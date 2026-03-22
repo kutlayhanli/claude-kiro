@@ -11,3 +11,6 @@ wheels/
 
 # Resources directory (scraped content)
 _resources/
+
+# Git worktrees (created by /spawn-worktree)
+worktrees/

@@ -12,7 +12,7 @@ Claude Kiro `ck` provides:
 - **Slash commands** for structured workflows
 - **Output styles** that enforce disciplined responses
 
-**Prompt → Requirements → Design → Tasks → Implementation**
+**Prompt → Plan → Requirements → Design → Tasks → Implementation**
 
 ## Repository Structure
 
@@ -35,6 +35,9 @@ Claude Kiro `ck` provides:
 ```bash
 # Install Claude Kiro globally
 uv tool install claude-kiro
+
+# Set up global config (once per machine)
+ck setup
 
 # Initialize your project
 cd your-project
@@ -61,6 +64,7 @@ uv tool install . --editable
 ```
 
 This installs the `ck` command globally, which provides:
+- `ck setup` - Install global config to ~/.claude/ (once per machine)
 - `ck init` - Set up a project for spec-driven development
 - `ck doctor` - Verify your setup is working
 - `ck hook` - Manage Claude Code hook integration
@@ -89,14 +93,17 @@ The hooks provide intelligent spec context:
 ## How It Works
 
 1. **Initialize:** `ck init` sets up your project with all necessary files
-2. **Create specs:** `/spec:create "feature"` - Generate requirements, design, and tasks
-3. **Implement:** `/spec:implement task` - Execute tasks with full context
-4. **Track progress:** TodoWrite tracks implementation automatically
-5. **Stay aligned:** Hooks provide context and maintain spec-driven discipline
+2. **Plan:** `/spec:plan "feature"` - Research best practices, compare approaches, make decisions
+3. **Create specs:** `/spec:create "feature"` - Generate requirements, design, and tasks
+4. **Implement:** `/spec:implement task` - Execute tasks with full context
+5. **Parallelize:** `/spawn-worktree spec` - Run independent tasks concurrently in isolated worktrees
+6. **Track progress:** TodoWrite tracks implementation automatically
+7. **Stay aligned:** Hooks provide context and maintain spec-driven discipline
 
 ## CLI Commands Reference
 
 ### Main Commands
+- `ck setup [--force]` - Install global config to ~/.claude/ (once per machine)
 - `ck init [--force]` - Initialize a project with spec-driven setup
 - `ck doctor` - Check your Claude Kiro setup health
 - `ck hook list` - Show available hooks
@@ -105,9 +112,11 @@ The hooks provide intelligent spec context:
 - `ck hook config` - Generate settings.json configuration
 
 ### Claude Code Slash Commands (Created by `ck init`)
+- `/spec:plan <feature>` - Research and plan before writing requirements
 - `/spec:create <feature>` - Create a new specification
 - `/spec:implement <task>` - Implement a spec task
 - `/spec:review <spec>` - Review an existing spec
+- `/spawn-worktree <spec-or-tasks>` - Run tasks in parallel with git worktree isolation
 
 ## Key Features
 
@@ -136,7 +145,7 @@ make format-docs  # Format HTML/CSS/JS with prettier
 
 - ✅ CLI tool (`ck`) - Complete with all commands
 - ✅ Hook system - Smart context injection working
-- ✅ Slash commands - `/spec:create`, `/spec:implement`, `/spec:review`
+- ✅ Slash commands - `/spec:plan`, `/spec:create`, `/spec:implement`, `/spec:review`
 - ✅ Output styles - Spec-driven responses enforced
 - ✅ Project setup automation - `ck init` configures everything
 

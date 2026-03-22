@@ -25,7 +25,10 @@ This project follows spec-driven development:
 ## Quick Start
 
 ```bash
-# Create a new spec
+# Research & plan before writing requirements
+/spec:plan [feature-description]
+
+# Create a new spec (requirements -> design -> tasks)
 /spec:create [feature-description]
 
 # Review an existing spec
@@ -33,6 +36,9 @@ This project follows spec-driven development:
 
 # Implement a spec task
 /spec:implement [spec-directory]
+
+# Run tasks in parallel with worktree isolation
+/spawn-worktree [spec-directory-or-task-list]
 ```
 
 ## Conventions

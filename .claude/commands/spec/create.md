@@ -292,9 +292,63 @@ After all tasks:
 3. When user accepts ExitPlanMode:
    - Write `.claude/specs/[feature-name]/tasks.md`
    - Create TodoWrite list with ALL tasks
-4. Confirm completion: "Specification complete! All 3 phases documented. Use `/spec-implement [task-number]` to begin implementation."
+4. Say: "All 3 phases documented. Running spec review..."
+5. Proceed directly to Phase 4 (Review).
 
-The specification is now ready for implementation.
+## Phase 4: Automated Review (RUNS AUTOMATICALLY AFTER PHASE 3)
+
+**You should only be reading this section after tasks.md has been written.**
+
+Now review the complete specification for internal consistency and quality. This replaces the need for a separate `/spec:review` call.
+
+### Review Checklist
+
+Run through these checks against the spec you just created:
+
+**Requirements (requirements.md):**
+- [ ] All user stories have acceptance criteria in EARS notation
+- [ ] Edge cases and error conditions are covered
+- [ ] Non-functional requirements are specific (not vague)
+- [ ] Out-of-scope section exists and is explicit
+
+**Design (design.md):**
+- [ ] Uses actual file paths from the codebase (not placeholders)
+- [ ] All requirements map to design decisions
+- [ ] Error handling strategy covers all error scenarios from requirements
+- [ ] Data models/interfaces are complete with types
+
+**Tasks (tasks.md):**
+- [ ] Every task has specific files listed
+- [ ] Dependencies are correct (no circular, no missing)
+- [ ] Parallelizable tasks are identified (for `/spawn-worktree`)
+- [ ] All requirements are covered by at least one task
+
+**Cross-document consistency:**
+- [ ] Feature names match across all three documents
+- [ ] No task references a component not in the design
+- [ ] No design component exists without a requirement driving it
+
+### Review Output
+
+Report findings inline:
+
+```
+Spec Review:
+  Quality: [Good/Needs Work]
+
+  Issues (if any):
+  - [file]: [specific issue and fix]
+
+  Parallelization note:
+  - Tasks [X, Y] can run in parallel (no dependencies)
+  - Tasks [Z] must run after [X] (dependency)
+```
+
+If issues are found:
+1. Fix them directly in the spec files
+2. Note what was fixed
+
+After review, confirm: "Specification complete and reviewed. Use `/spec:implement [task-number]` to begin, or `/spawn-worktree [spec-directory]` for parallel implementation."
 
 ## Guidelines for All Phases
 
@@ -329,4 +383,6 @@ By the end of this command:
 - [ ] Design specifies exact files and interfaces
 - [ ] Tasks are sequenced and tracked in TodoWrite
 - [ ] User has approved all three phases via ExitPlanMode checkpoints
+- [ ] Spec reviewed for consistency (Phase 4)
+- [ ] Parallelizable tasks identified
 - [ ] Implementation can begin with full context

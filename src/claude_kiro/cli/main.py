@@ -96,9 +96,11 @@ def init(force: bool):
     files_to_create = [
         (".claude/CLAUDE.md", "claude_md.md"),
         (".claude/output-styles/spec-driven.md", "output_styles/spec_driven.md"),
+        (".claude/commands/spec/plan.md", "commands/spec/plan.md"),
         (".claude/commands/spec/create.md", "commands/spec/create.md"),
         (".claude/commands/spec/implement.md", "commands/spec/implement.md"),
         (".claude/commands/spec/review.md", "commands/spec/review.md"),
+        (".claude/commands/spawn-worktree.md", "commands/spawn-worktree.md"),
     ]
 
     for target_path, resource_path in files_to_create:
@@ -170,10 +172,67 @@ def init(force: bool):
     click.echo("\n🚀 Next steps:")
     click.echo("  1. Review .claude/CLAUDE.md and customize for your project")
     click.echo("  2. Run 'ck doctor' to verify setup")
-    click.echo("  3. Use /spec:create to start spec-driven development")
+    click.echo("  3. Use /spec:plan to research, then /spec:create to write requirements")
     click.echo(
         "\n📚 Claude Code hooks docs: https://docs.claude.com/en/docs/claude-code/hooks"
     )
+
+
+@cli.command()
+@click.option("--force", is_flag=True, help="Overwrite existing files")
+def setup(force: bool):
+    """Set up global Claude Kiro configuration in ~/.claude/.
+
+    Installs global CLAUDE.md and skills that apply across all projects.
+    Run this once per machine after installing claude-kiro.
+    """
+    from ..resources import ResourceLoader
+
+    home_claude = Path.home() / ".claude"
+    skills_dir = home_claude / "skills" / "spawn-worktree"
+
+    # Track what we create/skip
+    created = []
+    skipped = []
+
+    loader = ResourceLoader()
+
+    # Global files to install
+    global_files = [
+        (home_claude / "CLAUDE.md", "global/claude_md.md"),
+        (skills_dir / "SKILL.md", "global/spawn_worktree_skill.md"),
+    ]
+
+    for target, resource_path in global_files:
+        if target.exists() and not force:
+            skipped.append(str(target))
+            continue
+
+        try:
+            content = loader.get_resource(resource_path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content)
+            created.append(str(target))
+        except Exception as e:
+            logger.error(f"Failed to create {target}: {e}")
+
+    # Report results
+    click.echo("\n✨ Claude Kiro global setup complete!")
+
+    if created:
+        click.echo("\n📁 Created:")
+        for item in created:
+            click.echo(f"  ✓ {item}")
+
+    if skipped:
+        click.echo("\n⏭️  Skipped (already exists):")
+        for item in skipped:
+            click.echo(f"  - {item}")
+        click.echo("\n💡 Use --force to overwrite existing files")
+
+    click.echo("\n🚀 Next steps:")
+    click.echo("  1. Review ~/.claude/CLAUDE.md and customize")
+    click.echo("  2. Run 'ck init' in each project to set up project-level config")
 
 
 @cli.command()
@@ -210,9 +269,11 @@ def doctor():
     # Check 3: Required files present
     required_files = [
         ".claude/output-styles/spec-driven.md",
+        ".claude/commands/spec/plan.md",
         ".claude/commands/spec/create.md",
         ".claude/commands/spec/implement.md",
         ".claude/commands/spec/review.md",
+        ".claude/commands/spawn-worktree.md",
     ]
 
     missing_files = []
@@ -254,7 +315,22 @@ def doctor():
     else:
         warnings.append("settings.local.json not found - hooks may not be configured")
 
-    # Check 5: Count existing specs
+    # Check 5: Global setup
+    home_claude = Path.home() / ".claude"
+    global_claude_md = home_claude / "CLAUDE.md"
+    spawn_skill = home_claude / "skills" / "spawn-worktree" / "SKILL.md"
+
+    if global_claude_md.exists():
+        click.echo("✓ Global ~/.claude/CLAUDE.md found")
+    else:
+        warnings.append("Global ~/.claude/CLAUDE.md not found - run 'ck setup'")
+
+    if spawn_skill.exists():
+        click.echo("✓ Global spawn-worktree skill found")
+    else:
+        warnings.append("spawn-worktree skill not found - run 'ck setup'")
+
+    # Check 6: Count existing specs
     specs_dir = claude_dir / "specs"
     if specs_dir.exists():
         spec_count = len(list(specs_dir.glob("**/requirements.md")))
