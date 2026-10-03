@@ -95,6 +95,8 @@ class SessionTracker:
                 "session_id": self.session_id,
                 "session_start": cache_data.get("session_start", time.time()),
                 "files_notified": files_notified,
+                "spec_edits": cache_data.get("spec_edits", []),
+                "gate": cache_data.get("gate", {}),
             }
         else:
             # Initialize new cache
@@ -102,7 +104,10 @@ class SessionTracker:
                 "session_id": self.session_id,
                 "session_start": time.time(),
                 "files_notified": {},
+                "spec_edits": [],
+                "gate": {},
             }
+            self._save_cache()
 
     def _save_cache(self):
         """Save session cache to disk."""
@@ -173,6 +178,36 @@ class SessionTracker:
 
         # Save to disk
         self._save_cache()
+
+    def mark_spec_edit(self, spec_dir: str):
+        """Record that a spec's tasks.md was edited in this session."""
+        if spec_dir not in self._cache["spec_edits"]:
+            self._cache["spec_edits"].append(spec_dir)
+            self._save_cache()
+
+    def spec_edits(self) -> list:
+        """Spec directories whose tasks.md was edited in this session."""
+        return list(self._cache.get("spec_edits", []))
+
+    def touched_tasks(self) -> set:
+        """(spec_name, task_num) pairs whose files were edited in this session."""
+        return {
+            (r["spec_name"], r["task_num"])
+            for r in self._cache.get("files_notified", {}).values()
+            if r.get("in_spec") and r.get("spec_name") and r.get("task_num")
+        }
+
+    def gate_state(self) -> dict:
+        """Mutable gate bookkeeping (verified fingerprints, block counts)."""
+        return self._cache.setdefault("gate", {})
+
+    def save(self):
+        """Persist changes made through gate_state()."""
+        self._save_cache()
+
+    @property
+    def session_start(self) -> float:
+        return self._cache.get("session_start", time.time())
 
     def get_notification_count(self) -> int:
         """Get total number of files notified in this session.

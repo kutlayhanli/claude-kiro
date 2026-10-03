@@ -7,6 +7,7 @@ import os
 import glob
 import re
 from pathlib import Path
+from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, NamedTuple
 
 from claude_kiro.paths import spec_roots
@@ -182,3 +183,78 @@ class SpecParser:
                     files[file_type.replace(".md", "")] = file_path
 
         return files
+
+
+@dataclass
+class SpecTask:
+    """One "### Task N: Title" block from tasks.md, with the fields the gate uses."""
+
+    num: str
+    title: str
+    status: str = "Not Started"
+    track: str = "impl"  # "impl" or "test"
+    files: List[str] = field(default_factory=list)
+    verify: List[str] = field(default_factory=list)  # **Verify:** `cmd` `cmd`
+    verified_by: List[str] = field(default_factory=list)  # **Verified by:** Task 7
+    verifies: List[str] = field(default_factory=list)  # **Verifies:** Task 2
+    acceptance: List[Tuple[bool, str]] = field(default_factory=list)
+
+    @property
+    def done(self) -> bool:
+        return _status_key(self.status) in ("done", "complete", "completed")
+
+    @property
+    def in_progress(self) -> bool:
+        return _status_key(self.status) == "in progress"
+
+
+def _status_key(status: str) -> str:
+    """Normalize "✅ Done", "**Done**", "In Progress (blocked)" style statuses."""
+    words = re.sub(r"[^a-z ]", " ", status.lower()).split()
+    joined = " ".join(words)
+    for key in ("in progress", "not started", "done", "completed", "complete", "evolved", "blocked"):
+        if joined.startswith(key):
+            return key
+    return joined
+
+
+def _field(block: str, name: str) -> Optional[str]:
+    match = re.search(rf"^\*\*{name}:\*\*\s*(.*)$", block, re.MULTILINE | re.IGNORECASE)
+    return match.group(1).strip() if match else None
+
+
+def _task_refs(value: Optional[str]) -> List[str]:
+    if not value:
+        return []
+    return re.findall(r"(?:Task\s*)?(\d+)", value, re.IGNORECASE)
+
+
+def parse_tasks(task_file_path: Path) -> List[SpecTask]:
+    """Parse every task block in tasks.md, including tasks with no files."""
+    try:
+        content = Path(task_file_path).read_text(encoding="utf-8")
+    except (OSError, IOError):
+        return []
+
+    tasks = []
+    for match in re.finditer(r"^### Task (\d+): (.+?)(?=^### Task |^## |\Z)", content, re.DOTALL | re.MULTILINE):
+        block = match.group(0)
+        task = SpecTask(num=match.group(1), title=match.group(2).split("\n")[0].strip())
+
+        status = _field(block, "Status")
+        if status:
+            task.status = status
+        track = (_field(block, "Track") or "").lower()
+        if track.startswith("test"):
+            task.track = "test"
+
+        task.files = [f.removeprefix("./") for f in re.findall(r"^- `([^`]+)`", block, re.MULTILINE)]
+        task.verify = re.findall(r"`([^`]+)`", _field(block, "Verify") or "")
+        task.verified_by = _task_refs(_field(block, "Verified by"))
+        task.verifies = _task_refs(_field(block, "Verifies"))
+        task.acceptance = [
+            (mark.lower() == "x", text.strip())
+            for mark, text in re.findall(r"^\s*- \[([ xX])\]\s*(.+)$", block, re.MULTILINE)
+        ]
+        tasks.append(task)
+    return tasks

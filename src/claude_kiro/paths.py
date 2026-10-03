@@ -33,3 +33,7 @@ def is_spec_path(file_path: str, project_dir: Path) -> bool:
         except ValueError:
             continue
     return False
+
+
+# Verification and guard settings (verify commands, test patterns, guard modes).
+CONFIG_FILE = f"{SPECS_DIR}/ck.json"

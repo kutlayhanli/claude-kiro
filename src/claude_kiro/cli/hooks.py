@@ -7,7 +7,7 @@ from typing import Optional, Dict, Any
 
 import click
 
-from .runner import HookRegistry
+from .runner import HOOK_SETTINGS, HookRegistry, configured_hooks, install_hook_settings
 
 
 @click.group()
@@ -20,35 +20,19 @@ def hook():
 def list():
     """List all available hook modules."""
     registry = HookRegistry()
-    hooks = registry.list_hooks()
-
-    if not hooks:
-        click.echo("No hooks available.")
-        return
-
     click.echo("Available hooks:")
-    for hook_name in sorted(hooks):
-        hook_func = registry.get_hook(hook_name)
-        if hook_func:
-            # Try to get docstring from the hook module
-            module_path = (
-                hook_func if isinstance(hook_func, str) else hook_func.__module__
-            )
-            click.echo(f"\n  📎 {hook_name}")
-            click.echo(f"     Module: {module_path}")
-
-            # Get description if available
-            if hook_name == "post-file-ops":
-                click.echo(
-                    "     Description: Injects spec context after file operations"
-                )
+    for hook_name in sorted(registry.list_hooks()):
+        click.echo(f"\n  📎 {hook_name}")
+        click.echo(f"     Module: {registry.get_hook(hook_name)}")
+        description = registry.descriptions.get(hook_name)
+        if description:
+            click.echo(f"     Description: {description}")
 
 
 @hook.command()
 def status():
-    """Show which hooks are configured in settings.local.json."""
-    claude_dir = Path.cwd() / ".claude"
-    settings_file = claude_dir / "settings.local.json"
+    """Show which Claude Kiro hooks are configured in settings.local.json."""
+    settings_file = Path.cwd() / ".claude" / "settings.local.json"
 
     if not settings_file.exists():
         click.echo("❌ No settings.local.json found")
@@ -57,25 +41,17 @@ def status():
 
     try:
         settings = json.loads(settings_file.read_text())
-        hooks = settings.get("hooks", {})
-
-        if not hooks:
-            click.echo("⚠️  No hooks configured in settings.local.json")
-            click.echo("\n💡 Run 'ck hook config' to generate configuration")
-            return
-
-        click.echo("Configured hooks:")
-        for hook_name, command in hooks.items():
-            status_icon = "✓" if "ck --hook" in command else "⚠️"
-            click.echo(f"\n  {status_icon} {hook_name}")
-            click.echo(f"     Command: {command}")
-
-            if "ckh-" in command:
-                click.echo("     ⚠️  Using deprecated command style")
-                click.echo(f"     💡 Update to: ck --hook {hook_name}")
-
     except json.JSONDecodeError as e:
         click.echo(f"❌ Failed to parse settings.local.json: {e}")
+        return
+
+    found = configured_hooks(settings)
+    click.echo("Claude Kiro hooks:")
+    for spec in HOOK_SETTINGS:
+        ok = spec["hook"] in found.get(spec["event"], [])
+        click.echo(f"  {'✓' if ok else '✗'} {spec['event']:<13} ck --hook {spec['hook']}")
+    if not all(spec["hook"] in found.get(spec["event"], []) for spec in HOOK_SETTINGS):
+        click.echo("\n💡 Run 'ck init' to install missing hooks (other hooks are kept)")
 
 
 @hook.command()
@@ -136,22 +112,7 @@ def config():
     """Generate settings.json snippet for hook configuration."""
     click.echo("📋 Add this to your .claude/settings.local.json:\n")
 
-    config_snippet = {
-        "hooks": {
-            "PostToolUse": [
-                {
-                    "matcher": "Edit|Write|MultiEdit",
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": "ck --hook post-file-ops",
-                            "timeout": 5000,
-                        }
-                    ],
-                }
-            ]
-        }
-    }
+    config_snippet = install_hook_settings({})
 
     click.echo(json.dumps(config_snippet, indent=2))
 

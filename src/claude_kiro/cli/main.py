@@ -12,9 +12,10 @@ from typing import Optional
 
 import click
 
-from ..paths import LEGACY_SPECS_DIR, SPECS_DIR, SPEC_WORKFLOW, spec_roots
+from ..config import initial_config, load_config
+from ..paths import CONFIG_FILE, LEGACY_SPECS_DIR, SPECS_DIR, SPEC_WORKFLOW, spec_roots
 from .hooks import hook
-from .runner import execute_hook
+from .runner import HOOK_SETTINGS, configured_hooks, execute_hook, install_hook_settings
 
 
 # Configure logging
@@ -136,27 +137,18 @@ def init(force: bool):
             logger.warning(f"Backed up corrupted settings to {backup}")
             settings = {}
 
-    # Add hook configuration in proper Claude Code format
-    if "hooks" not in settings:
-        settings["hooks"] = {}
-
-    # Use Claude Code's required structure
-    settings["hooks"]["PostToolUse"] = [
-        {
-            "matcher": "Edit|Write|MultiEdit",
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "ck --hook post-file-ops",
-                    "timeout": 5000,
-                }
-            ],
-        }
-    ]
-
-    # Write settings
+    # Add (or refresh) Claude Kiro hooks, keeping hooks from other tools
+    install_hook_settings(settings)
     settings_file.write_text(json.dumps(settings, indent=2))
     created.append(".claude/settings.local.json")
+
+    # Verification and guard config lives with the specs, so Claude can edit it
+    config_file = project_dir / CONFIG_FILE
+    if not config_file.exists():
+        config_file.write_text(json.dumps(initial_config(project_dir), indent=2) + "\n")
+        created.append(CONFIG_FILE)
+    else:
+        skipped.append(CONFIG_FILE)
 
     # Report results
     click.echo("\n✨ Claude Kiro initialized successfully!")
@@ -299,25 +291,21 @@ def doctor():
     if settings_file.exists():
         try:
             settings = json.loads(settings_file.read_text())
-            hooks = settings.get("hooks", {})
-
-            # Check for Claude Code PostToolUse format
-            hook_found = False
-            if "PostToolUse" in hooks:
-                for hook_config in hooks["PostToolUse"]:
-                    if isinstance(hook_config, dict) and "hooks" in hook_config:
-                        for hook_item in hook_config["hooks"]:
-                            if isinstance(hook_item, dict) and "command" in hook_item:
-                                cmd = hook_item["command"]
-                                if "ck --hook" in cmd or "ckh-post-file-ops" in cmd:
-                                    click.echo(f"✓ Hook configured: {cmd}")
-                                    hook_found = True
-                                    break
-                        if hook_found:
-                            break
-
-            if not hook_found:
-                issues.append("PostToolUse hook not configured - run 'ck init' to fix")
+            found = configured_hooks(settings)
+            for spec in HOOK_SETTINGS:
+                if spec["hook"] in found.get(spec["event"], []):
+                    click.echo(f"✓ {spec['event']} hook configured: ck --hook {spec['hook']}")
+                else:
+                    issues.append(
+                        f"{spec['event']} hook 'ck --hook {spec['hook']}' not configured - run 'ck init' to fix"
+                    )
+            for event, groups in settings.get("hooks", {}).items():
+                for group in groups if isinstance(groups, list) else []:
+                    for h in group.get("hooks", []) if isinstance(group, dict) else []:
+                        if isinstance(h, dict) and str(h.get("command", "")).startswith("ck --hook") and h.get("timeout", 0) > 3600:
+                            warnings.append(
+                                f"{event} hook timeout {h['timeout']} looks like milliseconds; Claude Code uses seconds - run 'ck init' to fix"
+                            )
         except json.JSONDecodeError:
             issues.append("settings.local.json is corrupted")
     else:
@@ -345,6 +333,13 @@ def doctor():
         click.echo(f"✓ Found {spec_count} spec(s)")
     else:
         click.echo(f"ℹ️  No specs created yet (they go in {SPECS_DIR}/)")
+
+    if not (project_dir / CONFIG_FILE).exists():
+        warnings.append(f"{CONFIG_FILE} not found - run 'ck init' to create verification config")
+    elif not load_config(project_dir).get("verify"):
+        warnings.append(f'No "verify" commands in {CONFIG_FILE} - the gate can only check per-task **Verify:** lines')
+    else:
+        click.echo(f"✓ Verify commands: {', '.join(load_config(project_dir)['verify'])}")
 
     if (project_dir / LEGACY_SPECS_DIR).is_dir():
         warnings.append(
@@ -419,6 +414,37 @@ def migrate(dry_run: bool):
         click.echo(f"No spec directories found in {LEGACY_SPECS_DIR}/.")
     if moved and not dry_run:
         click.echo("\n💡 Review with 'git status' and commit the move.")
+
+
+@cli.command()
+@click.argument("spec")
+@click.option("--task", "-t", "tasks", multiple=True, help="Task number to verify (repeatable). Default: every Done task.")
+def gate(spec: str, tasks: tuple):
+    """Run the verification gate for SPEC (a name in specs/ or a path).
+
+    Checks acceptance boxes, runs the verify commands from specs/ck.json and the
+    tasks' **Verify:** lines, and checks no existing test was deleted or
+    weakened on this branch. Exits 1 if anything fails.
+    """
+    from ..gate import run_gate
+
+    project_dir = Path.cwd()
+    candidate = Path(spec)
+    if not candidate.is_absolute():
+        candidate = project_dir / spec
+    if not (candidate / "tasks.md").exists():
+        matches = [root / spec for root in spec_roots(project_dir) if (root / spec / "tasks.md").exists()]
+        if not matches:
+            click.echo(f"❌ No tasks.md found for '{spec}' (looked in {SPECS_DIR}/ and {LEGACY_SPECS_DIR}/)")
+            sys.exit(2)
+        candidate = matches[0]
+
+    result = run_gate(project_dir, candidate, [t.removeprefix("Task ").strip() for t in tasks] or None)
+    if not result.tasks and not result.checks:
+        click.echo("ℹ️  No Done tasks to verify. Pass --task N to verify a specific task.")
+        return
+    click.echo(result.report())
+    sys.exit(0 if result.ok else 1)
 
 
 def _report_doctor_results(issues: list, warnings: list):

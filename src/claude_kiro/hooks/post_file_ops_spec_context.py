@@ -111,13 +111,18 @@ def hook(input_data: dict) -> dict | None:
     # Get project directory
     cwd = input_data.get("cwd", os.getcwd())
 
-    # IGNORE operations on spec files themselves
-    if is_spec_path(file_path, Path(cwd)):
-        return None
-
     # Initialize components
     cache_manager = CacheManager()
     session_tracker = SessionTracker(session_id, cache_manager)
+
+    # Spec files get no context message, but tasks.md edits are recorded so the
+    # Stop hook can verify tasks marked Done in this session.
+    if is_spec_path(file_path, Path(cwd)):
+        path = Path(file_path) if os.path.isabs(file_path) else Path(cwd) / file_path
+        if path.name == "tasks.md":
+            session_tracker.mark_spec_edit(str(path.parent))
+        return None
+
     spec_parser = SpecParser(cwd)
 
     # Clean up old sessions on first file of a new session

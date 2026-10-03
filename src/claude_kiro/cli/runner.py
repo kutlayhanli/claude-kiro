@@ -1,7 +1,7 @@
 """Hook execution runner for Claude Code integration."""
 
 import importlib
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
 
 class HookRegistry:
@@ -9,7 +9,14 @@ class HookRegistry:
 
     _hooks: Dict[str, str] = {
         "post-file-ops": "claude_kiro.hooks.post_file_ops_spec_context:hook",
-        # Future hooks will be added here
+        "pre-tool-guard": "claude_kiro.hooks.pre_tool_guard:hook",
+        "stop-verify": "claude_kiro.hooks.stop_verify:hook",
+    }
+
+    descriptions: Dict[str, str] = {
+        "post-file-ops": "Injects spec task context after file edits; records tasks.md edits",
+        "pre-tool-guard": "Asks before tests are weakened/deleted or requirements edited mid-implementation",
+        "stop-verify": "Blocks stopping while a task marked Done fails the verification gate",
     }
 
     def get_hook(self, name: str) -> Optional[str]:
@@ -30,6 +37,54 @@ class HookRegistry:
             List of hook names
         """
         return list(self._hooks.keys())
+
+
+
+# Claude Code settings entries that `ck init` installs. Timeouts are in seconds.
+HOOK_SETTINGS: List[Dict[str, Any]] = [
+    {"event": "PreToolUse", "matcher": "Edit|Write|MultiEdit|Bash", "hook": "pre-tool-guard", "timeout": 30},
+    {"event": "PostToolUse", "matcher": "Edit|Write|MultiEdit", "hook": "post-file-ops", "timeout": 10},
+    {"event": "Stop", "matcher": None, "hook": "stop-verify", "timeout": 600},
+    {"event": "SubagentStop", "matcher": None, "hook": "stop-verify", "timeout": 600},
+]
+
+
+def install_hook_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
+    """Add Claude Kiro hooks to a settings dict, replacing older ck entries only.
+
+    Hooks from other tools are left untouched.
+    """
+    hooks = settings.setdefault("hooks", {})
+    for spec in HOOK_SETTINGS:
+        command = f"ck --hook {spec['hook']}"
+        groups = [
+            g
+            for g in hooks.get(spec["event"], [])
+            if not any(
+                isinstance(h, dict)
+                and (h.get("command", "") == command or "ckh-" in h.get("command", ""))
+                for h in g.get("hooks", [])
+            )
+        ]
+        group: Dict[str, Any] = {"hooks": [{"type": "command", "command": command, "timeout": spec["timeout"]}]}
+        if spec["matcher"]:
+            group = {"matcher": spec["matcher"], **group}
+        groups.append(group)
+        hooks[spec["event"]] = groups
+    return settings
+
+
+def configured_hooks(settings: Dict[str, Any]) -> Dict[str, List[str]]:
+    """Map event -> ck hook names configured for it."""
+    found: Dict[str, List[str]] = {}
+    for event, groups in settings.get("hooks", {}).items():
+        for group in groups if isinstance(groups, list) else []:
+            for h in group.get("hooks", []) if isinstance(group, dict) else []:
+                cmd = h.get("command", "") if isinstance(h, dict) else ""
+                if cmd.startswith("ck --hook "):
+                    found.setdefault(event, []).append(cmd.split()[-1])
+    return found
+
 
 
 def execute_hook(
