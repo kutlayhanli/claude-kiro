@@ -28,6 +28,7 @@ Hook messages are standing instructions from user to Claude about how to collabo
 - `.claude/commands/spec/` - Slash commands for spec workflow
 - `.claude/output-styles/` - Behavioral transformation (spec-driven mode)
 - `.claude/hooks/` - Context injection hooks
-- `.claude/specs/` - Generated specifications
+- `specs/` - Generated specifications (project root, outside `.claude/`)
+- `.claude/workflows/spec-create.js` - Workflow run by /spec:create and /spec:review
 
 See @VISION.md for methodology overview.

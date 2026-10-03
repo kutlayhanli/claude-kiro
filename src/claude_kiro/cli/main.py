@@ -12,6 +12,7 @@ from typing import Optional
 
 import click
 
+from ..paths import LEGACY_SPECS_DIR, SPECS_DIR, SPEC_WORKFLOW, spec_roots
 from .hooks import hook
 from .runner import execute_hook
 
@@ -64,7 +65,8 @@ def init(force: bool):
     """Initialize a Claude Kiro project in the current directory.
 
     Creates .claude directory structure with output styles, slash commands,
-    and configures hooks in settings.local.json.
+    the spec workflow, a specs/ directory, and configures hooks in
+    settings.local.json.
     """
     from ..resources import ResourceLoader
     import json
@@ -82,7 +84,8 @@ def init(force: bool):
         claude_dir / "output-styles",
         claude_dir / "commands",
         claude_dir / "commands" / "spec",
-        claude_dir / "specs",
+        claude_dir / "workflows",
+        project_dir / SPECS_DIR,
     ]
 
     for directory in directories:
@@ -101,6 +104,7 @@ def init(force: bool):
         (".claude/commands/spec/implement.md", "commands/spec/implement.md"),
         (".claude/commands/spec/review.md", "commands/spec/review.md"),
         (".claude/commands/spawn-worktree.md", "commands/spawn-worktree.md"),
+        (SPEC_WORKFLOW, "workflows/spec_create.js"),
     ]
 
     for target_path, resource_path in files_to_create:
@@ -172,7 +176,10 @@ def init(force: bool):
     click.echo("\n🚀 Next steps:")
     click.echo("  1. Review .claude/CLAUDE.md and customize for your project")
     click.echo("  2. Run 'ck doctor' to verify setup")
-    click.echo("  3. Use /spec:plan to research, then /spec:create to write requirements")
+    click.echo("  3. Use /spec:plan to decide the approach, then /spec:create to write the spec")
+    click.echo(f"\n📝 Specs are written to {SPECS_DIR}/ (outside .claude/, so no approval prompts)")
+    if (project_dir / LEGACY_SPECS_DIR).is_dir():
+        click.echo(f"⚠️  Found specs in {LEGACY_SPECS_DIR}/ - run 'ck migrate' to move them")
     click.echo(
         "\n📚 Claude Code hooks docs: https://docs.claude.com/en/docs/claude-code/hooks"
     )
@@ -274,6 +281,7 @@ def doctor():
         ".claude/commands/spec/implement.md",
         ".claude/commands/spec/review.md",
         ".claude/commands/spawn-worktree.md",
+        SPEC_WORKFLOW,
     ]
 
     missing_files = []
@@ -331,17 +339,86 @@ def doctor():
         warnings.append("spawn-worktree skill not found - run 'ck setup'")
 
     # Check 6: Count existing specs
-    specs_dir = claude_dir / "specs"
-    if specs_dir.exists():
-        spec_count = len(list(specs_dir.glob("**/requirements.md")))
-        if spec_count > 0:
-            click.echo(f"✓ Found {spec_count} spec(s)")
-        else:
-            click.echo("ℹ️  No specs created yet")
+    roots = spec_roots(project_dir)
+    spec_count = sum(len(list(root.glob("*/requirements.md"))) for root in roots)
+    if spec_count > 0:
+        click.echo(f"✓ Found {spec_count} spec(s)")
     else:
-        click.echo("ℹ️  Specs directory not found")
+        click.echo(f"ℹ️  No specs created yet (they go in {SPECS_DIR}/)")
+
+    if (project_dir / LEGACY_SPECS_DIR).is_dir():
+        warnings.append(
+            f"Specs found in {LEGACY_SPECS_DIR}/ - run 'ck migrate' to move them to {SPECS_DIR}/"
+        )
 
     _report_doctor_results(issues, warnings)
+
+
+@cli.command()
+@click.option("--dry-run", is_flag=True, help="Show what would move without changing anything")
+def migrate(dry_run: bool):
+    """Move specs from .claude/specs/ to specs/.
+
+    Uses `git mv` for tracked specs so history follows the files, and rewrites
+    `.claude/specs/` references inside the moved Markdown files.
+    """
+    import shutil
+    import subprocess
+
+    project_dir = Path.cwd()
+    legacy = project_dir / LEGACY_SPECS_DIR
+    target_root = project_dir / SPECS_DIR
+
+    if not legacy.is_dir():
+        click.echo(f"Nothing to migrate: {LEGACY_SPECS_DIR}/ not found.")
+        return
+
+    def tracked(path: Path) -> bool:
+        result = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", str(path)],
+            cwd=project_dir,
+            capture_output=True,
+        )
+        return result.returncode == 0
+
+    moved, skipped = [], []
+    for spec_dir in sorted(p for p in legacy.iterdir() if p.is_dir()):
+        dest = target_root / spec_dir.name
+        if dest.exists():
+            skipped.append(f"{spec_dir.name} ({SPECS_DIR}/{spec_dir.name} already exists)")
+            continue
+        moved.append(spec_dir.name)
+        if dry_run:
+            continue
+
+        target_root.mkdir(parents=True, exist_ok=True)
+        if any(tracked(f) for f in spec_dir.rglob("*") if f.is_file()):
+            subprocess.run(["git", "mv", str(spec_dir), str(dest)], cwd=project_dir, check=True)
+        else:
+            shutil.move(str(spec_dir), str(dest))
+
+        for md in dest.rglob("*.md"):
+            text = md.read_text()
+            updated = text.replace(f"{LEGACY_SPECS_DIR}/", f"{SPECS_DIR}/")
+            if updated != text:
+                md.write_text(updated)
+
+    if not dry_run and legacy.is_dir() and not any(legacy.iterdir()):
+        legacy.rmdir()
+
+    verb = "Would move" if dry_run else "Moved"
+    if moved:
+        click.echo(f"\n📦 {verb} to {SPECS_DIR}/:")
+        for name in moved:
+            click.echo(f"  ✓ {name}")
+    if skipped:
+        click.echo("\n⏭️  Skipped:")
+        for item in skipped:
+            click.echo(f"  - {item}")
+    if not moved and not skipped:
+        click.echo(f"No spec directories found in {LEGACY_SPECS_DIR}/.")
+    if moved and not dry_run:
+        click.echo("\n💡 Review with 'git status' and commit the move.")
 
 
 def _report_doctor_results(issues: list, warnings: list):

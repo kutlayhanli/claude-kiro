@@ -1,6 +1,6 @@
 [project]
 name = "claude-kiro"
-version = "0.1.0"
+version = "0.2.0"
 description = "Spec-driven development methodology for Claude Code"
 readme = "README.md"
 license = { text = "MIT" }

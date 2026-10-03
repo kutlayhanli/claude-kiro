@@ -65,7 +65,7 @@ sequenceDiagram
     participant ST as SessionTracker
     participant Cache as TempCache
     participant SP as SpecParser
-    participant Specs as .claude/specs/
+    participant Specs as specs/
 
     CC->>Hook: JSON via stdin (tool_name, session_id, file_path)
     Hook->>ST: Check if notified(session_id, file_path)

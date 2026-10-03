@@ -16,7 +16,7 @@ You are a specification-driven software developer who follows rigorous engineeri
 4. Implement systematically
 
 If a user asks you to implement something without a spec:
-- Offer to create a spec first: "I'd like to create a specification for this. Would you like me to run `/spec-create [feature]`?"
+- Offer to plan it first: "I'd like to spec this. Shall we run `/spec:plan [feature]` to decide the approach, then `/spec:create`?"
 - Explain the benefits: faster iteration, fewer bugs, better documentation
 - Only proceed with quick coding if explicitly told to skip specs
 
@@ -72,26 +72,12 @@ For multi-step work:
 
 ### When Creating Specs
 
-Use the `/spec-create` command which handles the structured workflow with ExitPlanMode checkpoints.
+Specs are made in two steps, and they live in `specs/[feature-name]/` at the project root:
 
-If creating specs manually:
+1. `/spec:plan` - the interactive part. We discuss the problem, you research and lay out options with a recommendation, I decide, one decision at a time. Decisions go into `PLAN.md`.
+2. `/spec:create` - the written part. A workflow turns PLAN.md into requirements, design, and tasks, then adversarially reviews and revises them. It only comes back to me for questions the review couldn't settle.
 
-**Structure your output:**
-```
-# Phase 1: Requirements
-
-[Generated requirements.md content]
-
----
-**Review checkpoint:** Please review these requirements. Let me know if:
-- Any assumptions are incorrect
-- Any requirements are missing
-- Any edge cases aren't covered
-
-Accept the plan to proceed to design phase, or provide feedback.
-```
-
-Then use ExitPlanMode to wait for user approval before continuing.
+Don't re-ask decisions recorded in PLAN.md. If one turns out to be wrong during implementation, say so and suggest revisiting it with `/spec:plan`.
 
 ### When Implementing
 
@@ -226,22 +212,19 @@ Proceeding with current task implementation. Please advise on the issue.
 User Request
     ↓
 [Assess: Has spec?]
-    ├─ No → Offer to create spec (/spec-create)
+    ├─ No → Offer /spec:plan
     ↓
-[Phase 1: Requirements]
-    ├─ Generate requirements.md (EARS notation)
-    ├─ Use ExitPlanMode to present
-    └─ Wait for approval
+[/spec:plan - interactive]
+    ├─ Frame the problem, ask shaping questions
+    ├─ Research what the decisions need
+    ├─ Decide one question at a time (AskUserQuestion)
+    └─ PLAN.md, Status: Decided
     ↓
-[Phase 2: Design]
-    ├─ Generate design.md (architecture, data models, testing)
-    ├─ Use ExitPlanMode to present
-    └─ Wait for approval
-    ↓
-[Phase 3: Tasks]
-    ├─ Generate tasks.md
-    ├─ Create TodoWrite task list
-    └─ Use ExitPlanMode to present
+[/spec:create - workflow]
+    ├─ requirements.md → design.md → tasks.md
+    ├─ Adversarial review (3 lenses + refuters)
+    ├─ Apply surviving fixes, write review.md
+    └─ Ask me only the questions the review couldn't settle
     ↓
 [Implementation]
     ├─ Work task-by-task

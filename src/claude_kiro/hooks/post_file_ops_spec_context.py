@@ -4,14 +4,16 @@ Provides spec context when editing files, showing messages only once per file pe
 """
 
 import os
+from pathlib import Path
 
 from claude_kiro.hooks._shared.cache_manager import CacheManager
 from claude_kiro.hooks._shared.session_tracker import SessionTracker
 from claude_kiro.hooks._shared.spec_parser import SpecParser
+from claude_kiro.paths import is_spec_path
 
 
 def generate_spec_context_message(
-    spec_name: str, task_num: str, task_title: str
+    spec_name: str, task_num: str, task_title: str, spec_dir: str
 ) -> str:
     """Generate context message for a file in a spec.
 
@@ -19,6 +21,7 @@ def generate_spec_context_message(
         spec_name: Name of the spec.
         task_num: Task number.
         task_title: Task title.
+        spec_dir: Spec directory, relative to the project root.
 
     Returns:
         Formatted context message.
@@ -29,9 +32,9 @@ def generate_spec_context_message(
 You are working on Task {task_num}: {task_title}
 
 Before proceeding:
-1. Read `.claude/specs/{spec_name}/requirements.md` - verify acceptance criteria
-2. Read `.claude/specs/{spec_name}/design.md` - follow architectural decisions
-3. Check `.claude/specs/{spec_name}/tasks.md` - review full task acceptance checklist
+1. Read `{spec_dir}/requirements.md` - verify acceptance criteria
+2. Read `{spec_dir}/design.md` - follow architectural decisions
+3. Check `{spec_dir}/tasks.md` - review full task acceptance checklist
 
 Your responsibilities:
 - As you complete acceptance criteria, update the checkboxes in tasks.md to [x]
@@ -41,6 +44,14 @@ Your responsibilities:
 
 Ensure your changes align with the spec requirements and design.
 """
+
+
+def _relative(path: Path, cwd: str) -> str:
+    """Display a path relative to the project root when possible."""
+    try:
+        return str(path.resolve().relative_to(Path(cwd).resolve()))
+    except ValueError:
+        return str(path)
 
 
 def generate_no_spec_message(file_path: str) -> str:
@@ -64,9 +75,9 @@ WHEN we work on new feature code, you should suggest to me creating a specificat
 
 Your task:
 1. Infer what feature this file relates to based on file path and context
-2. Suggest to me: "You can run `/spec-create [inferred-feature-description]`"
+2. Suggest to me: "You can run `/spec:plan [inferred-feature-description]` to decide the approach, then `/spec:create`"
 
-Example: "You can run `/spec-create Add user authentication system`"
+Example: "You can run `/spec:plan Add user authentication system`"
 
 If this is a quick fix or non-feature work, acknowledge and proceed without requiring a spec.
 """
@@ -97,12 +108,12 @@ def hook(input_data: dict) -> dict | None:
     if not file_path:
         return None
 
-    # IGNORE operations on spec files themselves
-    if "/.claude/specs/" in file_path:
-        return None
-
     # Get project directory
     cwd = input_data.get("cwd", os.getcwd())
+
+    # IGNORE operations on spec files themselves
+    if is_spec_path(file_path, Path(cwd)):
+        return None
 
     # Initialize components
     cache_manager = CacheManager()
@@ -124,7 +135,10 @@ def hook(input_data: dict) -> dict | None:
     if task_match:
         # File IS in spec → generate task context message
         context = generate_spec_context_message(
-            task_match.spec_name, task_match.task_num, task_match.task_title
+            task_match.spec_name,
+            task_match.task_num,
+            task_match.task_title,
+            _relative(task_match.spec_dir, cwd),
         )
 
         # Mark file as notified (in spec)

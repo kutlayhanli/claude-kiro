@@ -6,8 +6,8 @@ This configuration is managed by Claude Kiro (`ck`).
 
 When working on new features, follow the spec-driven workflow:
 
-1. `/spec:plan` - Research and compare approaches before committing to a direction
-2. `/spec:create` - Write requirements, design, and task breakdown
+1. `/spec:plan` - Discuss and decide the approach with me, interactively (writes PLAN.md)
+2. `/spec:create` - Workflow that writes requirements, design, and tasks, then adversarially reviews them
 3. `/spec:implement` - Implement tasks with granular commits and task tracking
 4. `/spawn-worktree` - Run independent tasks in parallel with git worktree isolation
 
@@ -37,5 +37,5 @@ After parallel agents complete:
 ## Conventions
 
 - Commit messages for spec tasks use `task [N]:` prefix
-- Specs live in `.claude/specs/[feature-name]/`
-- Each spec has: requirements.md, design.md, tasks.md (and optionally PLAN.md)
+- Specs live in `specs/[feature-name]/` at the project root (not in `.claude/`, which needs approval for every write)
+- Each spec has: PLAN.md, requirements.md, design.md, tasks.md, review.md

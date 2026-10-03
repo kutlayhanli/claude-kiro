@@ -157,15 +157,20 @@
 
           <div class="code-block">
             <pre><code>.claude/
-├── commands/spec/
-│   ├── create.md
-│   ├── implement.md
-│   └── review.md
+├── commands/
+│   ├── spec/
+│   │   ├── plan.md
+│   │   ├── create.md
+│   │   ├── implement.md
+│   │   └── review.md
+│   └── spawn-worktree.md
+├── workflows/
+│   └── spec-create.js
 ├── output-styles/
 │   └── spec-driven.md
-├── specs/
-│   └── (your specs will go here)
-└── CLAUDE.md</code></pre>
+└── CLAUDE.md
+specs/
+└── (your specs go here, outside .claude/ so writes need no approval)</code></pre>
           </div>
 
           <h4>Example</h4>
@@ -184,7 +189,8 @@ ck init --force</code></pre>
             <pre><code>✅ Created .claude directory
 ✅ Installed slash commands
 ✅ Configured spec-driven output style
-✅ Created specs directory
+✅ Created specs/ directory
+✅ Installed spec-create workflow
 ✅ Generated CLAUDE.md
 
 🎉 Claude Kiro initialized! Run 'ck doctor' to verify.</code></pre>

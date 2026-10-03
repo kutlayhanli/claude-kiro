@@ -43,7 +43,7 @@ Through collaborative design discussion, we evolved to a better architecture usi
 
 ## Migration Path
 
-See: `.claude/specs/cli-init-hook-management/` for the evolved design that:
+See: `specs/cli-init-hook-management/` for the evolved design that:
 - Uses all hook modules as-is
 - Provides single `ck` command entry point
 - Adds `ck init` for project setup
@@ -92,6 +92,6 @@ All while maintaining the clean single `ck` entry point.
 ## Cross-References
 
 - **Original Spec:** This directory (hook-scripts-package)
-- **Evolved Spec:** `.claude/specs/cli-init-hook-management/`
+- **Evolved Spec:** `specs/cli-init-hook-management/`
 - **Implementation:** `src/claude_kiro/hooks/` (unchanged)
 - **New Interface:** `src/claude_kiro/cli/` (new in evolved spec)

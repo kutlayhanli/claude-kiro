@@ -45,7 +45,7 @@ Tasks:
 - **Thinking mode** ensures thorough planning
 - **TodoWrite** tracks all tasks
 - **Custom slash command** triggers workflow
-- Files saved to `.claude/specs/auth/`
+- Files saved to `specs/auth/`
 
 ### Implementing Tasks
 

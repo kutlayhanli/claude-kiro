@@ -9,6 +9,8 @@ import re
 from pathlib import Path
 from typing import List, Tuple, Optional, NamedTuple
 
+from claude_kiro.paths import spec_roots
+
 
 class TaskMatch(NamedTuple):
     """Result of matching a file to a spec task."""
@@ -16,6 +18,7 @@ class TaskMatch(NamedTuple):
     spec_name: str
     task_num: str
     task_title: str
+    spec_dir: Path
 
 
 class SpecParser:
@@ -28,19 +31,22 @@ class SpecParser:
             project_dir: Project root directory. Defaults to current directory.
         """
         self.project_dir = Path(project_dir) if project_dir else Path.cwd()
-        self.specs_dir = self.project_dir / ".claude" / "specs"
+
+    @property
+    def spec_roots(self) -> List[Path]:
+        """Existing spec roots (specs/, then legacy .claude/specs/)."""
+        return spec_roots(self.project_dir)
 
     def find_spec_files(self) -> List[Path]:
-        """Find all tasks.md files in .claude/specs/*/.
+        """Find all tasks.md files in every spec root.
 
         Returns:
             List of paths to tasks.md files.
         """
-        if not self.specs_dir.exists():
-            return []
-
-        pattern = str(self.specs_dir / "*" / "tasks.md")
-        return [Path(p) for p in glob.glob(pattern)]
+        files = []
+        for root in self.spec_roots:
+            files.extend(Path(p) for p in glob.glob(str(root / "*" / "tasks.md")))
+        return files
 
     def parse_task_file(self, task_file_path: Path) -> List[Tuple[str, str, List[str]]]:
         """Parse tasks.md and extract file mentions.
@@ -131,12 +137,12 @@ class SpecParser:
 
                     # Direct match or suffix match
                     if file_path == task_file or file_path.endswith(task_file):
-                        return TaskMatch(spec_name, task_num, task_title)
+                        return TaskMatch(spec_name, task_num, task_title, spec_file.parent)
 
                     # Also check if task_file is a suffix of file_path
                     # This handles cases where file_path is absolute
                     if task_file and file_path.endswith(task_file):
-                        return TaskMatch(spec_name, task_num, task_title)
+                        return TaskMatch(spec_name, task_num, task_title, spec_file.parent)
 
         return None
 
@@ -146,13 +152,11 @@ class SpecParser:
         Returns:
             List of spec directory names.
         """
-        if not self.specs_dir.exists():
-            return []
-
-        spec_names = []
-        for spec_dir in self.specs_dir.iterdir():
-            if spec_dir.is_dir() and (spec_dir / "tasks.md").exists():
-                spec_names.append(spec_dir.name)
+        spec_names = set()
+        for root in self.spec_roots:
+            for spec_dir in root.iterdir():
+                if spec_dir.is_dir() and (spec_dir / "tasks.md").exists():
+                    spec_names.add(spec_dir.name)
 
         return sorted(spec_names)
 
@@ -165,10 +169,13 @@ class SpecParser:
         Returns:
             Dictionary mapping file type to path.
         """
-        spec_dir = self.specs_dir / spec_name
         files = {}
+        spec_dir = next(
+            (root / spec_name for root in self.spec_roots if (root / spec_name).is_dir()),
+            None,
+        )
 
-        if spec_dir.exists():
+        if spec_dir:
             for file_type in ["requirements.md", "design.md", "tasks.md"]:
                 file_path = spec_dir / file_type
                 if file_path.exists():

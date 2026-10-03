@@ -1,235 +1,124 @@
 ---
-description: Research best practices, analyze approaches, and create a decision document before writing requirements
+description: Discuss and decide what to build, interactively, and record the decisions in PLAN.md
 argument-hint: [feature-description]
-allowed-tools: Read, Write, Grep, Glob, WebSearch, WebFetch, AskUserQuestion, ExitPlanMode
+allowed-tools: Read, Write, Edit, Grep, Glob, WebSearch, WebFetch, AskUserQuestion, Agent
 ---
 
-Research and plan feature: $ARGUMENTS
+Plan feature: $ARGUMENTS
 
-# Spec-Plan: Pre-Requirements Research & Decision Framework
+# Spec-Plan: Decide Together, Then Write It Down
 
-Before we write requirements, you should research the problem space thoroughly and create a structured decision document for me to review.
+This is where we decide what to build. You and I talk it through: you bring research, options, and a recommendation; I make the calls. The output is `specs/[feature-name]/PLAN.md`, a decision record that `/spec:create` turns into requirements, design, and tasks without asking me again.
 
-**CRITICAL: This is a research and discussion phase. The goal is informed decision-making BEFORE committing to requirements. You MUST use ExitPlanMode after presenting research findings to discuss direction with me.**
-
----
-
-## Phase 1: Understand the Problem Space
-
-### 1.1 Clarify Scope
-
-Before researching, make sure you understand what we're building:
-
-1. **Core problem** - What user need does this address?
-2. **Scope boundaries** - What is explicitly in/out?
-3. **Existing work** - Check `.claude/specs/` for related specs
-4. **Codebase patterns** - Search for similar functionality already in the project
-
-If the feature description is ambiguous, use AskUserQuestion to clarify before researching. Better to spend time here than research the wrong thing.
-
-### 1.2 External Research
-
-Use WebSearch and WebFetch to find:
-
-**Best practices and patterns:**
-```
-"best practices" [feature domain] [current year]
-"design patterns" [feature type] [language/framework]
-"architecture" [feature domain] production
-```
-
-**Real-world implementations:**
-```
-"how to implement" [feature type] [technology]
-[feature domain] "open source" example
-[feature type] tutorial [framework]
-```
-
-**Known pitfalls and edge cases:**
-```
-"common mistakes" [feature type]
-"pitfalls" [feature domain]
-[feature type] "lessons learned"
-```
-
-**Run at least 3-5 searches.** Follow promising results with WebFetch to get details. Cross-reference claims across multiple sources.
-
-### 1.3 Evaluate Sources
-
-For each source you use:
-- **Credibility** - official docs > established engineering blogs > tutorials > forum posts
-- **Recency** - prefer sources from the last 2 years
-- **Relevance** - does it match our specific context (language, scale, constraints)?
-- **Extract** the key insight, not just the URL
+**Rules for this command:**
+- Stay interactive. Ask before assuming. One topic at a time.
+- Do not write requirements, design, tasks, or code here. Only PLAN.md.
+- Every decision in PLAN.md must be one I made or explicitly accepted. Mark your own defaults as "accepted default" only after I agree.
 
 ---
 
-## Phase 2: Analyze Solution Approaches
+## Step 1: Frame the problem (talk first)
 
-### 2.1 Identify 2-4 Distinct Approaches
+1. Pick a kebab-case feature name (e.g. `user-authentication`). If `specs/[feature-name]/PLAN.md` already exists, read it and resume from its Open Questions instead of starting over.
+2. Look around quickly before asking anything:
+   - List `specs/` (and legacy `.claude/specs/` if present) for related or overlapping specs.
+   - Grep/Glob for code this feature would touch. Note the 3-6 most relevant files.
+3. Play the problem back to me in 3-5 lines: what you think I want, who it is for, what it touches in the codebase.
+4. Ask me the questions whose answers change the shape of the work (use AskUserQuestion, up to 4 per call): goal and success signal, scope boundaries, hard constraints (deadline, compatibility, dependencies we can't add), and whether this evolves an existing spec.
 
-Based on your research, identify genuinely different approaches. Not minor variations - fundamentally different ways to solve the problem.
+Do not research yet. A wrong frame wastes the research.
 
-For each approach:
-- **Name** - a clear, descriptive label
-- **How it works** - brief technical explanation
-- **Where it shines** - what it handles well
-- **Where it struggles** - what it doesn't handle well
-- **Real-world usage** - who uses this approach and at what scale
+## Step 2: Research what matters
 
-### 2.2 Comparative Analysis
+Research only what the decisions need. Scale it to the problem:
+- **Internal change** (refactor, wiring, tooling): mostly codebase reading. Find existing patterns, utilities, and constraints.
+- **Unfamiliar domain or library choice**: also do 3-5 WebSearch queries for current best practices, real implementations, and known pitfalls. Prefer official docs and recent sources; extract the insight, not just the URL.
 
-Build a comparison table:
+For broad sweeps, delegate to an Agent and keep only its conclusions here so our conversation stays focused.
 
-| Criteria | Approach A | Approach B | Approach C |
-|----------|-----------|-----------|-----------|
-| Implementation complexity | | | |
-| Flexibility / extensibility | | | |
-| Maintainability | | | |
-| Performance characteristics | | | |
-| Learning curve | | | |
-| Integration with our codebase | | | |
-| Risk level | | | |
+Then create the first draft of `specs/[feature-name]/PLAN.md` (structure below) with Status `Discussing`, the framing, the research notes, and the decisions still open. Saving early means nothing is lost if we stop midway.
 
-### 2.3 Complexity Assessment
+## Step 3: Decide, one decision at a time
 
-Rate overall feature complexity (Low / Medium / High / Very High) and identify specific complexity drivers:
-- Integration points
-- State management
-- Concurrency / async
-- Security surface
-- Performance constraints
-- Migration / backwards compatibility
+List the decisions that must be made before a spec can be written, in dependency order (approach first, details later). Tell me the list, then go through it:
+
+For each decision:
+1. Lay out 2-4 real options (genuinely different, not variations). For each: how it works, where it shines, where it hurts, rough cost.
+2. Give your recommendation and why, grounded in what you found in our codebase and research.
+3. Ask with AskUserQuestion. Put your recommendation first, labelled "(Recommended)". Use `preview` for code or layout comparisons.
+4. If I push back, pick "Other", or ask a question, discuss it. Don't rush to the next decision.
+5. Record the outcome in PLAN.md right away: choice, rationale, rejected options and why.
+
+New decisions often surface along the way (a choice opens a new question). Add them to the list and tell me.
+
+Keep going until there are no open decisions that would change the requirements. Small details that `/spec:create` can reasonably settle can stay as "Delegated to spec", but say so and get my OK.
+
+## Step 4: Confirm and hand off
+
+1. Summarize the plan back to me in under 15 lines: what we're building, the key decisions, what's out of scope, the main risks.
+2. Ask whether anything is missing or wrong. Apply changes.
+3. Set Status to `Decided` and update the date.
+4. Tell me: "Plan decided. Run `/spec:create [feature-name]` to write the spec. It runs as a workflow and ends with an adversarial review."
 
 ---
 
-## Phase 3: Create the Decision Document
-
-Write `.claude/specs/[feature-name]/PLAN.md` with this structure:
+## PLAN.md structure
 
 ```markdown
 # Plan: [Feature Name]
 
-**Created:** [date]
-**Status:** Pending Decision
+**Status:** Discussing | Decided
+**Updated:** [YYYY-MM-DD]
+**Evolves:** [specs/old-spec, or none]
 
-## Problem Statement
-[What problem are we solving and for whom?]
+## Problem
+What we're solving, for whom, and how we'll know it worked.
 
-## Research Summary
+## Scope
+**In:**
+- ...
 
-### Sources Consulted
-- [Source 1](url) - key insight
-- [Source 2](url) - key insight
-- [Source 3](url) - key insight
+**Out:**
+- ...
 
-### Best Practices Found
-- [Practice 1] - [source, context]
-- [Practice 2] - [source, context]
+## Constraints
+Hard limits: compatibility, dependencies, performance budgets, deadlines.
 
-### Patterns to Avoid
-- [Anti-pattern 1] - [why, source]
-- [Anti-pattern 2] - [why, source]
+## Decisions
 
-## Solution Options
+### D1: [Decision question]
+**Choice:** [what we picked]
+**Why:** [rationale]
+**Rejected:** [option] - [why not]; [option] - [why not]
+**Decided by:** user | accepted default
 
-### Option A: [Name]
+### D2: ...
 
-**Description:** [How it works]
+## Delegated to Spec
+Details `/spec:create` may decide on its own, within the decisions above.
 
-**Pros:**
-- [Pro 1]
-- [Pro 2]
-
-**Cons:**
-- [Con 1]
-- [Con 2]
-
-**Complexity:** Low/Medium/High
-**Precedent:** [Who uses this, at what scale]
-
----
-
-### Option B: [Name]
-[same structure]
-
----
-
-## Comparison Matrix
-
-| Criteria | Option A | Option B | Option C |
-|----------|----------|----------|----------|
-| ... | ... | ... | ... |
-
-## Key Decisions
-
-Decisions we need to make before writing requirements:
-
-1. **[Decision question]**
-   - Option X: [rationale]
-   - Option Y: [rationale]
-   - Recommendation: [which and why]
-
-2. **[Decision question]**
-   - [same structure]
+## Risks
+- [Risk] -> [mitigation, or "accepted"]
 
 ## Open Questions
+- [ ] [Anything still unresolved. Must be empty, or explicitly deferred, before Status is Decided.]
 
-- [ ] [Question needing user input]
-- [ ] [Technical unknown to resolve]
+## Research Notes
+### Codebase
+- `path/to/file` - what's relevant there
 
-## Recommended Direction
-
-**Approach:** [recommended option]
-
-**Rationale:**
-- [Reason 1]
-- [Reason 2]
-
-**Key risks and mitigations:**
-- [Risk] -> [mitigation]
-
-## Decisions Log
-
-| # | Decision | Choice | Rationale | Date |
-|---|----------|--------|-----------|------|
-| | | | | |
-
-_Populated after discussion with user._
+### Sources
+- [Title](url) - key insight
 ```
 
 ---
 
-## Phase 4: Present and Discuss
+## Workflow summary
 
-After writing PLAN.md, use ExitPlanMode to present your findings. Structure your presentation as:
+1. **Frame**: look at the code and existing specs, play it back, ask the shaping questions
+2. **Research**: only what the decisions need; draft PLAN.md early
+3. **Decide**: one decision at a time with AskUserQuestion; record each as it's made
+4. **Confirm**: summary, final check, Status `Decided`
+5. **Hand off**: `/spec:create [feature-name]`
 
-1. **What I found** - 3-5 key research insights
-2. **Options on the table** - brief summary of each approach
-3. **My recommendation** - which option and why
-4. **What I need from you** - specific decisions/questions
-
-Then discuss with me. Use AskUserQuestion if you need clarification on priorities, constraints, or preferences.
-
-### After Discussion
-
-Once we've made decisions together, update PLAN.md:
-- Fill in the **Decisions Log** table with what was decided and why
-- Update **Status** to "Decisions Made"
-- Mark resolved items in **Open Questions**
-
-Then tell me: "Plan complete. Run `/spec:create [feature-name]` to write requirements based on our decisions."
-
----
-
-## Workflow Summary
-
-1. **Understand** - Clarify scope, check existing work
-2. **Research** - WebSearch/WebFetch for best practices and real examples
-3. **Analyze** - Identify approaches, compare tradeoffs
-4. **Document** - Write structured PLAN.md
-5. **Discuss** - ExitPlanMode to review findings with me
-6. **Decide** - Record decisions and rationale
-7. **Hand off** - PLAN.md feeds into `/spec:create`
-
-**Output:** `.claude/specs/[feature-name]/PLAN.md`
+**Output:** `specs/[feature-name]/PLAN.md`

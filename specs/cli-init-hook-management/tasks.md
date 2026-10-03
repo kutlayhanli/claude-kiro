@@ -185,8 +185,8 @@ The new `ck` command completely replaces the old `ckh-*` scripts.
 ### Task 10: Create evolution documentation ✅ COMPLETE
 **Description:** Document the evolution from hook-scripts-package
 **Files:**
-- `.claude/specs/hook-scripts-package/evolution.md` - Created ✅
-- `.claude/specs/hook-scripts-package/tasks.md` - Status updated to EVOLVED ✅
+- `specs/hook-scripts-package/evolution.md` - Created ✅
+- `specs/hook-scripts-package/tasks.md` - Status updated to EVOLVED ✅
 
 **Acceptance:**
 - [x] evolution.md explains the transition

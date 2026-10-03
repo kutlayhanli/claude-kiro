@@ -21,7 +21,7 @@ Run multiple implementation tasks concurrently, each in its own git worktree wit
 ### Phase 1: Parse and Validate
 
 1. **Read the spec** if a spec directory was provided:
-   - Load `tasks.md` from `.claude/specs/[name]/`
+   - Load `tasks.md` from `specs/[name]/`
    - Identify tasks that can run in parallel (no dependencies between them)
    - Load `design.md` and `requirements.md` for context
 
@@ -161,7 +161,7 @@ git worktree prune
 ## Example
 
 ```
-User: /spawn-worktree .claude/specs/auth-system
+User: /spawn-worktree specs/auth-system
 
 Claude: I found 5 tasks in the auth-system spec. Tasks 1-3 are independent
 and can run in parallel. Tasks 4-5 depend on 1-3.

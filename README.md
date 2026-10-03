@@ -80,6 +80,8 @@ ck init
 This creates:
 - `.claude/output-styles/spec-driven.md` - Enforces structured responses
 - `.claude/commands/spec/` - Slash commands for specs
+- `.claude/workflows/spec-create.js` - Workflow behind `/spec:create` and `/spec:review`
+- `specs/` - Where specs are written (project root, outside `.claude/`, so writes need no approval)
 - `.claude/settings.local.json` - Hook configuration
 - `.claude/CLAUDE.md` - Project context template
 
@@ -93,8 +95,8 @@ The hooks provide intelligent spec context:
 ## How It Works
 
 1. **Initialize:** `ck init` sets up your project with all necessary files
-2. **Plan:** `/spec:plan "feature"` - Research best practices, compare approaches, make decisions
-3. **Create specs:** `/spec:create "feature"` - Generate requirements, design, and tasks
+2. **Plan:** `/spec:plan "feature"` - Discuss interactively, decide one question at a time, record decisions in `specs/<name>/PLAN.md`
+3. **Create specs:** `/spec:create <name>` - A workflow writes requirements, design, and tasks from PLAN.md, then adversarially reviews and revises them
 4. **Implement:** `/spec:implement task` - Execute tasks with full context
 5. **Parallelize:** `/spawn-worktree spec` - Run independent tasks concurrently in isolated worktrees
 6. **Track progress:** TodoWrite tracks implementation automatically
@@ -106,16 +108,17 @@ The hooks provide intelligent spec context:
 - `ck setup [--force]` - Install global config to ~/.claude/ (once per machine)
 - `ck init [--force]` - Initialize a project with spec-driven setup
 - `ck doctor` - Check your Claude Kiro setup health
+- `ck migrate [--dry-run]` - Move specs from `.claude/specs/` to `specs/` (tracked files keep their history)
 - `ck hook list` - Show available hooks
 - `ck hook status` - Display configured hooks
 - `ck hook test <name>` - Test a hook with sample data
 - `ck hook config` - Generate settings.json configuration
 
 ### Claude Code Slash Commands (Created by `ck init`)
-- `/spec:plan <feature>` - Research and plan before writing requirements
-- `/spec:create <feature>` - Create a new specification
+- `/spec:plan <feature>` - Discuss and decide the approach interactively (writes PLAN.md)
+- `/spec:create <name>` - Write the spec as a workflow, ending in adversarial review
 - `/spec:implement <task>` - Implement a spec task
-- `/spec:review <spec>` - Review an existing spec
+- `/spec:review <spec>` - Adversarially review an existing spec and apply surviving fixes
 - `/spawn-worktree <spec-or-tasks>` - Run tasks in parallel with git worktree isolation
 
 ## Key Features

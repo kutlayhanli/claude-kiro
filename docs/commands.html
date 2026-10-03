@@ -116,15 +116,51 @@
             in your project to install the slash commands.
           </div>
 
-          <h2>/spec:create</h2>
+          <h2>/spec:plan</h2>
 
-          <p>Create a new structured specification with a 3-phase workflow.</p>
+          <p>
+            Discuss and decide what to build, interactively. Claude frames the
+            problem, asks the questions that shape the work, researches only what
+            the decisions need, then walks you through each decision one at a
+            time with options and a recommendation. You make the calls.
+          </p>
 
           <div class="code-block">
-            <code>/spec:create [feature-description]</code>
+            <code>/spec:plan [feature-description]</code>
           </div>
 
-          <h3>The 3-Phase Workflow</h3>
+          <p>
+            The output is
+            <code>specs/[feature-name]/PLAN.md</code>,
+            a decision record (scope, decisions with rationale and rejected
+            options, risks). It is saved early and updated after every decision,
+            and it is the input
+            <code>/spec:create</code>
+            works from.
+          </p>
+
+          <hr
+            style="
+              margin: var(--space-8) 0;
+              border: 0;
+              border-top: 1px solid hsl(var(--border));
+            "
+          />
+
+          <h2>/spec:create</h2>
+
+          <p>
+            Turn the decisions in PLAN.md into a spec. This runs as a
+            multi-agent workflow (watch it with
+            <code>/workflows</code>) and ends with an adversarial review. It
+            only comes back to you for questions the review could not settle.
+          </p>
+
+          <div class="code-block">
+            <code>/spec:create [feature-name]</code>
+          </div>
+
+          <h3>The Workflow</h3>
 
           <div class="card-grid-1">
             <div class="card">
@@ -145,9 +181,8 @@
                 <li>Constraints and out-of-scope items</li>
               </ul>
               <p style="margin-top: var(--space-3)">
-                <strong>Approval Gate:</strong>
-                Claude presents requirements using ExitPlanMode. You review and
-                approve before proceeding to design.
+                <strong>Traceable:</strong>
+                Criteria are numbered so design and tasks can reference them.
               </p>
             </div>
 
@@ -167,9 +202,9 @@
                 <li>Testing strategy and performance considerations</li>
               </ul>
               <p style="margin-top: var(--space-3)">
-                <strong>Approval Gate:</strong>
-                Another ExitPlanMode checkpoint. Review the design before task
-                breakdown.
+                <strong>Grounded:</strong>
+                Written after reading the code it changes, with a traceability
+                table back to every requirement.
               </p>
             </div>
 
@@ -189,9 +224,21 @@
                 <li>Testing checklist</li>
               </ul>
               <p style="margin-top: var(--space-3)">
-                <strong>Final Approval:</strong>
-                Review the task breakdown. Once approved, you're ready to
-                implement!
+                <strong>Parallel-ready:</strong>
+                Tasks are grouped into waves for
+                <code>/spawn-worktree</code>.
+              </p>
+            </div>
+
+            <div class="card">
+              <h4>Phase 4: Adversarial Review</h4>
+              <p>
+                Three reviewers attack the spec from different angles: plan
+                fidelity, grounding in the real codebase, and implementability.
+                A separate skeptic tries to refute every finding. Findings that
+                survive are applied, questions that need a product decision are
+                brought back to you, and everything is recorded in
+                <code>review.md</code>.
               </p>
             </div>
           </div>
@@ -279,10 +326,10 @@
 
           <div class="code-block">
             <pre><code># Implement a specific spec
-/spec:implement .claude/specs/user-authentication
+/spec:implement specs/user-authentication
 
 # Continue working on a partially completed spec
-/spec:implement .claude/specs/email-notifications</code></pre>
+/spec:implement specs/email-notifications</code></pre>
           </div>
 
           <h3>Hook Integration</h3>
@@ -311,12 +358,14 @@
           <h2>/spec:review</h2>
 
           <p>
-            Review a specification for completeness, quality, and alignment with
-            methodology.
+            Run the adversarial review half of the
+            <code>/spec:create</code>
+            workflow on an existing spec, for example after hand edits or code
+            drift. Findings that survive refutation are applied.
           </p>
 
           <div class="code-block">
-            <code>/spec:review [spec-directory]</code>
+            <code>/spec:review [spec-name]</code>
           </div>
 
           <h3>Review Criteria</h3>
@@ -371,7 +420,7 @@
           <h3>Example</h3>
 
           <div class="code-block">
-            <code>/spec:review .claude/specs/user-authentication</code>
+            <code>/spec:review user-authentication</code>
           </div>
 
           <h3>Output</h3>
@@ -418,7 +467,7 @@
             <div class="card">
               <h4>✅ Do</h4>
               <ul style="margin: var(--space-2) 0 0 var(--space-6)">
-                <li>Review and approve each phase before proceeding</li>
+                <li>Settle decisions in <code>/spec:plan</code>, then let <code>/spec:create</code> run</li>
                 <li>Ask questions if requirements aren't clear</li>
                 <li>Request changes to the spec before implementation</li>
                 <li>Use descriptive spec names (feature-focused)</li>
