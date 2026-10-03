@@ -51,6 +51,8 @@ That's it! Your project is now configured for spec-driven development.
 
 ## Installation
 
+> **Already using claude-kiro 0.1?** Follow [UPGRADING.md](UPGRADING.md): one step per machine, then `ck upgrade` in each repository.
+
 ### Install Claude Kiro (Global Tool)
 
 ```bash
@@ -116,6 +118,8 @@ The hooks provide spec context and enforce the definition of done:
 - `ck doctor` - Check your Claude Kiro setup health
 - `ck migrate [--dry-run]` - Move specs from `.claude/specs/` to `specs/` (tracked files keep their history)
 - `ck gate <spec> [--task N]` - Run the verification gate; exits 1 on failure
+- `ck upgrade [--dry-run] [--no-migrate]` - Update a project set up by an older ck (see [UPGRADING.md](UPGRADING.md))
+- `ck setup --diff` - Show how your global `~/.claude` files differ from this version, without writing
 - `ck hook list` - Show available hooks
 - `ck hook status` - Display configured hooks
 - `ck hook test <name>` - Test a hook with sample data

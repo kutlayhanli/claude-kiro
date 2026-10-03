@@ -60,6 +60,45 @@ def cli(ctx: click.Context, hook_name: Optional[str]):
         click.echo(ctx.get_help())
 
 
+# Files ck owns and refreshes on upgrade. .claude/CLAUDE.md is not here: it is
+# created once by `ck init` and then belongs to the project.
+MANAGED_FILES = [
+    (".claude/output-styles/spec-driven.md", "output_styles/spec_driven.md"),
+    (".claude/commands/spec/plan.md", "commands/spec/plan.md"),
+    (".claude/commands/spec/create.md", "commands/spec/create.md"),
+    (".claude/commands/spec/implement.md", "commands/spec/implement.md"),
+    (".claude/commands/spec/review.md", "commands/spec/review.md"),
+    (".claude/commands/spawn-worktree.md", "commands/spawn-worktree.md"),
+    (SPEC_WORKFLOW, "workflows/spec_create.js"),
+]
+
+
+def _install_hooks(project_dir: Path) -> None:
+    """Add or refresh ck hooks in .claude/settings.local.json, keeping other hooks."""
+    settings_file = project_dir / ".claude" / "settings.local.json"
+    settings = {}
+    if settings_file.exists():
+        try:
+            settings = json.loads(settings_file.read_text())
+        except json.JSONDecodeError:
+            backup = settings_file.with_suffix(".json.bak")
+            settings_file.rename(backup)
+            logger.warning(f"Backed up corrupted settings to {backup}")
+    settings_file.parent.mkdir(parents=True, exist_ok=True)
+    install_hook_settings(settings)
+    settings_file.write_text(json.dumps(settings, indent=2))
+
+
+def _ensure_config(project_dir: Path) -> bool:
+    """Create specs/ck.json if missing. Returns True when it was created."""
+    config_file = project_dir / CONFIG_FILE
+    if config_file.exists():
+        return False
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    config_file.write_text(json.dumps(initial_config(project_dir), indent=2) + "\n")
+    return True
+
+
 @cli.command()
 @click.option("--force", is_flag=True, help="Overwrite existing files")
 def init(force: bool):
@@ -97,16 +136,7 @@ def init(force: bool):
     # Load resources and create files
     loader = ResourceLoader()
 
-    files_to_create = [
-        (".claude/CLAUDE.md", "claude_md.md"),
-        (".claude/output-styles/spec-driven.md", "output_styles/spec_driven.md"),
-        (".claude/commands/spec/plan.md", "commands/spec/plan.md"),
-        (".claude/commands/spec/create.md", "commands/spec/create.md"),
-        (".claude/commands/spec/implement.md", "commands/spec/implement.md"),
-        (".claude/commands/spec/review.md", "commands/spec/review.md"),
-        (".claude/commands/spawn-worktree.md", "commands/spawn-worktree.md"),
-        (SPEC_WORKFLOW, "workflows/spec_create.js"),
-    ]
+    files_to_create = [(".claude/CLAUDE.md", "claude_md.md"), *MANAGED_FILES]
 
     for target_path, resource_path in files_to_create:
         target = project_dir / target_path
@@ -123,29 +153,10 @@ def init(force: bool):
         except Exception as e:
             logger.error(f"Failed to create {target_path}: {e}")
 
-    # Configure hooks in settings.local.json
-    settings_file = claude_dir / "settings.local.json"
-    settings = {}
-
-    if settings_file.exists():
-        try:
-            settings = json.loads(settings_file.read_text())
-        except json.JSONDecodeError:
-            # Backup corrupted file
-            backup = settings_file.with_suffix(".json.bak")
-            settings_file.rename(backup)
-            logger.warning(f"Backed up corrupted settings to {backup}")
-            settings = {}
-
-    # Add (or refresh) Claude Kiro hooks, keeping hooks from other tools
-    install_hook_settings(settings)
-    settings_file.write_text(json.dumps(settings, indent=2))
+    _install_hooks(project_dir)
     created.append(".claude/settings.local.json")
 
-    # Verification and guard config lives with the specs, so Claude can edit it
-    config_file = project_dir / CONFIG_FILE
-    if not config_file.exists():
-        config_file.write_text(json.dumps(initial_config(project_dir), indent=2) + "\n")
+    if _ensure_config(project_dir):
         created.append(CONFIG_FILE)
     else:
         skipped.append(CONFIG_FILE)
@@ -179,13 +190,19 @@ def init(force: bool):
 
 @cli.command()
 @click.option("--force", is_flag=True, help="Overwrite existing files")
-def setup(force: bool):
+@click.option("--diff", "show_diff", is_flag=True, help="Show how existing global files differ from this version; write nothing")
+def setup(force: bool, show_diff: bool):
     """Set up global Claude Kiro configuration in ~/.claude/.
 
     Installs global CLAUDE.md and skills that apply across all projects.
-    Run this once per machine after installing claude-kiro.
+    Run this once per machine after installing claude-kiro. On an existing
+    machine, use --diff to see what changed before deciding on --force.
     """
     from ..resources import ResourceLoader
+
+    if show_diff:
+        _setup_diff(ResourceLoader())
+        return
 
     home_claude = Path.home() / ".claude"
     skills_dir = home_claude / "skills" / "spawn-worktree"
@@ -232,6 +249,37 @@ def setup(force: bool):
     click.echo("\n🚀 Next steps:")
     click.echo("  1. Review ~/.claude/CLAUDE.md and customize")
     click.echo("  2. Run 'ck init' in each project to set up project-level config")
+
+
+GLOBAL_FILES = [
+    (Path(".claude") / "CLAUDE.md", "global/claude_md.md"),
+    (Path(".claude") / "skills" / "spawn-worktree" / "SKILL.md", "global/spawn_worktree_skill.md"),
+]
+
+
+def _setup_diff(loader) -> None:
+    """Print a unified diff between each existing global file and this version's template."""
+    import difflib
+
+    for rel, resource_path in GLOBAL_FILES:
+        target = Path.home() / rel
+        new = loader.get_resource(resource_path)
+        if not target.exists():
+            click.echo(f"\n➕ {target} does not exist; 'ck setup' would create it.")
+            continue
+        old = target.read_text()
+        if old == new:
+            click.echo(f"\n✓ {target} matches this version.")
+            continue
+        click.echo(f"\n✏️  {target} differs (- yours, + ck {resource_path}):")
+        diff = difflib.unified_diff(
+            old.splitlines(keepends=True), new.splitlines(keepends=True), str(target), f"ck:{resource_path}"
+        )
+        click.echo("".join(diff))
+    click.echo(
+        "\n💡 If you never customized a file, 'ck setup --force' replaces it. "
+        "If you did, copy the + lines you want by hand."
+    )
 
 
 @cli.command()
@@ -357,49 +405,12 @@ def migrate(dry_run: bool):
     Uses `git mv` for tracked specs so history follows the files, and rewrites
     `.claude/specs/` references inside the moved Markdown files.
     """
-    import shutil
-    import subprocess
-
     project_dir = Path.cwd()
-    legacy = project_dir / LEGACY_SPECS_DIR
-    target_root = project_dir / SPECS_DIR
-
-    if not legacy.is_dir():
+    if not (project_dir / LEGACY_SPECS_DIR).is_dir():
         click.echo(f"Nothing to migrate: {LEGACY_SPECS_DIR}/ not found.")
         return
 
-    def tracked(path: Path) -> bool:
-        result = subprocess.run(
-            ["git", "ls-files", "--error-unmatch", str(path)],
-            cwd=project_dir,
-            capture_output=True,
-        )
-        return result.returncode == 0
-
-    moved, skipped = [], []
-    for spec_dir in sorted(p for p in legacy.iterdir() if p.is_dir()):
-        dest = target_root / spec_dir.name
-        if dest.exists():
-            skipped.append(f"{spec_dir.name} ({SPECS_DIR}/{spec_dir.name} already exists)")
-            continue
-        moved.append(spec_dir.name)
-        if dry_run:
-            continue
-
-        target_root.mkdir(parents=True, exist_ok=True)
-        if any(tracked(f) for f in spec_dir.rglob("*") if f.is_file()):
-            subprocess.run(["git", "mv", str(spec_dir), str(dest)], cwd=project_dir, check=True)
-        else:
-            shutil.move(str(spec_dir), str(dest))
-
-        for md in dest.rglob("*.md"):
-            text = md.read_text()
-            updated = text.replace(f"{LEGACY_SPECS_DIR}/", f"{SPECS_DIR}/")
-            if updated != text:
-                md.write_text(updated)
-
-    if not dry_run and legacy.is_dir() and not any(legacy.iterdir()):
-        legacy.rmdir()
+    moved, skipped = _migrate_specs(project_dir, dry_run)
 
     verb = "Would move" if dry_run else "Moved"
     if moved:
@@ -414,6 +425,140 @@ def migrate(dry_run: bool):
         click.echo(f"No spec directories found in {LEGACY_SPECS_DIR}/.")
     if moved and not dry_run:
         click.echo("\n💡 Review with 'git status' and commit the move.")
+
+
+def _git_tracked(project_dir: Path, path: Path) -> bool:
+    import subprocess
+
+    result = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", str(path)],
+        cwd=project_dir,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def _migrate_specs(project_dir: Path, dry_run: bool) -> tuple:
+    """Move .claude/specs/* to specs/. Returns (moved names, skipped reasons)."""
+    import shutil
+    import subprocess
+
+    legacy = project_dir / LEGACY_SPECS_DIR
+    target_root = project_dir / SPECS_DIR
+    if not legacy.is_dir():
+        return [], []
+
+    moved, skipped = [], []
+    for spec_dir in sorted(p for p in legacy.iterdir() if p.is_dir()):
+        dest = target_root / spec_dir.name
+        if dest.exists():
+            skipped.append(f"{spec_dir.name} ({SPECS_DIR}/{spec_dir.name} already exists)")
+            continue
+        moved.append(spec_dir.name)
+        if dry_run:
+            continue
+
+        target_root.mkdir(parents=True, exist_ok=True)
+        if any(_git_tracked(project_dir, f) for f in spec_dir.rglob("*") if f.is_file()):
+            subprocess.run(["git", "mv", str(spec_dir), str(dest)], cwd=project_dir, check=True)
+        else:
+            shutil.move(str(spec_dir), str(dest))
+
+        for md in dest.rglob("*.md"):
+            text = md.read_text()
+            updated = text.replace(f"{LEGACY_SPECS_DIR}/", f"{SPECS_DIR}/")
+            if updated != text:
+                md.write_text(updated)
+
+    if not dry_run and legacy.is_dir() and not any(legacy.iterdir()):
+        legacy.rmdir()
+    return moved, skipped
+
+
+@cli.command()
+@click.option("--dry-run", is_flag=True, help="Show what would change without writing anything")
+@click.option("--no-migrate", is_flag=True, help=f"Leave specs in {LEGACY_SPECS_DIR}/")
+def upgrade(dry_run: bool, no_migrate: bool):
+    """Bring an existing Claude Kiro project up to date with this ck version.
+
+    \b
+    - Refreshes ck-managed files: spec commands, /spawn-worktree, the output
+      style, and the spec-create workflow
+    - Merges the current hooks into .claude/settings.local.json, keeping hooks
+      from other tools and fixing old millisecond timeouts
+    - Creates specs/ck.json (verify commands, guard settings) if missing
+    - Moves specs from .claude/specs/ to specs/ (unless --no-migrate)
+
+    Never touches .claude/CLAUDE.md or the content of your specs. Managed files
+    that differ from the new version and are not tracked by git are backed up
+    as <file>.bak first.
+    """
+    from ..resources import ResourceLoader
+
+    project_dir = Path.cwd()
+    if not (project_dir / ".claude").is_dir():
+        click.echo("❌ No .claude/ directory here. Run 'ck init' for a new project.")
+        sys.exit(1)
+
+    loader = ResourceLoader()
+    changes, backups = [], []
+    for target_path, resource_path in MANAGED_FILES:
+        target = project_dir / target_path
+        content = loader.get_resource(resource_path)
+        if target.exists() and target.read_text() == content:
+            continue
+        changes.append(("updated" if target.exists() else "added", target_path))
+        if dry_run:
+            continue
+        if target.exists() and not _git_tracked(project_dir, target):
+            backup = target.with_name(target.name + ".bak")
+            backup.write_text(target.read_text())
+            backups.append(str(backup.relative_to(project_dir)))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+
+    settings_file = project_dir / ".claude" / "settings.local.json"
+    before = settings_file.read_text() if settings_file.exists() else ""
+    try:
+        merged = json.dumps(install_hook_settings(json.loads(before) if before else {}), indent=2)
+    except json.JSONDecodeError:
+        merged = None
+    if merged != before:
+        changes.append(("updated" if before else "added", ".claude/settings.local.json (hooks)"))
+        if not dry_run:
+            _install_hooks(project_dir)
+
+    if not (project_dir / CONFIG_FILE).exists():
+        changes.append(("added", f"{CONFIG_FILE} (verify: {', '.join(initial_config(project_dir)['verify']) or 'none detected'})"))
+        if not dry_run:
+            _ensure_config(project_dir)
+
+    moved, skipped = ([], []) if no_migrate else _migrate_specs(project_dir, dry_run)
+    for name in moved:
+        changes.append(("moved", f"{LEGACY_SPECS_DIR}/{name} -> {SPECS_DIR}/{name}"))
+
+    title = "Upgrade plan (dry run, nothing written)" if dry_run else "Claude Kiro project upgraded"
+    click.echo(f"\n✨ {title}")
+    if not changes:
+        click.echo("\n✓ Already up to date.")
+    for kind, item in changes:
+        click.echo(f"  {kind:>7}  {item}")
+    for item in skipped:
+        click.echo(f"  skipped  {item}")
+    if backups:
+        click.echo("\n🗂️  Backed up untracked files you may have customized:")
+        for item in backups:
+            click.echo(f"  - {item}")
+    if no_migrate and (project_dir / LEGACY_SPECS_DIR).is_dir():
+        click.echo(f"\n⚠️  Specs are still in {LEGACY_SPECS_DIR}/; run 'ck migrate' when ready.")
+
+    if changes and not dry_run:
+        click.echo("\n🚀 Next steps:")
+        click.echo("  1. Review: git status && git diff .claude specs")
+        click.echo(f"  2. Check the \"verify\" command in {CONFIG_FILE} runs your test suite")
+        click.echo("  3. Commit .claude/commands, .claude/workflows, .claude/output-styles and specs/")
+        click.echo("  4. Restart open Claude Code sessions in this project so the new hooks load")
+        click.echo("  5. Run 'ck doctor'")
 
 
 @cli.command()
