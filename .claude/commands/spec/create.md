@@ -11,9 +11,9 @@ Create the specification for: $ARGUMENTS
 `/spec:plan` is where we decide. This command turns those decisions into a spec without another round of questions. It runs the `spec-create` workflow, which:
 
 1. writes `requirements.md` (EARS criteria, numbered for traceability),
-2. writes `design.md` grounded in the real codebase,
-3. writes `tasks.md` in the format the hooks and `/spawn-worktree` parse,
-4. runs an **adversarial review**: three reviewers attack the spec from different angles (plan fidelity, codebase grounding, implementability), and a separate skeptic tries to refute each finding,
+2. in parallel, writes `design.md` grounded in the real codebase and `test-plan.md`. The test plan is integration-first: it tests real boundaries (database, filesystem, HTTP, CLI) and never sees the design, so the tests stay an independent check,
+3. in parallel, writes an implementation track and a test track of tasks, then links them into `tasks.md`. Each impl task is **Verified by** test tasks that run first, and tasks are grouped into parallel waves,
+4. runs an **adversarial review**: four reviewers attack the spec (plan fidelity, codebase grounding, implementability, test adequacy), and a separate skeptic tries to refute each finding,
 5. applies the findings that survive, and writes `review.md`.
 
 Your job here is to set up the run, launch it, and bring back anything that needs my decision.
@@ -35,7 +35,9 @@ Your job here is to set up the run, launch it, and bring back anything that need
 
 ## Step 2: Gather brief context
 
-Spend a few tool calls, no more, to give the workflow a head start: the 3-8 most relevant files, the test layout, and any conventions it must follow. Summarize in under 20 lines. The workflow agents will read the code themselves; this is a pointer list, not a design.
+Spend a few tool calls, no more, to give the workflow a head start: the 3-8 most relevant files, the test layout and how tests run (frameworks, fixtures, how the app/DB/CLI is started in tests), and any conventions it must follow. Summarize in under 20 lines. The workflow agents will read the code themselves; this is a pointer list, not a design.
+
+Also read `specs/ck.json`. If it is missing or has no `"verify"` commands, tell me which command you'd use to run the project's tests and offer to add it; the verification gate relies on it.
 
 ## Step 3: Launch the workflow
 
@@ -56,7 +58,7 @@ Spend a few tool calls, no more, to give the workflow a head start: the 3-8 most
        "date": "[today, YYYY-MM-DD]"
      }
      ```
-3. Tell me it's running: four phases (requirements, design, tasks, adversarial review and revision), and I can watch it with `/workflows`.
+3. Tell me it's running: requirements, then design and test plan in parallel, then two task tracks in parallel and a link step, then adversarial review and revision. I can watch it with `/workflows`.
 
 ## Step 4: Close the loop
 
@@ -69,26 +71,30 @@ When the workflow returns:
 
    requirements.md: [one-line summary]
    design.md:       [one-line summary]
-   tasks.md:        [N tasks; parallel waves]
+   test-plan.md:    [N cases: X integration, Y e2e, Z unit/property; infrastructure to build]
+   tasks.md:        [N tasks (T test, I impl); waves]
 
    Adversarial review: [N] fixed, [M] refuted, [K] need your decision
    Assumptions to check: [only the ones that matter]
    ```
    Mention any `unverified` findings or lost review lenses so I know coverage was partial.
 3. **Open questions:** if `review.openQuestions` is non-empty, ask me with AskUserQuestion (up to 4 per call; put the reviewer's suggested fix first when it is a sensible default). Then apply my answers to the spec files, keeping requirements, design, and tasks consistent. Record each answer under a new "Decisions" entry in PLAN.md (if it exists) and in the "Needs Your Decision" table of `review.md`.
-4. Finish with: "Spec ready. Use `/spec:implement [task-number]` to start, or `/spawn-worktree specs/[feature-name]` to run a parallel wave."
+4. Finish with: "Spec ready. Use `/spec:implement [task-number]` to start, or `/spawn-worktree specs/[feature-name]` to run wave 1. Tasks are only Done when `ck gate` passes."
 
 ---
 
 ## Spec layout
 
 ```
-specs/[feature-name]/
-├── PLAN.md          # decisions (from /spec:plan)
-├── requirements.md  # what: user stories, EARS criteria
-├── design.md        # how: components, interfaces, traceability
-├── tasks.md         # steps: ### Task N, files, acceptance, waves
-└── review.md        # adversarial review record
+specs/
+├── ck.json              # verify commands, test patterns, guard modes (shared by all specs)
+└── [feature-name]/
+    ├── PLAN.md          # decisions (from /spec:plan)
+    ├── requirements.md  # what: user stories, numbered EARS criteria
+    ├── design.md        # how: components, public interfaces, traceability
+    ├── test-plan.md     # proof: integration-first test cases, infrastructure, commands
+    ├── tasks.md         # steps: ### Task N, Track, Files, Verify, Verified by, waves
+    └── review.md        # adversarial review record
 ```
 
 Specs live at the project root, not in `.claude/`, so writing them never needs approval.

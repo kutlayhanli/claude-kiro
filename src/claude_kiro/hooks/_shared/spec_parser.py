@@ -73,7 +73,7 @@ class SpecParser:
             return tasks
 
         # Split by task headers (### Task N: Title)
-        task_pattern = r"### Task (\d+): (.+?)(?=\n### Task |\Z)"
+        task_pattern = r"### Task ?(\d+): (.+?)(?=\n### Task ?\d|\Z)"
         task_matches = re.finditer(task_pattern, content, re.DOTALL)
 
         for match in task_matches:
@@ -237,13 +237,15 @@ def parse_tasks(task_file_path: Path) -> List[SpecTask]:
         return []
 
     tasks = []
-    for match in re.finditer(r"^### Task (\d+): (.+?)(?=^### Task |^## |\Z)", content, re.DOTALL | re.MULTILINE):
+    for match in re.finditer(r"^### Task ?(\d+): (.+?)(?=^### Task ?\d|^## |\Z)", content, re.DOTALL | re.MULTILINE):
         block = match.group(0)
         task = SpecTask(num=match.group(1), title=match.group(2).split("\n")[0].strip())
 
         status = _field(block, "Status")
         if status:
             task.status = status
+        elif re.search(r"✅|\b(?:COMPLETE|DONE)\b", task.title):
+            task.status = "Done"  # older specs put the status in the title
         track = (_field(block, "Track") or "").lower()
         if track.startswith("test"):
             task.track = "test"

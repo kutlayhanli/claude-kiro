@@ -136,6 +136,20 @@ def test_deleted_test_fails_tamper_check(project):
     assert "tests/test_calc.py: deleted" in report
 
 
+def test_older_task_format_is_understood(tmp_path):
+    """Specs written before Track/Status fields: "### Task1:" and status in the title."""
+    from claude_kiro.hooks._shared.spec_parser import parse_tasks
+
+    tasks_md = tmp_path / "tasks.md"
+    tasks_md.write_text(
+        "### Task1: Create module ✅ COMPLETE\n**Files:**\n- `a.py` - x\n\n"
+        "### Task 2: Wire it up\n**Files:**\n- `b.py` - y\n- [ ] done\n"
+    )
+    first, second = parse_tasks(tasks_md)
+    assert (first.num, first.done, first.files, first.track) == ("1", True, ["a.py"], "impl")
+    assert (second.num, second.done, second.acceptance) == ("2", False, [(False, "done")])
+
+
 # --- Stop hook ---------------------------------------------------------------
 
 

@@ -17,7 +17,8 @@ This project follows spec-driven development:
 
 ## Project Structure
 
-- `specs/` - Feature specifications (PLAN, requirements, design, tasks, review)
+- `specs/` - Feature specifications (PLAN, requirements, design, test-plan, tasks, review)
+- `specs/ck.json` - Verify commands, test patterns, and guard settings for the verification gate
 - `.claude/workflows/spec-create.js` - Workflow run by /spec:create and /spec:review
 - `.claude/output-styles/` - Claude Code behavioral configuration
 - `.claude/commands/spec/` - Slash commands for spec workflow
@@ -36,7 +37,10 @@ This project follows spec-driven development:
 /spec:review [spec-name]
 
 # Implement a spec task
-/spec:implement [spec-directory]
+/spec:implement [task-number]
+
+# Check a task is really done (also enforced by a Stop hook)
+ck gate [spec-name] --task [N]
 
 # Run tasks in parallel with worktree isolation
 /spawn-worktree [spec-directory-or-task-list]

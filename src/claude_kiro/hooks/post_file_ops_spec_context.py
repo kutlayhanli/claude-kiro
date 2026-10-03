@@ -34,13 +34,13 @@ You are working on Task {task_num}: {task_title}
 Before proceeding:
 1. Read `{spec_dir}/requirements.md` - verify acceptance criteria
 2. Read `{spec_dir}/design.md` - follow architectural decisions
-3. Check `{spec_dir}/tasks.md` - review full task acceptance checklist
+3. Read `{spec_dir}/test-plan.md` (if present) - the tests that define "working"
+4. Check `{spec_dir}/tasks.md` - the task's Track, Verify commands, and acceptance checklist
 
 Your responsibilities:
 - As you complete acceptance criteria, update the checkboxes in tasks.md to [x]
-- When a task is fully complete, mark it with ✅ COMPLETE
-- Keep the spec documentation current, just like you maintain TodoWrite
-- Update the overall spec status when all tasks are done
+- Mark the task `**Status:** Done` only after `ck gate {spec_name} --task {task_num}` passes; a Stop hook enforces this
+- Never delete, skip, or weaken existing tests or edit requirements.md to get a pass; if a test looks wrong, tell me
 
 Ensure your changes align with the spec requirements and design.
 """

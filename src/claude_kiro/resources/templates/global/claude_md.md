@@ -8,7 +8,7 @@ When working on new features, follow the spec-driven workflow:
 
 1. `/spec:plan` - Discuss and decide the approach with me, interactively (writes PLAN.md)
 2. `/spec:create` - Workflow that writes requirements, design, and tasks, then adversarially reviews them
-3. `/spec:implement` - Implement tasks with granular commits and task tracking
+3. `/spec:implement` - Implement a test-track or impl-track task; Done only when `ck gate` passes
 4. `/spawn-worktree` - Run independent tasks in parallel with git worktree isolation
 
 ## Parallel Implementation
@@ -38,4 +38,5 @@ After parallel agents complete:
 
 - Commit messages for spec tasks use `task [N]:` prefix
 - Specs live in `specs/[feature-name]/` at the project root (not in `.claude/`, which needs approval for every write)
-- Each spec has: PLAN.md, requirements.md, design.md, tasks.md, review.md
+- Each spec has: PLAN.md, requirements.md, design.md, test-plan.md, tasks.md, review.md
+- Tests are integration-first and written before the code they verify; never weaken a test or edit requirements to get a pass

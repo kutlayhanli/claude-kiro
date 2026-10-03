@@ -8,132 +8,82 @@ Implement task: $ARGUMENTS
 
 # Implementation Guidelines
 
+Every task in `tasks.md` has a **Track**:
+
+- **test**: write the tests from `test-plan.md`. They are the oracle for the impl tasks listed under **Verifies:**.
+- **impl**: write the code that makes the tests listed under **Verified by:** pass.
+
+"Done" is checked by a machine, not by you. `ck gate` (and a Stop hook that runs it automatically) runs the task's verification. A task marked Done that fails the gate blocks you from finishing.
+
 ## Before Starting
 
-1. **Load the spec context:**
-   - Read requirements.md to understand the "why"
-   - Read design.md to understand the "how"
-   - Read tasks.md to understand dependencies and current status
+1. **Load the spec context** from `specs/[spec-name]/`:
+   - `requirements.md`: the "why", and the numbered criteria your task covers
+   - `design.md`: the "how", especially Public Interfaces
+   - `test-plan.md`: test levels, infrastructure, and the test cases (TC IDs)
+   - `tasks.md`: your task block, its dependencies, and current status
 
-2. **Update task tracking:**
-   - In tasks.md, change your task's status to `**Status:** In Progress`
-   - Mark this task as "in_progress" in TodoWrite
-   - Commit: `git commit -m "task [N]: mark in progress"`
+2. **Check prerequisites:** every task under **Dependencies:** is Done. For an impl task this includes its verifying test tasks: their tests must exist before you start.
 
-3. **Verify prerequisites:**
-   - Check that dependent tasks are marked completed in tasks.md
-   - Ensure you have all necessary context
+3. **Mark the task In Progress** in tasks.md (`**Status:** In Progress`), mark it in TodoWrite, and commit: `git commit -m "task [N]: mark in progress"`.
 
-## During Implementation
+## Test Track Tasks
 
-### Follow the Design
-- Implement exactly as specified in design.md
-- Use the file paths specified
-- Use the interfaces/types specified
-- Follow the error handling strategy specified
+1. Build what the test plan's **Test Infrastructure** calls for if your task owns it: fixtures, temp databases or containers, a server or CLI harness, factories.
+2. Write the test cases listed in your task (TC IDs) **against real boundaries**: the real CLI entry point, a real HTTP test client, a real database (in-memory or temp), real temp directories, real subprocesses. Mock only things the project doesn't own (third-party APIs, clocks, randomness). Never mock the project's own modules, database, or filesystem in an integration test.
+3. Target public interfaces from `design.md` and the requirements, not private helpers, so the tests survive refactoring.
+4. Run your **Verify:** command. Before the implementation exists, the tests should **fail for the right reason** (missing behavior, a missing command or endpoint), not because of a syntax error, a broken fixture, or a typo. Fix the test code until that's true.
+5. Mark Done. The gate checks that your test files exist and contain test cases. It requires them to pass only once the impl tasks they verify are Done.
 
-### Test-Driven Approach
-1. Write failing tests first (based on acceptance criteria)
-2. Implement minimum code to pass tests
-3. Refactor while keeping tests green
+## Impl Track Tasks
 
-### Code Quality
-- Follow project coding standards (check CLAUDE.md)
-- Add clear comments for complex logic
-- Use meaningful variable names
-- Handle edge cases from requirements.md
+1. Implement as specified in `design.md`: file paths, interfaces, error handling.
+2. Run the verifying tests (the **Verify:** commands of the tasks under **Verified by:**) and your own **Verify:** command. Iterate until they pass.
+3. Add unit tests only for pure logic you introduce, if useful. The integration tests from the test track are the real check.
+4. **Tests and requirements are not yours to change.** A guard asks me before any edit that deletes tests, removes assertions, adds skip/xfail/only markers, or edits `requirements.md` mid-implementation. If a test seems wrong or contradicts the spec, **stop and tell me**: quote the test, the requirement, and what you think is wrong. Don't edit the test to get a pass, and don't change the code to match a wrong test.
 
-### Granular Commits
+## Granular Commits
 
-Commit after each meaningful milestone, not just at the end. Use this pattern:
+Commit after each meaningful milestone, prefixed with `task [N]:` so commits stay attributable when tasks run in parallel:
 
-```
-git add <specific-files>
-git commit -m "task [N]: <what was done>"
-```
-
-**Commit after each of these milestones:**
 1. Task marked in progress (tasks.md update)
-2. Tests written (before implementation)
-3. Core implementation complete
+2. Tests written (test track) or first passing verification (impl track)
+3. Core work complete
 4. Edge cases and error handling added
-5. Task marked done (tasks.md update)
+5. Task marked Done (tasks.md update)
 
-**Commit message format:** Always prefix with `task [N]:` so it's clear which spec task the commit belongs to. This is critical when running in parallel — each agent's commits must be attributable.
+## Finishing: The Gate
 
-## Task Tracking in tasks.md
+1. Check every acceptance box in your task block that you actually satisfied.
+2. Run the gate yourself:
+   ```bash
+   ck gate [spec-name] --task [N]
+   ```
+   It checks your acceptance boxes, runs the project verify commands (`specs/ck.json`), your task's **Verify:** commands, and (for impl tasks) the verifying test tasks' commands. It also confirms no existing test was deleted or weakened on this branch.
+3. **Pass:** set `**Status:** Done`, update TodoWrite, and commit: `git commit -m "task [N]: complete - <summary>"`.
+4. **Fail:** fix the cause and re-run. If you can't make it pass without weakening a test or changing a requirement, leave the task In Progress and tell me what's blocking it. Stopping with a task In Progress is always fine; claiming Done on a red gate is not.
 
-### Updating Your Task
+If `ck gate` reports that no verify commands are configured, tell me, and suggest the right command for `specs/ck.json` (for example `uv run pytest -q`, `npm test --silent`, `go test ./...`).
 
-As you work, update **only your task's section** in tasks.md. Do not modify other tasks.
-
-**Mark acceptance criteria done as you complete them:**
-
-```markdown
-### Task 3: Create authentication middleware
-**Status:** In Progress
-
-**Acceptance:**
-- [x] Implementation complete
-- [x] Unit tests written and passing
-- [ ] Integration tests written and passing  ← still working
-- [ ] Error handling implemented
-- [ ] Edge cases covered
-```
-
-**When finished, update the status:**
-
-```markdown
-### Task 3: Create authentication middleware
-**Status:** Done
-```
-
-### Parallel Safety
+## Parallel Safety
 
 When running as a subagent via `/spawn-worktree`:
-- You have your own copy of tasks.md in your worktree
-- **Only update YOUR task** — never check/uncheck items in other tasks
-- Your tasks.md changes will be merged back with others' changes
-- Keep task updates minimal and confined to your section to reduce merge conflicts
+- You have your own copy of tasks.md in your worktree. Only update YOUR task's section.
+- Run `ck gate` in your worktree before marking Done; hooks may not be active there.
+- An impl task's verifying tests come from an earlier wave and are already merged into your branch. If they're missing, stop and report it.
 
-## After Implementation
+## Spec Sync
 
-### Verification Checklist
-- [ ] All unit tests passing
-- [ ] Integration tests passing (if applicable)
-- [ ] Error handling implemented
-- [ ] Edge cases covered
-- [ ] Code follows project standards
-- [ ] Documentation updated
-
-### Finalize
-
-1. **Mark task done in tasks.md:**
-   - Set `**Status:** Done`
-   - Check all acceptance criteria: `- [x]`
-   - Add completion note if there are deviations
-
-2. **Update TodoWrite:**
-   - Mark task as "completed" ONLY if ALL verification items pass
-   - If blocked, keep as "in_progress" and create new task for blocker
-
-3. **Final commit:**
-   ```
-   git add -A
-   git commit -m "task [N]: complete — <brief summary>"
-   ```
-
-### Spec Sync
-If implementation differs from design:
-- Document the deviation in your task section of tasks.md
-- Explain why the change was necessary
-- Update design.md if the deviation is intentional
+If the implementation must deviate from `design.md`:
+- Document the deviation and the reason in your task section of tasks.md.
+- Update `design.md` if the deviation is intentional.
+- Never "sync" by editing `requirements.md` or weakening tests; that needs my decision.
 
 ## Output
 
 Provide:
 1. Summary of what was implemented
-2. Files changed/created with commit hashes
-3. Test results
-4. Any deviations from spec and why
-5. Next recommended task (if any)
+2. Files changed/created, with commit hashes
+3. Gate result (paste the `ck gate` output)
+4. Any deviations from the spec, and any tests you believe are wrong (with reasoning)
+5. Next recommended task, from the next wave in tasks.md

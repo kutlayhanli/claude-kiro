@@ -1,12 +1,13 @@
 export const meta = {
   name: 'spec-create',
-  description: 'Write a spec (requirements, design, tasks) from PLAN.md, then adversarially review and revise it',
+  description: 'Write a spec (requirements, then design and test plan in parallel, then two task tracks), then adversarially review and revise it',
   whenToUse: 'Invoked by /spec:create (mode "create") and /spec:review (mode "review")',
   phases: [
     { title: 'Requirements', detail: 'EARS requirements from PLAN.md decisions' },
-    { title: 'Design', detail: 'architecture grounded in the real codebase' },
-    { title: 'Tasks', detail: 'dependency-ordered, parser-compatible task list' },
-    { title: 'Adversarial Review', detail: '3 lenses, each finding challenged by a refuter' },
+    { title: 'Design + Test Plan', detail: 'in parallel; the test plan never sees the design' },
+    { title: 'Task Tracks', detail: 'implementation and test task lists in parallel' },
+    { title: 'Link', detail: 'merge tracks into tasks.md, wire Verified by, compute waves' },
+    { title: 'Adversarial Review', detail: '4 lenses, each finding challenged by a refuter' },
     { title: 'Revise', detail: 'apply confirmed fixes, write review.md' },
   ],
 }
@@ -30,7 +31,10 @@ const DIR = A.specDir
 const REQ = `${DIR}/requirements.md`
 const DES = `${DIR}/design.md`
 const TSK = `${DIR}/tasks.md`
+const TPL = `${DIR}/test-plan.md`
 const REVIEW = `${DIR}/review.md`
+const DRAFT_IMPL = `${DIR}/.tasks-impl.draft.md`
+const DRAFT_TEST = `${DIR}/.tasks-test.draft.md`
 
 if (!ROOT || !DIR || !A.feature) {
   throw new Error('spec-create needs args.projectRoot, args.specDir and args.feature')
@@ -118,8 +122,17 @@ ${A.evolvesFrom ? `- Evolution: read ${A.evolvesFrom}. Add the Heritage section.
 
 Write the file, then return the structured result.`, { label: 'write requirements.md', phase: 'Requirements', schema: WRITE_RESULT })
 
-  phase('Design')
-  authored.design = await agent(`
+  if (!authored.requirements) {
+    log('Requirements authoring failed. Stopping.')
+    return { mode: MODE, feature: A.feature, specDir: DIR, error: 'authoring failed: requirements' }
+  }
+
+  // Design and test plan run in parallel. The test planner works from the
+  // requirements and the codebase's real boundaries, never from design.md, so
+  // the tests stay an independent oracle instead of mirroring the design.
+  phase('Design + Test Plan')
+  const [design, testPlan] = await parallel([
+    () => agent(`
 You are writing the design document of a spec.
 
 ${BRIEF}
@@ -139,17 +152,17 @@ How this fits the existing system, and which PLAN.md decisions shape it.
 ### New Components
 - \`proposed/path\` - responsibility
 
-## Interfaces and Data Models
-Signatures, types, schemas in the project's own language. Every field typed and explained.
+## Public Interfaces
+The entry points other code and tests will call: CLI commands, HTTP endpoints, public functions/classes, events, file formats. Exact names and signatures. A separate test plan is being written in parallel against the requirements and these kinds of boundaries, so keep public behavior faithful to the requirements and keep internals behind these interfaces.
+
+## Data Models
+Types and schemas in the project's own language. Every field typed and explained.
 
 ## Data Flow
 A Mermaid diagram of the main flow (sequence or flowchart).
 
 ## Error Handling
 One entry per error criterion in requirements.md, referenced by number.
-
-## Testing Strategy
-Which test types, where they live (real test directories), and which criteria each covers.
 
 ## Security, Performance, Migration
 Only the sections that apply.
@@ -160,63 +173,168 @@ Every criterion from requirements.md appears here.
 
 Rules:
 - Use real paths. Before naming an existing file, confirm it exists. Mark new files as new.
-- Match the conventions you actually see in the code (framework, error style, test layout).
+- Match the conventions you actually see in the code (framework, error style, layout).
 - No component without a requirement driving it.
+- Do not write a testing section; ${TPL} covers testing.
 
-Write the file, then return the structured result.`, { label: 'write design.md', phase: 'Design', schema: WRITE_RESULT })
+Write the file, then return the structured result.`, { label: 'write design.md', phase: 'Design + Test Plan', schema: WRITE_RESULT }),
 
-  phase('Tasks')
-  authored.tasks = await agent(`
-You are writing the implementation task list of a spec.
+    () => agent(`
+You are a test architect writing the test plan of a spec. A design is being written in parallel; do NOT read or wait for design.md. Work from the requirements and from how this codebase is actually tested and run, so the tests are an independent check on whatever the implementation turns out to be.
 
 ${BRIEF}
 
-Read ${REQ} and ${DES}. Write ${TSK}. Hooks and tooling parse this file, so follow the format exactly:
+${PLAN_RULE}
+
+Read ${REQ}. Then study the codebase's testing reality: test frameworks and runners, existing test directories and fixtures, how the app, CLI, server, database, queues, or external services are started in tests (or could be), CI config, and the commands that run each kind of test.
+
+The most common failure of AI-written tests is a pile of shallow unit tests that mock everything and prove nothing about the system working. Prevent that:
+- **Integration first.** Every criterion that involves I/O, persistence, network, configuration, process boundaries, multiple components, or an error that surfaces at a boundary MUST be covered by an integration or end-to-end test that exercises the real boundary: a real database (in-memory engine, temp DB, or container), a real filesystem (temp dirs), a real HTTP server or test client, the real CLI entry point, real subprocesses.
+- **Mock only what you don't own** (third-party APIs, payment providers, clocks, randomness). Never mock the project's own modules, database, or filesystem in an integration test.
+- **End-to-end smoke tests** for each critical user flow named in the requirements.
+- **Unit tests only for pure logic** with meaningful branching or edge cases.
+- **Property tests** for invariants (round-trips, idempotence, ordering, conservation) when the project's language has a property-testing library; name it.
+- Tests target public behavior: the entry points named in the requirements or that already exist (CLI commands, endpoints, public APIs, files written). They must not depend on private helpers, so they stay valid whatever internal design is chosen.
+- Every test must fail before the feature exists, for the right reason (missing behavior), and pass after.
+
+Write ${TPL} with:
+
+# Test Plan: [Feature Name]
+
+## Strategy
+Which levels are used and why, given this codebase. State the integration-first rule as applied here.
+
+## Test Infrastructure
+What already exists (paths) and what must be added: fixtures, factories, temp DB/containers, server or CLI harness, test data. Concrete enough to implement.
+
+## Test Cases
+| ID | Criterion | Level | Scenario (Given / When / Then) | Real boundary exercised | Test file |
+IDs TC-1, TC-2, ... Every acceptance criterion has at least one case. Error criteria get their own cases.
+
+## Critical Paths
+The end-to-end flows that must work, as numbered steps, each mapped to TC IDs.
+
+## Commands
+Exact commands to run each level and each test file (these become task **Verify:** lines).
+
+## Not Tested
+What is deliberately left out and why.
+
+Return the structured result after writing the file.`, { label: 'write test-plan.md', phase: 'Design + Test Plan', schema: WRITE_RESULT }),
+  ])
+  authored.design = design
+  authored.testPlan = testPlan
+
+  if (!design || !testPlan) {
+    const missing = [!design && 'design', !testPlan && 'test plan'].filter(Boolean).join(', ')
+    log(`Authoring failed for: ${missing}. Stopping before task planning.`)
+    return { mode: MODE, feature: A.feature, specDir: DIR, error: `authoring failed: ${missing}` }
+  }
+
+  const TASK_BLOCK = `
+### Task <ID>: [Action-oriented title]
+**Status:** Not Started
+**Track:** <impl|test>
+**Requirements:** 1.1, 1.2
+**Description:** What to do, in enough detail that an engineer new to the repo can start without asking.
+**Files:**
+- \`path/to/file\` - specific change
+**Verify:** \`exact command\` \`another command\`
+
+**Acceptance:**
+- [ ] [Concrete check derived from the referenced criteria]
+
+**Dependencies:** None | Task <ID>, Task <ID>
+**Complexity:** Low | Medium | High
+`
+
+  phase('Task Tracks')
+  const [implTasks, testTasks] = await parallel([
+    () => agent(`
+You are writing the IMPLEMENTATION track of a spec's task list. Another agent is writing the test track in parallel from ${TPL}; tests are not your job.
+
+${BRIEF}
+
+Read ${REQ} and ${DES}. Write a draft to ${DRAFT_IMPL}: a list of task blocks in exactly this shape, with provisional IDs I1, I2, ...:
+${TASK_BLOCK}
+
+Rules:
+- **Track:** impl on every task.
+- Every acceptance criterion in requirements.md is implemented by at least one task (list it under **Requirements:**).
+- **Files:** lists only source files (and unit tests for pure helpers you introduce). Never list files under the project's test directories that the test plan owns.
+- **Verify:** the command(s) that prove this task works, e.g. the relevant test files from ${TPL}'s Commands section. Leave it empty if only the project-wide suite applies.
+- Small tasks, one focused change set each. Order by dependency. Two tasks that could run in parallel must not edit the same file.
+- No task references a component absent from design.md.
+
+Write the draft file, then return the structured result.`, { label: 'write implementation track', phase: 'Task Tracks', schema: WRITE_RESULT }),
+
+    () => agent(`
+You are writing the TEST track of a spec's task list. Another agent is writing the implementation track in parallel.
+
+${BRIEF}
+
+Read ${REQ}, ${TPL}, and ${DES} (use design.md only for the names of public interfaces the tests call). Write a draft to ${DRAFT_TEST}: task blocks in exactly this shape, with provisional IDs T1, T2, ...:
+${TASK_BLOCK}
+
+Rules:
+- **Track:** test on every task.
+- If ${TPL} needs new test infrastructure, T1 builds it (fixtures, harness, temp DB/container setup) and other test tasks depend on it.
+- Group test cases by boundary or user flow, one task per group. In **Description**, list the TC IDs it implements; together the tasks cover every TC in ${TPL}.
+- **Requirements:** the criteria those test cases cover. This is how tasks are linked to the implementation that must make them pass.
+- **Files:** the test files and fixtures the task creates. These files are owned by the test track; implementation tasks may not weaken them.
+- **Verify:** the exact command that runs this task's tests (from ${TPL} Commands).
+- Acceptance must include: tests exercise the real boundary named in the test plan; tests fail before the implementation exists for the right reason (missing behavior, not broken test code); no mocks of the project's own code in integration tests.
+- Test tasks depend only on other test tasks (infrastructure), never on implementation tasks, so they can start as soon as the spec is approved.
+
+Write the draft file, then return the structured result.`, { label: 'write test track', phase: 'Task Tracks', schema: WRITE_RESULT }),
+  ])
+  authored.implTasks = implTasks
+  authored.testTasks = testTasks
+
+  if (!implTasks || !testTasks) {
+    const missing = [!implTasks && 'implementation track', !testTasks && 'test track'].filter(Boolean).join(', ')
+    log(`Authoring failed for: ${missing}. Stopping before linking.`)
+    return { mode: MODE, feature: A.feature, specDir: DIR, error: `authoring failed: ${missing}` }
+  }
+
+  phase('Link')
+  authored.tasks = await agent(`
+You are merging two task tracks into the final task list of a spec. Tooling parses the result, so follow the format exactly.
+
+${BRIEF}
+
+Inputs: ${DRAFT_IMPL} (implementation track, IDs I1..), ${DRAFT_TEST} (test track, IDs T1..). Also read ${REQ}, ${DES}, and ${TPL}.
+
+1. Renumber all tasks as integers: test-infrastructure task first, then interleave so the order reads as a sensible plan. Rewrite every **Dependencies:** reference to the new numbers.
+2. Link the tracks by requirement overlap:
+   - On each impl task add \`**Verified by:** Task N, Task M\`: the test tasks whose **Requirements:** overlap its own.
+   - On each test task add \`**Verifies:** Task N, Task M\`: the impl tasks it verifies.
+   - Add each impl task's verifying test tasks to its **Dependencies:** (tests are written first and are the task's oracle).
+   - Every impl task that implements a requirement criterion has at least one verifying test task; every test task verifies at least one impl task. If a gap exists, add the missing task, consistent with ${TPL}.
+3. Write ${TSK}:
 
 # Implementation Tasks: [Feature Name]
 
 **Status:** Not Started
-**Spec:** [requirements.md](requirements.md) · [design.md](design.md)${A.planPath ? ' · [PLAN.md](PLAN.md)' : ''}
+**Spec:** [requirements.md](requirements.md) · [design.md](design.md) · [test-plan.md](test-plan.md)${A.planPath ? ' · [PLAN.md](PLAN.md)' : ''}
 
 ## Task Breakdown
 
-### Task 1: [Action-oriented title]
-**Status:** Not Started
-**Description:** What to do, in enough detail that an engineer new to the repo can start without asking.
-**Requirements:** 1.1, 1.2
-**Files:**
-- \`path/to/file\` - specific change
-- \`path/to/test_file\` - tests to add
-
-**Acceptance:**
-- [ ] [Concrete check derived from the referenced criteria]
-- [ ] Tests written and passing
-
-**Dependencies:** None | Task N, Task M
-**Complexity:** Low | Medium | High
-
----
-
-(repeat for each task)
+(all task blocks: "### Task N: Title" headers, "- \`path\` - note" file lines under **Files:**, fields **Status:** **Track:** **Requirements:** **Description:** **Files:** **Verify:** **Verified by:**/**Verifies:** **Acceptance:** **Dependencies:** **Complexity:**, separated by ---)
 
 ## Dependency Graph
-A Mermaid graph TD of task dependencies.
+A Mermaid graph TD of task dependencies, with test tasks visually distinct (e.g. a "test" class).
 
 ## Parallel Groups
-Waves of tasks that can run concurrently via /spawn-worktree, e.g. "Wave 1: Tasks 1, 2 · Wave 2: Task 3 (after 1)". Tasks in one wave must not edit the same files.
+Waves for /spawn-worktree, computed from Dependencies. Typically: Wave 1 = test infrastructure; Wave 2 = all test tasks plus impl tasks with no verifying tests (foundations); Wave 3+ = impl tasks whose tests are done. Tasks in one wave must not edit the same files.
 
-Rules:
-- Headers MUST be "### Task N: Title" and file lines MUST be "- \`path\` - note" under **Files:**.
-- Every acceptance criterion in requirements.md is covered by at least one task.
-- Every task names its files and its tests. No task references a component absent from design.md.
-- Prefer small tasks (one focused change set each). Order by dependency.
+4. Delete ${DRAFT_IMPL} and ${DRAFT_TEST}.
 
-Write the file, then return the structured result.`, { label: 'write tasks.md', phase: 'Tasks', schema: WRITE_RESULT })
+Return the structured result.`, { label: 'link tracks into tasks.md', phase: 'Link', schema: WRITE_RESULT })
 
-  const missing = Object.entries(authored).filter(([, v]) => !v).map(([k]) => k)
-  if (missing.length) {
-    log(`Authoring failed for: ${missing.join(', ')}. Stopping before review.`)
-    return { mode: MODE, feature: A.feature, specDir: DIR, error: `authoring failed: ${missing.join(', ')}`, authored }
+  if (!authored.tasks) {
+    log('Linking failed. Drafts are left in the spec directory. Stopping before review.')
+    return { mode: MODE, feature: A.feature, specDir: DIR, error: 'linking task tracks failed' }
   }
 }
 
@@ -234,7 +352,7 @@ const FINDINGS = {
         type: 'object',
         properties: {
           id: { type: 'string', description: 'short unique id, e.g. R1, D3, T2' },
-          file: { type: 'string', enum: ['requirements.md', 'design.md', 'tasks.md', 'PLAN.md'] },
+          file: { type: 'string', enum: ['requirements.md', 'design.md', 'test-plan.md', 'tasks.md', 'PLAN.md'] },
           location: { type: 'string', description: 'section, story, or task number' },
           severity: { type: 'string', enum: ['critical', 'major', 'minor'] },
           problem: { type: 'string' },
@@ -269,6 +387,8 @@ const VERDICTS = {
   required: ['verdicts'],
 }
 
+const SPEC_FILES = `${REQ}, ${DES}, ${TPL}, ${TSK}${A.planPath ? `, decision record ${A.planPath}` : ''}`
+
 const LENSES = [
   {
     key: 'fidelity',
@@ -294,9 +414,24 @@ const LENSES = [
     focus: `TASKS AN ENGINEER CAN EXECUTE.
 - Is every requirement criterion covered by a task? List any orphans.
 - Are dependencies correct and acyclic? Is any task in a parallel wave editing the same file as another task in that wave?
-- Does each task name files and tests, and is it small enough to finish in one sitting?
-- Format: "### Task N: Title" headers and "- \`path\` - note" file lines (tooling parses these).
+- Does each task name its files and a **Verify:** command, and is it small enough to finish in one sitting?
+- Is every impl task linked to the test tasks that verify it (**Verified by:**), with those test tasks in its Dependencies? Do test tasks depend only on test infrastructure, never on impl tasks?
+- Does any impl task list a test file owned by a test task (the guard will block it from weakening those)?
+- Format: "### Task N: Title" headers, "- \`path\` - note" file lines, and **Status:** / **Track:** / **Verify:** / **Verified by:** / **Verifies:** fields (tooling parses these).
 - Pretend you are implementing Task 1 and the riskiest task right now. Where would you get stuck or have to guess?`,
+  },
+  {
+    key: 'verification',
+    prefix: 'V',
+    focus: `TESTS THAT WOULD ACTUALLY CATCH A BROKEN FEATURE.
+- ${TPL} exists? If not, that is a critical finding: propose the test plan's outline as the fix.
+- For each criterion involving I/O, persistence, network, config, process boundaries, multiple components, or boundary errors: is there an integration or end-to-end test that exercises the REAL boundary (real DB/temp DB, temp filesystem, real HTTP/test client, real CLI entry point)? Flag criteria covered only by unit tests or mocks.
+- Flag any plan to mock the project's own modules, database, or filesystem in an integration test.
+- Do the critical user flows have end-to-end smoke tests? Are error criteria tested at the boundary where the user sees them?
+- Do tests target public interfaces (CLI, endpoints, public APIs, written files) rather than private helpers, so they survive refactoring? Check names against design.md's Public Interfaces and the existing code.
+- Is the test infrastructure (fixtures, harness, containers) concrete enough to build, and does a test task build it first?
+- Would each test fail before the feature exists for the right reason? Are the **Verify:** commands real, runnable commands for this repo?
+- Imagine a plausible implementation bug for the riskiest criterion. Which test catches it? If none, that is a finding.`,
   },
 ]
 
@@ -308,7 +443,7 @@ You are an adversarial reviewer of a spec. Assume it is wrong until the files pr
 
 ${BRIEF}
 
-Spec files: ${REQ}, ${DES}, ${TSK}${A.planPath ? `, decision record ${A.planPath}` : ''}.
+Spec files: ${SPEC_FILES}.
 
 Your lens: ${lens.focus}
 
@@ -327,7 +462,7 @@ You are a skeptic. A reviewer raised the findings below against a spec. Try to R
 
 ${BRIEF}
 
-Spec files: ${REQ}, ${DES}, ${TSK}${A.planPath ? `, decision record ${A.planPath}` : ''}.
+Spec files: ${SPEC_FILES}.
 
 Findings (JSON):
 ${JSON.stringify(findings, null, 2)}
@@ -377,9 +512,9 @@ You are revising a spec after adversarial review.
 
 ${BRIEF}
 
-Spec files: ${REQ}, ${DES}, ${TSK}.
+Spec files: ${SPEC_FILES}.
 
-1. Apply each of these confirmed findings by editing the spec files. Keep the documents consistent with each other (if you change a criterion, update design traceability and the covering task). Keep the tasks.md format intact ("### Task N: Title", "- \`path\` - note").
+1. Apply each of these confirmed findings by editing the spec files. Keep the documents consistent with each other (if you change a criterion, update design traceability, the test plan's cases, and the covering impl and test tasks). Keep the tasks.md format intact ("### Task N: Title", "- \`path\` - note").
 ${JSON.stringify(toFix, null, 2)}
 
 2. Do NOT resolve these; they need the user's decision. Leave the spec as is for them:
@@ -432,7 +567,7 @@ return {
   mode: MODE,
   feature: A.feature,
   specDir: DIR,
-  files: MODE === 'create' ? [REQ, DES, TSK, REVIEW] : [REVIEW],
+  files: MODE === 'create' ? [REQ, DES, TPL, TSK, REVIEW] : [REVIEW],
   authored: MODE === 'create'
     ? Object.fromEntries(Object.entries(authored).map(([k, v]) => [k, { summary: v.summary, assumptions: v.assumptions, concerns: v.concerns }]))
     : null,

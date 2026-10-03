@@ -22,8 +22,10 @@ Run multiple implementation tasks concurrently, each in its own git worktree wit
 
 1. **Read the spec** if a spec directory was provided:
    - Load `tasks.md` from `specs/[name]/`
-   - Identify tasks that can run in parallel (no dependencies between them)
-   - Load `design.md` and `requirements.md` for context
+   - Use its **Parallel Groups** section as the wave plan. Run one wave at a time: the next wave starts only after the current one is merged and passes the wave gate (Phase 7).
+   - Pick the first wave whose tasks are not all Done, and skip tasks already Done.
+   - Tasks have a **Track:** `test` or `impl`. Test tasks write the tests that later impl tasks must pass, and usually run in an earlier wave than the impl tasks they verify. Both tracks can share a wave when they touch different files.
+   - Load `requirements.md`, `design.md`, and `test-plan.md` for context
 
 2. **If no spec given**, parse the user's description into discrete tasks
 
@@ -69,7 +71,7 @@ For each task, spawn an agent with `run_in_background: true`:
 ```json
 {
   "description": "implement <feature>: <task-summary>",
-  "prompt": "You are implementing a specific task in an isolated git worktree.\n\nWORKING DIRECTORY: <absolute-path>/worktrees/<task-name>\nBRANCH: feat/<task-name>\n\n## Context\n<paste relevant sections from requirements.md and design.md>\n\n## Task\n<paste specific task from tasks.md>\n\n## Instructions\n1. All file operations MUST be relative to your working directory\n2. Commit your changes to your branch when done\n3. Include tests as specified in the task\n4. Do NOT modify files outside your worktree",
+  "prompt": "You are implementing Task <N> of spec <name> in an isolated git worktree.\n\nWORKING DIRECTORY: <absolute-path>/worktrees/<task-name>\nBRANCH: feat/<task-name>\n\n## Context\n<paste relevant sections from requirements.md, design.md, and (for test tasks) test-plan.md>\n\n## Task\n<paste the full task block from tasks.md, including Track, Verify, Verified by/Verifies>\n\n## Instructions\n1. Follow .claude/commands/spec/implement.md for this task (read it from your worktree). In short: mark the task In Progress, commit with the `task <N>:` prefix, and only mark it Done after `ck gate specs/<name> --task <N>` passes in your worktree.\n2. Track test: write the tests from test-plan.md against the real boundaries. They may fail until the implementation lands, but must fail for the right reason.\n3. Track impl: make the verifying tests pass. Never delete, skip, or weaken a test, and never edit requirements.md. If a test looks wrong, stop and report it in your final message.\n4. All file operations MUST be relative to your working directory. Do NOT modify files outside your worktree.\n5. Commit your changes to your branch when done.",
   "subagent_type": "general-purpose",
   "run_in_background": true
 }
@@ -127,6 +129,19 @@ If merge conflicts occur:
 - Report which branch conflicted and what files
 - Let me decide how to resolve
 
+### Phase 7: Wave Gate
+
+After a wave is merged, the test track and the impl track meet for the first time. Before starting the next wave, run:
+
+```bash
+ck gate specs/<name>
+```
+
+This verifies every Done task on the merged result: acceptance boxes, verify commands, each impl task's verifying tests, and that no existing test was weakened.
+
+- **Pass:** report it, then offer to start the next wave.
+- **Fail:** set the failing tasks back to In Progress in tasks.md, report the gate output, and ask me whether to fix it here or re-run those tasks. Never start the next wave on a red gate.
+
 ## Error Handling
 
 | Situation | Response |
@@ -163,13 +178,16 @@ git worktree prune
 ```
 User: /spawn-worktree specs/auth-system
 
-Claude: I found 5 tasks in the auth-system spec. Tasks 1-3 are independent
-and can run in parallel. Tasks 4-5 depend on 1-3.
+Claude: The auth-system spec has 3 waves. Wave 1 (test infrastructure) is Done.
+Wave 2 has 3 tasks that touch different files:
 
 Plan:
-  Agent 1: worktrees/auth-user-model (feat/auth-user-model) - Task 1
-  Agent 2: worktrees/auth-password-hash (feat/auth-password-hash) - Task 2
-  Agent 3: worktrees/auth-middleware (feat/auth-middleware) - Task 3
+  Agent 1: worktrees/auth-login-tests (feat/auth-login-tests) - Task 2 [test]
+  Agent 2: worktrees/auth-session-tests (feat/auth-session-tests) - Task 3 [test]
+  Agent 3: worktrees/auth-user-model (feat/auth-user-model) - Task 4 [impl, no verifying tests]
+
+Wave 3 (Tasks 5-6, impl verified by Tasks 2-3) starts after this wave merges
+and passes `ck gate`.
 
 Proceed? [asking user]
 
@@ -186,4 +204,8 @@ Results:
   [ok] auth-middleware: 4 commits
 
 All 3 tasks completed. Merge to current branch?
+
+User: yes
+
+Claude: Merged 3 branches. Wave gate: PASS (Tasks 1-4). Start wave 3?
 ```

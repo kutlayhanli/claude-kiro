@@ -8,7 +8,7 @@ Review the specification: $ARGUMENTS
 
 # Spec-Review: Adversarial Review of an Existing Spec
 
-Use this after the spec or the code has drifted, after hand edits, or for specs written before `/spec:create` reviewed its own output. It runs the review half of the `spec-create` workflow: three reviewers attack the spec (plan fidelity, codebase grounding, implementability), a separate skeptic tries to refute each finding, and the survivors are applied.
+Use this after the spec or the code has drifted, after hand edits, or for specs written before `/spec:create` reviewed its own output. It runs the review half of the `spec-create` workflow: four reviewers attack the spec (plan fidelity, codebase grounding, implementability, test adequacy), a separate skeptic tries to refute each finding, and the survivors are applied. On an older spec without `test-plan.md`, the test-adequacy lens flags it and the revision adds one.
 
 **Calling the Workflow tool here is intended.** Running `/spec:review` is my opt-in.
 
