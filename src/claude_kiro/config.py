@@ -1,6 +1,7 @@
 """Project configuration for verification and guards, stored in specs/ck.json."""
 
 import copy
+import re
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -8,10 +9,28 @@ from typing import Any, Dict, List, Optional
 from claude_kiro.paths import CONFIG_FILE
 
 DEFAULT_CONFIG: Dict[str, Any] = {
-    # Commands that must pass before any implementation task can be marked Done.
+    # The project's full test suite. While a test-first spec is in progress its
+    # test tasks land before the code they verify, so the full suite is
+    # expected to be red; see verify_mode.
     "verify": [],
+    # Checks that must pass at every gate, whatever the spec's progress
+    # (lint, type check, smoke tests).
+    "verify_always": [],
+    # "auto": while the spec has unfinished test-track tasks, run only the
+    # tests that should already pass (verify_always, the collection check, and
+    # each test task's Verify commands once every task it Verifies is Done);
+    # run `verify` once every task is Done. "full": always run `verify`.
+    "verify_mode": "auto",
+    # Command that fails when any test file cannot be collected/imported.
+    # null = derived from a pytest command in `verify`; "" disables the check.
+    "collect": None,
     # Seconds allowed per verify command.
     "verify_timeout": 540,
+    # Dependency install step for fresh worktrees (`ck worktree create --install`).
+    # null = detected from lockfiles.
+    "install": None,
+    # Extra glob patterns the spec-context hook never comments on.
+    "context_ignore": [],
     # How test files are recognized. A path is a test file if any directory
     # segment is in `dirs` or its file name matches one of `files`.
     "tests": {
@@ -74,6 +93,34 @@ def detect_verify_commands(project_dir: Path) -> List[str]:
     if (project_dir / "Cargo.toml").exists():
         return ["cargo test"]
     return []
+
+
+def collect_command(config: Dict[str, Any]) -> Optional[str]:
+    """The test-collection check: configured, or derived from a pytest verify command."""
+    configured = config.get("collect")
+    if configured is not None:
+        return configured or None
+    for command in config.get("verify", []):
+        match = re.match(r"^(.*?\bpytest)\b", command)
+        if match:
+            return f"{match.group(1)} --collect-only -q"
+    return None
+
+
+def install_command(config: Dict[str, Any], project_dir: Path) -> Optional[str]:
+    """Dependency install step for a fresh worktree."""
+    configured = config.get("install")
+    if configured is not None:
+        return configured or None
+    if (project_dir / "uv.lock").exists():
+        return "uv sync --frozen -q"
+    if (project_dir / "package-lock.json").exists():
+        return "npm ci --silent"
+    if (project_dir / "pnpm-lock.yaml").exists():
+        return "pnpm install --frozen-lockfile"
+    if (project_dir / "yarn.lock").exists():
+        return "yarn install --frozen-lockfile"
+    return None
 
 
 def initial_config(project_dir: Path) -> Dict[str, Any]:

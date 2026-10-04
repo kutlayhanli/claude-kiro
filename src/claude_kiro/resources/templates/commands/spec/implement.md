@@ -1,10 +1,45 @@
 ---
-description: Implement a task from the specification
-argument-hint: [task-number-or-description]
-allowed-tools: Read, Write, Edit, Grep, Glob, Bash, TodoWrite
+description: Implement a spec task, or a whole spec wave by wave as a workflow
+argument-hint: [spec-name | task-number]
+allowed-tools: Read, Write, Edit, Grep, Glob, Bash, TodoWrite, Workflow
 ---
 
-Implement task: $ARGUMENTS
+Implement: $ARGUMENTS
+
+# Two Modes
+
+- **A task number** (for example `/spec:implement 3` or `/spec:implement auth 3`): implement that one task yourself, following the Implementation Guidelines below.
+- **A spec with no task number** (for example `/spec:implement auth`, `/spec:implement auth all`, `/spec:implement auth in parallel`): run the whole spec as the `spec-implement` workflow, wave by wave. That's the default for a spec. Running this command for a whole spec is my opt-in to the multi-agent workflow; don't ask me before each wave.
+
+## Whole Spec: The Wave Workflow
+
+1. **Resolve the spec** in `specs/`. If it only exists in `.claude/specs/`, tell me to run `ck migrate` and stop.
+2. **Check the setup.** If `.claude/workflows/spec-implement.js` or `.claude/workflows/spec-implement-brief.md` is missing, tell me to run `ck upgrade` and stop. Read `specs/ck.json`; if `"verify"` is empty, tell me, since the gate needs it.
+3. **Plan.** Run `ck waves <spec> --json`. Show me a short plan: the number of waves, tasks per wave, how many are already Done (they'll be skipped), and any warnings (for example, waves recomputed from Dependencies).
+4. **Choose the merge target:**
+   - Default: merge into the branch the main checkout is on (`into` = that branch, `targetDir` = the main checkout). The main checkout must have no uncommitted changes to tracked files; if it has some, stop and tell me.
+   - If I asked for an integration branch: run `ck worktree integration <spec>`, then `into` = `integrate/<spec>` and `targetDir` = `<main checkout>/.claude/worktrees/<spec>-integration`.
+5. **Launch** the Workflow tool with `scriptPath` set to the absolute path of `.claude/workflows/spec-implement.js` and `args` as a JSON object:
+   ```json
+   {
+     "spec": "<spec>",
+     "root": "<absolute main checkout>",
+     "into": "<target branch>",
+     "targetDir": "<absolute checkout that has the target branch>",
+     "waves": "<waves from ck waves>",
+     "deps": "<deps from ck waves>",
+     "titles": "<titles from ck waves>",
+     "tracks": "<tracks from ck waves>",
+     "maxRetries": 1,
+     "onFailure": "halt",
+     "maxConcurrent": null
+   }
+   ```
+   Use `"onFailure": "continue"` if I asked to keep going past failed tasks (tasks whose dependencies merged keep running; a red target still halts). Set `maxConcurrent` (for example 4) if I said the test suite is memory-heavy.
+6. **Tell me it's running.** Each wave sets up worktrees, runs task agents in parallel (with one retry when a gate fails), merges each task as it finishes (one merge at a time), then runs `ck gate` on the target. I can watch with `/workflows`.
+7. **When it returns,** report per wave: tasks merged, tasks failed with their blockers, tests agents believe are wrong, and files touched outside their task. If it halted, say at which wave and why, and give me the next step: fix the blocker (or answer the wrong-test question), then run `/spec:implement <spec>` again. Done tasks are skipped, so a rerun resumes where it stopped. If the target is an integration branch, remind me to fast-forward: `git merge --ff-only integrate/<spec>`.
+
+The rest of this file is the single-task guide, which every task agent in the workflow also follows (through `.claude/workflows/spec-implement-brief.md`).
 
 # Implementation Guidelines
 

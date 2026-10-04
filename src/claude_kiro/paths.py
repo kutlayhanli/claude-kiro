@@ -1,7 +1,8 @@
 """Project-relative locations used across the CLI, hooks, and templates."""
 
-from pathlib import Path
-from typing import List
+import fnmatch
+from pathlib import Path, PurePosixPath
+from typing import List, Optional
 
 # Specs live at the project root, outside .claude/, so Claude can write them
 # without the per-edit approval Claude Code requires for .claude/.
@@ -37,3 +38,38 @@ def is_spec_path(file_path: str, project_dir: Path) -> bool:
 
 # Verification and guard settings (verify commands, test patterns, guard modes).
 CONFIG_FILE = f"{SPECS_DIR}/ck.json"
+
+# Workflow that /spec:implement runs for a whole spec, and the brief its task agents read.
+IMPLEMENT_WORKFLOW = ".claude/workflows/spec-implement.js"
+IMPLEMENT_BRIEF = ".claude/workflows/spec-implement-brief.md"
+
+# Where `ck worktree` puts task worktrees (relative to the main checkout).
+WORKTREES_DIR = ".claude/worktrees"
+
+# Repo hygiene and scaffolding: editing these is never feature work, so the
+# spec-context hook stays silent about them. File-name globs, plus top-level dirs.
+SCAFFOLD_FILES = [
+    ".gitignore", ".gitattributes", ".gitmodules", ".editorconfig", ".env.example",
+    ".pre-commit-config.yaml", ".python-version", ".nvmrc", ".tool-versions",
+    ".prettierrc*", ".eslintrc*", "eslint.config.*", ".dockerignore",
+    "pyproject.toml", "setup.cfg", "setup.py", "requirements*.txt", "uv.lock", "poetry.lock", "Pipfile*",
+    "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "tsconfig*.json",
+    "go.mod", "go.sum", "Cargo.toml", "Cargo.lock", "Gemfile*",
+    "Makefile", "justfile", "Dockerfile", "docker-compose*.y*ml", "compose*.y*ml",
+    "README*", "LICENSE*", "CHANGELOG*", "CONTRIBUTING*", "CODEOWNERS", "CLAUDE.md", "AGENTS.md",
+]
+SCAFFOLD_DIRS = {".claude", ".github", ".vscode", ".idea", ".devcontainer", "worktrees"}
+
+
+def is_scaffold_path(rel_path: str, extra_patterns: Optional[List[str]] = None) -> bool:
+    """Whether a project-relative path is repo hygiene the spec hooks should ignore.
+
+    `extra_patterns` (specs/ck.json "context_ignore") are globs matched against
+    the whole relative path, e.g. "scripts/*" or "notebooks/**".
+    """
+    path = PurePosixPath(rel_path)
+    if path.parts and path.parts[0] in SCAFFOLD_DIRS:
+        return True
+    if any(path.match(pattern) for pattern in SCAFFOLD_FILES):
+        return True
+    return any(fnmatch.fnmatch(rel_path, pattern) for pattern in extra_patterns or [])

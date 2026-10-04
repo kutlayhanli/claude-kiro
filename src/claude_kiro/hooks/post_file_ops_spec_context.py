@@ -9,7 +9,8 @@ from pathlib import Path
 from claude_kiro.hooks._shared.cache_manager import CacheManager
 from claude_kiro.hooks._shared.session_tracker import SessionTracker
 from claude_kiro.hooks._shared.spec_parser import SpecParser
-from claude_kiro.paths import is_spec_path
+from claude_kiro.config import load_config
+from claude_kiro.paths import is_scaffold_path, is_spec_path
 
 
 def generate_spec_context_message(
@@ -83,6 +84,16 @@ If this is a quick fix or non-feature work, acknowledge and proceed without requ
 """
 
 
+def generate_outside_task_message(rel_path: str, spec_name: str, task_num: str) -> str:
+    """Note for a file the In Progress task does not list."""
+    return f"""
+📎 `{rel_path}` is not listed in Task {task_num} of {spec_name} (In Progress).
+
+Other tasks may run in parallel and touch nearby files, so keep changes outside your task's
+**Files:** minimal, and mention `{rel_path}` in your report as a file touched outside the task.
+"""
+
+
 def hook(input_data: dict) -> dict | None:
     """Process post-file-ops hook.
 
@@ -131,37 +142,42 @@ def hook(input_data: dict) -> dict | None:
 
     # Check if we've already notified about this file in this session
     if session_tracker.has_notified(file_path):
-        # Already notified, return None
         return None
 
-    # Find if this file is mentioned in any spec
-    task_match = spec_parser.find_matching_task(file_path)
+    # Repo hygiene, scaffolding, and files outside the project never get spec talk.
+    rel = spec_parser._relative(file_path)
+    if rel is None or is_scaffold_path(rel, load_config(Path(cwd)).get("context_ignore", [])):
+        return None
 
+    task_match = spec_parser.find_matching_task(file_path)
     if task_match:
-        # File IS in spec → generate task context message
+        # File belongs to the task In Progress -> remind of its context.
         context = generate_spec_context_message(
             task_match.spec_name,
             task_match.task_num,
             task_match.task_title,
             _relative(task_match.spec_dir, cwd),
         )
-
-        # Mark file as notified (in spec)
         session_tracker.mark_notified(
             file_path,
             in_spec=True,
             spec_name=task_match.spec_name,
             task_num=task_match.task_num,
         )
-
+    elif spec_parser.listed_by_any_task(file_path):
+        # Planned work of a task that is not In Progress: nothing useful to say.
+        session_tracker.mark_notified(file_path, in_spec=False, context="other-task")
+        return None
+    elif spec_parser.in_progress_tasks():
+        # Implementing a task, editing a file it doesn't list.
+        current = spec_parser.in_progress_tasks()[0]
+        context = generate_outside_task_message(rel, current.spec_name, current.task_num)
+        session_tracker.mark_notified(file_path, in_spec=False, context="outside-task")
     else:
-        # File NOT in any spec → suggest creating one
+        # No spec work under way and the file is in no spec -> suggest one.
         context = generate_no_spec_message(file_path)
-
-        # Mark file as notified (not in spec)
         session_tracker.mark_notified(file_path, in_spec=False)
 
-    # Return the context for Claude Code
     return {
         "hookSpecificOutput": {
             "hookEventName": "PostToolUse",

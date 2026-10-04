@@ -1,3 +1,31 @@
+# Upgrading
+
+- **From 0.2 to 0.3:** see the next section.
+- **From 0.1:** skip to [Upgrading to 0.2](#upgrading-to-02), then come back here for the 0.3 steps (same commands).
+
+## 0.2 → 0.3
+
+What changes:
+- **`/spec:implement <spec>`** with no task number now runs the whole spec as a workflow, wave by wave. It uses two new managed files: `.claude/workflows/spec-implement.js` and `spec-implement-brief.md`. `/spec:implement <N>` still runs one task.
+- **The gate no longer requires the full suite mid-spec.** While a test-first spec is in progress, `ck gate` runs `verify_always`, a test-collection check, and only the test suites whose tasks are all Done. The full `verify` suite runs once every task is Done. Set `"verify_mode": "full"` in `specs/ck.json` to keep the old behavior. If you wrote a custom script to work around this (like `verify_green.py`), you can go back to plain `"verify": ["uv run pytest -q"]` and move lint into `"verify_always": ["uv run ruff check ."]`.
+- **Test collection is checked** (derived from a pytest `verify` command, or set with `"collect"`). A test file that can't be imported now fails the gate.
+- **Hooks:**
+  - The spec-context hook names only the **In Progress** task that lists the exact file.
+  - Scaffold files (`.gitignore`, `pyproject.toml`, `README`, lockfiles, `.github/`, and so on) and files outside the repo no longer trigger messages.
+  - Add your own ignore patterns with `"context_ignore"`.
+- **New commands:** `ck waves`, plus `ck worktree create|claim|release|merge|integration|status`, which replace hand-written worktree scripts.
+- **`ck init` / `ck upgrade`** limit the ruff pre-commit hooks to Python files (`types_or: [python, pyi]`), so `ruff-format` stops rewriting code blocks inside spec Markdown.
+
+Steps:
+1. **Each machine:**
+   - Reinstall: `uv tool install --force "git+https://github.com/kutlayhanli/claude-kiro@feat/specs-dir-and-workflow-create"`
+   - Refresh the spawn-worktree skill, which now points to the wave workflow. Run `ck setup --diff` to see the change. If you never edited the skill, run `rm ~/.claude/skills/spawn-worktree/SKILL.md && ck setup` (`ck setup` only creates missing files, so your `~/.claude/CLAUDE.md` is untouched). Otherwise copy the new note by hand. Avoid `ck setup --force`: it also overwrites `~/.claude/CLAUDE.md`.
+   - Restart Claude Code sessions.
+2. **Each repository:** `ck upgrade --dry-run`, then `ck upgrade` (adds the two workflow files and patches `.pre-commit-config.yaml`). Commit, then restart sessions.
+3. **Optional:** in `specs/ck.json`, move lint and type checks to `"verify_always"`, and drop any custom green-only verify script.
+
+---
+
 # Upgrading to 0.2
 
 This guide is for machines and repositories already set up with claude-kiro 0.1.x.

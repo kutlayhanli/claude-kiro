@@ -99,53 +99,61 @@ class SpecParser:
 
         return tasks
 
-    def find_matching_task(self, file_path: str) -> Optional[TaskMatch]:
-        """Find which spec task mentions this file.
-
-        Args:
-            file_path: Path to the file being edited.
-
-        Returns:
-            TaskMatch if found, None otherwise.
-        """
-        # Normalize the file path (make relative to project)
+    def _relative(self, file_path: str) -> Optional[str]:
+        """Project-relative POSIX path, or None for files outside the project."""
+        path = Path(file_path)
+        if not path.is_absolute():
+            path = self.project_dir / path
         try:
-            if os.path.isabs(file_path):
-                file_path = os.path.relpath(file_path, self.project_dir)
+            return path.resolve().relative_to(self.project_dir.resolve()).as_posix()
         except ValueError:
-            # Can't make relative path (different drives on Windows)
             return None
 
-        # Remove leading ./ if present
-        file_path = file_path.lstrip("./")
+    @staticmethod
+    def _lists(task_files: List[str], rel: str) -> bool:
+        for listed in task_files:
+            listed = listed.removeprefix("./")
+            if rel == listed or (listed.endswith("/") and rel.startswith(listed)):
+                return True
+        return False
 
-        spec_files = self.find_spec_files()
+    def _tasks_by_recency(self):
+        """(spec_dir, tasks) for every spec, most recently edited tasks.md first."""
+        spec_files = sorted(self.find_spec_files(), key=lambda f: f.stat().st_mtime, reverse=True)
+        return [(f.parent, parse_tasks(f)) for f in spec_files]
 
-        # Sort by modification time (most recent first)
-        # This ensures we return matches from the most recently worked on spec
-        spec_files = sorted(spec_files, key=lambda f: f.stat().st_mtime, reverse=True)
+    def find_matching_task(self, file_path: str) -> Optional[TaskMatch]:
+        """The In Progress task whose **Files:** list this exact file, if any.
 
-        for spec_file in spec_files:
-            # Extract spec name from directory
-            spec_name = spec_file.parent.name
-            tasks = self.parse_task_file(spec_file)
-
-            for task_num, task_title, files in tasks:
-                # Check if modified file matches any task file
-                for task_file in files:
-                    # Normalize task file path
-                    task_file = task_file.lstrip("./")
-
-                    # Direct match or suffix match
-                    if file_path == task_file or file_path.endswith(task_file):
-                        return TaskMatch(spec_name, task_num, task_title, spec_file.parent)
-
-                    # Also check if task_file is a suffix of file_path
-                    # This handles cases where file_path is absolute
-                    if task_file and file_path.endswith(task_file):
-                        return TaskMatch(spec_name, task_num, task_title, spec_file.parent)
-
+        Only In Progress tasks count: naming a Not Started or Done task during an
+        unrelated edit is wrong context. Paths are compared exactly, relative to
+        the project root (no suffix matching, so `README.md` never matches
+        `docs/README.md`).
+        """
+        rel = self._relative(file_path)
+        if rel is None:
+            return None
+        for spec_dir, tasks in self._tasks_by_recency():
+            for task in tasks:
+                if task.in_progress and self._lists(task.files, rel):
+                    return TaskMatch(spec_dir.name, task.num, task.title, spec_dir)
         return None
+
+    def listed_by_any_task(self, file_path: str) -> bool:
+        """Whether any task, in any status, lists this file."""
+        rel = self._relative(file_path)
+        if rel is None:
+            return False
+        return any(self._lists(t.files, rel) for _, tasks in self._tasks_by_recency() for t in tasks)
+
+    def in_progress_tasks(self) -> List[TaskMatch]:
+        """Every In Progress task across specs, most recently edited spec first."""
+        return [
+            TaskMatch(spec_dir.name, t.num, t.title, spec_dir)
+            for spec_dir, tasks in self._tasks_by_recency()
+            for t in tasks
+            if t.in_progress
+        ]
 
     def get_all_spec_names(self) -> List[str]:
         """Get list of all spec names in the project.
@@ -197,6 +205,7 @@ class SpecTask:
     verify: List[str] = field(default_factory=list)  # **Verify:** `cmd` `cmd`
     verified_by: List[str] = field(default_factory=list)  # **Verified by:** Task 7
     verifies: List[str] = field(default_factory=list)  # **Verifies:** Task 2
+    dependencies: List[str] = field(default_factory=list)  # **Dependencies:** Task 1, Task 3
     acceptance: List[Tuple[bool, str]] = field(default_factory=list)
 
     @property
@@ -254,6 +263,7 @@ def parse_tasks(task_file_path: Path) -> List[SpecTask]:
         task.verify = re.findall(r"`([^`]+)`", _field(block, "Verify") or "")
         task.verified_by = _task_refs(_field(block, "Verified by"))
         task.verifies = _task_refs(_field(block, "Verifies"))
+        task.dependencies = _task_refs(_field(block, "Dependencies"))
         task.acceptance = [
             (mark.lower() == "x", text.strip())
             for mark, text in re.findall(r"^\s*- \[([ xX])\]\s*(.+)$", block, re.MULTILINE)

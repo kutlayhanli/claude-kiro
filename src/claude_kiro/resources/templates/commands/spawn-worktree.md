@@ -12,9 +12,10 @@ Run multiple implementation tasks concurrently, each in its own git worktree wit
 
 ## When to Use
 
-- Implementing multiple independent tasks from a spec simultaneously
+- **One wave**, or an ad-hoc batch of independent tasks, with my approval at each step
 - Tasks that touch different files and have no dependencies on each other
-- Batch work where speed matters more than sequential review
+
+**For a whole spec, use `/spec:implement <spec>` instead.** It runs every wave as one workflow: task agents in parallel, merges as tasks finish, a gate after each wave, and a halt on red. This command is for single waves and ad-hoc batches.
 
 ## Workflow
 
@@ -46,23 +47,17 @@ Run multiple implementation tasks concurrently, each in its own git worktree wit
 
 ### Phase 2: Pre-create Worktrees
 
-For each task, **before spawning any agents**:
+**Spec tasks:** create all of the wave's worktrees **before spawning any agents**:
 
 ```bash
-# Create worktree with its own branch
-git worktree add worktrees/<task-name> -b feat/<task-name>
+ck worktree create <spec> <N> <M> ... --install
 ```
 
-**Naming conventions:**
-- Worktree directory: `worktrees/<feature>-<task-n>` (e.g., `worktrees/auth-login-task1`)
-- Branch name: `feat/<feature>-<task-n>` (e.g., `feat/auth-login-task1`)
+This creates `.claude/worktrees/<spec>-task-<N>` on branch `feat/<spec>-task-<N>` and installs dependencies. An existing worktree is reused. A worktree that is claimed by another agent, or has uncommitted changes, is reported **BUSY** and left alone: don't spawn an agent into it.
 
-Verify ALL worktrees were created:
-```bash
-git worktree list
-```
+**Ad-hoc tasks (no spec):** `command git worktree add .claude/worktrees/<feature>-<n> -b feat/<feature>-<n>`.
 
-**If any worktree fails to create, abort the entire batch.** Do not proceed with partial isolation.
+Run git as `command git` (a shell hook may rewrite plain `git`). Verify with `ck worktree status <spec>` (or `command git worktree list`). **If any worktree fails to create, or is BUSY, abort the entire batch.** Do not proceed with partial isolation.
 
 ### Phase 3: Spawn Parallel Agents
 
@@ -71,17 +66,16 @@ For each task, spawn an agent with `run_in_background: true`:
 ```json
 {
   "description": "implement <feature>: <task-summary>",
-  "prompt": "You are implementing Task <N> of spec <name> in an isolated git worktree.\n\nWORKING DIRECTORY: <absolute-path>/worktrees/<task-name>\nBRANCH: feat/<task-name>\n\n## Context\n<paste relevant sections from requirements.md, design.md, and (for test tasks) test-plan.md>\n\n## Task\n<paste the full task block from tasks.md, including Track, Verify, Verified by/Verifies>\n\n## Instructions\n1. Follow .claude/commands/spec/implement.md for this task (read it from your worktree). In short: mark the task In Progress, commit with the `task <N>:` prefix, and only mark it Done after `ck gate specs/<name> --task <N>` passes in your worktree.\n2. Track test: write the tests from test-plan.md against the real boundaries. They may fail until the implementation lands, but must fail for the right reason.\n3. Track impl: make the verifying tests pass. Never delete, skip, or weaken a test, and never edit requirements.md. If a test looks wrong, stop and report it in your final message.\n4. All file operations MUST be relative to your working directory. Do NOT modify files outside your worktree.\n5. Commit your changes to your branch when done.",
+  "prompt": "Your task: Task <N> of spec <name>.\nWorktree: <absolute main checkout>/.claude/worktrees/<name>-task-<N> (branch feat/<name>-task-<N>). Target branch for the final merge: <current branch>.\nRead your operating brief at <absolute main checkout>/.claude/workflows/spec-implement-brief.md and follow it exactly: claim the worktree with `ck worktree claim <name> <N>`, implement per your track, get `ck gate <name> --task <N>` passing, merge the target into your branch before finishing, release the worktree.\nReport: status, gatePassed, summary, commits, gate output tail, blocker, deviations, wrong tests, files outside your task.",
   "subagent_type": "general-purpose",
   "run_in_background": true
 }
 ```
 
 **Important agent prompt rules:**
-- Include the FULL working directory path so the agent knows where to operate
-- Paste relevant spec context directly into the prompt (agents can't read from main worktree)
-- Tell the agent to commit when done
-- Tell the agent NOT to modify files outside its worktree
+- Include the FULL worktree path so the agent knows where to operate
+- Point to the brief by absolute path; it covers claiming, track rules, the gate, committing, and staying inside the worktree
+- Don't spawn into a worktree that `ck worktree create` reported BUSY
 
 ### Phase 4: Monitor Completion
 
@@ -116,18 +110,14 @@ After all agents complete:
 If I approve merging:
 
 ```bash
-# For each completed branch
-git merge feat/<task-name> --no-ff -m "Merge feat/<task-name>: <task-summary>"
-
-# Clean up
-git branch -d feat/<task-name>
-git worktree remove worktrees/<task-name>
+ck worktree merge <spec> <N> <M> ...
 ```
 
-If merge conflicts occur:
-- Stop merging
-- Report which branch conflicted and what files
-- Let me decide how to resolve
+This merges each task branch into the current branch one at a time (`--no-ff`), then removes the worktree and branch. It stops at the first conflict.
+
+If a merge reports **CONFLICT**:
+- The merge is already aborted. Nothing is half-merged on the current branch.
+- Report which task and files conflicted, and let me decide. To resolve: run `command git -C .claude/worktrees/<spec>-task-<N> merge <current branch>` **inside the task worktree**, fix the conflicts there (keep both sides' tests), commit, then run `ck worktree merge <spec> <N>` again. Never resolve in the main checkout.
 
 ### Phase 7: Wave Gate
 

@@ -11,7 +11,10 @@ from claude_kiro.gate import run_gate
 
 from conftest import git, write_tasks
 
-SUBTRACT_TEST = "from calc import subtract\n\n\ndef test_subtract():\n    assert subtract(5, 3) == 2\n"
+# Imports the project module inside the test body: before subtract() exists the
+# test fails, but the file still collects (a module-level import would break
+# collection for the whole suite).
+SUBTRACT_TEST = "def test_subtract():\n    from calc import subtract\n\n    assert subtract(5, 3) == 2\n"
 
 
 def implement_subtract(project: Path) -> None:
@@ -105,6 +108,50 @@ def test_test_task_may_be_red_until_its_impl_is_done(project):
     result = run_gate(project, project / "specs/calc", ["1"])
     assert result.ok, result.report()
     assert "may still fail" in result.report()
+
+
+def test_collection_breakage_fails_gate(project):
+    """A red-phase test file with a module-level import of missing code breaks collection for everyone."""
+    (project / "tests" / "test_subtract.py").write_text("from calc import subtract\n\n\ndef test_subtract():\n    assert subtract(5, 3) == 2\n")
+    write_tasks(project, t1="Done", a1="x")
+    result = run_gate(project, project / "specs/calc", ["1"])
+    assert not result.ok
+    report = result.report()
+    assert "✗ Test collection succeeds (`python -m pytest --collect-only -q`)" in report
+    assert "import project modules inside test bodies" in report
+
+
+def test_green_only_skips_full_suite_until_spec_complete(project):
+    """Test-first: an unrelated red test task must not block an impl task's gate; the full suite runs at the end."""
+    import re
+
+    tasks_md = project / "specs" / "calc" / "tasks.md"
+    # A third task: tests for multiply, verifying a fourth (unimplemented) impl task.
+    extra = (
+        "\n### Task 3: Tests for multiply\n**Status:** Done\n**Track:** test\n**Verifies:** Task 4\n"
+        "**Files:**\n- `tests/test_multiply.py` - multiply\n**Verify:** `python -m pytest -q tests/test_multiply.py`\n"
+        "- [x] cases written\n\n"
+        "### Task 4: Implement multiply\n**Status:** Not Started\n**Track:** impl\n**Verified by:** Task 3\n"
+        "**Files:**\n- `calc.py` - multiply()\n- [ ] done\n"
+    )
+    (project / "tests" / "test_multiply.py").write_text("def test_multiply():\n    from calc import multiply\n\n    assert multiply(2, 3) == 6\n")
+    write_subtract_tests(project)
+    implement_subtract(project)
+    write_tasks(project, t1="Done", t2="Done", a1="x", a2="x")
+    tasks_md.write_text(re.sub(r"\n## Parallel Groups", extra + "\n## Parallel Groups", tasks_md.read_text()))
+    # The full suite would fail (test_multiply is red until Task 4); make that the project verify.
+    (project / "specs/ck.json").write_text(json.dumps({"verify": ["python -m pytest -q"]}))
+
+    green = run_gate(project, project / "specs/calc", ["2"])
+    report = green.report()
+    assert green.ok, report
+    assert "`python -m pytest -q tests/test_subtract.py`" in report or "test_subtract" in report
+    assert "skipping 1 still waiting on unfinished tasks (Tasks 3)" in report
+
+    from claude_kiro.config import load_config
+
+    full = run_gate(project, project / "specs/calc", ["2"], config={**load_config(project), "verify_mode": "full"})
+    assert not full.ok  # the full suite includes the red multiply test
 
 
 def test_test_task_needs_real_test_cases(project):

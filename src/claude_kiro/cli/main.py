@@ -7,14 +7,24 @@ hook runner for Claude Code integration.
 import sys
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Optional
 
 import click
 
 from ..config import initial_config, load_config
-from ..paths import CONFIG_FILE, LEGACY_SPECS_DIR, SPECS_DIR, SPEC_WORKFLOW, spec_roots
+from ..paths import (
+    CONFIG_FILE,
+    IMPLEMENT_BRIEF,
+    IMPLEMENT_WORKFLOW,
+    LEGACY_SPECS_DIR,
+    SPECS_DIR,
+    SPEC_WORKFLOW,
+    spec_roots,
+)
 from .hooks import hook
+from .worktree import waves, worktree
 from .runner import HOOK_SETTINGS, configured_hooks, execute_hook, install_hook_settings
 
 
@@ -70,7 +80,53 @@ MANAGED_FILES = [
     (".claude/commands/spec/review.md", "commands/spec/review.md"),
     (".claude/commands/spawn-worktree.md", "commands/spawn-worktree.md"),
     (SPEC_WORKFLOW, "workflows/spec_create.js"),
+    (IMPLEMENT_WORKFLOW, "workflows/spec_implement.js"),
+    (IMPLEMENT_BRIEF, "workflows/spec_implement_brief.md"),
 ]
+
+RUFF_HOOK = re.compile(r"^(\s*)-\s+id:\s*(ruff|ruff-check|ruff-format)\s*$")
+
+
+def _ruff_hooks_unrestricted(text: str) -> list:
+    """Line indexes of ruff pre-commit hooks with no types/types_or/files restriction."""
+    lines = text.splitlines()
+    found = []
+    for i, line in enumerate(lines):
+        match = RUFF_HOOK.match(line)
+        if not match:
+            continue
+        dash = len(match.group(1))
+        restricted = False
+        for following in lines[i + 1:]:
+            stripped = following.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            indent = len(following) - len(following.lstrip())
+            if indent <= dash:
+                break
+            if re.match(r"(types|types_or|files):", stripped):
+                restricted = True
+                break
+        if not restricted:
+            found.append(i)
+    return found
+
+
+def _patch_precommit(project_dir: Path, dry_run: bool = False) -> int:
+    """Limit ruff pre-commit hooks to Python files, so ruff-format leaves the
+    code blocks inside spec Markdown alone. Returns how many hooks were patched."""
+    config = project_dir / ".pre-commit-config.yaml"
+    if not config.exists():
+        return 0
+    text = config.read_text()
+    targets = _ruff_hooks_unrestricted(text)
+    if targets and not dry_run:
+        lines = text.splitlines()
+        for i in reversed(targets):
+            dash = len(RUFF_HOOK.match(lines[i]).group(1))
+            lines.insert(i + 1, " " * (dash + 2) + "types_or: [python, pyi]")
+        config.write_text("\n".join(lines) + ("\n" if text.endswith("\n") else ""))
+    return len(targets)
 
 
 def _install_hooks(project_dir: Path) -> None:
@@ -155,6 +211,10 @@ def init(force: bool):
 
     _install_hooks(project_dir)
     created.append(".claude/settings.local.json")
+
+    patched = _patch_precommit(project_dir)
+    if patched:
+        created.append(f".pre-commit-config.yaml (ruff limited to Python in {patched} hook(s))")
 
     if _ensure_config(project_dir):
         created.append(CONFIG_FILE)
@@ -322,6 +382,8 @@ def doctor():
         ".claude/commands/spec/review.md",
         ".claude/commands/spawn-worktree.md",
         SPEC_WORKFLOW,
+        IMPLEMENT_WORKFLOW,
+        IMPLEMENT_BRIEF,
     ]
 
     missing_files = []
@@ -381,6 +443,9 @@ def doctor():
         click.echo(f"✓ Found {spec_count} spec(s)")
     else:
         click.echo(f"ℹ️  No specs created yet (they go in {SPECS_DIR}/)")
+
+    if _patch_precommit(project_dir, dry_run=True):
+        warnings.append("ruff pre-commit hooks also run on Markdown code blocks in specs - run 'ck upgrade' to limit them to Python")
 
     if not (project_dir / CONFIG_FILE).exists():
         warnings.append(f"{CONFIG_FILE} not found - run 'ck init' to create verification config")
@@ -533,6 +598,10 @@ def upgrade(dry_run: bool, no_migrate: bool):
         if not dry_run:
             _ensure_config(project_dir)
 
+    patched = _patch_precommit(project_dir, dry_run=dry_run)
+    if patched:
+        changes.append(("updated", f".pre-commit-config.yaml (ruff limited to Python in {patched} hook(s))"))
+
     moved, skipped = ([], []) if no_migrate else _migrate_specs(project_dir, dry_run)
     for name in moved:
         changes.append(("moved", f"{LEGACY_SPECS_DIR}/{name} -> {SPECS_DIR}/{name}"))
@@ -617,6 +686,8 @@ def _report_doctor_results(issues: list, warnings: list):
 
 # Add hook subcommand group
 cli.add_command(hook)
+cli.add_command(worktree)
+cli.add_command(waves)
 
 
 if __name__ == "__main__":

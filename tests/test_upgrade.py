@@ -132,3 +132,38 @@ def test_setup_diff_shows_changes_without_writing(tmp_path, monkeypatch):
     assert "does not exist" in result.output  # skill not installed in this fake HOME
     assert claude_md.read_text().startswith("# My global notes")
     assert not (tmp_path / ".claude/skills").exists()
+
+
+PRECOMMIT = """repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+      - id: ruff-check
+        files: ^src/
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+"""
+
+
+def test_upgrade_limits_ruff_precommit_hooks_to_python(old_project):
+    config = old_project / ".pre-commit-config.yaml"
+    config.write_text(PRECOMMIT)
+    dry = run(old_project, "upgrade", "--dry-run")
+    assert "ruff limited to Python in 2 hook(s)" in dry.output
+    assert config.read_text() == PRECOMMIT
+
+    run(old_project, "upgrade")
+    text = config.read_text()
+    assert text.count("types_or: [python, pyi]") == 2
+    assert "      - id: ruff\n        types_or: [python, pyi]\n        args: [--fix]\n" in text
+    assert "      - id: ruff-format\n        types_or: [python, pyi]\n" in text
+    assert "      - id: ruff-check\n        files: ^src/\n" in text  # already restricted: untouched
+    assert "trailing-whitespace\n" in text
+
+    again = run(old_project, "upgrade")
+    assert "pre-commit" not in again.output  # idempotent

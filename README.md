@@ -106,7 +106,7 @@ The hooks provide spec context and enforce the definition of done:
 2. **Plan:** `/spec:plan "feature"` - Discuss interactively, decide one question at a time, record decisions in `specs/<name>/PLAN.md`
 3. **Create specs:** `/spec:create <name>` - A workflow writes requirements, then design and an integration-first test plan in parallel, then test and impl task tracks in parallel, then adversarially reviews and revises them
 4. **Implement:** `/spec:implement task` - Test-track tasks write integration tests first; impl-track tasks make them pass. Done only when `ck gate` passes
-5. **Parallelize:** `/spawn-worktree spec` - Run independent tasks concurrently in isolated worktrees
+5. **Parallelize:** `/spec:implement <spec>` (no task number) runs the whole spec as a workflow, wave by wave: task agents in parallel worktrees, a retry when a gate fails, merges as each task finishes, `ck gate` after each wave, and a halt on red. `/spawn-worktree` covers a single wave or an ad-hoc batch
 6. **Track progress:** TodoWrite tracks implementation automatically
 7. **Stay aligned:** Hooks provide context and maintain spec-driven discipline
 
@@ -118,6 +118,8 @@ The hooks provide spec context and enforce the definition of done:
 - `ck doctor` - Check your Claude Kiro setup health
 - `ck migrate [--dry-run]` - Move specs from `.claude/specs/` to `specs/` (tracked files keep their history)
 - `ck gate <spec> [--task N]` - Run the verification gate; exits 1 on failure
+- `ck waves <spec> [--json]` - Show the wave plan (Parallel Groups, or computed from Dependencies)
+- `ck worktree create|claim|release|merge|integration|status <spec> ...` - Per-task worktrees for parallel implementation (`.claude/worktrees/<spec>-task-N`, branch `feat/<spec>-task-N`); merges go one at a time and stop at the first conflict
 - `ck upgrade [--dry-run] [--no-migrate]` - Update a project set up by an older ck (see [UPGRADING.md](UPGRADING.md))
 - `ck setup --diff` - Show how your global `~/.claude` files differ from this version, without writing
 - `ck hook list` - Show available hooks

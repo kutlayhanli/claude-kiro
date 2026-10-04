@@ -2,8 +2,11 @@
 
 A task may be marked Done only when:
 - every acceptance checkbox in its tasks.md block is checked,
-- the project verify commands (specs/ck.json) and the task's own **Verify:**
-  commands pass, plus the Verify commands of the test tasks that verify it,
+- the project checks pass: `verify_always`, the test-collection check, and
+  either the full `verify` suite or, while a test-first spec is in progress,
+  only the test suites that should already pass (see specs/ck.json verify_mode),
+- the task's own **Verify:** commands pass, plus those of the test tasks that
+  verify it,
 - no existing test was deleted or weakened on this branch unless a test-track
   task owns that file.
 
@@ -20,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-from claude_kiro.config import load_config
+from claude_kiro.config import collect_command, load_config
 from claude_kiro.hooks._shared import git_utils
 from claude_kiro.hooks._shared.spec_parser import SpecTask, parse_tasks
 from claude_kiro.hooks._shared.test_heuristics import is_test_path, measure, weakening
@@ -163,15 +166,46 @@ def run_gate(
 
     commands: List[str] = []
     impl_selected = [t for t in selected if t.track != "test"]
+
+    # Gating a task means claiming it is Done, so count it as Done when
+    # deciding which test suites must already pass.
+    assumed_done = {n for n, t in tasks.items() if t.done} | {t.num for t in selected}
+
+    def suite_due(test_task: SpecTask) -> bool:
+        targets = [n for n in test_task.verifies if n in tasks]
+        return bool(targets) and all(n in assumed_done for n in targets)
+
+    has_test_track = any(t.track == "test" for t in tasks.values())
+    spec_complete = all(n in assumed_done for n in tasks)
+    green_only = str(config.get("verify_mode", "auto")).lower() == "auto" and has_test_track and not spec_complete
+
+    commands.extend(config.get("verify_always", []))
     if impl_selected:
-        commands.extend(config.get("verify", []))
+        if green_only:
+            due = [t for t in tasks.values() if t.track == "test" and suite_due(t)]
+            for test_task in due:
+                commands.extend(test_task.verify)
+            pending = [t.num for t in tasks.values() if t.track == "test" and not suite_due(t)]
+            if config.get("verify"):
+                result.checks.append(
+                    Check(
+                        "Verify mode: tests that should already pass",
+                        True,
+                        f"test-first spec in progress: running the suites of {len(due)} test task(s) whose "
+                        f"tasks are all Done; skipping {len(pending)} still waiting on unfinished tasks "
+                        f"(Tasks {', '.join(pending) or '-'}). The full suite ({'; '.join(config['verify'])}) "
+                        "runs once every task is Done.",
+                        warning=True,
+                    )
+                )
+        else:
+            commands.extend(config.get("verify", []))
 
     for task in selected:
         result.checks.append(_acceptance(task))
         if task.track == "test":
             result.checks.append(_test_files_present(task, project_dir, config))
-            targets = [tasks[n] for n in task.verifies if n in tasks]
-            if targets and all(t.done for t in targets):
+            if suite_due(task):
                 commands.extend(task.verify)
             elif task.verify:
                 result.checks.append(
@@ -196,10 +230,20 @@ def run_gate(
                             f"Task {num} ({linked.title}) must be Done first: its tests are this task's oracle",
                         )
                     )
-                else:
+                elif suite_due(linked):
                     commands.extend(linked.verify)
+                else:
+                    waiting = [n for n in linked.verifies if n in tasks and n not in assumed_done]
+                    result.checks.append(
+                        Check(
+                            f"Task {num} tests not required yet",
+                            True,
+                            f"they also verify Task {', '.join(waiting)}, not Done yet; required once it is",
+                            warning=True,
+                        )
+                    )
 
-    if impl_selected and not commands:
+    if impl_selected and not commands and not config.get("verify"):
         result.checks.append(
             Check(
                 "Verify commands configured",
@@ -210,8 +254,16 @@ def run_gate(
         )
 
     timeout = int(config.get("verify_timeout", 540))
+    collect = collect_command(config)
+    if collect:
+        check = _run(collect, project_dir, timeout)
+        check.name = f"Test collection succeeds (`{collect}`)"
+        if not check.ok:
+            check.detail += "\n(a test file that cannot be imported breaks the suite for every task; import project modules inside test bodies)"
+        result.checks.append(check)
     for command in dict.fromkeys(commands):  # dedupe, keep order
-        result.checks.append(_run(command, project_dir, timeout))
+        if command != collect:
+            result.checks.append(_run(command, project_dir, timeout))
 
     owned = {f for t in tasks.values() if t.track == "test" for f in t.files}
     result.checks.append(_tamper(project_dir, config, owned))
