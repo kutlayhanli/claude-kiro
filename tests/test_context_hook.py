@@ -72,7 +72,7 @@ def test_no_in_progress_task_means_no_task_named(project, session):
 @pytest.mark.parametrize(
     "path",
     [".gitignore", "pyproject.toml", "uv.lock", "README.md", "docs/README.md", "Makefile",
-     ".pre-commit-config.yaml", ".github/workflows/ci.yml", ".claude/settings.json", "LICENSE"],
+     ".pre-commit-config.yaml", ".github/workflows/ci.yml", ".claude/settings.json", "LICENSE", "UPGRADING.md"],
 )
 def test_scaffold_files_are_ignored(project, session, path):
     write(project, "Done", "Done")

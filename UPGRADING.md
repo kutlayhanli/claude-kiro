@@ -21,7 +21,13 @@ What changes:
 - **Reference fields parse only references.** In `**Dependencies:**`, `**Verified by:**`, and `**Verifies:**`, text in parentheses or after " - " is a reason or note, so "Task 39 (see also Task 69)" means Task 39 only. `/spec:create` now writes a reason for every dependency and a Harness Contract section in test-plan.md.
 - **Resuming:** run `/spec:implement <spec>` again (a fresh run skips Done tasks). Don't use `resumeFromRunId`.
 
-Steps: reinstall `ck` on each machine (wait until any running `/spec:implement` workflow has finished, since its agents call `ck`), then run `ck upgrade` in each repository and commit the refreshed `.claude/` files.
+- **Version stamp (0.4.1).** `ck init` and `ck upgrade` write `.claude/ck-manifest.json`: the ck version and a hash of each managed file. Commit it with the other `.claude/` files.
+  - An older ck refuses to `ck upgrade` (or `ck init --force`) a project stamped by a newer one, because it would replace newer files with older copies. Pass `--allow-downgrade` if you really mean it.
+  - Upgrade also lists managed files you edited by hand since ck last wrote them.
+  - `ck doctor` reports when the stamp and the installed ck differ.
+  - Only ck 0.4.1 and later know about the stamp. An older install will still overwrite files, so reinstall on every machine.
+
+Steps: reinstall `ck` on each machine (wait until any running `/spec:implement` workflow has finished, since its agents call `ck`). Then, **from each repository's directory**, run `ck upgrade` and commit the refreshed `.claude/` files, including `ck-manifest.json`.
 
 ## 0.2 → 0.3
 

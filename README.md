@@ -127,7 +127,7 @@ The hooks provide spec context and enforce the definition of done:
 - `ck lint <spec>` - Check the task plan: dependency cycles, verify-order cycles (an impl task whose verifying tests need code from a task that depends on it), dependencies without a stated reason, critical path. Exits 1 on a cycle
 - `ck plan <spec> --json [--exclude N,M]` - Machine-readable plan with the tasks ready to start now; the workflow re-reads it after every task
 - `ck worktree create|claim|release|merge|integration|status <spec> ...` - Per-task worktrees for parallel implementation (`.claude/worktrees/<spec>-task-N`, branch `feat/<spec>-task-N`); merges go one at a time and stop at the first conflict
-- `ck upgrade [--dry-run] [--no-migrate]` - Update a project set up by an older ck (see [UPGRADING.md](UPGRADING.md))
+- `ck upgrade [--dry-run] [--no-migrate] [--allow-downgrade]` - Update a project set up by an older ck (see [UPGRADING.md](UPGRADING.md)). It records a version stamp in `.claude/ck-manifest.json` and refuses to let an older ck downgrade newer files
 - `ck setup --diff` - Show how your global `~/.claude` files differ from this version, without writing
 - `ck hook list` - Show available hooks
 - `ck hook status` - Display configured hooks

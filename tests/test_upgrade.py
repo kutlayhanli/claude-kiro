@@ -167,3 +167,79 @@ def test_upgrade_limits_ruff_precommit_hooks_to_python(old_project):
 
     again = run(old_project, "upgrade")
     assert "pre-commit" not in again.output  # idempotent
+
+
+# --- version stamp (.claude/ck-manifest.json) ---------------------------------
+
+from claude_kiro import manifest as ck_manifest
+
+
+def stamp_of(root: Path) -> dict:
+    return json.loads((root / ".claude/ck-manifest.json").read_text())
+
+
+def test_upgrade_writes_version_stamp(old_project):
+    run(old_project, "upgrade")
+    stamp = stamp_of(old_project)
+    assert stamp["version"] == ck_manifest.ck_version()
+    implement = (old_project / ".claude/commands/spec/implement.md").read_text()
+    assert stamp["files"][".claude/commands/spec/implement.md"] == ck_manifest.digest(implement)
+    assert ".claude/workflows/spec-implement.js" in stamp["files"]
+
+
+def test_older_ck_refuses_to_downgrade_newer_files(old_project):
+    run(old_project, "upgrade")
+    stamp = stamp_of(old_project)
+    stamp["version"] = "99.0.0"
+    (old_project / ".claude/ck-manifest.json").write_text(json.dumps(stamp))
+    (old_project / ".claude/commands/spec/plan.md").write_text("pretend this is the newer ck's plan.md\n")
+
+    refused = run(old_project, "upgrade")
+    assert refused.exit_code == 1
+    assert "written by ck 99.0.0" in refused.output and "--allow-downgrade" in refused.output
+    assert (old_project / ".claude/commands/spec/plan.md").read_text() == "pretend this is the newer ck's plan.md\n"
+
+    forced = run(old_project, "upgrade", "--allow-downgrade")
+    assert forced.exit_code == 0, forced.output
+    assert stamp_of(old_project)["version"] == ck_manifest.ck_version()
+
+
+def test_hand_edits_to_tracked_managed_files_are_reported(old_project):
+    run(old_project, "upgrade")
+    git(old_project, "add", "-A")
+    git(old_project, "commit", "-qm", "upgrade")
+    review = old_project / ".claude/commands/spec/review.md"
+    review.write_text(review.read_text() + "\nMy local tweak.\n")
+
+    dry = run(old_project, "upgrade", "--dry-run")
+    assert "Edited by hand since ck last wrote them (would replace" in dry.output
+    assert ".claude/commands/spec/review.md" in dry.output
+    assert "My local tweak." in review.read_text()
+
+
+def test_init_stamps_fresh_projects_and_refuses_force_over_newer(tmp_path):
+    result = run(tmp_path, "init")
+    assert result.exit_code == 0, result.output
+    assert stamp_of(tmp_path)["version"] == ck_manifest.ck_version()
+
+    stamp = stamp_of(tmp_path)
+    stamp["version"] = "99.0.0"
+    (tmp_path / ".claude/ck-manifest.json").write_text(json.dumps(stamp))
+    refused = run(tmp_path, "init", "--force")
+    assert refused.exit_code == 1 and "99.0.0" in refused.output
+
+
+def test_doctor_reports_version_mismatch(old_project):
+    assert "No .claude/ck-manifest.json version stamp" in run(old_project, "doctor").output
+    run(old_project, "upgrade")
+    assert f"stamped by ck {ck_manifest.ck_version()}" in run(old_project, "doctor").output
+    stamp = stamp_of(old_project)
+    stamp["version"] = "99.0.0"
+    (old_project / ".claude/ck-manifest.json").write_text(json.dumps(stamp))
+    assert "reinstall ck before running 'ck upgrade'" in run(old_project, "doctor").output
+
+
+def test_version_key_ordering():
+    key = ck_manifest.version_key
+    assert key("0.10.0") > key("0.9.9") > key("0.4.0")
+    assert key("1.0.0rc1") == (1, 0, 0)

@@ -56,7 +56,8 @@ SCAFFOLD_FILES = [
     "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "tsconfig*.json",
     "go.mod", "go.sum", "Cargo.toml", "Cargo.lock", "Gemfile*",
     "Makefile", "justfile", "Dockerfile", "docker-compose*.y*ml", "compose*.y*ml",
-    "README*", "LICENSE*", "CHANGELOG*", "CONTRIBUTING*", "CODEOWNERS", "CLAUDE.md", "AGENTS.md",
+    "README*", "LICENSE*", "CHANGELOG*", "CONTRIBUTING*", "UPGRADING*", "SECURITY*", "CODE_OF_CONDUCT*",
+    "CODEOWNERS", "CLAUDE.md", "AGENTS.md",
 ]
 SCAFFOLD_DIRS = {".claude", ".github", ".vscode", ".idea", ".devcontainer", "worktrees"}
 

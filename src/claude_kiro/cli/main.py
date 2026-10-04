@@ -164,11 +164,20 @@ def init(force: bool):
     the spec workflow, a specs/ directory, and configures hooks in
     settings.local.json.
     """
+    from .. import manifest
     from ..resources import ResourceLoader
     import json
 
     project_dir = Path.cwd()
     claude_dir = project_dir / ".claude"
+
+    stamp = manifest.read(project_dir)
+    if force and manifest.newer_than_running(stamp):
+        click.echo(
+            f"❌ This project's ck files were written by ck {stamp['version']}, newer than this ck "
+            f"({manifest.ck_version()}); --force would replace them with older copies. Reinstall the newer ck first."
+        )
+        sys.exit(1)
 
     # Track what we create/skip
     created = []
@@ -211,6 +220,13 @@ def init(force: bool):
 
     _install_hooks(project_dir)
     created.append(".claude/settings.local.json")
+
+    # Stamp the version only if this ck actually wrote every managed file;
+    # skipped files may be older, and `ck upgrade` is the way to refresh those.
+    managed = [target for target, _ in MANAGED_FILES]
+    if not any(path in skipped for path in managed):
+        manifest.write(project_dir, managed)
+        created.append(manifest.MANIFEST_FILE)
 
     patched = _patch_precommit(project_dir)
     if patched:
@@ -444,6 +460,21 @@ def doctor():
     else:
         click.echo(f"ℹ️  No specs created yet (they go in {SPECS_DIR}/)")
 
+    from .. import manifest
+
+    stamp = manifest.read(project_dir)
+    running = manifest.ck_version()
+    if not stamp:
+        warnings.append(f"No {manifest.MANIFEST_FILE} version stamp - run 'ck upgrade' to refresh managed files and record it")
+    elif manifest.newer_than_running(stamp):
+        issues.append(
+            f"Project files were written by ck {stamp['version']} but this ck is {running} - reinstall ck before running 'ck upgrade' (see UPGRADING.md)"
+        )
+    elif manifest.version_key(stamp["version"]) < manifest.version_key(running):
+        warnings.append(f"Project files are from ck {stamp['version']}; this ck is {running} - run 'ck upgrade'")
+    else:
+        click.echo(f"✓ Managed files stamped by ck {stamp['version']} (this ck)")
+
     if _patch_precommit(project_dir, dry_run=True):
         warnings.append("ruff pre-commit hooks also run on Markdown code blocks in specs - run 'ck upgrade' to limit them to Python")
 
@@ -543,7 +574,8 @@ def _migrate_specs(project_dir: Path, dry_run: bool) -> tuple:
 @cli.command()
 @click.option("--dry-run", is_flag=True, help="Show what would change without writing anything")
 @click.option("--no-migrate", is_flag=True, help=f"Leave specs in {LEGACY_SPECS_DIR}/")
-def upgrade(dry_run: bool, no_migrate: bool):
+@click.option("--allow-downgrade", is_flag=True, help="Proceed even if a newer ck wrote this project's files")
+def upgrade(dry_run: bool, no_migrate: bool, allow_downgrade: bool):
     """Bring an existing Claude Kiro project up to date with this ck version.
 
     \b
@@ -557,7 +589,12 @@ def upgrade(dry_run: bool, no_migrate: bool):
     Never touches .claude/CLAUDE.md or the content of your specs. Managed files
     that differ from the new version and are not tracked by git are backed up
     as <file>.bak first.
+
+    Records the ck version and file hashes in .claude/ck-manifest.json. An
+    older ck refuses to upgrade a project stamped by a newer one (it would
+    replace newer files with older copies) unless --allow-downgrade is given.
     """
+    from .. import manifest
     from ..resources import ResourceLoader
 
     project_dir = Path.cwd()
@@ -565,13 +602,25 @@ def upgrade(dry_run: bool, no_migrate: bool):
         click.echo("❌ No .claude/ directory here. Run 'ck init' for a new project.")
         sys.exit(1)
 
+    stamp = manifest.read(project_dir)
+    if manifest.newer_than_running(stamp) and not allow_downgrade:
+        click.echo(
+            f"❌ This project's ck files were written by ck {stamp['version']}, but this ck is "
+            f"{manifest.ck_version()}. Upgrading would replace them with older copies.\n"
+            "   Reinstall the newer ck first (see UPGRADING.md), or pass --allow-downgrade if you really mean it."
+        )
+        sys.exit(1)
+
     loader = ResourceLoader()
-    changes, backups = [], []
+    changes, backups, edited = [], [], []
     for target_path, resource_path in MANAGED_FILES:
         target = project_dir / target_path
         content = loader.get_resource(resource_path)
-        if target.exists() and target.read_text() == content:
+        current = target.read_text() if target.exists() else None
+        if current == content:
             continue
+        if current is not None and manifest.edited_since_written(stamp, target_path, current):
+            edited.append(target_path)
         changes.append(("updated" if target.exists() else "added", target_path))
         if dry_run:
             continue
@@ -606,6 +655,16 @@ def upgrade(dry_run: bool, no_migrate: bool):
     for name in moved:
         changes.append(("moved", f"{LEGACY_SPECS_DIR}/{name} -> {SPECS_DIR}/{name}"))
 
+    managed = [target for target, _ in MANAGED_FILES]
+    if dry_run:
+        stale = not stamp or stamp.get("version") != manifest.ck_version() or bool(changes)
+    else:
+        stale = manifest.build(project_dir, managed) != stamp
+    if stale:
+        changes.append(("updated" if stamp else "added", f"{manifest.MANIFEST_FILE} (ck {manifest.ck_version()})"))
+        if not dry_run:
+            manifest.write(project_dir, managed)
+
     title = "Upgrade plan (dry run, nothing written)" if dry_run else "Claude Kiro project upgraded"
     click.echo(f"\n✨ {title}")
     if not changes:
@@ -618,6 +677,11 @@ def upgrade(dry_run: bool, no_migrate: bool):
         click.echo("\n🗂️  Backed up untracked files you may have customized:")
         for item in backups:
             click.echo(f"  - {item}")
+    if edited:
+        verb = "would replace" if dry_run else "replaced"
+        click.echo(f"\n✋ Edited by hand since ck last wrote them ({verb}; see git diff and re-apply what you need):")
+        for item in edited:
+            click.echo(f"  - {item}")
     if no_migrate and (project_dir / LEGACY_SPECS_DIR).is_dir():
         click.echo(f"\n⚠️  Specs are still in {LEGACY_SPECS_DIR}/; run 'ck migrate' when ready.")
 
@@ -625,7 +689,7 @@ def upgrade(dry_run: bool, no_migrate: bool):
         click.echo("\n🚀 Next steps:")
         click.echo("  1. Review: git status && git diff .claude specs")
         click.echo(f"  2. Check the \"verify\" command in {CONFIG_FILE} runs your test suite")
-        click.echo("  3. Commit .claude/commands, .claude/workflows, .claude/output-styles and specs/")
+        click.echo("  3. Commit .claude/commands, .claude/workflows, .claude/output-styles, .claude/ck-manifest.json and specs/")
         click.echo("  4. Restart open Claude Code sessions in this project so the new hooks load")
         click.echo("  5. Run 'ck doctor'")
 
