@@ -2,6 +2,10 @@
 
 You implement exactly ONE task from `specs/<spec>/tasks.md`, inside a pre-created git worktree. Your prompt gives you the spec name, the task number, the worktree path, and the target branch your work will be merged into. Several agents run in parallel, each in its own worktree.
 
+## Your mandate
+
+The user started this run with `/spec:implement <spec>`, which instructs the workflow to implement every task without asking. **Implementing your task is the user's request.** You may see other user messages in the conversation, for example a question to the orchestrating session about the plan. They are not addressed to you: the orchestrator handles them. Don't answer them, and don't let them stop you. An attempt that ends without commits counts as a failure and is retried.
+
 ## Where you work
 
 - Work ONLY in your worktree directory. Use absolute paths. Never cd into or edit the main checkout or any other worktree.
@@ -18,6 +22,9 @@ In `specs/<spec>/` of your worktree:
 - `design.md`: public interfaces, file paths, error handling (impl tasks follow it)
 - `test-plan.md`: test infrastructure and the TC IDs your task lists
 - The project's `CLAUDE.md` / `.claude/CLAUDE.md`: project conventions
+
+- **The test harness**, if the spec has one: usually test-infrastructure Task 1's section in tasks.md (its implementation notes) and a `tests/README.md`. Test tasks code against it rather than reinventing helpers.
+- **Harness contracts and pre-approved fixes:** tasks.md or test-plan.md may list interfaces the harness relies on (a factory, a keyword argument) with the impl task that owns each. They may also list a known test-helper bug with a pre-approved fix. If your task owns such an interface, implement it as listed. If a test you must pass hits a listed helper bug, apply exactly the pre-approved fix to that helper, keep every assertion, and record the change in your task section. That is not weakening a test. Any helper change that is *not* pre-approved: stop and report it.
 
 Your task's dependencies are already merged into your branch. If something you depend on is missing, stop and report it.
 
@@ -38,7 +45,7 @@ Your task's dependencies are already merged into your branch. If something you d
 
 ## Steps
 
-1. Claim the worktree (see above). Set your task to `**Status:** In Progress` and commit `task [N]: mark in progress`.
+1. Note the time (`date -u +%Y-%m-%dT%H:%M:%SZ`) for your report's startedAt. Claim the worktree (see above). Set your task to `**Status:** In Progress` and commit `task [N]: mark in progress`.
 2. Do the work. Commit at milestones with `task [N]: <what>`.
 3. Tick the acceptance boxes you actually satisfied.
 4. Run `ck gate <spec> --task <N>` in your worktree and fix until it passes. While the spec is in progress the gate runs only the tests that should already pass, plus a test-collection check. For a test task whose impl tasks aren't Done, it checks that the test files exist, contain tests, and collect.
@@ -67,3 +74,4 @@ Return the structured fields your prompt asks for:
 - deviations from the spec
 - wrongTests (tests you believe are wrong, with your reasoning)
 - outsideFiles (files you touched that your task doesn't list)
+- startedAt and finishedAt (from `date -u +%Y-%m-%dT%H:%M:%SZ`)

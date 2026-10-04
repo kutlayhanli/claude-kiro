@@ -206,6 +206,7 @@ class SpecTask:
     verified_by: List[str] = field(default_factory=list)  # **Verified by:** Task 7
     verifies: List[str] = field(default_factory=list)  # **Verifies:** Task 2
     dependencies: List[str] = field(default_factory=list)  # **Dependencies:** Task 1, Task 3
+    dependency_reasons: dict = field(default_factory=dict)  # {"1": "uses its API", "3": None}
     acceptance: List[Tuple[bool, str]] = field(default_factory=list)
 
     @property
@@ -232,10 +233,46 @@ def _field(block: str, name: str) -> Optional[str]:
     return match.group(1).strip() if match else None
 
 
-def _task_refs(value: Optional[str]) -> List[str]:
-    if not value:
+def _ref_items(value: Optional[str]) -> List[Tuple[str, Optional[str]]]:
+    """(task number, reason) for each reference in a field like
+    "Task 3 (uses its API), Task 7 - shared file x.py; 9".
+
+    Only the first number of each comma/semicolon/"and"-separated item is a
+    reference. Parenthesized text and text after " - " / " — " / ":" is the
+    item's reason, so "Task 39 (see also Task 69)" refers to Task 39 only.
+    """
+    if not value or value.strip().lower().startswith(("none", "n/a", "-")):
         return []
-    return re.findall(r"(?:Task\s*)?(\d+)", value, re.IGNORECASE)
+    items = []
+    # split on separators that are outside parentheses
+    depth, current, parts = 0, "", []
+    for char in value:
+        depth += char == "("
+        depth -= char == ")" and depth > 0
+        if depth == 0 and char in ",;":
+            parts.append(current)
+            current = ""
+        else:
+            current += char
+    parts.append(current)
+    for part in parts:
+        for piece in re.split(r"\s+and\s+(?=(?:Task\s*)?\d)", part, flags=re.IGNORECASE):
+            reason = None
+            paren = re.search(r"\(([^)]*)\)", piece)
+            if paren:
+                reason = paren.group(1).strip() or None
+            head = re.sub(r"\([^)]*\)", " ", piece)
+            dash = re.split(r"\s[-—–:]\s|:\s", head, maxsplit=1)
+            if reason is None and len(dash) > 1 and dash[1].strip():
+                reason = dash[1].strip()
+            number = re.search(r"\d+", dash[0])
+            if number:
+                items.append((number.group(0), reason))
+    return items
+
+
+def _task_refs(value: Optional[str]) -> List[str]:
+    return [num for num, _ in _ref_items(value)]
 
 
 def parse_tasks(task_file_path: Path) -> List[SpecTask]:
@@ -263,7 +300,9 @@ def parse_tasks(task_file_path: Path) -> List[SpecTask]:
         task.verify = re.findall(r"`([^`]+)`", _field(block, "Verify") or "")
         task.verified_by = _task_refs(_field(block, "Verified by"))
         task.verifies = _task_refs(_field(block, "Verifies"))
-        task.dependencies = _task_refs(_field(block, "Dependencies"))
+        dep_items = _ref_items(_field(block, "Dependencies"))
+        task.dependencies = [num for num, _ in dep_items]
+        task.dependency_reasons = dict(dep_items)
         task.acceptance = [
             (mark.lower() == "x", text.strip())
             for mark, text in re.findall(r"^\s*- \[([ xX])\]\s*(.+)$", block, re.MULTILINE)

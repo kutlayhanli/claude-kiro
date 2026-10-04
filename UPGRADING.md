@@ -1,7 +1,27 @@
 # Upgrading
 
-- **From 0.2 to 0.3:** see the next section.
-- **From 0.1:** skip to [Upgrading to 0.2](#upgrading-to-02), then come back here for the 0.3 steps (same commands).
+- **From 0.3 to 0.4:** see the next section.
+- **From 0.2:** apply the 0.3 notes below as well; the steps are the same.
+- **From 0.1:** skip to [Upgrading to 0.2](#upgrading-to-02), then come back for the 0.3 and 0.4 notes (same commands).
+
+## 0.3 → 0.4
+
+What changes:
+- **`/spec:implement <spec>` schedules by dependency, not by wave.** A task starts as soon as its own dependencies merge; waves only group the progress display.
+  - After every task, the plan is re-read from tasks.md on the target branch (`ck plan`), so relinking tasks mid-run needs no restart.
+  - Each merge is checked with `ck gate <spec> --task N` on the target, the full `ck gate <spec>` runs every `fullGateEvery` merges (default 10) and once at the end, and the result includes wall-clock time per task and per wave.
+- **Pre-launch lint.** `ck lint <spec>` reports:
+  - dependency cycles;
+  - verify-order cycles: an impl task whose verifying tests import code owned by a task that depends on it (market-sim's Task 40);
+  - dependencies without a stated reason;
+  - the critical path.
+  
+  The workflow refuses to launch on a cycle.
+- **Mandate in every task prompt.** Task agents ignore chat questions meant for the orchestrator, and an attempt with no commits is retried.
+- **Reference fields parse only references.** In `**Dependencies:**`, `**Verified by:**`, and `**Verifies:**`, text in parentheses or after " - " is a reason or note, so "Task 39 (see also Task 69)" means Task 39 only. `/spec:create` now writes a reason for every dependency and a Harness Contract section in test-plan.md.
+- **Resuming:** run `/spec:implement <spec>` again (a fresh run skips Done tasks). Don't use `resumeFromRunId`.
+
+Steps: reinstall `ck` on each machine (wait until any running `/spec:implement` workflow has finished, since its agents call `ck`), then run `ck upgrade` in each repository and commit the refreshed `.claude/` files.
 
 ## 0.2 → 0.3
 

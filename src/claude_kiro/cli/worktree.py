@@ -69,6 +69,88 @@ def waves(spec: str, as_json: bool):
         click.echo(f"  ⚠️  {warning}")
 
 
+def _plan(project_dir: Path, spec: str, exclude: set) -> dict:
+    from ..lint import lint_spec
+    from ..waves import plan_waves
+
+    spec_dir = _spec_dir(project_dir, spec)
+    lint = lint_spec(spec_dir, project_dir)
+    if lint["cycles"]:
+        from ..hooks._shared.spec_parser import parse_tasks
+
+        tasks = parse_tasks(spec_dir / "tasks.md")
+        plan = {
+            "spec": spec_dir.name,
+            "waves": [],
+            "deps": {t.num: t.dependencies for t in tasks},
+            "done": [t.num for t in tasks if t.done],
+            "titles": {t.num: t.title for t in tasks},
+            "tracks": {t.num: t.track for t in tasks},
+            "source": "none (dependency cycle)",
+            "warnings": [],
+        }
+    else:
+        plan = plan_waves(spec_dir)
+    wave_of = {n: i + 1 for i, wave in enumerate(plan["waves"]) for n in wave}
+    done = set(plan["done"])
+    blocked = {c["task"] for c in lint["verifyCycles"]} | {n for cycle in lint["cycles"] for n in cycle}
+    ready = [
+        n
+        for n, deps in plan["deps"].items()
+        if n not in done and n not in exclude and n not in blocked and all(d in done for d in deps)
+    ]
+    ready.sort(key=lambda n: (wave_of.get(n, 0), int(n) if n.isdigit() else 0))
+    return {**plan, **lint, "wave": wave_of, "ready": ready, "remaining": [n for n in plan["deps"] if n not in done]}
+
+
+@click.command()
+@click.argument("spec")
+@click.option("--exclude", default="", help="Comma-separated tasks to leave out of `ready` (running or failed)")
+def plan(spec: str, exclude: str):
+    """Machine-readable plan for SPEC (JSON): waves, deps, done, ready-to-start tasks, and lint results."""
+    excluded = {x.strip() for x in exclude.split(",") if x.strip()}
+    click.echo(json.dumps(_plan(Path.cwd(), spec, excluded), indent=2))
+
+
+@click.command()
+@click.argument("spec")
+@click.option("--json", "as_json", is_flag=True)
+def lint(spec: str, as_json: bool):
+    """Check SPEC's task plan: dependency cycles, verify-order cycles, reasonless dependencies, critical path.
+
+    Exits 1 if there is a cycle (the plan can't be executed as written).
+    """
+    result = _plan(Path.cwd(), spec, set())
+    if as_json:
+        click.echo(json.dumps({k: result[k] for k in ("cycles", "verifyCycles", "reasonless", "criticalPath", "waves")}, indent=2))
+    else:
+        click.echo(f"Plan lint for {result['spec']}:")
+        if result["cycles"]:
+            for cycle in result["cycles"]:
+                click.echo(f"  ✗ dependency cycle: {' -> '.join('Task ' + n for n in cycle)}")
+        else:
+            click.echo("  ✓ no dependency cycles")
+        for item in result["verifyCycles"]:
+            click.echo(f"  ✗ verify-order cycle: {item['message']}")
+        if not result["verifyCycles"] and not result["cycles"]:
+            click.echo("  ✓ no verify-order cycles found (checked Python imports of existing test files)")
+        if result["reasonless"]:
+            click.echo(f"  ⚠ {len(result['reasonless'])} dependenc{'y' if len(result['reasonless']) == 1 else 'ies'} without a stated reason (each one serializes work):")
+            for item in result["reasonless"][:25]:
+                hint = f"; shares {', '.join(item['sharedFiles'])}" if item["sharedFiles"] else "; no shared files"
+                click.echo(f"      Task {item['task']} -> Task {item['dependsOn']}{hint}")
+            if len(result["reasonless"]) > 25:
+                click.echo(f"      ... and {len(result['reasonless']) - 25} more (see --json)")
+            click.echo('      Add a reason in parentheses, e.g. "Task 3 (calls parse_config)", or drop the edge.'
+                       " Specs written before ck 0.4 have no reasons; review the edges on the critical path first.")
+        path = result["criticalPath"]
+        open_waves = sum(1 for wave in result["waves"] if any(n in result["remaining"] for n in wave))
+        if path:
+            click.echo(f"  ℹ critical path ({len(path)} open tasks): {' -> '.join(path)}; open waves: {open_waves}")
+    if result["cycles"] or result["verifyCycles"]:
+        sys.exit(1)
+
+
 @click.group()
 def worktree():
     """Create, claim, merge, and inspect per-task git worktrees.

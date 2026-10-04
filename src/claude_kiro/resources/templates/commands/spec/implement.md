@@ -9,36 +9,52 @@ Implement: $ARGUMENTS
 # Two Modes
 
 - **A task number** (for example `/spec:implement 3` or `/spec:implement auth 3`): implement that one task yourself, following the Implementation Guidelines below.
-- **A spec with no task number** (for example `/spec:implement auth`, `/spec:implement auth all`, `/spec:implement auth in parallel`): run the whole spec as the `spec-implement` workflow, wave by wave. That's the default for a spec. Running this command for a whole spec is my opt-in to the multi-agent workflow; don't ask me before each wave.
+- **A spec with no task number** (for example `/spec:implement auth`, `/spec:implement auth all`, `/spec:implement auth in parallel`): run the whole spec as the `spec-implement` workflow. Tasks start as soon as their dependencies merge. That's the default for a spec. Running this command for a whole spec is my opt-in to the multi-agent workflow; don't ask me before each wave.
 
-## Whole Spec: The Wave Workflow
+## Whole Spec: The Workflow
 
 1. **Resolve the spec** in `specs/`. If it only exists in `.claude/specs/`, tell me to run `ck migrate` and stop.
 2. **Check the setup.** If `.claude/workflows/spec-implement.js` or `.claude/workflows/spec-implement-brief.md` is missing, tell me to run `ck upgrade` and stop. Read `specs/ck.json`; if `"verify"` is empty, tell me, since the gate needs it.
-3. **Plan.** Run `ck waves <spec> --json`. Show me a short plan: the number of waves, tasks per wave, how many are already Done (they'll be skipped), and any warnings (for example, waves recomputed from Dependencies).
-4. **Choose the merge target:**
+3. **Lint the plan:** `ck lint <spec>`.
+   - **A dependency cycle or verify-order cycle:** don't launch. Show me the cycle and the suggested relink (for a verify-order cycle: make the task a foundation task with a smoke Verify, and have the test task verify the later task that its tests need). Offer to apply the relink in tasks.md; if I agree, apply it, re-run `ck lint`, and continue. A spec bug like this would otherwise halt the run hours in.
+   - **Dependencies without a stated reason:** list them. Each one serializes the run. Ask whether to drop the ones with no code, data, test, or shared-file reason before launching.
+   - **The critical path:** report it, with the number of open waves.
+4. **Plan.** Run `ck plan <spec> --json` and show me a short summary: the tasks remaining, how many are already Done (skipped), how many can start right away, and the critical-path length.
+5. **Choose the merge target:**
    - **Default: an integration branch.** Run `ck worktree integration <spec>`. It creates or reuses `.claude/worktrees/<spec>-integration` on branch `integrate/<spec>`, branched from the main checkout's current branch. Then set `into` = `integrate/<spec>` and `targetDir` = `<main checkout>/.claude/worktrees/<spec>-integration`. Task worktrees branch from it and every task merges into it, so the main branch is never touched mid-run. I fast-forward main at the end.
    - **If I asked to merge directly:** set `into` = the main checkout's current branch and `targetDir` = the main checkout. The main checkout must have no uncommitted changes to tracked files; if it has some, stop and tell me.
-5. **Launch** the Workflow tool with `scriptPath` set to the absolute path of `.claude/workflows/spec-implement.js` and `args` as a JSON object:
+6. **Launch** the Workflow tool (a fresh run, not `resumeFromRunId`) with `scriptPath` set to the absolute path of `.claude/workflows/spec-implement.js` and `args` as a JSON object:
    ```json
    {
      "spec": "<spec>",
      "root": "<absolute main checkout>",
      "into": "<target branch>",
      "targetDir": "<absolute checkout that has the target branch>",
-     "waves": "<waves from ck waves>",
-     "deps": "<deps from ck waves>",
-     "titles": "<titles from ck waves>",
-     "tracks": "<tracks from ck waves>",
+     "wave": "<wave from ck plan>",
+     "titles": "<titles from ck plan>",
+     "tracks": "<tracks from ck plan>",
      "maxRetries": 1,
      "onFailure": "continue",
-     "maxConcurrent": null
+     "maxConcurrent": null,
+     "fullGateEvery": 10
    }
    ```
-   By default a failed task doesn't stop the run: later tasks whose dependencies all merged keep running, tasks that depend on the failure are skipped and reported, and a red target branch always halts. Use `"onFailure": "halt"` if I asked to stop at the first failed wave. Set `maxConcurrent` (for example 4) if I said the test suite is memory-heavy.
-6. **Tell me it's running.** Each wave sets up worktrees, runs task agents in parallel (with one retry when a gate fails), merges each task as it finishes (one merge at a time), then runs `ck gate` on the target. I can watch with `/workflows`.
-7. **When it returns,** report per wave: tasks merged, tasks failed or skipped with their blockers, tests agents believe are wrong, and files touched outside their task. If it halted, say at which wave and why. Then give me the next step: fix the blockers (or answer the wrong-test questions), then run `/spec:implement <spec>` again. Done tasks are skipped and the integration worktree is reused, so a rerun picks up where it stopped.
-8. **Landing the integration branch:** once I'm happy (ideally once every task is Done and `ck gate <spec>` passes in the integration worktree), tell me the command to land it: `git merge --ff-only integrate/<spec>` from the main checkout. If main moved in the meantime, use `git merge integrate/<spec>` instead. Afterwards: `git worktree remove .claude/worktrees/<spec>-integration && git branch -d integrate/<spec>`. Don't run these yourself unless I ask.
+   - **onFailure:** by default a failed task doesn't stop the run. Tasks that don't depend on it keep starting, its dependents never start and are reported, and a red target branch always halts. Use `"onFailure": "halt"` if I asked to stop at the first failure.
+   - **maxConcurrent:** set it (for example 4) if I said the test suite is memory-heavy.
+7. **Tell me it's running:**
+   - Each task starts as soon as its own dependencies are merged; waves only group the progress display.
+   - After every task, a cheap planning step re-reads the plan from tasks.md on the target. If we fix tasks.md mid-run (for example, removing a spurious dependency, committed to the target branch), it takes effect at the next step, with no restart.
+   - Each merge is checked with `ck gate <spec> --task N` on the target. The full `ck gate <spec>` runs every `fullGateEvery` merges and once at the end.
+   - I can watch with `/workflows`.
+8. **Questions while it runs** are for you, the orchestrator. Task agents are told to ignore chat messages and stick to their task.
+9. **When it returns,** report:
+   - tasks merged, failed (with reasons and blockers), and not started (and why);
+   - tests agents believe are wrong, and files touched outside their task;
+   - the timing: total wall-clock, minutes per wave group, and the slowest tasks;
+   - if it halted or refused, the reason.
+   
+   Then give me the next step: fix the blockers (or answer the wrong-test questions), then run `/spec:implement <spec>` again. That is a fresh run: Done tasks are skipped and worktrees and the integration branch are reused. Don't use `resumeFromRunId`, because its cached planning steps would be stale.
+10. **Landing the integration branch:** once I'm happy (ideally once every task is Done and `ck gate <spec>` passes in the integration worktree), tell me the command to land it: `git merge --ff-only integrate/<spec>` from the main checkout. If main moved in the meantime, use `git merge integrate/<spec>` instead. Afterwards: `git worktree remove .claude/worktrees/<spec>-integration && git branch -d integrate/<spec>`. Don't run these yourself unless I ask.
 
 The rest of this file is the single-task guide, which every task agent in the workflow also follows (through `.claude/workflows/spec-implement-brief.md`).
 

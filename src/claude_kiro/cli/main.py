@@ -24,7 +24,7 @@ from ..paths import (
     spec_roots,
 )
 from .hooks import hook
-from .worktree import waves, worktree
+from .worktree import lint, plan, waves, worktree
 from .runner import HOOK_SETTINGS, configured_hooks, execute_hook, install_hook_settings
 
 
@@ -688,6 +688,8 @@ def _report_doctor_results(issues: list, warnings: list):
 cli.add_command(hook)
 cli.add_command(worktree)
 cli.add_command(waves)
+cli.add_command(plan)
+cli.add_command(lint)
 
 
 if __name__ == "__main__":

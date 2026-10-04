@@ -106,7 +106,12 @@ The hooks provide spec context and enforce the definition of done:
 2. **Plan:** `/spec:plan "feature"` - Discuss interactively, decide one question at a time, record decisions in `specs/<name>/PLAN.md`
 3. **Create specs:** `/spec:create <name>` - A workflow writes requirements, then design and an integration-first test plan in parallel, then test and impl task tracks in parallel, then adversarially reviews and revises them
 4. **Implement:** `/spec:implement task` - Test-track tasks write integration tests first; impl-track tasks make them pass. Done only when `ck gate` passes
-5. **Parallelize:** `/spec:implement <spec>` (no task number) runs the whole spec as a workflow, wave by wave: task agents in parallel worktrees, a retry when a gate fails, merges as each task finishes, `ck gate` after each wave, and a halt on red. By default tasks merge into an `integrate/<spec>` branch that you fast-forward into main when you're happy, and a failed task doesn't stop tasks that don't depend on it. `/spawn-worktree` covers a single wave or an ad-hoc batch
+5. **Parallelize:** `/spec:implement <spec>` (no task number) runs the whole spec as a workflow:
+   - It lints the plan first and refuses to launch on a cycle.
+   - Each task starts as soon as its own dependencies merge, in its own worktree, with a retry when a gate fails.
+   - Merges happen one at a time, each checked with `ck gate --task`, plus a full gate every N merges and at the end.
+   - The plan is re-read from tasks.md after every task, so relinks apply without a restart.
+   - It reports wall-clock time per task and per wave. By default tasks merge into an `integrate/<spec>` branch that you fast-forward into main when you're happy, and a failed task doesn't stop tasks that don't depend on it. `/spawn-worktree` covers a single wave or an ad-hoc batch
 6. **Track progress:** TodoWrite tracks implementation automatically
 7. **Stay aligned:** Hooks provide context and maintain spec-driven discipline
 
@@ -119,6 +124,8 @@ The hooks provide spec context and enforce the definition of done:
 - `ck migrate [--dry-run]` - Move specs from `.claude/specs/` to `specs/` (tracked files keep their history)
 - `ck gate <spec> [--task N]` - Run the verification gate; exits 1 on failure
 - `ck waves <spec> [--json]` - Show the wave plan (Parallel Groups, or computed from Dependencies)
+- `ck lint <spec>` - Check the task plan: dependency cycles, verify-order cycles (an impl task whose verifying tests need code from a task that depends on it), dependencies without a stated reason, critical path. Exits 1 on a cycle
+- `ck plan <spec> --json [--exclude N,M]` - Machine-readable plan with the tasks ready to start now; the workflow re-reads it after every task
 - `ck worktree create|claim|release|merge|integration|status <spec> ...` - Per-task worktrees for parallel implementation (`.claude/worktrees/<spec>-task-N`, branch `feat/<spec>-task-N`); merges go one at a time and stop at the first conflict
 - `ck upgrade [--dry-run] [--no-migrate]` - Update a project set up by an older ck (see [UPGRADING.md](UPGRADING.md))
 - `ck setup --diff` - Show how your global `~/.claude` files differ from this version, without writing

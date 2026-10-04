@@ -211,6 +211,9 @@ What already exists (paths) and what must be added: fixtures, factories, temp DB
 | ID | Criterion | Level | Scenario (Given / When / Then) | Real boundary exercised | Test file |
 IDs TC-1, TC-2, ... Every acceptance criterion has at least one case. Error criteria get their own cases.
 
+## Harness Contract
+Interfaces the test harness relies on that the implementation must provide: factories, keyword arguments, entry points, event or file formats. Give exact names and signatures, so the implementation tasks can honor them.
+
 ## Critical Paths
 The end-to-end flows that must work, as numbered steps, each mapped to TC IDs.
 
@@ -244,7 +247,7 @@ Return the structured result after writing the file.`, { label: 'write test-plan
 **Acceptance:**
 - [ ] [Concrete check derived from the referenced criteria]
 
-**Dependencies:** None | Task <ID>, Task <ID>
+**Dependencies:** None | Task <ID> (reason), Task <ID> (reason)
 **Complexity:** Low | Medium | High
 `
 
@@ -263,7 +266,8 @@ Rules:
 - Every acceptance criterion in requirements.md is implemented by at least one task (list it under **Requirements:**).
 - **Files:** lists only source files (and unit tests for pure helpers you introduce). Never list files under the project's test directories that the test plan owns.
 - **Verify:** the command(s) that prove this task works, e.g. the relevant test files from ${TPL}'s Commands section. Leave it empty if only the project-wide suite applies.
-- Small tasks, one focused change set each. Order by dependency. Two tasks that could run in parallel must not edit the same file.
+- Small tasks, one focused change set each. Two tasks that could run in parallel must not edit the same file.
+- Add a dependency only when this task calls code, reads data, or edits a file that the other task creates. Every dependency carries a one-line reason in parentheses, e.g. "Task I3 (calls parse_config)". Every dependency serializes the run, so don't add order-only edges.
 - No task references a component absent from design.md.
 
 Write the draft file, then return the structured result.`, { label: 'write implementation track', phase: 'Task Tracks', schema: WRITE_RESULT }),
@@ -309,8 +313,12 @@ Inputs: ${DRAFT_IMPL} (implementation track, IDs I1..), ${DRAFT_TEST} (test trac
 2. Link the tracks by requirement overlap:
    - On each impl task add \`**Verified by:** Task N, Task M\`: the test tasks whose **Requirements:** overlap its own.
    - On each test task add \`**Verifies:** Task N, Task M\`: the impl tasks it verifies.
-   - Add each impl task's verifying test tasks to its **Dependencies:** (tests are written first and are the task's oracle).
+   - Add each impl task's verifying test tasks to its **Dependencies:** with the reason "(its tests are the oracle)". Tests are written first.
+   - **Verify-order rule:** a test task may only verify an impl task whose code the tests can run without help from later tasks. If test task T exercises a path through code owned by impl task Y (for example a runner or CLI entry point), and Y depends on impl task X, then T must verify Y, not X. X becomes a foundation task whose own **Verify:** is a smoke command, and its criteria are verified at Y. Otherwise X's gate can never pass.
    - Every impl task that implements a requirement criterion has at least one verifying test task; every test task verifies at least one impl task. If a gap exists, add the missing task, consistent with ${TPL}.
+   - Give every interface in ${TPL}'s Harness Contract an owning impl task, and note it in that task's Description.
+   - Reference fields (**Dependencies:**, **Verified by:**, **Verifies:**) hold task references with their reasons in parentheses, nothing else. Put explanatory notes on their own line: tooling reads every "Task N" in those fields.
+   - Every dependency keeps a one-line reason in parentheses. Drop any dependency that has no code, data, test, or shared-file reason.
 3. Write ${TSK}:
 
 # Implementation Tasks: [Feature Name]
@@ -329,6 +337,7 @@ A Mermaid graph TD of task dependencies, with test tasks visually distinct (e.g.
 Waves for /spawn-worktree, computed from Dependencies. Typically: Wave 1 = test infrastructure; Wave 2 = all test tasks plus impl tasks with no verifying tests (foundations); Wave 3+ = impl tasks whose tests are done. Tasks in one wave must not edit the same files.
 
 4. Delete ${DRAFT_IMPL} and ${DRAFT_TEST}.
+5. Run \`ck lint ${A.feature}\` from ${ROOT}. Fix every dependency cycle and every verify-order cycle it reports, and add a reason to every dependency it lists as reasonless (or remove the dependency). Re-run it until it reports no cycles.
 
 Return the structured result.`, { label: 'link tracks into tasks.md', phase: 'Link', schema: WRITE_RESULT })
 
@@ -416,6 +425,8 @@ const LENSES = [
 - Are dependencies correct and acyclic? Is any task in a parallel wave editing the same file as another task in that wave?
 - Does each task name its files and a **Verify:** command, and is it small enough to finish in one sitting?
 - Is every impl task linked to the test tasks that verify it (**Verified by:**), with those test tasks in its Dependencies? Do test tasks depend only on test infrastructure, never on impl tasks?
+- Verify-order: can each impl task's verifying tests pass when only that task and its dependencies exist? A test that drives a runner or entry point built by a LATER task (one that depends on this task) makes this task's gate unpassable. Flag it, with the fix: make this task a foundation task, and have the test task verify the later task.
+- Dependencies: does each dependency have a reason (calls its code, reads its data, its tests are the oracle, a shared file)? Every dependency serializes the run, so flag edges with no such reason and propose removing them. Run \`ck lint ${A.feature}\` from ${ROOT} and include what it reports.
 - Does any impl task list a test file owned by a test task (the guard will block it from weakening those)?
 - Format: "### Task N: Title" headers, "- \`path\` - note" file lines, and **Status:** / **Track:** / **Verify:** / **Verified by:** / **Verifies:** fields (tooling parses these).
 - Pretend you are implementing Task 1 and the riskiest task right now. Where would you get stuck or have to guess?`,
