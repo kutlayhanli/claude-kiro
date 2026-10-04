@@ -7,6 +7,9 @@
 
 What changes:
 - **`/spec:implement <spec>`** with no task number now runs the whole spec as a workflow, wave by wave. It uses two new managed files: `.claude/workflows/spec-implement.js` and `spec-implement-brief.md`. `/spec:implement <N>` still runs one task.
+  - Tasks merge into **`integrate/<spec>`**, in its own worktree, not into main. Land it when you're happy: `git merge --ff-only integrate/<spec>`. To merge straight into the checked-out branch instead, ask for it when you run the command.
+  - A failed task doesn't stop the run. Tasks whose dependencies all merged keep going, and tasks that depend on the failure are skipped and reported. A red integration branch always halts. Ask for "halt on failure" to stop at the first failed wave.
+  - Rerunning `/spec:implement <spec>` resumes: Done tasks are skipped and the integration worktree is reused.
 - **The gate no longer requires the full suite mid-spec.** While a test-first spec is in progress, `ck gate` runs `verify_always`, a test-collection check, and only the test suites whose tasks are all Done. The full `verify` suite runs once every task is Done. Set `"verify_mode": "full"` in `specs/ck.json` to keep the old behavior. If you wrote a custom script to work around this (like `verify_green.py`), you can go back to plain `"verify": ["uv run pytest -q"]` and move lint into `"verify_always": ["uv run ruff check ."]`.
 - **Test collection is checked** (derived from a pytest `verify` command, or set with `"collect"`). A test file that can't be imported now fails the gate.
 - **Hooks:**

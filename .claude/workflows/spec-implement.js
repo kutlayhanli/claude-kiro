@@ -8,13 +8,13 @@ export const meta = {
 // {
 //   spec: 'market-sim',                    // spec directory name under specs/
 //   root: '/abs/main/checkout',            // where `ck worktree` puts .claude/worktrees/
-//   into: 'main',                          // branch task work is merged into
-//   targetDir: '/abs/checkout/of/into',    // checkout that has `into` checked out (root, or the integration worktree)
+//   into: 'integrate/market-sim',          // branch task work is merged into (default flow: the integration branch)
+//   targetDir: '/abs/checkout/of/into',    // checkout that has `into` checked out (integration worktree, or root)
 //   waves: [['1'], ['2', '3'], ...],       // from `ck waves --json`
 //   deps: { '3': ['1'], ... },             // from `ck waves --json`
 //   titles: { '1': '...' }, tracks: { '1': 'test' },
 //   maxRetries: 1,                         // extra attempts per task after a failed gate
-//   onFailure: 'halt' | 'continue',        // continue = keep running tasks whose dependencies all merged
+//   onFailure: 'continue' | 'halt',        // default continue: keep running tasks whose dependencies all merged; a red target always halts
 //   maxConcurrent: null,                   // cap on task agents at once (memory-heavy test suites)
 //   startWave: 1,
 // }
@@ -28,7 +28,7 @@ const DEPS = A.deps || {}
 const TITLES = A.titles || {}
 const TRACKS = A.tracks || {}
 const MAX_RETRIES = Number.isInteger(A.maxRetries) ? A.maxRetries : 1
-const CONTINUE = A.onFailure === 'continue'
+const CONTINUE = A.onFailure !== 'halt'
 const START = Math.max(1, A.startWave || 1)
 const BRIEF = `${ROOT}/.claude/workflows/spec-implement-brief.md`
 

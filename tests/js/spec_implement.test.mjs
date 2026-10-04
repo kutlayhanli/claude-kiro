@@ -84,9 +84,9 @@ await test('merges start as tasks finish, before slower tasks in the wave are do
   assert.ok(merge2 < s.calls.indexOf('task 4 end'), 'merge 2 began while task 4 was still running')
 })
 
-await test('halt (default): a task failing all attempts stops before the next wave', async () => {
+await test('halt: a task failing all attempts stops before the next wave', async () => {
   const s = stub({ done: ['1'], taskFail: { 3: 99 } })
-  const { result } = await runWorkflow(SCRIPT, { agent: s.agent, args: { ...baseArgs, maxRetries: 1 } })
+  const { result } = await runWorkflow(SCRIPT, { agent: s.agent, args: { ...baseArgs, maxRetries: 1, onFailure: 'halt' } })
   assert.equal(result.halted, true)
   assert.equal(result.atWave, 2)
   assert.deepEqual(result.failedTasks, ['3'])
@@ -94,8 +94,8 @@ await test('halt (default): a task failing all attempts stops before the next wa
   assert.ok(s.calls.includes('merge 2') && s.calls.includes('merge 4'), 'finished tasks still merge')
 })
 
-await test('continue: tasks depending on a failed task are skipped, others run', async () => {
-  const args = { ...baseArgs, waves: [['1'], ['2', '3'], ['4', '5']], deps: { 1: [], 2: ['1'], 3: ['1'], 4: ['2'], 5: ['3'] }, onFailure: 'continue', maxRetries: 0 }
+await test('continue (default): tasks depending on a failed task are skipped, others run', async () => {
+  const args = { ...baseArgs, waves: [['1'], ['2', '3'], ['4', '5']], deps: { 1: [], 2: ['1'], 3: ['1'], 4: ['2'], 5: ['3'] }, maxRetries: 0 }
   const s = stub({ done: ['1'], taskFail: { 3: 99 } })
   const { result, logs } = await runWorkflow(SCRIPT, { agent: s.agent, args })
   assert.equal(result.halted, false)
@@ -113,11 +113,13 @@ await test('red target after a wave: one fix attempt, then halt even in continue
   assert.ok(s.calls.includes('fix wave 2') && s.calls.includes('re-verify wave 2'))
 })
 
-await test('busy worktree is reported and not run', async () => {
+await test('busy worktree is reported and not run; the run continues by default', async () => {
   const s = stub({ done: ['1'], busy: ['4'] })
   const { result } = await runWorkflow(SCRIPT, { agent: s.agent, args: baseArgs })
   assert.ok(!s.calls.includes('task 4'))
-  assert.equal(result.halted, true)
+  assert.equal(result.halted, false)
+  assert.ok(s.calls.includes('task 5'), 'task 5 does not depend on 4')
+  assert.deepEqual(result.failedTasks, ['4'])
   assert.deepEqual(result.report.find(r => r.wave === 2).busy, [{ task: '4', detail: 'claimed' }])
 })
 

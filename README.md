@@ -106,7 +106,7 @@ The hooks provide spec context and enforce the definition of done:
 2. **Plan:** `/spec:plan "feature"` - Discuss interactively, decide one question at a time, record decisions in `specs/<name>/PLAN.md`
 3. **Create specs:** `/spec:create <name>` - A workflow writes requirements, then design and an integration-first test plan in parallel, then test and impl task tracks in parallel, then adversarially reviews and revises them
 4. **Implement:** `/spec:implement task` - Test-track tasks write integration tests first; impl-track tasks make them pass. Done only when `ck gate` passes
-5. **Parallelize:** `/spec:implement <spec>` (no task number) runs the whole spec as a workflow, wave by wave: task agents in parallel worktrees, a retry when a gate fails, merges as each task finishes, `ck gate` after each wave, and a halt on red. `/spawn-worktree` covers a single wave or an ad-hoc batch
+5. **Parallelize:** `/spec:implement <spec>` (no task number) runs the whole spec as a workflow, wave by wave: task agents in parallel worktrees, a retry when a gate fails, merges as each task finishes, `ck gate` after each wave, and a halt on red. By default tasks merge into an `integrate/<spec>` branch that you fast-forward into main when you're happy, and a failed task doesn't stop tasks that don't depend on it. `/spawn-worktree` covers a single wave or an ad-hoc batch
 6. **Track progress:** TodoWrite tracks implementation automatically
 7. **Stay aligned:** Hooks provide context and maintain spec-driven discipline
 
