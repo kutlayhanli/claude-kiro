@@ -33,8 +33,8 @@ Claude Kiro `ck` provides:
 ## Quick Start
 
 ```bash
-# Install Claude Kiro globally
-uv tool install claude-kiro
+# Install Claude Kiro globally (this fork; PyPI only has the upstream 0.1.0)
+uv tool install --force "git+https://github.com/kutlayhanli/claude-kiro@feat/specs-dir-and-workflow-create"
 
 # Set up global config (once per machine)
 ck setup
@@ -49,21 +49,55 @@ ck doctor
 
 That's it! Your project is now configured for spec-driven development.
 
+### Updating an existing setup
+
+Already have claude-kiro on this machine, or projects set up by an older `ck`? Use the same install command to update `ck`, then upgrade each project:
+
+```bash
+# 1. Update ck (once per machine; reinstalls the latest commit of the fork)
+uv tool install --force "git+https://github.com/kutlayhanli/claude-kiro@feat/specs-dir-and-workflow-create"
+
+# 2. Check the global files (~/.claude) without overwriting your customizations
+ck setup --diff
+
+# 3. Upgrade each project (run from that project's directory)
+cd your-project
+ck upgrade --dry-run   # shows what would change, writes nothing
+ck upgrade             # refreshes commands/workflows, merges hooks, moves .claude/specs -> specs/
+ck doctor
+
+# 4. Commit the refreshed files, then restart Claude Code sessions in that project
+git add .claude/commands .claude/workflows .claude/output-styles .claude/ck-manifest.json specs
+git commit -m "Upgrade claude-kiro"
+```
+
+- Don't update `ck` while a `/spec:implement` workflow is running in some project: its agents call `ck`.
+- `ck upgrade` never touches `.claude/CLAUDE.md` or your spec content, and it refuses to let an older `ck` downgrade files written by a newer one.
+- Other clones of the same repo: after `git pull`, run `ck upgrade` once in each. Hooks live in `.claude/settings.local.json`, which is local to each clone.
+- Avoid `ck setup --force` if you've customized `~/.claude/CLAUDE.md`: it overwrites the file.
+
+Details, version-by-version changes, and rollback are in [UPGRADING.md](UPGRADING.md).
+
 ## Installation
 
-> **Already using claude-kiro 0.1?** Follow [UPGRADING.md](UPGRADING.md): one step per machine, then `ck upgrade` in each repository.
+> **Already using claude-kiro?** See [Updating an existing setup](#updating-an-existing-setup): reinstall once per machine, then run `ck upgrade` in each repository.
 
 ### Install Claude Kiro (Global Tool)
 
-```bash
-# Install from PyPI
-uv tool install claude-kiro
+The `claude-kiro` package on PyPI is the upstream 0.1.0, which lacks everything described here (specs in `specs/`, the workflows, `ck gate`, `ck worktree`, and the rest). Install this fork from GitHub:
 
-# Or install from source in editable mode
-git clone https://github.com/angelsen/claude-kiro.git
+```bash
+# Install (or update: the same command reinstalls the latest commit)
+uv tool install --force "git+https://github.com/kutlayhanli/claude-kiro@feat/specs-dir-and-workflow-create"
+
+# Or install from a local clone in editable mode (follows whatever branch the clone has checked out)
+git clone https://github.com/kutlayhanli/claude-kiro.git
 cd claude-kiro
-uv tool install . --editable
+git checkout feat/specs-dir-and-workflow-create
+uv tool install --force . --editable
 ```
+
+Check it: `ck --help` should list `gate`, `lint`, `plan`, `upgrade`, `waves`, and `worktree`. The work lives on the `feat/specs-dir-and-workflow-create` branch until it's merged; after that, install from `@master` instead.
 
 This installs the `ck` command globally, which provides:
 - `ck setup` - Install global config to ~/.claude/ (once per machine)

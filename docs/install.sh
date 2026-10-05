@@ -5,6 +5,9 @@
 
 set -e  # Exit on error
 
+# This fork is installed from GitHub (PyPI only has the upstream 0.1.0).
+CK_SOURCE="${CK_SOURCE:-git+https://github.com/kutlayhanli/claude-kiro@feat/specs-dir-and-workflow-create}"
+
 # Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -29,24 +32,24 @@ if ! command -v ck &> /dev/null; then
     if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
         echo -e "${YELLOW}Installing Claude Kiro...${NC}"
         if command -v uv &> /dev/null; then
-            uv tool install claude-kiro
+            uv tool install --force "$CK_SOURCE"
             if [ $? -eq 0 ]; then
                 echo -e "${GREEN}✓ Claude Kiro installed successfully!${NC}"
             else
                 echo -e "${RED}Failed to install. Try manually:${NC}"
-                echo "  uv tool install claude-kiro"
+                echo "  uv tool install --force \"$CK_SOURCE\""
                 exit 1
             fi
         else
             echo -e "${RED}uv is not installed. Please install uv first:${NC}"
             echo "  curl -LsSf https://astral.sh/uv/install.sh | sh"
             echo ""
-            echo "Then run: uv tool install claude-kiro"
+            echo "Then run: uv tool install --force \"$CK_SOURCE\""
             exit 1
         fi
     else
         echo -e "${RED}Claude Kiro is required. Install it with:${NC}"
-        echo "  uv tool install claude-kiro"
+        echo "  uv tool install --force \"$CK_SOURCE\""
         exit 1
     fi
     echo ""
