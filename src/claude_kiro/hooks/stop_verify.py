@@ -40,6 +40,10 @@ def _candidates(project_dir: Path, tracker: SessionTracker) -> Dict[Path, List[s
             touched_by_bash = tasks_md.stat().st_mtime >= tracker.session_start
         except OSError:
             continue
+        # An mtime alone is not an edit: a fresh checkout or worktree rewrites every
+        # tasks.md. Where git can tell, require a real change against HEAD.
+        if touched_by_bash and git_utils.is_modified(project_dir, tasks_md) is False:
+            touched_by_bash = False
         if spec_dir.resolve() in edited or touched_by_bash:
             specs.setdefault(spec_dir, set()).add("*")
 

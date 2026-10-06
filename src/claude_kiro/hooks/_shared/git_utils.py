@@ -46,6 +46,15 @@ def changed_files(project_dir: Path, base: str) -> List[Tuple[str, str]]:
     return sorted((status, path) for path, status in changes.items())
 
 
+def is_modified(project_dir: Path, path: Path) -> Optional[bool]:
+    """Whether `path` differs from HEAD (modified, staged, or untracked).
+
+    None when git cannot tell (not a repo), so callers can fall back to mtime.
+    """
+    out = _git(project_dir, "status", "--porcelain", "--", str(path))
+    return None if out is None else bool(out.strip())
+
+
 def show(project_dir: Path, ref: str, rel_path: str) -> Optional[str]:
     """File content at `ref`, or None if it did not exist there."""
     return _git(project_dir, "show", f"{ref}:{rel_path}")
