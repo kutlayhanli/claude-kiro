@@ -123,6 +123,8 @@ def test_plan_ready_respects_done_deps_and_exclude(tmp_path):
     )
     plan = json.loads(ck(tmp_path, "plan", "sim", "--exclude", "3").output)
     assert plan["ready"] == ["2"]
+    # The /spec:implement docs and the workflow's plan step pass --json; it must be accepted.
+    assert json.loads(ck(tmp_path, "plan", "sim", "--json", "--exclude", "3").output) == plan
     assert plan["wave"] == {"1": 1, "2": 2, "3": 2, "4": 3}
     assert plan["criticalPath"] == ["2", "4"]
     assert plan["remaining"] == ["2", "3", "4"]

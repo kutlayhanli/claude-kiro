@@ -106,7 +106,8 @@ def _plan(project_dir: Path, spec: str, exclude: set) -> dict:
 @click.command()
 @click.argument("spec")
 @click.option("--exclude", default="", help="Comma-separated tasks to leave out of `ready` (running or failed)")
-def plan(spec: str, exclude: str):
+@click.option("--json", "as_json", is_flag=True, hidden=True)  # output is always JSON; accepted because the docs and workflow pass it
+def plan(spec: str, exclude: str, as_json: bool):
     """Machine-readable plan for SPEC (JSON): waves, deps, done, ready-to-start tasks, and lint results."""
     excluded = {x.strip() for x in exclude.split(",") if x.strip()}
     click.echo(json.dumps(_plan(Path.cwd(), spec, excluded), indent=2))
