@@ -11,7 +11,7 @@ const baseArgs = { spec: 'demo', root: '/repo', into: 'integrate/demo', targetDi
 
 // A fake project: `ck plan` semantics over deps/done, task durations, failures, timestamps.
 function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null }) {
-  const state = { deps: { ...deps }, done: new Set(done), events: [], prompts: {}, attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0 }
+  const state = { deps: { ...deps }, done: new Set(done), events: [], prompts: {}, opts: {}, attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0 }
   let clock = Date.parse('2026-10-04T10:00:00Z')
   const stamp = () => new Date((clock += 60000)).toISOString().replace('.000', '')
   const ready = exclude =>
@@ -20,6 +20,7 @@ function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFir
     const l = opts.label
     state.events.push(l)
     state.prompts[l] = prompt
+    state.opts[l] = opts
     if (l.startsWith('plan')) {
       state.plans++
       if (relink && state.plans === relink.atPlan) Object.assign(state.deps, relink.deps)
@@ -192,4 +193,37 @@ await test('wall-clock timing per task and per wave group', async () => {
   assert.ok(t1.agentMinutes > 0 && t1.toMergedMinutes >= t1.agentMinutes)
   assert.deepEqual(result.timing.phases.map(ph => ph.group).sort(), ['Wave 1', 'Wave 2'])
   assert.ok(result.timing.minutes > 0)
+})
+
+await test('model and effort: unset means task agents inherit the session', async () => {
+  const p = project({ deps: { 1: [] } })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: baseArgs })
+  const o = p.state.opts['task 1']
+  assert.equal('model' in o, false)
+  assert.equal('effort' in o, false)
+  assert.deepEqual(result.taskAgents, { model: 'inherited', effort: 'inherited' })
+})
+
+await test('model and effort: applied to task, retry and fix agents only', async () => {
+  const p = project({ deps: { 1: [] }, failUntil: { 1: 1 }, checkRed: ['1'] })
+  const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, model: 'sonnet', effort: 'medium' } })
+  for (const l of ['task 1', 'task 1 retry 1', 'fix 1 (after merging Task 1)']) {
+    assert.equal(p.state.opts[l].model, 'sonnet', l)
+    assert.equal(p.state.opts[l].effort, 'medium', l)
+  }
+  for (const l of ['plan 1', 'merge 1']) {
+    assert.equal('model' in p.state.opts[l], false, l)
+    assert.equal(p.state.opts[l].effort, 'low', l)
+  }
+  assert.equal('model' in p.state.opts['re-check 1'], false)
+  assert.deepEqual(result.taskAgents, { model: 'sonnet', effort: 'medium' })
+  assert.ok(logs.some(m => m.includes('model sonnet, effort medium')))
+})
+
+await test('model and effort: unknown values are refused before any agent runs', async () => {
+  for (const bad of [{ effort: 'fast' }, { model: 'gpt-5' }]) {
+    const p = project({ deps: { 1: [] } })
+    await assert.rejects(runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, ...bad } }), /unknown (effort|model)/)
+    assert.equal(p.state.events.length, 0)
+  }
 })

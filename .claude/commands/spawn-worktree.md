@@ -1,7 +1,7 @@
 ---
 description: Run parallel implementation tasks using git worktrees for filesystem isolation
-argument-hint: [task-specification-or-spec-directory]
-allowed-tools: Read, Write, Edit, Grep, Glob, Bash, Agent, AskUserQuestion
+argument-hint: [task-specification-or-spec-directory] [--model sonnet|opus|haiku|fable] [--effort low|medium|high|xhigh|max]
+allowed-tools: Read, Write, Edit, Grep, Glob, Bash, Agent, AskUserQuestion, Workflow
 ---
 
 Run parallel implementation batch: $ARGUMENTS
@@ -71,6 +71,12 @@ For each task, spawn an agent with `run_in_background: true`:
   "run_in_background": true
 }
 ```
+
+**Model and effort:** by default, omit both so the agents inherit this session's model and effort. If I ask for them (`--model sonnet --effort medium`, or in words), follow the Model and Effort rules in `/spec:implement`: pass the family alias (`sonnet`, `opus`, `haiku`, `fable`), which resolves to that family's latest model, and an effort of `low` to `max`.
+- **Model only:** add `"model": "<alias>"` to each Agent call above.
+- **Effort (with or without a model):** the Agent tool can't set effort, so launch the wave as one Workflow call instead of separate Agent calls: an inline script that runs the same per-task prompts in `parallel()`, each `agent(prompt, { label: 'task <N>', model, effort })`, omitting whichever I didn't give. The worktrees are already created, so don't pass `isolation`. Running this command with an effort is my opt-in to that workflow.
+
+Name the model and effort in the Phase 1 plan you show me (or "inherited").
 
 **Important agent prompt rules:**
 - Include the FULL worktree path so the agent knows where to operate

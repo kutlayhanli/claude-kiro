@@ -16,6 +16,9 @@ export const meta = {
 //   onFailure: 'continue' | 'halt',        // default continue: other ready tasks keep starting; a red target always halts
 //   maxConcurrent: null,                   // cap on task agents at once (memory-heavy test suites)
 //   fullGateEvery: 10,                     // run the full `ck gate <spec>` every N merges (0 = only at the end)
+//   model: null,                           // task, retry and fix agents: 'sonnet' | 'opus' | 'haiku' | 'fable' (latest of that
+//                                          //   family) or a full model ID; null = inherit the session model
+//   effort: null,                          // same agents: 'low' | 'medium' | 'high' | 'xhigh' | 'max'; null = inherit
 // }
 //
 // Scheduling is driven by the plan in tasks.md on the target branch, re-read
@@ -39,6 +42,16 @@ const FULL_EVERY = Number.isInteger(A.fullGateEvery) ? A.fullGateEvery : 10
 const BRIEF = `${ROOT}/.claude/workflows/spec-implement-brief.md`
 
 if (!SPEC || !ROOT) throw new Error('spec-implement needs args.spec and args.root')
+
+// Model and effort for the agents that write code (task, retry, fix). Unset means
+// inherit the session's; planning and merge steps keep their own low effort.
+const MODEL = A.model || null
+const EFFORT = A.effort || null
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+if (MODEL && !/^(sonnet|opus|haiku|fable)$|^claude-/.test(MODEL)) throw new Error(`spec-implement: unknown model "${MODEL}" (use sonnet, opus, haiku, fable, or a claude-* ID)`)
+if (EFFORT && !EFFORTS.includes(EFFORT)) throw new Error(`spec-implement: unknown effort "${EFFORT}" (use ${EFFORTS.join(', ')})`)
+const IMPL = { ...(MODEL ? { model: MODEL } : {}), ...(EFFORT ? { effort: EFFORT } : {}) }
+if (MODEL || EFFORT) log(`Task agents: model ${MODEL || 'inherited'}, effort ${EFFORT || 'inherited'}`)
 
 const WT = n => `${ROOT}/.claude/worktrees/${SPEC}-task-${n}`
 const BR = n => `feat/${SPEC}-task-${n}`
@@ -199,7 +212,7 @@ async function plan() {
 
 async function fixAndRecheck(what, failure, n) {
   fixCount++
-  const fix = await agent(fixPrompt(fixCount, what, failure), { label: `fix ${fixCount} (${what})`, phase: n ? phaseOf(n) : 'Final gate', schema: VERIFY })
+  const fix = await agent(fixPrompt(fixCount, what, failure), { label: `fix ${fixCount} (${what})`, phase: n ? phaseOf(n) : 'Final gate', schema: VERIFY, ...IMPL })
   const recheck = await agent(recheckPrompt(n), { label: `re-check ${fixCount}`, phase: n ? phaseOf(n) : 'Final gate', schema: VERIFY })
   return { fix, recheck, green: !!(recheck && recheck.green) }
 }
@@ -240,12 +253,12 @@ function enqueueMerge(n) {
 async function runTask(n) {
   const rec = { task: n, wave: waveOf(n), title: TITLES[n], attempts: 0, ok: false }
   try {
-    let r = await agent(taskPrompt(n), { label: label(n), phase: phaseOf(n), schema: RESULT })
+    let r = await agent(taskPrompt(n), { label: label(n), phase: phaseOf(n), schema: RESULT, ...IMPL })
     rec.attempts = 1
     rec.startedAt = r && r.startedAt
     while (!ok(r) && rec.attempts <= MAX_RETRIES && !(r && r.blocker && /worktree busy/i.test(r.blocker))) {
       log(`Task ${n}: ${r && !(r.commits || '').trim() ? 'no commits' : 'gate not passed'}, retry ${rec.attempts}/${MAX_RETRIES}`)
-      r = await agent(retryPrompt(n, r, rec.attempts), { label: `${label(n)} retry ${rec.attempts}`, phase: phaseOf(n), schema: RESULT })
+      r = await agent(retryPrompt(n, r, rec.attempts), { label: `${label(n)} retry ${rec.attempts}`, phase: phaseOf(n), schema: RESULT, ...IMPL })
       rec.attempts++
       rec.startedAt = rec.startedAt || (r && r.startedAt)
     }
@@ -392,6 +405,7 @@ return {
   halted: redTarget || (!!stopReason && notStarted.length > 0),
   reason: stopReason,
   into: INTO,
+  taskAgents: { model: MODEL || 'inherited', effort: EFFORT || 'inherited' },
   targetGreen: !redTarget,
   merged,
   failed: [...failed.entries()].map(([task, reason]) => ({ task, reason })),

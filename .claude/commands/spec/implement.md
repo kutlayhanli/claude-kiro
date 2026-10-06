@@ -1,6 +1,6 @@
 ---
 description: Implement a spec task, or a whole spec wave by wave as a workflow
-argument-hint: [spec-name | task-number]
+argument-hint: [spec-name | task-number] [--model sonnet|opus|haiku|fable] [--effort low|medium|high|xhigh|max]
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash, TodoWrite, Workflow
 ---
 
@@ -10,6 +10,19 @@ Implement: $ARGUMENTS
 
 - **A task number** (for example `/spec:implement 3` or `/spec:implement auth 3`): implement that one task yourself, following the Implementation Guidelines below.
 - **A spec with no task number** (for example `/spec:implement auth`, `/spec:implement auth all`, `/spec:implement auth in parallel`): run the whole spec as the `spec-implement` workflow. Tasks start as soon as their dependencies merge. That's the default for a spec. Running this command for a whole spec is my opt-in to the multi-agent workflow; don't ask me before each wave.
+
+## Model and Effort
+
+By default, implementation inherits this session's model and effort. Pass nothing and don't pick one for me.
+
+If I ask for a model or effort (`--model sonnet --effort medium`, or in words: "with sonnet at medium effort"), use it for the agents that write code: task agents, their retries, and fix attempts.
+- **Model:** pass the family alias, `sonnet`, `opus`, `haiku`, or `fable`. An alias always resolves to the latest model in that family, so "sonnet" or "the latest sonnet" means `sonnet`. Pass a full ID such as `claude-sonnet-5` only if I name a specific older version.
+- **Effort:** one of `low`, `medium`, `high`, `xhigh`, `max`.
+- If I give only one of the two, the other stays inherited. If a value isn't one of these, ask me rather than guess.
+
+How each mode applies it:
+- **Whole spec:** set `model` and `effort` in the workflow args (step 6). Planning and merge steps keep their own low effort.
+- **One task:** you can't change your own model mid-session, so when I ask for a model or effort, don't implement the task yourself. Launch the Workflow tool with an inline script that runs one `agent()` with `{ model, effort }` (omit whichever I didn't give), and a prompt to implement task N of the spec in the current checkout, following `.claude/commands/spec/implement.md` from "Implementation Guidelines" on. Then relay its Output section to me. With neither given, implement the task yourself as usual.
 
 ## Whole Spec: The Workflow
 
@@ -36,9 +49,12 @@ Implement: $ARGUMENTS
      "maxRetries": 1,
      "onFailure": "continue",
      "maxConcurrent": null,
-     "fullGateEvery": 10
+     "fullGateEvery": 10,
+     "model": null,
+     "effort": null
    }
    ```
+   - **model / effort:** leave them `null` (inherit this session's) unless I asked for one; see Model and Effort above.
    - **onFailure:** by default a failed task doesn't stop the run. Tasks that don't depend on it keep starting, its dependents never start and are reported, and a red target branch always halts. Use `"onFailure": "halt"` if I asked to stop at the first failure.
    - **maxConcurrent:** set it (for example 4) if I said the test suite is memory-heavy.
 7. **Tell me it's running:**

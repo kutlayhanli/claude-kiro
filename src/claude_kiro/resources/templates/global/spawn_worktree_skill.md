@@ -84,6 +84,8 @@ For each task, spawn an agent with:
 }
 ```
 
+**Model and effort:** omit both by default so agents inherit the session's. If the user asks for them, pass the family alias (`sonnet`, `opus`, `haiku`, `fable`; it resolves to that family's latest model) as `"model"`. The Agent tool can't set effort, so if an effort is asked for, launch the batch as one Workflow call whose inline script runs each task prompt in `parallel()` with `agent(prompt, { model, effort })`.
+
 ### Phase 4: Monitor and Wait
 
 1. Track spawned agents by description
