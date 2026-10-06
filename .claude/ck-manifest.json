@@ -8,7 +8,7 @@
     ".claude/commands/spec/review.md": "5e785fd04e8f3920",
     ".claude/commands/spawn-worktree.md": "f2df55b876e28041",
     ".claude/workflows/spec-create.js": "f3c42afe3ab44598",
-    ".claude/workflows/spec-implement.js": "487ffcfded9dffc4",
+    ".claude/workflows/spec-implement.js": "1916d117c2625107",
     ".claude/workflows/spec-implement-brief.md": "6af925a648a347fd"
   }
 }

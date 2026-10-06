@@ -227,3 +227,13 @@ await test('model and effort: unknown values are refused before any agent runs',
     assert.equal(p.state.events.length, 0)
   }
 })
+
+await test('every gate-running prompt tells the agent to wait for the real exit code', async () => {
+  const p = project({ deps: { 1: [] }, failUntil: { 1: 1 }, checkRed: ['1'] })
+  await runWorkflow(SCRIPT, { agent: p.agent, args: baseArgs })
+  for (const l of ['task 1', 'task 1 retry 1', 'merge 1', 'fix 1 (after merging Task 1)', 're-check 1', 'final gate']) {
+    assert.ok(p.state.prompts[l], `no prompt for ${l}`)
+    assert.match(p.state.prompts[l], /A slow gate is not a failed gate/, l)
+  }
+  assert.doesNotMatch(p.state.prompts['plan 1'], /slow gate/)
+})

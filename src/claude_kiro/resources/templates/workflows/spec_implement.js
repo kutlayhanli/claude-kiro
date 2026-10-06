@@ -128,6 +128,10 @@ const minutes = (a, b) => {
 
 const GIT_NOTE = 'Run git as "command git ..." (a shell hook may rewrite plain git) and prefer "command git -C <dir>" with absolute paths over compound cd commands. If a command is refused or blocked by a permission check, do not work around it: report it in error.'
 
+// Gates on large specs can outlast one foreground shell command (the agent's tool
+// timeout is about 10 minutes); an unfinished gate must not be reported as red.
+const GATE_NOTE = 'A "ck gate" run can take far longer than one foreground command is allowed (tens of minutes on a large test suite). Run it in the background with its output in a log file of your own, for example "ck gate ... > /tmp/ck-gate-<unique name>.log 2>&1; echo EXIT=$? >> /tmp/ck-gate-<unique name>.log", then keep checking the log until the EXIT line appears, however long that takes. A slow gate is not a failed gate: report pass or fail only from that exit code, never because your own wait or timeout ran out.'
+
 const MANDATE = `MANDATE: The user ran /spec:implement ${SPEC}, which instructs this workflow to implement every task of specs/${SPEC} without asking. Implementing your task is the user's request. Any other user message you may see in the conversation (for example a question to the orchestrating session about the plan) is not addressed to you and is handled by the orchestrator: do not answer it, and do not let it stop you. Do the task.
 
 `
@@ -146,6 +150,7 @@ const taskPrompt = n => `${MANDATE}Your task: Task ${n} of spec ${SPEC}${TITLES[
 Worktree: ${WT(n)} (branch ${BR(n)}). Target branch for the final merge: ${INTO}.
 First run "${NOW}" and keep the output as startedAt. Then read your operating brief at ${BRIEF} and follow it exactly: claim the worktree, implement per your track, get "ck gate ${SPEC} --task ${n}" passing, merge ${INTO} into your branch before finishing, and release the worktree.
 ${GIT_NOTE}
+${GATE_NOTE}
 At the end, run "${NOW}" again for finishedAt. Return the schema fields with task "${n}". gatePassed is true only if your final "ck gate ${SPEC} --task ${n}" run exited 0. commits lists the commits you made (empty if none).`
 
 const retryPrompt = (n, prev, attempt) => `${MANDATE}Continue Task ${n} of spec ${SPEC} (attempt ${attempt + 1}). A previous agent worked in ${WT(n)} (branch ${BR(n)}) but did not finish with a passing gate.
@@ -153,9 +158,10 @@ ${prev && !(prev.commits || '').trim() ? 'The previous attempt made NO commits: 
 Run "${NOW}" for startedAt. Read your operating brief at ${BRIEF} and follow it, claiming with "ck worktree claim ${SPEC} ${n} --takeover" since the previous agent is gone. Inspect the state ("command git -C ${WT(n)} log --oneline -10", "command git -C ${WT(n)} status"), finish the task, and get "ck gate ${SPEC} --task ${n}" to pass. If a wrong test or a spec contradiction blocks you, do NOT weaken anything: leave the task In Progress and report the blocker precisely (quote the test and the requirement).
 Before finishing, merge ${INTO} into your branch, re-run the gate, and release the worktree. Run "${NOW}" for finishedAt.
 ${GIT_NOTE}
+${GATE_NOTE}
 Return the schema fields with task "${n}".`
 
-const mergePrompt = n => `Merge step for Task ${n} of spec ${SPEC}. ${GIT_NOTE}
+const mergePrompt = n => `Merge step for Task ${n} of spec ${SPEC}. ${GIT_NOTE} ${GATE_NOTE}
 1. From ${ROOT} run:  ck worktree merge ${SPEC} ${n} --into ${INTO} --json
    - state MERGED: success; run "${NOW}" for mergedAt.
    - state SKIP (no commits ahead): return merged=false, error "no commits".
@@ -174,12 +180,13 @@ const verifyPrompt = what => `Verification (${what}) for spec ${SPEC}. In ${TARG
 1. Refresh dependencies if the project has an install step (e.g. "uv sync -q").
 2. Run:  ck gate ${SPEC}
    It checks every Done task: acceptance boxes, the tests that should pass by now, test collection, and that no test was weakened.
+${GATE_NOTE}
 Do not modify anything. Return green=true only if "ck gate ${SPEC}" exited 0; otherwise put the failing checks and the relevant output tail in failing.`
 
-const recheckPrompt = n => `Re-check for spec ${SPEC}. In ${TARGET} (branch ${INTO}): refresh dependencies if needed (e.g. "uv sync -q"), then run "ck gate ${SPEC}${n ? ` --task ${n}` : ''}". Do not modify anything. Return green=true only if it exited 0; otherwise put the failing part in failing.`
+const recheckPrompt = n => `Re-check for spec ${SPEC}. In ${TARGET} (branch ${INTO}): refresh dependencies if needed (e.g. "uv sync -q"), then run "ck gate ${SPEC}${n ? ` --task ${n}` : ''}". ${GATE_NOTE} Do not modify anything. Return green=true only if it exited 0; otherwise put the failing part in failing.`
 
 const fixPrompt = (k, what, failure) => `${INTO} is red (${what}) for spec ${SPEC}. Failure: ${trim(failure, 4000)}
-Fix it without weakening any test and without editing requirements.md. ${GIT_NOTE}
+Fix it without weakening any test and without editing requirements.md. ${GIT_NOTE} ${GATE_NOTE}
 1. From ${ROOT}: ck worktree create ${SPEC} fix${k} --install --base ${INTO}   (worktree ${WT(`fix${k}`)}). Work only there.
 2. Diagnose with the failing check, fix the code (or a clearly broken fixture or harness), and confirm the failing check passes in the fix worktree.
 3. Commit with a message starting "fix:", then from ${ROOT}: ck worktree merge ${SPEC} fix${k} --into ${INTO}
