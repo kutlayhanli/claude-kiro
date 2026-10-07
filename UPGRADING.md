@@ -1,9 +1,18 @@
 # Upgrading
 
-- **From 0.4 to 0.5:** see the next section.
+- **From 0.5 to 0.6:** see the next section.
+- **From 0.4 to 0.5:** see [0.4 → 0.5](#04--05).
 - **From 0.3 to 0.4:** see [0.3 → 0.4](#03--04).
 - **From 0.2:** apply the 0.3 notes below as well; the steps are the same.
 - **From 0.1:** skip to [Upgrading to 0.2](#upgrading-to-02), then come back for the 0.3 and 0.4 notes (same commands).
+
+## 0.5 → 0.6
+
+What changes:
+- **Works without the Workflow tool.** If your account blocks workflows, the spec commands run the same steps themselves: `/spec:create` and `/spec:review` play `spec-create.js` with the Agent tool; `/spec:implement <spec>` schedules task agents in worktrees, merges one at a time, gates, reviews, and tracks progress in the task list. See `.claude/workflows/without-workflow-tool.md`. Pass `--no-workflow` to force it.
+- **Agent types per role.** `.claude/agents/ck-implementer.md`, `ck-test-writer.md`, `ck-fixer.md` and `ck-reviewer.md` carry each role's model and effort from `ck agents` (the Agent tool can't set effort per call). `ck agents sync` writes them. `ck upgrade` and `ck agents set` keep them current. Files you wrote yourself under those names are left alone.
+
+Steps: `ck update` from a project directory (or reinstall and `ck upgrade`), then commit `.claude/commands`, `.claude/workflows`, `.claude/agents` and `.claude/ck-manifest.json`. Restart sessions: a session started before `.claude/agents/` existed doesn't see the new agent types.
 
 ## 0.4 → 0.5
 

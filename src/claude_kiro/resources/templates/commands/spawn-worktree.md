@@ -1,7 +1,7 @@
 ---
 description: Run parallel implementation tasks using git worktrees for filesystem isolation
 argument-hint: [task-specification-or-spec-directory] [--model sonnet|opus|haiku|fable] [--effort low|medium|high|xhigh|max]
-allowed-tools: Read, Write, Edit, Grep, Glob, Bash, Agent, AskUserQuestion, Workflow
+allowed-tools: Read, Write, Edit, Grep, Glob, Bash, Agent, SendMessage, AskUserQuestion, Workflow
 ---
 
 Run parallel implementation batch: $ARGUMENTS
@@ -75,6 +75,7 @@ For each task, spawn an agent with `run_in_background: true`:
 **Models, effort, and review:** run `ck agents --json` (adding `--override` for anything I asked, as described in `/spec:implement` under Agents) and use its roles: the implementer for impl-track tasks, the test_writer for test-track tasks, the reviewer after each task. Values are a family alias (`sonnet`, `opus`, `haiku`, `fable`, each the newest of its family) or `inherit`, and an effort from `low` to `max` or `inherit`.
 - **Everything `inherit`, review off:** use the Agent calls above as they are.
 - **Otherwise:** the Agent tool can't set effort, so launch the wave as one Workflow call instead of separate Agent calls: an inline script that runs the same per-task prompts in `parallel()`, each `agent(prompt, { label: 'task <N>', model, effort })` with that task's role settings (omit any that are `inherit`). If the reviewer is enabled, the script runs a reviewer `agent()` with the reviewer's `{ model, effort }` for each task whose gate passed, reading `command git -C <worktree> diff <target>...<branch>` and the spec without editing, and gives blocking findings to one revising implementer `agent()` (up to the reviewer's `rounds`) before the merge phase. The worktrees are already created, so don't pass `isolation`. Running this command is my opt-in to that workflow.
+- **No Workflow tool** (missing, refused, or blocked): run `ck agents sync` (with the same overrides) and spawn the Agent calls above with `subagent_type` set to the task's type, `ck-implementer` or `ck-test-writer`. Those types carry the role's model and effort. If the reviewer is enabled, run a `ck-reviewer` for each task whose gate passed, before the merge phase. Send blocking findings back to that task's agent with SendMessage, up to the reviewer's `rounds`. Details: `.claude/workflows/without-workflow-tool.md`.
 
 Name each role's model and effort, and whether review is on, in the Phase 1 plan you show me.
 

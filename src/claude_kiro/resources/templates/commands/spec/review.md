@@ -1,7 +1,7 @@
 ---
 description: Adversarially review an existing spec and apply the findings that survive
 argument-hint: [spec-name]
-allowed-tools: Read, Edit, Write, Grep, Glob, AskUserQuestion, Workflow
+allowed-tools: Read, Edit, Write, Grep, Glob, AskUserQuestion, Workflow, Agent, TaskCreate, TaskUpdate
 ---
 
 Review the specification: $ARGUMENTS
@@ -11,6 +11,8 @@ Review the specification: $ARGUMENTS
 Use this after the spec or the code has drifted, after hand edits, or for specs written before `/spec:create` reviewed its own output. It runs the review half of the `spec-create` workflow: four reviewers attack the spec (plan fidelity, codebase grounding, implementability, test adequacy), a separate skeptic tries to refute each finding, and the survivors are applied. On an older spec without `test-plan.md`, the test-adequacy lens flags it and the revision adds one.
 
 **Calling the Workflow tool here is intended.** Running `/spec:review` is my opt-in.
+
+**Without the Workflow tool** (it isn't among your tools, or calling it is refused or blocked, or I pass `--no-workflow`): run `.claude/workflows/spec-create.js` by hand with the Agent tool and the same args, as `.claude/workflows/without-workflow-tool.md` describes, and tell me once that you're doing so. The steps, prompts, and result are the same.
 
 ## Steps
 

@@ -84,7 +84,7 @@ For each task, spawn an agent with:
 }
 ```
 
-**Model and effort:** for claude-kiro spec tasks, take each role's model and effort from `ck agents --json` (implementer: Sonnet medium, reviewer: Opus high by default; see `/spec:implement`). For ad-hoc batches, omit both so agents inherit the session's unless the user asks; pass a family alias (`sonnet`, `opus`, `haiku`, `fable`; it resolves to that family's latest model) as `"model"`. The Agent tool can't set effort, so when an effort is set, launch the batch as one Workflow call whose inline script runs each task prompt in `parallel()` with `agent(prompt, { model, effort })`.
+**Model and effort:** for claude-kiro spec tasks, take each role's model and effort from `ck agents --json` (implementer: Sonnet medium, reviewer: Opus high by default; see `/spec:implement`). For ad-hoc batches, omit both so agents inherit the session's unless the user asks; pass a family alias (`sonnet`, `opus`, `haiku`, `fable`; it resolves to that family's latest model) as `"model"`. The Agent tool can't set effort, so when an effort is set, launch the batch as one Workflow call whose inline script runs each task prompt in `parallel()` with `agent(prompt, { model, effort })`. If the Workflow tool is unavailable, use agent types instead: in a claude-kiro project, `ck agents sync` writes `ck-implementer`, `ck-test-writer`, `ck-fixer` and `ck-reviewer` in `.claude/agents/` with each role's model and effort; pass them as `subagent_type`.
 
 ### Phase 4: Monitor and Wait
 

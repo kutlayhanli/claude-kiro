@@ -9,6 +9,12 @@ import pytest
 
 CALC = "def add(a, b):\n    return a + b\n"
 
+
+@pytest.fixture(autouse=True)
+def _isolated_preferences(tmp_path_factory, monkeypatch):
+    """Never read the developer's real ~/.config/claude-kiro (ck init/upgrade resolve agent settings)."""
+    monkeypatch.setenv("CK_CONFIG_HOME", str(tmp_path_factory.mktemp("ck-prefs")))
+
 CALC_TEST = """from calc import add
 
 

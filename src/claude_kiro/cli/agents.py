@@ -61,6 +61,47 @@ def set_cmd(setting: str, value: str, project: bool):
     except ag.AgentConfigError as e:
         _fail(e)
     click.echo(f"✓ {role}.{key} = {value} in {path}")
+    if (Path.cwd() / ".claude").is_dir():
+        _report_sync(ag.sync_agent_types(Path.cwd()))
+
+
+def _report_sync(result: dict) -> None:
+    for fname in result["changed"]:
+        click.echo(f"  wrote {ag.AGENTS_DIR}/{fname}")
+    for fname in result["skipped"]:
+        click.echo(f"  ⚠ {ag.AGENTS_DIR}/{fname} was not written by ck; left alone")
+    if result["changed"] and result["created_dir"]:
+        click.echo(f"  {ag.AGENTS_DIR}/ is new: restart open Claude Code sessions so they see the ck-* agent types.")
+    elif result["changed"]:
+        click.echo("  Open Claude Code sessions pick this up within seconds.")
+
+
+@agents.command("sync")
+@click.option("--override", "overrides", multiple=True, metavar="ROLE.KEY=VALUE", help="Override a setting for this run")
+@click.option("--dry-run", is_flag=True, help="Report what would change without writing")
+@click.option("--json", "as_json", is_flag=True)
+def sync(overrides: tuple, dry_run: bool, as_json: bool):
+    """Write the ck-* agent types (.claude/agents/) with each role's model and effort.
+
+    \b
+    For running spec commands without the Workflow tool: the Agent tool can pick
+    a model per call but not an effort, so ck-implementer, ck-test-writer,
+    ck-fixer and ck-reviewer carry both. `ck agents set` and `ck upgrade` keep
+    them current; run this with --override for a one-off run.
+    """
+    try:
+        result = ag.sync_agent_types(Path.cwd(), list(overrides), dry_run=dry_run)
+    except ag.AgentConfigError as e:
+        _fail(e)
+    if as_json:
+        click.echo(json.dumps(result, indent=2))
+        return
+    if not result["changed"] and not result["skipped"]:
+        click.echo(f"✓ {ag.AGENTS_DIR}/ck-*.md already match `ck agents`.")
+    elif dry_run:
+        click.echo("Would write: " + ", ".join(result["changed"]))
+    else:
+        _report_sync(result)
 
 
 @agents.command("check")

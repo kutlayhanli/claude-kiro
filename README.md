@@ -147,8 +147,9 @@ The hooks provide spec context and enforce the definition of done:
    - Merges happen one at a time, each checked with `ck gate --task`, plus a full gate every N merges and at the end.
    - The plan is re-read from tasks.md after every task, so relinks apply without a restart.
    - It reports wall-clock time per task and per wave. By default tasks merge into an `integrate/<spec>` branch that you fast-forward into main when you're happy, and a failed task doesn't stop tasks that don't depend on it. `/spawn-worktree` covers a single wave or an ad-hoc batch
-6. **Track progress:** TodoWrite tracks implementation automatically
-7. **Stay aligned:** Hooks provide context and maintain spec-driven discipline
+6. **No Workflow tool?** Some accounts block it. `/spec:create`, `/spec:review`, `/spec:implement` and `/spawn-worktree` then run the same steps with the Agent tool and a task list (`.claude/workflows/without-workflow-tool.md`): parallel agents in worktrees, merges one at a time, the same gates and reviewer. Models and efforts come from the `ck-*` agent types. Force it with `--no-workflow`.
+7. **Track progress:** TodoWrite tracks implementation automatically
+8. **Stay aligned:** Hooks provide context and maintain spec-driven discipline
 
 ## CLI Commands Reference
 
@@ -164,6 +165,7 @@ The hooks provide spec context and enforce the definition of done:
 - `ck worktree create|claim|release|merge|integration|status <spec> ...` - Per-task worktrees for parallel implementation (`.claude/worktrees/<spec>-task-N`, branch `feat/<spec>-task-N`); merges go one at a time and stop at the first conflict
 - `ck agents [--json] [--override role.key=value]` - Show the model and effort each workflow role uses and where each value comes from. Defaults: implementer Sonnet at medium effort (test writer and fixer follow it), reviewer Opus at high effort (reviews every task's diff against the spec before it merges), and `/spec:plan` / `/spec:create` ask to switch if the session is below Opus at medium effort
 - `ck agents set <role.key> <value> [--project]` - Save a preference globally (`~/.config/claude-kiro/config.json`) or for this project (`specs/ck.json`), e.g. `ck agents set implementer.model haiku`, `ck agents set reviewer.enabled false`, `ck agents set planning.ask false`; `default` removes a setting
+- `ck agents sync [--override role.key=value]` - Write the agent types `ck-implementer`, `ck-test-writer`, `ck-fixer` and `ck-reviewer` to `.claude/agents/`, carrying each role's model and effort. They are used when the Workflow tool is unavailable. `ck init`, `ck upgrade` and `ck agents set` keep them current
 - `ck agents check --model <id> [--effort <level>]` - Exit 0 if a session meets the planning minimum (used by `/spec:plan` and `/spec:create`)
 - `ck upgrade [--dry-run] [--no-migrate] [--allow-downgrade]` - Update a project set up by an older ck (see [UPGRADING.md](UPGRADING.md)). It records a version stamp in `.claude/ck-manifest.json` and refuses to let an older ck downgrade newer files
 - `ck setup --diff` - Show how your global `~/.claude` files differ from this version, without writing

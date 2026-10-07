@@ -243,3 +243,17 @@ def test_version_key_ordering():
     key = ck_manifest.version_key
     assert key("0.10.0") > key("0.9.9") > key("0.4.0")
     assert key("1.0.0rc1") == (1, 0, 0)
+
+
+def test_upgrade_installs_the_no_workflow_guide_and_agent_types(old_project):
+    dry = run(old_project, "upgrade", "--dry-run")
+    assert "ck-implementer.md" in dry.output
+    assert not (old_project / ".claude/agents").exists()
+
+    result = run(old_project, "upgrade")
+    assert result.exit_code == 0, result.output
+    assert (old_project / ".claude/workflows/without-workflow-tool.md").exists()
+    impl = (old_project / ".claude/agents/ck-implementer.md").read_text()
+    assert "model: sonnet" in impl and "effort: medium" in impl
+    assert "effort: high" in (old_project / ".claude/agents/ck-reviewer.md").read_text()
+    assert "Already up to date" in run(old_project, "upgrade").output

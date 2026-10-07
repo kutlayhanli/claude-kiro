@@ -1,7 +1,7 @@
 ---
 description: Write the spec (requirements → design → tasks) as a workflow, ending with an adversarial review
 argument-hint: [feature-name-or-description]
-allowed-tools: Read, Edit, Write, Grep, Glob, AskUserQuestion, Workflow, Bash(ck agents check:*)
+allowed-tools: Read, Edit, Write, Grep, Glob, AskUserQuestion, Workflow, Agent, TaskCreate, TaskUpdate, Bash(ck agents check:*)
 ---
 
 Create the specification for: $ARGUMENTS
@@ -74,6 +74,8 @@ Also read `specs/ck.json`. If it is missing or has no `"verify"` commands, tell 
      }
      ```
 3. Tell me it's running: requirements, then design and test plan in parallel, then two task tracks in parallel and a link step, then adversarial review and revision. I can watch it with `/workflows`.
+
+**Without the Workflow tool** (it isn't among your tools, or calling it is refused or blocked, or I pass `--no-workflow`): run `.claude/workflows/spec-create.js` by hand with the Agent tool and the same args, as `.claude/workflows/without-workflow-tool.md` describes, and tell me once that you're doing so. The steps, prompts, and result are the same.
 
 ## Step 4: Close the loop
 

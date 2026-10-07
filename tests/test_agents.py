@@ -129,3 +129,68 @@ def test_check_command_exit_codes_follow_configured_minimum(home):
 def test_resolve_without_any_files(tmp_path, monkeypatch):
     monkeypatch.setenv("CK_CONFIG_HOME", str(tmp_path / "nowhere"))
     assert resolve(tmp_path)["roles"]["reviewer"]["model"] == "opus"
+
+
+# --- agent types for running without the Workflow tool -----------------------
+
+def frontmatter(path: Path) -> dict:
+    head = path.read_text().split("---")[1]
+    return dict(line.split(": ", 1) for line in head.strip().splitlines())
+
+
+def test_sync_writes_one_agent_type_per_role_with_model_and_effort(home):
+    out = ck(home, "agents", "sync")
+    assert out.exit_code == 0, out.output
+    agents_dir = home / ".claude" / "agents"
+    impl = frontmatter(agents_dir / "ck-implementer.md")
+    assert (impl["name"], impl["model"], impl["effort"]) == ("ck-implementer", "sonnet", "medium")
+    assert "tools" not in impl
+    review = frontmatter(agents_dir / "ck-reviewer.md")
+    assert (review["model"], review["effort"]) == ("opus", "high")
+    assert "Edit" not in review["tools"] and "Write" not in review["tools"]
+    assert frontmatter(agents_dir / "ck-test-writer.md")["model"] == "sonnet"  # follows the implementer
+    assert (agents_dir / "ck-fixer.md").exists()
+    assert "restart" in out.output  # the agents directory is new
+
+
+def test_sync_is_idempotent_and_follows_settings_and_overrides(home):
+    ck(home, "agents", "sync")
+    assert "already match" in ck(home, "agents", "sync").output
+    ck(home, "agents", "sync", "--override", "implementer.effort=low")
+    assert frontmatter(home / ".claude/agents/ck-implementer.md")["effort"] == "low"
+    ck(home, "agents", "sync")
+    assert frontmatter(home / ".claude/agents/ck-implementer.md")["effort"] == "medium"
+
+
+def test_inherit_leaves_the_field_out(home):
+    ck(home, "agents", "sync", "--override", "implementer.model=inherit", "--override", "implementer.effort=inherit")
+    fm = frontmatter(home / ".claude/agents/ck-implementer.md")
+    assert "model" not in fm and "effort" not in fm
+
+
+def test_set_resyncs_agent_types_in_a_project(home):
+    (home / ".claude").mkdir()
+    out = ck(home, "agents", "set", "reviewer.model", "fable", "--project")
+    assert out.exit_code == 0, out.output
+    assert frontmatter(home / ".claude/agents/ck-reviewer.md")["model"] == "fable"
+
+
+def test_set_outside_a_project_writes_no_agent_types(home):
+    ck(home, "agents", "set", "implementer.model", "haiku")
+    assert not (home / ".claude").exists()
+
+
+def test_sync_leaves_hand_written_agent_files_alone(home):
+    agents_dir = home / ".claude" / "agents"
+    agents_dir.mkdir(parents=True)
+    (agents_dir / "ck-reviewer.md").write_text("---\nname: ck-reviewer\nmodel: haiku\n---\nmine\n")
+    out = ck(home, "agents", "sync", "--json")
+    result = json.loads(out.output)
+    assert result["skipped"] == ["ck-reviewer.md"] and result["created_dir"] is False
+    assert (agents_dir / "ck-reviewer.md").read_text().endswith("mine\n")
+
+
+def test_sync_dry_run_writes_nothing(home):
+    out = ck(home, "agents", "sync", "--dry-run")
+    assert "Would write" in out.output and "ck-implementer.md" in out.output
+    assert not (home / ".claude" / "agents").exists()

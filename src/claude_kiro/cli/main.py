@@ -19,6 +19,7 @@ from ..paths import (
     IMPLEMENT_BRIEF,
     IMPLEMENT_WORKFLOW,
     LEGACY_SPECS_DIR,
+    NO_WORKFLOW_GUIDE,
     SPECS_DIR,
     SPEC_WORKFLOW,
     spec_roots,
@@ -84,6 +85,7 @@ MANAGED_FILES = [
     (SPEC_WORKFLOW, "workflows/spec_create.js"),
     (IMPLEMENT_WORKFLOW, "workflows/spec_implement.js"),
     (IMPLEMENT_BRIEF, "workflows/spec_implement_brief.md"),
+    (NO_WORKFLOW_GUIDE, "workflows/without_workflow_tool.md"),
 ]
 
 RUFF_HOOK = re.compile(r"^(\s*)-\s+id:\s*(ruff|ruff-check|ruff-format)\s*$")
@@ -157,6 +159,22 @@ def _ensure_config(project_dir: Path) -> bool:
     return True
 
 
+def _sync_agent_types(project_dir: Path, dry_run: bool = False) -> list:
+    """Write the ck-* agent types; returns (kind, path) per change. A broken agents config is reported, not fatal."""
+    from .. import agents as ag
+
+    try:
+        before = {p.name for p in (project_dir / ag.AGENTS_DIR).glob("ck-*.md")}
+        result = ag.sync_agent_types(project_dir, dry_run=dry_run)
+    except ag.AgentConfigError as e:
+        click.echo(f"⚠️  Agent types not written: {e}")
+        return []
+    return [
+        ("updated" if name in before else "added", f"{ag.AGENTS_DIR}/{name} (agent type for runs without the Workflow tool)")
+        for name in result["changed"]
+    ]
+
+
 @cli.command()
 @click.option("--force", is_flag=True, help="Overwrite existing files")
 def init(force: bool):
@@ -222,6 +240,8 @@ def init(force: bool):
 
     _install_hooks(project_dir)
     created.append(".claude/settings.local.json")
+
+    created.extend(item for _, item in _sync_agent_types(project_dir))
 
     # Stamp the version only if this ck actually wrote every managed file;
     # skipped files may be older, and `ck upgrade` is the way to refresh those.
@@ -402,6 +422,7 @@ def doctor():
         SPEC_WORKFLOW,
         IMPLEMENT_WORKFLOW,
         IMPLEMENT_BRIEF,
+        NO_WORKFLOW_GUIDE,
     ]
 
     missing_files = []
@@ -649,6 +670,8 @@ def upgrade(dry_run: bool, no_migrate: bool, allow_downgrade: bool):
         if not dry_run:
             _ensure_config(project_dir)
 
+    changes.extend(_sync_agent_types(project_dir, dry_run=dry_run))
+
     patched = _patch_precommit(project_dir, dry_run=dry_run)
     if patched:
         changes.append(("updated", f".pre-commit-config.yaml (ruff limited to Python in {patched} hook(s))"))
@@ -691,7 +714,7 @@ def upgrade(dry_run: bool, no_migrate: bool, allow_downgrade: bool):
         click.echo("\n🚀 Next steps:")
         click.echo("  1. Review: git status && git diff .claude specs")
         click.echo(f"  2. Check the \"verify\" command in {CONFIG_FILE} runs your test suite")
-        click.echo("  3. Commit .claude/commands, .claude/workflows, .claude/output-styles, .claude/ck-manifest.json and specs/")
+        click.echo("  3. Commit .claude/commands, .claude/workflows, .claude/agents, .claude/output-styles, .claude/ck-manifest.json and specs/")
         click.echo("  4. Restart open Claude Code sessions in this project so the new hooks load")
         click.echo("  5. Run 'ck doctor'")
 

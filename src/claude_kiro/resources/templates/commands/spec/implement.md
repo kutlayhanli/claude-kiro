@@ -1,7 +1,7 @@
 ---
 description: Implement a spec task, or a whole spec wave by wave as a workflow
-argument-hint: [spec-name | task-number] [--model M] [--effort E] [--test-model M] [--review-model M] [--no-review]
-allowed-tools: Read, Write, Edit, Grep, Glob, Bash, TodoWrite, Workflow
+argument-hint: [spec-name | task-number] [--model M] [--effort E] [--test-model M] [--review-model M] [--no-review] [--no-workflow]
+allowed-tools: Read, Write, Edit, Grep, Glob, Bash, TodoWrite, Workflow, Agent, SendMessage, TaskCreate, TaskUpdate
 ---
 
 Implement: $ARGUMENTS
@@ -10,6 +10,8 @@ Implement: $ARGUMENTS
 
 - **A task number** (for example `/spec:implement 3` or `/spec:implement auth 3`): implement that one task yourself, following the Implementation Guidelines below.
 - **A spec with no task number** (for example `/spec:implement auth`, `/spec:implement auth all`, `/spec:implement auth in parallel`): run the whole spec as the `spec-implement` workflow. Tasks start as soon as their dependencies merge. That's the default for a spec. Running this command for a whole spec is my opt-in to the multi-agent workflow; don't ask me before each wave.
+
+**Without the Workflow tool.** If the Workflow tool isn't among your tools, or calling it is refused or blocked (some organizations disable it), or I pass `--no-workflow`: run the same steps yourself with the Agent tool and a task list, as `.claude/workflows/without-workflow-tool.md` describes. Everything else here still applies (agents and their models, lint, plan, merge target, report); only the launch differs. Tell me once that you're running without workflows. Don't ask whether to.
 
 ## Agents: Models, Effort, and Review
 
@@ -25,7 +27,7 @@ Models: `sonnet`, `opus`, `haiku`, `fable` (each means the newest model of that 
 
 How each mode applies them:
 - **Whole spec:** pass the `roles` object from `ck agents --json` as `agents` in the workflow args (step 6). Planning and merge steps keep their own low effort.
-- **One task:** you can't change your own model mid-session. If the implementer (or the test_writer, for a test-track task) is `inherit` for both model and effort, implement the task yourself as usual. Otherwise launch the Workflow tool with an inline script that runs one `agent()` with that role's `{ model, effort }` (omit any that are `inherit`) and a prompt to implement task N of the spec in the current checkout, following `.claude/commands/spec/implement.md` from "Implementation Guidelines" on. If the reviewer is enabled and the task's gate passed, the same script then runs a reviewer `agent()` with the reviewer's `{ model, effort }`: it reads the task's changes (`git diff` against where the task started) and the spec, does not edit, and returns approve or blocking findings; on findings, one implementer `agent()` revises them (up to the reviewer's `rounds`) and the reviewer looks again. Relay the implementation Output and the review verdict to me.
+- **One task:** you can't change your own model mid-session. If the implementer (or the test_writer, for a test-track task) is `inherit` for both model and effort, implement the task yourself as usual. Otherwise launch the Workflow tool with an inline script that runs one `agent()` with that role's `{ model, effort }` (omit any that are `inherit`) and a prompt to implement task N of the spec in the current checkout, following `.claude/commands/spec/implement.md` from "Implementation Guidelines" on. If the reviewer is enabled and the task's gate passed, the same script then runs a reviewer `agent()` with the reviewer's `{ model, effort }`: it reads the task's changes (`git diff` against where the task started) and the spec, does not edit, and returns approve or blocking findings; on findings, one implementer `agent()` revises them (up to the reviewer's `rounds`) and the reviewer looks again. Relay the implementation Output and the review verdict to me. Without the Workflow tool, use the Agent tool with the `ck-*` agent types instead (see `.claude/workflows/without-workflow-tool.md`).
 
 ## Whole Spec: The Workflow
 
@@ -39,7 +41,7 @@ How each mode applies them:
 5. **Choose the merge target:**
    - **Default: an integration branch.** Run `ck worktree integration <spec>`. It creates or reuses `.claude/worktrees/<spec>-integration` on branch `integrate/<spec>`, branched from the main checkout's current branch. Then set `into` = `integrate/<spec>` and `targetDir` = `<main checkout>/.claude/worktrees/<spec>-integration`. Task worktrees branch from it and every task merges into it, so the main branch is never touched mid-run. I fast-forward main at the end.
    - **If I asked to merge directly:** set `into` = the main checkout's current branch and `targetDir` = the main checkout. The main checkout must have no uncommitted changes to tracked files; if it has some, stop and tell me.
-6. **Launch** the Workflow tool (a fresh run, not `resumeFromRunId`) with `scriptPath` set to the absolute path of `.claude/workflows/spec-implement.js` and `args` as a JSON object:
+6. **Launch.** Without the Workflow tool: run `ck agents sync` (with the same `--override`s), follow `.claude/workflows/without-workflow-tool.md` with the values below, tell me it's running and that progress is in the task list, and report as in step 9 when it finishes. Otherwise launch the Workflow tool (a fresh run, not `resumeFromRunId`) with `scriptPath` set to the absolute path of `.claude/workflows/spec-implement.js` and `args` as a JSON object:
    ```json
    {
      "spec": "<spec>",

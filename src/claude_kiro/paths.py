@@ -42,6 +42,8 @@ CONFIG_FILE = f"{SPECS_DIR}/ck.json"
 # Workflow that /spec:implement runs for a whole spec, and the brief its task agents read.
 IMPLEMENT_WORKFLOW = ".claude/workflows/spec-implement.js"
 IMPLEMENT_BRIEF = ".claude/workflows/spec-implement-brief.md"
+# How the spec commands run when the Workflow tool is unavailable (Agent tool + task list).
+NO_WORKFLOW_GUIDE = ".claude/workflows/without-workflow-tool.md"
 
 # Where `ck worktree` puts task worktrees (relative to the main checkout).
 WORKTREES_DIR = ".claude/worktrees"
