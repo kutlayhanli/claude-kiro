@@ -1,8 +1,21 @@
 # Upgrading
 
-- **From 0.3 to 0.4:** see the next section.
+- **From 0.4 to 0.5:** see the next section.
+- **From 0.3 to 0.4:** see [0.3 → 0.4](#03--04).
 - **From 0.2:** apply the 0.3 notes below as well; the steps are the same.
 - **From 0.1:** skip to [Upgrading to 0.2](#upgrading-to-02), then come back for the 0.3 and 0.4 notes (same commands).
+
+## 0.4 → 0.5
+
+What changes:
+- **Models per role.** `/spec:implement` runs implementation agents on **Sonnet at medium effort** by default (test-writing tasks and red-branch fixes follow it), instead of inheriting the session's model. `ck agents` shows the effective settings; `ck agents set role.key value` saves a global preference (`~/.config/claude-kiro/config.json`), `--project` saves it to `specs/ck.json`, and `/spec:implement ... --model M --effort E` overrides one run. `inherit` restores the old behavior: `ck agents set implementer.model inherit` and `ck agents set implementer.effort inherit`.
+- **A reviewer.** After each task's gate passes, an **Opus, high effort** reviewer checks its diff against `design.md` and `requirements.md` before it merges. Blocking findings go back to the implementer for one revision; findings that remain fail the task. Turn it off with `ck agents set reviewer.enabled false` or `/spec:implement ... --no-review`.
+- **A model check for planning.** `/spec:plan` and `/spec:create` ask whether to switch if the session runs below Opus at medium effort. `ck agents set planning.ask false` stops the question.
+- **Scoped task gates.** `ck gate <spec> --task N` runs that task's own Verify and its verifying tests while a test-first spec is in progress; `ck gate <spec>` still re-runs every suite that should already pass. `task_regression: true` in `specs/ck.json` brings back the per-task sweep.
+- **Slow gates aren't red.** Workflow agents wait for a gate's real exit code instead of reporting a timeout as a failure.
+- **`ck update`** reinstalls ck from `master`, adds missing global files, and runs `ck upgrade` in the current project.
+
+Steps: once per machine, `uv tool install --force --reinstall "git+https://github.com/kutlayhanli/claude-kiro"` (later versions: `ck update`). Then in each repository, `ck upgrade` and commit `.claude/commands`, `.claude/workflows`, `.claude/ck-manifest.json`. Restart sessions.
 
 ## 0.3 → 0.4
 

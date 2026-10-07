@@ -24,6 +24,7 @@ from ..paths import (
     spec_roots,
 )
 from .agents import agents
+from .update import update
 from .hooks import hook
 from .worktree import lint, plan, waves, worktree
 from .runner import HOOK_SETTINGS, configured_hooks, execute_hook, install_hook_settings
@@ -756,6 +757,7 @@ cli.add_command(waves)
 cli.add_command(plan)
 cli.add_command(lint)
 cli.add_command(agents)
+cli.add_command(update)
 
 
 if __name__ == "__main__":

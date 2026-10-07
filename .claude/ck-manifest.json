@@ -1,5 +1,5 @@
 {
-  "version": "0.4.1",
+  "version": "0.5.0",
   "files": {
     ".claude/output-styles/spec-driven.md": "33e67716471353f0",
     ".claude/commands/spec/plan.md": "381d168777fa50dc",
