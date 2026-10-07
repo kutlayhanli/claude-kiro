@@ -1,6 +1,6 @@
 ---
 description: Implement a spec task, or a whole spec wave by wave as a workflow
-argument-hint: [spec-name | task-number] [--model sonnet|opus|haiku|fable] [--effort low|medium|high|xhigh|max]
+argument-hint: [spec-name | task-number] [--model M] [--effort E] [--test-model M] [--review-model M] [--no-review]
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash, TodoWrite, Workflow
 ---
 
@@ -11,18 +11,21 @@ Implement: $ARGUMENTS
 - **A task number** (for example `/spec:implement 3` or `/spec:implement auth 3`): implement that one task yourself, following the Implementation Guidelines below.
 - **A spec with no task number** (for example `/spec:implement auth`, `/spec:implement auth all`, `/spec:implement auth in parallel`): run the whole spec as the `spec-implement` workflow. Tasks start as soon as their dependencies merge. That's the default for a spec. Running this command for a whole spec is my opt-in to the multi-agent workflow; don't ask me before each wave.
 
-## Model and Effort
+## Agents: Models, Effort, and Review
 
-By default, implementation inherits this session's model and effort. Pass nothing and don't pick one for me.
+Each role has a model and effort, resolved by `ck agents --json` (run it first). Defaults: **implementer** Sonnet, medium effort, for impl-track tasks; **test_writer** and **fixer** follow the implementer unless set; **reviewer** Opus, high effort, reviews every task's diff against the spec before it merges, with up to 1 revision round. My preferences (`ck agents set ...`, global or `--project`) override the defaults; `ck agents` shows the effective values and where each comes from.
 
-If I ask for a model or effort (`--model sonnet --effort medium`, or in words: "with sonnet at medium effort"), use it for the agents that write code: task agents, their retries, and fix attempts.
-- **Model:** pass the family alias, `sonnet`, `opus`, `haiku`, or `fable`. An alias always resolves to the latest model in that family, so "sonnet" or "the latest sonnet" means `sonnet`. Pass a full ID such as `claude-sonnet-5` only if I name a specific older version.
-- **Effort:** one of `low`, `medium`, `high`, `xhigh`, `max`.
-- If I give only one of the two, the other stays inherited. If a value isn't one of these, ask me rather than guess.
+For this run only, turn what I ask into `--override` arguments to `ck agents --json`:
+- `--model X` / `--effort Y` (or in words, "with haiku at low effort"): `implementer.model=X`, `implementer.effort=Y`
+- `--test-model` / `--test-effort`: `test_writer.model=…`, `test_writer.effort=…`
+- `--review-model` / `--review-effort`: `reviewer.model=…`, `reviewer.effort=…`; `--no-review`: `reviewer.enabled=false`
+- any `role.key=value` I give: pass it through as is.
 
-How each mode applies it:
-- **Whole spec:** set `model` and `effort` in the workflow args (step 6). Planning and merge steps keep their own low effort.
-- **One task:** you can't change your own model mid-session, so when I ask for a model or effort, don't implement the task yourself. Launch the Workflow tool with an inline script that runs one `agent()` with `{ model, effort }` (omit whichever I didn't give), and a prompt to implement task N of the spec in the current checkout, following `.claude/commands/spec/implement.md` from "Implementation Guidelines" on. Then relay its Output section to me. With neither given, implement the task yourself as usual.
+Models: `sonnet`, `opus`, `haiku`, `fable` (each means the newest model of that family; pass a full ID such as `claude-sonnet-5` only if I name a specific older version) or `inherit` (this session's model). Efforts: `low`, `medium`, `high`, `xhigh`, `max`, or `inherit`. `ck agents` refuses anything else; if it does, ask me rather than guess.
+
+How each mode applies them:
+- **Whole spec:** pass the `roles` object from `ck agents --json` as `agents` in the workflow args (step 6). Planning and merge steps keep their own low effort.
+- **One task:** you can't change your own model mid-session. If the implementer (or the test_writer, for a test-track task) is `inherit` for both model and effort, implement the task yourself as usual. Otherwise launch the Workflow tool with an inline script that runs one `agent()` with that role's `{ model, effort }` (omit any that are `inherit`) and a prompt to implement task N of the spec in the current checkout, following `.claude/commands/spec/implement.md` from "Implementation Guidelines" on. If the reviewer is enabled and the task's gate passed, the same script then runs a reviewer `agent()` with the reviewer's `{ model, effort }`: it reads the task's changes (`git diff` against where the task started) and the spec, does not edit, and returns approve or blocking findings; on findings, one implementer `agent()` revises them (up to the reviewer's `rounds`) and the reviewer looks again. Relay the implementation Output and the review verdict to me.
 
 ## Whole Spec: The Workflow
 
@@ -50,11 +53,10 @@ How each mode applies it:
      "onFailure": "continue",
      "maxConcurrent": null,
      "fullGateEvery": 10,
-     "model": null,
-     "effort": null
+     "agents": "<the roles object from ck agents --json>"
    }
    ```
-   - **model / effort:** leave them `null` (inherit this session's) unless I asked for one; see Model and Effort above.
+   - **agents:** see Agents above. Report the roles you passed (implementer, test_writer, reviewer) when you tell me it's running.
    - **onFailure:** by default a failed task doesn't stop the run. Tasks that don't depend on it keep starting, its dependents never start and are reported, and a red target branch always halts. Use `"onFailure": "halt"` if I asked to stop at the first failure.
    - **maxConcurrent:** set it (for example 4) if I said the test suite is memory-heavy.
 7. **Tell me it's running:**

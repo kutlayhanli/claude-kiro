@@ -72,11 +72,11 @@ For each task, spawn an agent with `run_in_background: true`:
 }
 ```
 
-**Model and effort:** by default, omit both so the agents inherit this session's model and effort. If I ask for them (`--model sonnet --effort medium`, or in words), follow the Model and Effort rules in `/spec:implement`: pass the family alias (`sonnet`, `opus`, `haiku`, `fable`), which resolves to that family's latest model, and an effort of `low` to `max`.
-- **Model only:** add `"model": "<alias>"` to each Agent call above.
-- **Effort (with or without a model):** the Agent tool can't set effort, so launch the wave as one Workflow call instead of separate Agent calls: an inline script that runs the same per-task prompts in `parallel()`, each `agent(prompt, { label: 'task <N>', model, effort })`, omitting whichever I didn't give. The worktrees are already created, so don't pass `isolation`. Running this command with an effort is my opt-in to that workflow.
+**Models, effort, and review:** run `ck agents --json` (adding `--override` for anything I asked, as described in `/spec:implement` under Agents) and use its roles: the implementer for impl-track tasks, the test_writer for test-track tasks, the reviewer after each task. Values are a family alias (`sonnet`, `opus`, `haiku`, `fable`, each the newest of its family) or `inherit`, and an effort from `low` to `max` or `inherit`.
+- **Everything `inherit`, review off:** use the Agent calls above as they are.
+- **Otherwise:** the Agent tool can't set effort, so launch the wave as one Workflow call instead of separate Agent calls: an inline script that runs the same per-task prompts in `parallel()`, each `agent(prompt, { label: 'task <N>', model, effort })` with that task's role settings (omit any that are `inherit`). If the reviewer is enabled, the script runs a reviewer `agent()` with the reviewer's `{ model, effort }` for each task whose gate passed, reading `command git -C <worktree> diff <target>...<branch>` and the spec without editing, and gives blocking findings to one revising implementer `agent()` (up to the reviewer's `rounds`) before the merge phase. The worktrees are already created, so don't pass `isolation`. Running this command is my opt-in to that workflow.
 
-Name the model and effort in the Phase 1 plan you show me (or "inherited").
+Name each role's model and effort, and whether review is on, in the Phase 1 plan you show me.
 
 **Important agent prompt rules:**
 - Include the FULL worktree path so the agent knows where to operate

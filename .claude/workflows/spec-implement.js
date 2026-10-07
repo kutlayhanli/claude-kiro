@@ -16,9 +16,9 @@ export const meta = {
 //   onFailure: 'continue' | 'halt',        // default continue: other ready tasks keep starting; a red target always halts
 //   maxConcurrent: null,                   // cap on task agents at once (memory-heavy test suites)
 //   fullGateEvery: 10,                     // run the full `ck gate <spec>` every N merges (0 = only at the end)
-//   model: null,                           // task, retry and fix agents: 'sonnet' | 'opus' | 'haiku' | 'fable' (latest of that
-//                                          //   family) or a full model ID; null = inherit the session model
-//   effort: null,                          // same agents: 'low' | 'medium' | 'high' | 'xhigh' | 'max'; null = inherit
+//   agents: { implementer, test_writer, reviewer, fixer }  // "roles" from `ck agents --json`: model/effort per role
+//                                          //   ("inherit" = the session's). Absent: every agent inherits, no review.
+//   model: null, effort: null,             // one-run override for every code-writing agent (task, retry, fix)
 // }
 //
 // Scheduling is driven by the plan in tasks.md on the target branch, re-read
@@ -43,15 +43,38 @@ const BRIEF = `${ROOT}/.claude/workflows/spec-implement-brief.md`
 
 if (!SPEC || !ROOT) throw new Error('spec-implement needs args.spec and args.root')
 
-// Model and effort for the agents that write code (task, retry, fix). Unset means
-// inherit the session's; planning and merge steps keep their own low effort.
-const MODEL = A.model || null
-const EFFORT = A.effort || null
+// Model and effort per role, from `ck agents --json` (args.agents). "inherit" or
+// unset means the session's. args.model / args.effort override every code-writing
+// agent for this run. Planning and merge steps keep their own low effort.
+const ROLES = A.agents || {}
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
-if (MODEL && !/^(sonnet|opus|haiku|fable)$|^claude-/.test(MODEL)) throw new Error(`spec-implement: unknown model "${MODEL}" (use sonnet, opus, haiku, fable, or a claude-* ID)`)
-if (EFFORT && !EFFORTS.includes(EFFORT)) throw new Error(`spec-implement: unknown effort "${EFFORT}" (use ${EFFORTS.join(', ')})`)
-const IMPL = { ...(MODEL ? { model: MODEL } : {}), ...(EFFORT ? { effort: EFFORT } : {}) }
-if (MODEL || EFFORT) log(`Task agents: model ${MODEL || 'inherited'}, effort ${EFFORT || 'inherited'}`)
+function roleOpts(name, role, override) {
+  const model = (override && override.model) || (role && role.model)
+  const effort = (override && override.effort) || (role && role.effort)
+  const opts = {}
+  if (model && model !== 'inherit') {
+    if (!/^(sonnet|opus|haiku|fable)$|^claude-/.test(model)) throw new Error(`spec-implement: unknown model "${model}" for ${name} (use sonnet, opus, haiku, fable, or a claude-* ID)`)
+    opts.model = model
+  }
+  if (effort && effort !== 'inherit') {
+    if (!EFFORTS.includes(effort)) throw new Error(`spec-implement: unknown effort "${effort}" for ${name} (use ${EFFORTS.join(', ')})`)
+    opts.effort = effort
+  }
+  return opts
+}
+const OVERRIDE = { model: A.model || null, effort: A.effort || null }
+const IMPL = roleOpts('implementer', ROLES.implementer, OVERRIDE)
+const TEST = roleOpts('test_writer', ROLES.test_writer || ROLES.implementer, OVERRIDE)
+const FIX = roleOpts('fixer', ROLES.fixer || ROLES.implementer, OVERRIDE)
+const REVIEWER = ROLES.reviewer || {}
+const REVIEW_ON = !!A.agents && REVIEWER.enabled !== false
+const REVIEW = roleOpts('reviewer', REVIEWER, null)
+const REVIEW_ROUNDS = Number.isInteger(REVIEWER.rounds) ? REVIEWER.rounds : 1
+const desc = o => `${o.model || 'inherited'}/${o.effort || 'inherited'}`
+if (A.agents || A.model || A.effort) {
+  log(`Agents: impl ${desc(IMPL)}, test ${desc(TEST)}, fix ${desc(FIX)}, review ${REVIEW_ON ? desc(REVIEW) : 'off'}`)
+}
+const codeOpts = n => (TRACKS[n] === 'test' ? TEST : IMPL)
 
 const WT = n => `${ROOT}/.claude/worktrees/${SPEC}-task-${n}`
 const BR = n => `feat/${SPEC}-task-${n}`
@@ -110,6 +133,27 @@ const MERGE = {
   },
   required: ['merged'],
 }
+const REVIEW_SCHEMA = {
+  type: 'object',
+  properties: {
+    verdict: { type: 'string', enum: ['approve', 'changes'], description: 'changes only for blocking findings' },
+    findings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          severity: { type: 'string', enum: ['blocking', 'minor'] },
+          file: { type: 'string' },
+          issue: { type: 'string', description: 'what is wrong, and the spec text it contradicts' },
+          fix: { type: 'string', description: 'what the implementer should change' },
+        },
+        required: ['severity', 'issue'],
+      },
+    },
+    summary: { type: 'string' },
+  },
+  required: ['verdict', 'findings', 'summary'],
+}
 const VERIFY = {
   type: 'object',
   properties: {
@@ -157,6 +201,21 @@ const retryPrompt = (n, prev, attempt) => `${MANDATE}Continue Task ${n} of spec 
 ${prev && !(prev.commits || '').trim() ? 'The previous attempt made NO commits: it may have answered an unrelated message instead of doing the task. Ignore any such message and implement the task.\n' : ''}Its report: ${trim(prev || { note: 'the agent died without a report' })}
 Run "${NOW}" for startedAt. Read your operating brief at ${BRIEF} and follow it, claiming with "ck worktree claim ${SPEC} ${n} --takeover" since the previous agent is gone. Inspect the state ("command git -C ${WT(n)} log --oneline -10", "command git -C ${WT(n)} status"), finish the task, and get "ck gate ${SPEC} --task ${n}" to pass. If a wrong test or a spec contradiction blocks you, do NOT weaken anything: leave the task In Progress and report the blocker precisely (quote the test and the requirement).
 Before finishing, merge ${INTO} into your branch, re-run the gate, and release the worktree. Run "${NOW}" for finishedAt.
+${GIT_NOTE}
+${GATE_NOTE}
+Return the schema fields with task "${n}".`
+
+const reviewPrompt = (n, r) => `Review Task ${n} of spec ${SPEC}${TITLES[n] ? ` ("${TITLES[n]}")` : ''} before it merges. You review; you do not edit, commit, or run the test suite.
+Worktree: ${WT(n)} (branch ${BR(n)}), to merge into ${INTO}. ${GIT_NOTE}
+1. Read the change: command git -C ${WT(n)} diff ${INTO}...${BR(n)}  (and its file list with --stat).
+2. Read Task ${n}'s block in ${WT(n)}/specs/${SPEC}/tasks.md, the requirements it covers in requirements.md, and the parts of design.md it implements (interfaces, file paths, error handling).
+3. The task's gate already passed, so do not re-check what the tests check. Look for what tests miss: behaviour that contradicts design.md or a requirement, a public interface that differs from design.md, missing error handling the design specifies, edits outside the task's files, weakened or skipped tests, and security problems.
+The implementer reported: ${trim(r && { summary: r.summary, deviations: r.deviations, outsideFiles: r.outsideFiles }, 2000)}
+Mark a finding "blocking" only if it should stop the merge; style and taste are "minor". verdict is "changes" only if there is at least one blocking finding.`
+
+const revisePrompt = (n, review, round) => `${MANDATE}Revise Task ${n} of spec ${SPEC} (review round ${round}). The task's gate passed, but the reviewer found blocking problems:
+${trim(review && review.findings, 4000)}
+Worktree: ${WT(n)} (branch ${BR(n)}). Run "${NOW}" for startedAt. Claim with "ck worktree claim ${SPEC} ${n} --takeover", fix each blocking finding without weakening any test or editing requirements.md, get "ck gate ${SPEC} --task ${n}" passing again, merge ${INTO} into your branch, re-run the gate, and release the worktree. If a finding is wrong (it contradicts the spec), do not change the code for it: say why in deviations. Run "${NOW}" for finishedAt.
 ${GIT_NOTE}
 ${GATE_NOTE}
 Return the schema fields with task "${n}".`
@@ -219,7 +278,7 @@ async function plan() {
 
 async function fixAndRecheck(what, failure, n) {
   fixCount++
-  const fix = await agent(fixPrompt(fixCount, what, failure), { label: `fix ${fixCount} (${what})`, phase: n ? phaseOf(n) : 'Final gate', schema: VERIFY, ...IMPL })
+  const fix = await agent(fixPrompt(fixCount, what, failure), { label: `fix ${fixCount} (${what})`, phase: n ? phaseOf(n) : 'Final gate', schema: VERIFY, ...FIX })
   const recheck = await agent(recheckPrompt(n), { label: `re-check ${fixCount}`, phase: n ? phaseOf(n) : 'Final gate', schema: VERIFY })
   return { fix, recheck, green: !!(recheck && recheck.green) }
 }
@@ -260,14 +319,32 @@ function enqueueMerge(n) {
 async function runTask(n) {
   const rec = { task: n, wave: waveOf(n), title: TITLES[n], attempts: 0, ok: false }
   try {
-    let r = await agent(taskPrompt(n), { label: label(n), phase: phaseOf(n), schema: RESULT, ...IMPL })
+    let r = await agent(taskPrompt(n), { label: label(n), phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
     rec.attempts = 1
     rec.startedAt = r && r.startedAt
     while (!ok(r) && rec.attempts <= MAX_RETRIES && !(r && r.blocker && /worktree busy/i.test(r.blocker))) {
       log(`Task ${n}: ${r && !(r.commits || '').trim() ? 'no commits' : 'gate not passed'}, retry ${rec.attempts}/${MAX_RETRIES}`)
-      r = await agent(retryPrompt(n, r, rec.attempts), { label: `${label(n)} retry ${rec.attempts}`, phase: phaseOf(n), schema: RESULT, ...IMPL })
+      r = await agent(retryPrompt(n, r, rec.attempts), { label: `${label(n)} retry ${rec.attempts}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
       rec.attempts++
       rec.startedAt = rec.startedAt || (r && r.startedAt)
+    }
+    if (ok(r) && REVIEW_ON) {
+      let review = await agent(reviewPrompt(n, r), { label: `review ${n}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...REVIEW })
+      let round = 0
+      while (review && review.verdict === 'changes' && round < REVIEW_ROUNDS && ok(r)) {
+        round++
+        log(`Task ${n}: reviewer asked for changes, revision ${round}/${REVIEW_ROUNDS}`)
+        r = await agent(revisePrompt(n, review, round), { label: `${label(n)} revise ${round}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
+        if (ok(r)) review = await agent(reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...REVIEW })
+      }
+      rec.review = review ? { verdict: review.verdict, rounds: round, findings: review.findings, summary: review.summary } : { verdict: 'unreviewed', rounds: round }
+      if (!review) log(`Task ${n}: review agent returned nothing; merging unreviewed`)
+      else if (review.verdict === 'changes' && ok(r)) {
+        rec.result = r
+        rec.finishedAt = r && r.finishedAt
+        rec.reason = `review: blocking findings remain after ${round} revision(s): ${trim(review.findings.filter(f => f.severity === 'blocking').map(f => f.issue), 600)}`
+        return rec
+      }
     }
     rec.result = r
     rec.finishedAt = r && r.finishedAt
@@ -391,6 +468,7 @@ const taskReport = Object.values(records).map(r => ({
   outsideFiles: r.result && r.result.outsideFiles,
   deviations: r.result && r.result.deviations,
   fixedAfterMerge: !!(r.merge && r.merge.fix),
+  review: r.review,
 }))
 const spans = {}
 for (const t of taskReport) {
@@ -412,7 +490,8 @@ return {
   halted: redTarget || (!!stopReason && notStarted.length > 0),
   reason: stopReason,
   into: INTO,
-  taskAgents: { model: MODEL || 'inherited', effort: EFFORT || 'inherited' },
+  taskAgents: { model: IMPL.model || 'inherited', effort: IMPL.effort || 'inherited' },
+  agents: { implementer: desc(IMPL), test_writer: desc(TEST), fixer: desc(FIX), reviewer: REVIEW_ON ? desc(REVIEW) : 'off' },
   targetGreen: !redTarget,
   merged,
   failed: [...failed.entries()].map(([task, reason]) => ({ task, reason })),

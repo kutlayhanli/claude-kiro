@@ -1,10 +1,25 @@
 ---
 description: Discuss and decide what to build, interactively, and record the decisions in PLAN.md
 argument-hint: [feature-description]
-allowed-tools: Read, Write, Edit, Grep, Glob, WebSearch, WebFetch, AskUserQuestion, Agent
+allowed-tools: Read, Write, Edit, Grep, Glob, WebSearch, WebFetch, AskUserQuestion, Agent, Bash(ck agents check:*)
 ---
 
 Plan feature: $ARGUMENTS
+
+## First: Model Check
+
+The decisions made here shape every task after them, so this conversation should run on a strong model.
+
+1. Find your model ID in your system prompt (for example "The exact model ID is claude-opus-5-5"), and your effort level if anything in your context states it.
+2. Run `ck agents check --model <model id> --json`, adding `--effort <level>` only if you know it.
+3. If it exits 0, or its `"ask"` is false, continue without mentioning it.
+4. Otherwise ask me once with AskUserQuestion, before any other work: "This session runs <model, effort if known>. Planning works best on <min_model> at <min_effort> effort or higher. Switch first?" Options:
+   - **Switch (recommended)**: tell me to run `/model` and choose <min_model> with <min_effort> effort or higher, then run this command again. Stop here.
+   - **Continue on <current model>**: go on.
+   You can't change the model yourself; don't try.
+5. If `ck` isn't installed or the check fails to run, skip it and say so in one line.
+
+The minimum is configurable: `ck agents set planning.min_model <model>`, `ck agents set planning.min_effort <level>`, or `ck agents set planning.ask false` to stop asking (add `--project` to set it for this project only).
 
 # Spec-Plan: Decide Together, Then Write It Down
 

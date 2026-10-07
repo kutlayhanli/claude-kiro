@@ -2,13 +2,13 @@
   "version": "0.4.1",
   "files": {
     ".claude/output-styles/spec-driven.md": "33e67716471353f0",
-    ".claude/commands/spec/plan.md": "122f9fef14a77d28",
-    ".claude/commands/spec/create.md": "0148a7f90000a69c",
-    ".claude/commands/spec/implement.md": "297a038195cb1fb3",
+    ".claude/commands/spec/plan.md": "381d168777fa50dc",
+    ".claude/commands/spec/create.md": "746b6269166cd7ee",
+    ".claude/commands/spec/implement.md": "20d5f6ca5ad6ed3b",
     ".claude/commands/spec/review.md": "5e785fd04e8f3920",
-    ".claude/commands/spawn-worktree.md": "f2df55b876e28041",
+    ".claude/commands/spawn-worktree.md": "030c48228eb5409f",
     ".claude/workflows/spec-create.js": "f3c42afe3ab44598",
-    ".claude/workflows/spec-implement.js": "1916d117c2625107",
+    ".claude/workflows/spec-implement.js": "5ca32b90ddb3ce52",
     ".claude/workflows/spec-implement-brief.md": "6af925a648a347fd"
   }
 }

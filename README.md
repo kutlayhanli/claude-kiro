@@ -161,6 +161,9 @@ The hooks provide spec context and enforce the definition of done:
 - `ck lint <spec>` - Check the task plan: dependency cycles, verify-order cycles (an impl task whose verifying tests need code from a task that depends on it), dependencies without a stated reason, critical path. Exits 1 on a cycle
 - `ck plan <spec> --json [--exclude N,M]` - Machine-readable plan with the tasks ready to start now; the workflow re-reads it after every task
 - `ck worktree create|claim|release|merge|integration|status <spec> ...` - Per-task worktrees for parallel implementation (`.claude/worktrees/<spec>-task-N`, branch `feat/<spec>-task-N`); merges go one at a time and stop at the first conflict
+- `ck agents [--json] [--override role.key=value]` - Show the model and effort each workflow role uses and where each value comes from. Defaults: implementer Sonnet at medium effort (test writer and fixer follow it), reviewer Opus at high effort (reviews every task's diff against the spec before it merges), and `/spec:plan` / `/spec:create` ask to switch if the session is below Opus at medium effort
+- `ck agents set <role.key> <value> [--project]` - Save a preference globally (`~/.config/claude-kiro/config.json`) or for this project (`specs/ck.json`), e.g. `ck agents set implementer.model haiku`, `ck agents set reviewer.enabled false`, `ck agents set planning.ask false`; `default` removes a setting
+- `ck agents check --model <id> [--effort <level>]` - Exit 0 if a session meets the planning minimum (used by `/spec:plan` and `/spec:create`)
 - `ck upgrade [--dry-run] [--no-migrate] [--allow-downgrade]` - Update a project set up by an older ck (see [UPGRADING.md](UPGRADING.md)). It records a version stamp in `.claude/ck-manifest.json` and refuses to let an older ck downgrade newer files
 - `ck setup --diff` - Show how your global `~/.claude` files differ from this version, without writing
 - `ck hook list` - Show available hooks
@@ -171,7 +174,7 @@ The hooks provide spec context and enforce the definition of done:
 ### Claude Code Slash Commands (Created by `ck init`)
 - `/spec:plan <feature>` - Discuss and decide the approach interactively (writes PLAN.md)
 - `/spec:create <name>` - Write the spec as a workflow, ending in adversarial review
-- `/spec:implement <task>` - Implement a spec task (Done is enforced by `ck gate`)
+- `/spec:implement <spec | task> [--model M] [--effort E] [--review-model M] [--no-review]` - Implement a task or a whole spec (Done is enforced by `ck gate`; models per role from `ck agents`)
 - `/spec:review <spec>` - Adversarially review an existing spec and apply surviving fixes
 - `/spawn-worktree <spec-or-tasks>` - Run tasks in parallel with git worktree isolation
 

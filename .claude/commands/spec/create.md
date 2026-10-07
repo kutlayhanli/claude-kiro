@@ -1,10 +1,25 @@
 ---
 description: Write the spec (requirements → design → tasks) as a workflow, ending with an adversarial review
 argument-hint: [feature-name-or-description]
-allowed-tools: Read, Edit, Write, Grep, Glob, AskUserQuestion, Workflow
+allowed-tools: Read, Edit, Write, Grep, Glob, AskUserQuestion, Workflow, Bash(ck agents check:*)
 ---
 
 Create the specification for: $ARGUMENTS
+
+## First: Model Check
+
+The spec written here is what every later agent builds and tests against, and the spec-create workflow's agents run on this session's model, so this should run on a strong model.
+
+1. Find your model ID in your system prompt (for example "The exact model ID is claude-opus-5-5"), and your effort level if anything in your context states it.
+2. Run `ck agents check --model <model id> --json`, adding `--effort <level>` only if you know it.
+3. If it exits 0, or its `"ask"` is false, continue without mentioning it.
+4. Otherwise ask me once with AskUserQuestion, before any other work: "This session runs <model, effort if known>. Writing the spec works best on <min_model> at <min_effort> effort or higher. Switch first?" Options:
+   - **Switch (recommended)**: tell me to run `/model` and choose <min_model> with <min_effort> effort or higher, then run this command again. Stop here.
+   - **Continue on <current model>**: go on.
+   You can't change the model yourself; don't try.
+5. If `ck` isn't installed or the check fails to run, skip it and say so in one line.
+
+The minimum is configurable: `ck agents set planning.min_model <model>`, `ck agents set planning.min_effort <level>`, or `ck agents set planning.ask false` to stop asking (add `--project` to set it for this project only).
 
 # Spec-Create: Write It Down, Then Attack It
 
