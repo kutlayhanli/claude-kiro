@@ -21,6 +21,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # each test task's Verify commands once every task it Verifies is Done);
     # run `verify` once every task is Done. "full": always run `verify`.
     "verify_mode": "auto",
+    # While a test-first spec is in progress, `ck gate <spec> --task N` runs only
+    # that task's Verify and its verifying tests; `ck gate <spec>` re-runs every
+    # suite that should already pass. true: every task gate re-runs them too.
+    "task_regression": False,
     # Command that fails when any test file cannot be collected/imported.
     # null = derived from a pytest command in `verify`; "" disables the check.
     "collect": None,

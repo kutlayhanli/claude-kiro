@@ -180,8 +180,25 @@ def run_gate(
     green_only = str(config.get("verify_mode", "auto")).lower() == "auto" and has_test_track and not spec_complete
 
     commands.extend(config.get("verify_always", []))
+    # A task gate (--task) checks that task: its own Verify and its verifying
+    # tests (added below). Re-running every other finished suite on every task
+    # is the whole-spec gate's job; on a large spec that sweep made each task
+    # gate run dozens of suites. task_regression: true restores it.
+    task_scoped = task_nums is not None and not config.get("task_regression", False)
     if impl_selected:
-        if green_only:
+        if green_only and task_scoped:
+            if config.get("verify"):
+                result.checks.append(
+                    Check(
+                        "Verify mode: this task's tests",
+                        True,
+                        "test-first spec in progress: running this task's Verify and its verifying tests; "
+                        f"`ck gate {spec_dir.name}` (no --task) re-runs every suite that should already pass, "
+                        f"and the full suite ({'; '.join(config['verify'])}) runs once every task is Done.",
+                        warning=True,
+                    )
+                )
+        elif green_only:
             due = [t for t in tasks.values() if t.track == "test" and suite_due(t)]
             for test_task in due:
                 commands.extend(test_task.verify)

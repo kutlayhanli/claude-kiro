@@ -146,12 +146,55 @@ def test_green_only_skips_full_suite_until_spec_complete(project):
     report = green.report()
     assert green.ok, report
     assert "`python -m pytest -q tests/test_subtract.py`" in report or "test_subtract" in report
-    assert "skipping 1 still waiting on unfinished tasks (Tasks 3)" in report
+    assert "running this task's Verify and its verifying tests" in report
+
+    whole = run_gate(project, project / "specs/calc")
+    assert whole.ok, whole.report()
+    assert "skipping 1 still waiting on unfinished tasks (Tasks 3)" in whole.report()
 
     from claude_kiro.config import load_config
 
     full = run_gate(project, project / "specs/calc", ["2"], config={**load_config(project), "verify_mode": "full"})
     assert not full.ok  # the full suite includes the red multiply test
+
+
+def test_task_gate_runs_only_its_own_suites_until_the_whole_gate(project):
+    """A task gate checks that task; re-running every finished suite is the whole-spec gate's job."""
+    import re
+
+    tasks_md = project / "specs" / "calc" / "tasks.md"
+    extra = (
+        "\n### Task 3: Tests for multiply\n**Status:** Done\n**Track:** test\n**Verifies:** Task 4\n"
+        "**Files:**\n- `tests/test_multiply.py` - multiply\n**Verify:** `python -m pytest -q tests/test_multiply.py`\n"
+        "- [x] cases written\n\n"
+        "### Task 4: Implement multiply\n**Status:** Done\n**Track:** impl\n**Verified by:** Task 3\n"
+        "**Files:**\n- `calc.py` - multiply()\n- [x] done\n\n"
+        "### Task 5: Tests for divide\n**Status:** Not Started\n**Track:** test\n**Verifies:** Task 6\n"
+        "**Files:**\n- `tests/test_divide.py` - divide\n- [ ] cases written\n\n"
+        "### Task 6: Implement divide\n**Status:** Not Started\n**Track:** impl\n**Verified by:** Task 5\n"
+        "**Files:**\n- `calc.py` - divide()\n- [ ] done\n"
+    )
+    (project / "tests" / "test_multiply.py").write_text("def test_multiply():\n    from calc import multiply\n\n    assert multiply(2, 3) == 6\n")
+    write_subtract_tests(project)
+    implement_subtract(project)
+    (project / "calc.py").write_text((project / "calc.py").read_text() + "\n\ndef multiply(a, b):\n    return a + b  # broken\n")
+    write_tasks(project, t1="Done", t2="Done", a1="x", a2="x")
+    tasks_md.write_text(re.sub(r"\n## Parallel Groups", extra + "\n## Parallel Groups", tasks_md.read_text()))
+    (project / "specs/ck.json").write_text(json.dumps({"verify": ["python -m pytest -q"]}))
+
+    task_gate = run_gate(project, project / "specs/calc", ["2"])
+    assert task_gate.ok, task_gate.report()  # Task 3's red suite is not Task 2's to run
+    assert "test_multiply" not in task_gate.report()
+
+    whole = run_gate(project, project / "specs/calc")
+    assert not whole.ok
+    assert "tests/test_multiply.py" in whole.report()
+
+    from claude_kiro.config import load_config
+
+    swept = run_gate(project, project / "specs/calc", ["2"], config={**load_config(project), "task_regression": True})
+    assert not swept.ok
+    assert "tests/test_multiply.py" in swept.report()
 
 
 def test_test_task_needs_real_test_cases(project):
