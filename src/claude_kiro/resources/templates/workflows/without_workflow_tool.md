@@ -12,13 +12,14 @@ The Agent tool can pick a model per call but not an effort. The effort comes fro
 ck agents sync            # add --override role.key=value for this run, as in /spec:implement
 ```
 
-This writes `.claude/agents/ck-implementer.md`, `ck-test-writer.md`, `ck-fixer.md` and `ck-reviewer.md` with each role's model and effort from `ck agents`. The reviewer type has no edit tools. Use them as `subagent_type`:
+This writes `.claude/agents/ck-implementer.md`, `ck-test-writer.md`, `ck-fixer.md`, `ck-resolver.md` and `ck-reviewer.md` with each role's model and effort from `ck agents`. The `orchestrator` role has no agent type: here you do its steps yourself. The reviewer type has no edit tools. Use them as `subagent_type`:
 
 | Work | `subagent_type` |
 |---|---|
 | impl-track task, its retry, its revision after review | `ck-implementer` |
 | test-track task, its retry, its revision | `ck-test-writer` |
-| merge conflict, red target branch | `ck-fixer` |
+| red target branch | `ck-fixer` |
+| merge conflict | `ck-resolver` |
 | review of a task's diff | `ck-reviewer` |
 | spec-create agents (requirements, design, reviewers, refuters) | `general-purpose` (the session's model, as in the workflow) |
 
@@ -55,7 +56,7 @@ You are the scheduler that `.claude/workflows/spec-implement.js` would be. The t
 4. **Merge, one at a time.** Only one merge and its gate run at any moment; queue the rest. From the main checkout: `ck worktree merge <spec> <N> --into <into> --json`.
    - MERGED: refresh dependencies in `targetDir` if the project has an install step, then run `ck gate <spec> --task <N>` there **in the background** (Bash `run_in_background`) and wait for its exit code. A slow gate is not a red gate.
    - BUSY: `ck worktree release <spec> <N>` once, then merge again.
-   - CONFLICT (already aborted on the target): start `ck-fixer` with the CONFLICT instructions from `mergePrompt` (resolve in the task worktree, keep both sides' tests, gate passes there), then merge again.
+   - CONFLICT (already aborted on the target): start `ck-resolver` with `resolvePrompt` (resolve in the task worktree, keep both sides' tests, gate passes there, then merge again).
    - SKIP: the task made no commits; it fails.
    - Gate red after a merge: start `ck-fixer` with the fix prompt, then re-run the gate yourself. Still red: stop launching, let running agents finish without merging them, and report. A red target branch always halts.
    - Every `fullGateEvery` merges, run the full `ck gate <spec>` the same way.

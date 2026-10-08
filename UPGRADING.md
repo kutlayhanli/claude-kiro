@@ -1,10 +1,21 @@
 # Upgrading
 
-- **From 0.5 to 0.6:** see the next section.
+- **From 0.6 to 0.7:** see the next section.
+- **From 0.5 to 0.6:** see [0.5 → 0.6](#05--06).
 - **From 0.4 to 0.5:** see [0.4 → 0.5](#04--05).
 - **From 0.3 to 0.4:** see [0.3 → 0.4](#03--04).
 - **From 0.2:** apply the 0.3 notes below as well; the steps are the same.
 - **From 0.1:** skip to [Upgrading to 0.2](#upgrading-to-02), then come back for the 0.3 and 0.4 notes (same commands).
+
+## 0.6 → 0.7
+
+What changes:
+- **Orchestration runs on a cheaper model.** The workflow's mechanical steps (plan, conflict-free merges, the per-merge, full and final gates, re-checks) used to run on the session's model, usually Opus. They now use the new **orchestrator** role, Sonnet at low effort. In the October benchmark these steps cost $1.9–3.1 per run on Opus.
+- **Merge conflicts go to a strong model.** A merge step that hits a conflict now stops and hands it to the new **resolver** role (Opus, high effort, agent type `ck-resolver`) instead of resolving it at low effort.
+- **The fixer defaults to Opus at medium effort** instead of following the implementer. Repairing a red target means deciding whether the environment or the code is at fault; Haiku fix agents got this wrong in 2 of 5 benchmark runs.
+- Restore the old behaviour with `ck agents set orchestrator.model inherit`, `ck agents set resolver.model inherit` and `ck agents set fixer.model default` (and the same for `.effort`).
+
+Steps: `ck update` from a project directory, then commit `.claude/workflows`, `.claude/commands`, `.claude/agents` and `.claude/ck-manifest.json`.
 
 ## 0.5 → 0.6
 

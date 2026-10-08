@@ -1,15 +1,15 @@
 {
-  "version": "0.6.0",
+  "version": "0.7.0",
   "files": {
     ".claude/output-styles/spec-driven.md": "33e67716471353f0",
     ".claude/commands/spec/plan.md": "381d168777fa50dc",
     ".claude/commands/spec/create.md": "a30eec6c69eba21e",
-    ".claude/commands/spec/implement.md": "3c7a6ca531f5c581",
+    ".claude/commands/spec/implement.md": "b2894901a2b26bf6",
     ".claude/commands/spec/review.md": "e5ab04f72a01f75c",
     ".claude/commands/spawn-worktree.md": "76bfeb5d8b3946b2",
     ".claude/workflows/spec-create.js": "f3c42afe3ab44598",
-    ".claude/workflows/spec-implement.js": "5ca32b90ddb3ce52",
+    ".claude/workflows/spec-implement.js": "4335b45a7a658b65",
     ".claude/workflows/spec-implement-brief.md": "6af925a648a347fd",
-    ".claude/workflows/without-workflow-tool.md": "2906394f421cced7"
+    ".claude/workflows/without-workflow-tool.md": "07496e4701e1271e"
   }
 }

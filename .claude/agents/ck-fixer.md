@@ -1,7 +1,7 @@
 ---
 name: ck-fixer
 description: claude-kiro agent that resolves a task's merge conflict or repairs a red target branch
-model: sonnet
+model: opus
 effort: medium
 ---
 

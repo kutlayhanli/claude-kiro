@@ -194,3 +194,20 @@ def test_sync_dry_run_writes_nothing(home):
     out = ck(home, "agents", "sync", "--dry-run")
     assert "Would write" in out.output and "ck-implementer.md" in out.output
     assert not (home / ".claude" / "agents").exists()
+
+
+def test_orchestration_defaults_cheap_steps_strong_judgment(home):
+    r = roles(home)["roles"]
+    assert (r["orchestrator"]["model"], r["orchestrator"]["effort"]) == ("sonnet", "low")
+    assert (r["resolver"]["model"], r["resolver"]["effort"]) == ("opus", "high")
+    assert (r["fixer"]["model"], r["fixer"]["effort"]) == ("opus", "medium")
+    assert ck(home, "agents", "set", "orchestrator.model", "haiku").exit_code == 0
+    assert roles(home)["roles"]["orchestrator"]["model"] == "haiku"
+    assert ck(home, "agents", "set", "orchestrator.rounds", "2").exit_code == 2  # not a key of that role
+
+
+def test_sync_writes_a_resolver_but_no_orchestrator_type(home):
+    ck(home, "agents", "sync")
+    resolver = frontmatter(home / ".claude/agents/ck-resolver.md")
+    assert (resolver["model"], resolver["effort"]) == ("opus", "high")
+    assert not (home / ".claude/agents/ck-orchestrator.md").exists()  # without workflows the main session orchestrates

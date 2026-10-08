@@ -16,7 +16,8 @@ export const meta = {
 //   onFailure: 'continue' | 'halt',        // default continue: other ready tasks keep starting; a red target always halts
 //   maxConcurrent: null,                   // cap on task agents at once (memory-heavy test suites)
 //   fullGateEvery: 10,                     // run the full `ck gate <spec>` every N merges (0 = only at the end)
-//   agents: { implementer, test_writer, reviewer, fixer }  // "roles" from `ck agents --json`: model/effort per role
+//   agents: { implementer, test_writer, reviewer, fixer, orchestrator, resolver }  // "roles" from `ck agents --json`
+//                                          //   orchestrator: plan, merge, gate and re-check steps; resolver: merge conflicts
 //                                          //   ("inherit" = the session's). Absent: every agent inherits, no review.
 //   model: null, effort: null,             // one-run override for every code-writing agent (task, retry, fix)
 // }
@@ -45,7 +46,8 @@ if (!SPEC || !ROOT) throw new Error('spec-implement needs args.spec and args.roo
 
 // Model and effort per role, from `ck agents --json` (args.agents). "inherit" or
 // unset means the session's. args.model / args.effort override every code-writing
-// agent for this run. Planning and merge steps keep their own low effort.
+// agent for this run. Plan and merge steps run at low effort unless the
+// orchestrator role sets one; a merge that hits a conflict goes to the resolver.
 const ROLES = A.agents || {}
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 function roleOpts(name, role, override) {
@@ -70,9 +72,12 @@ const REVIEWER = ROLES.reviewer || {}
 const REVIEW_ON = !!A.agents && REVIEWER.enabled !== false
 const REVIEW = roleOpts('reviewer', REVIEWER, null)
 const REVIEW_ROUNDS = Number.isInteger(REVIEWER.rounds) ? REVIEWER.rounds : 1
+const ORCH = roleOpts('orchestrator', ROLES.orchestrator, null)
+const LOW = { effort: 'low', ...ORCH }
+const RESOLVE = roleOpts('resolver', ROLES.resolver, null)
 const desc = o => `${o.model || 'inherited'}/${o.effort || 'inherited'}`
 if (A.agents || A.model || A.effort) {
-  log(`Agents: impl ${desc(IMPL)}, test ${desc(TEST)}, fix ${desc(FIX)}, review ${REVIEW_ON ? desc(REVIEW) : 'off'}`)
+  log(`Agents: impl ${desc(IMPL)}, test ${desc(TEST)}, fix ${desc(FIX)}, review ${REVIEW_ON ? desc(REVIEW) : 'off'}, orchestration ${desc(LOW)}, conflicts ${desc(RESOLVE)}`)
 }
 const codeOpts = n => (TRACKS[n] === 'test' ? TEST : IMPL)
 
@@ -125,6 +130,7 @@ const MERGE = {
   type: 'object',
   properties: {
     merged: { type: 'boolean' },
+    conflict: { type: 'boolean', description: 'ck worktree merge reported CONFLICT and you stopped without resolving it' },
     conflicts: { type: 'string', description: 'files that conflicted and how they were resolved, or empty' },
     error: { type: 'string', description: 'why it did not merge, including a refused/blocked command' },
     checkGreen: { type: 'boolean', description: 'ck gate --task on the target after the merge exited 0' },
@@ -220,20 +226,28 @@ ${GIT_NOTE}
 ${GATE_NOTE}
 Return the schema fields with task "${n}".`
 
+const AFTER_MERGE = n => `After MERGED: refresh dependencies in ${TARGET} if the project has an install step (e.g. "uv sync -q" from ${TARGET}), then from ${TARGET} run:  ck gate ${SPEC} --task ${n}
+   checkGreen = whether it exited 0; if not, put the failing part in checkTail.
+Never edit files in ${TARGET} directly, never force anything, never touch other task branches.`
+
 const mergePrompt = n => `Merge step for Task ${n} of spec ${SPEC}. ${GIT_NOTE} ${GATE_NOTE}
 1. From ${ROOT} run:  ck worktree merge ${SPEC} ${n} --into ${INTO} --json
    - state MERGED: success; run "${NOW}" for mergedAt.
    - state SKIP (no commits ahead): return merged=false, error "no commits".
    - state BUSY: the worktree is still claimed. Run "ck worktree release ${SPEC} ${n}" once, then retry the merge once.
-   - state CONFLICT: the merge was already aborted on ${INTO}. Resolve it in the TASK WORKTREE, never in ${TARGET}:
-       command git -C ${WT(n)} merge ${INTO}
-     Resolve each conflicted file keeping both sides' intent: tasks.md, keep both sides' task sections; dependency manifests, take the union and re-lock (e.g. "uv lock"); test files, keep every test and assertion from both sides and never weaken one.
-     In the worktree, "ck gate ${SPEC} --task ${n}" must pass. Commit the merge, then run the ck worktree merge command again.
+   - state CONFLICT: the merge was already aborted on ${INTO}. Do NOT resolve it: return merged=false, conflict=true, and the conflicting files in conflicts. A separate agent resolves conflicts.
    - state ERROR: return merged=false with the detail.
-2. After MERGED: refresh dependencies in ${TARGET} if the project has an install step (e.g. "uv sync -q" from ${TARGET}), then from ${TARGET} run:  ck gate ${SPEC} --task ${n}
-   checkGreen = whether it exited 0; if not, put the failing part in checkTail.
-Never edit files in ${TARGET} directly, never force anything, never touch other task branches.
-Return merged, conflicts, error, checkGreen, checkTail, mergedAt.`
+2. ${AFTER_MERGE(n)}
+Return merged, conflict, conflicts, error, checkGreen, checkTail, mergedAt.`
+
+const resolvePrompt = (n, files) => `Merge conflict for Task ${n} of spec ${SPEC}: merging ${BR(n)} into ${INTO} conflicted${files ? ` (${files})` : ''}, and the merge was already aborted on ${INTO}. ${GIT_NOTE} ${GATE_NOTE}
+1. Resolve it in the TASK WORKTREE, never in ${TARGET}:
+     command git -C ${WT(n)} merge ${INTO}
+   Resolve each conflicted file keeping both sides' intent: tasks.md, keep both sides' task sections; dependency manifests, take the union and re-lock (e.g. "uv lock"); test files, keep every test and assertion from both sides and never weaken one. Read the spec (specs/${SPEC}/design.md, requirements.md) when the two sides disagree about behaviour.
+   In the worktree, "ck gate ${SPEC} --task ${n}" must pass. Commit the merge.
+2. From ${ROOT} run:  ck worktree merge ${SPEC} ${n} --into ${INTO} --json  (state MERGED: run "${NOW}" for mergedAt; anything else: return merged=false with the detail).
+3. ${AFTER_MERGE(n)}
+Return merged, conflicts (the files and how you resolved them), error, checkGreen, checkTail, mergedAt.`
 
 const verifyPrompt = what => `Verification (${what}) for spec ${SPEC}. In ${TARGET} (branch ${INTO}):
 1. Refresh dependencies if the project has an install step (e.g. "uv sync -q").
@@ -271,7 +285,7 @@ async function plan() {
   refills++
   const exclude = [...running.keys(), ...failed.keys()]
   const slots = MAX_CONCURRENT - running.size
-  const p = await agent(planPrompt(exclude, slots), { label: `plan ${refills}`, phase: 'Plan', schema: PLAN, effort: 'low' })
+  const p = await agent(planPrompt(exclude, slots), { label: `plan ${refills}`, phase: 'Plan', schema: PLAN, ...LOW })
   if (!p || p.error) return null
   return p
 }
@@ -279,13 +293,17 @@ async function plan() {
 async function fixAndRecheck(what, failure, n) {
   fixCount++
   const fix = await agent(fixPrompt(fixCount, what, failure), { label: `fix ${fixCount} (${what})`, phase: n ? phaseOf(n) : 'Final gate', schema: VERIFY, ...FIX })
-  const recheck = await agent(recheckPrompt(n), { label: `re-check ${fixCount}`, phase: n ? phaseOf(n) : 'Final gate', schema: VERIFY })
+  const recheck = await agent(recheckPrompt(n), { label: `re-check ${fixCount}`, phase: n ? phaseOf(n) : 'Final gate', schema: VERIFY, ...ORCH })
   return { fix, recheck, green: !!(recheck && recheck.green) }
 }
 
 function enqueueMerge(n) {
   const link = mergeChain.then(async () => {
-    const m = await agent(mergePrompt(n), { label: `merge ${n}`, phase: phaseOf(n), schema: MERGE, effort: 'low' })
+    let m = await agent(mergePrompt(n), { label: `merge ${n}`, phase: phaseOf(n), schema: MERGE, ...LOW })
+    if (m && !m.merged && m.conflict) {
+      log(`Task ${n}: merge conflict, handing it to the resolver`)
+      m = await agent(resolvePrompt(n, m.conflicts), { label: `resolve ${n}`, phase: phaseOf(n), schema: MERGE, ...RESOLVE })
+    }
     if (!m || !m.merged) return m
     mergedCount++
     let green = m.checkGreen === true
@@ -296,7 +314,7 @@ function enqueueMerge(n) {
       green = f.green
     }
     if (green && FULL_EVERY > 0 && mergedCount % FULL_EVERY === 0) {
-      let v = await agent(verifyPrompt(`full gate after ${mergedCount} merges`), { label: `full gate @${mergedCount}`, phase: phaseOf(n), schema: VERIFY })
+      let v = await agent(verifyPrompt(`full gate after ${mergedCount} merges`), { label: `full gate @${mergedCount}`, phase: phaseOf(n), schema: VERIFY, ...ORCH })
       if (!v || !v.green) {
         log(`Full gate red after ${mergedCount} merges, one fix attempt`)
         const f = await fixAndRecheck(`full gate after ${mergedCount} merges`, v)
@@ -440,7 +458,7 @@ await mergeChain
 let finalGate = null
 if (mergedCount && !redTarget) {
   phase('Final gate')
-  finalGate = await agent(verifyPrompt('final'), { label: 'final gate', phase: 'Final gate', schema: VERIFY })
+  finalGate = await agent(verifyPrompt('final'), { label: 'final gate', phase: 'Final gate', schema: VERIFY, ...ORCH })
   if (!finalGate || !finalGate.green) {
     log(`Final gate red, one fix attempt`)
     const f = await fixAndRecheck('final gate', finalGate)
@@ -491,7 +509,7 @@ return {
   reason: stopReason,
   into: INTO,
   taskAgents: { model: IMPL.model || 'inherited', effort: IMPL.effort || 'inherited' },
-  agents: { implementer: desc(IMPL), test_writer: desc(TEST), fixer: desc(FIX), reviewer: REVIEW_ON ? desc(REVIEW) : 'off' },
+  agents: { implementer: desc(IMPL), test_writer: desc(TEST), fixer: desc(FIX), reviewer: REVIEW_ON ? desc(REVIEW) : 'off', orchestrator: desc(LOW), resolver: desc(RESOLVE) },
   targetGreen: !redTarget,
   merged,
   failed: [...failed.entries()].map(([task, reason]) => ({ task, reason })),

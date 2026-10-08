@@ -35,8 +35,16 @@ DEFAULTS: Dict[str, Dict[str, Any]] = {
     # Reviews each task's diff against design.md and requirements.md before it merges.
     # rounds: how many times the implementer may revise after blocking findings.
     "reviewer": {"model": "opus", "effort": "high", "enabled": True, "rounds": 1},
-    # Repairs a red target branch. null = same as implementer.
-    "fixer": {"model": None, "effort": None},
+    # Repairs a red target branch: reads the failing gate, decides environment vs code, fixes.
+    # Judgment-heavy and rare (about once a run). null = same as implementer.
+    "fixer": {"model": "opus", "effort": "medium"},
+    # Mechanical workflow steps: plan (`ck plan` + worktrees), conflict-free merges,
+    # gates, re-checks. Their decisions are coded in the workflow; the agent runs a
+    # command and reports.
+    "orchestrator": {"model": "sonnet", "effort": "low"},
+    # Resolves a merge conflict in the task worktree. A bad resolution lands broken
+    # or weakened code on the target, so it gets a strong model.
+    "resolver": {"model": "opus", "effort": "high"},
 }
 
 ROLE_KEYS = {
@@ -45,6 +53,8 @@ ROLE_KEYS = {
     "test_writer": {"model", "effort"},
     "reviewer": {"model", "effort", "enabled", "rounds"},
     "fixer": {"model", "effort"},
+    "orchestrator": {"model", "effort"},
+    "resolver": {"model", "effort"},
 }
 
 
@@ -229,6 +239,15 @@ AGENT_TYPES = {
         None,
         "You repair a claude-kiro spec run: a merge conflict in a task worktree, or a target branch whose gate is red. "
         "Never weaken a test or edit requirements.md to get a pass; if that is the only way, stop and explain.",
+    ),
+    "ck-resolver": (
+        "resolver",
+        "claude-kiro agent that resolves a task branch's merge conflict in the task worktree",
+        None,
+        "You resolve one merge conflict in a claude-kiro spec run, inside the task worktree your prompt names, never on "
+        "the target checkout. Keep both sides' intent: both sides' task sections in tasks.md, the union of dependency "
+        "manifests (then re-lock), and every test and assertion from both sides. Read design.md and requirements.md "
+        "when the sides disagree. The task's gate must pass in the worktree before you commit the merge.",
     ),
     "ck-reviewer": (
         "reviewer",

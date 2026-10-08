@@ -15,7 +15,7 @@ Implement: $ARGUMENTS
 
 ## Agents: Models, Effort, and Review
 
-Each role has a model and effort, resolved by `ck agents --json` (run it first). Defaults: **implementer** Sonnet, medium effort, for impl-track tasks; **test_writer** and **fixer** follow the implementer unless set; **reviewer** Opus, high effort, reviews every task's diff against the spec before it merges, with up to 1 revision round. My preferences (`ck agents set ...`, global or `--project`) override the defaults; `ck agents` shows the effective values and where each comes from.
+Each role has a model and effort, resolved by `ck agents --json` (run it first). Defaults: **implementer** Sonnet, medium effort, for impl-track tasks; **test_writer** follows the implementer unless set; **reviewer** Opus, high effort, reviews every task's diff against the spec before it merges, with up to 1 revision round; **fixer** Opus, medium effort, repairs a red target branch; **orchestrator** Sonnet, low effort, runs the mechanical steps (plan, conflict-free merges, gates, re-checks); **resolver** Opus, high effort, resolves merge conflicts. My preferences (`ck agents set ...`, global or `--project`) override the defaults; `ck agents` shows the effective values and where each comes from.
 
 For this run only, turn what I ask into `--override` arguments to `ck agents --json`:
 - `--model X` / `--effort Y` (or in words, "with haiku at low effort"): `implementer.model=X`, `implementer.effort=Y`
@@ -26,7 +26,7 @@ For this run only, turn what I ask into `--override` arguments to `ck agents --j
 Models: `sonnet`, `opus`, `haiku`, `fable` (each means the newest model of that family; pass a full ID such as `claude-sonnet-5` only if I name a specific older version) or `inherit` (this session's model). Efforts: `low`, `medium`, `high`, `xhigh`, `max`, or `inherit`. `ck agents` refuses anything else; if it does, ask me rather than guess.
 
 How each mode applies them:
-- **Whole spec:** pass the `roles` object from `ck agents --json` as `agents` in the workflow args (step 6). Planning and merge steps keep their own low effort.
+- **Whole spec:** pass the `roles` object from `ck agents --json` as `agents` in the workflow args (step 6).
 - **One task:** you can't change your own model mid-session. If the implementer (or the test_writer, for a test-track task) is `inherit` for both model and effort, implement the task yourself as usual. Otherwise launch the Workflow tool with an inline script that runs one `agent()` with that role's `{ model, effort }` (omit any that are `inherit`) and a prompt to implement task N of the spec in the current checkout, following `.claude/commands/spec/implement.md` from "Implementation Guidelines" on. If the reviewer is enabled and the task's gate passed, the same script then runs a reviewer `agent()` with the reviewer's `{ model, effort }`: it reads the task's changes (`git diff` against where the task started) and the spec, does not edit, and returns approve or blocking findings; on findings, one implementer `agent()` revises them (up to the reviewer's `rounds`) and the reviewer looks again. Relay the implementation Output and the review verdict to me. Without the Workflow tool, use the Agent tool with the `ck-*` agent types instead (see `.claude/workflows/without-workflow-tool.md`).
 
 ## Whole Spec: The Workflow
