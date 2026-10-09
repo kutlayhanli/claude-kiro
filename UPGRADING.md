@@ -13,6 +13,7 @@ What changes:
 - **Orchestration runs on a cheaper model.** The workflow's mechanical steps (plan, conflict-free merges, the per-merge, full and final gates, re-checks) used to run on the session's model, usually Opus. They now use the new **orchestrator** role, Sonnet at low effort. In the October benchmark these steps cost $1.9–3.1 per run on Opus.
 - **Merge conflicts go to a strong model.** A merge step that hits a conflict now stops and hands it to the new **resolver** role (Opus, high effort, agent type `ck-resolver`) instead of resolving it at low effort.
 - **The fixer defaults to Opus at medium effort** instead of following the implementer. Repairing a red target means deciding whether the environment or the code is at fault; Haiku fix agents got this wrong in 2 of 5 benchmark runs.
+- **`ck init` offers a Workflow allow rule.** In auto mode a classifier may stop to ask before a spec workflow launches; an unattended session (cloud, `claude -p`) then waits forever. `ck init` now asks whether to add `"Workflow"` to `permissions.allow` in `.claude/settings.json` (default no). For an existing project, `ck init --allow-workflow` adds just that rule and skips files that already exist.
 - Restore the old behaviour with `ck agents set orchestrator.model inherit`, `ck agents set resolver.model inherit` and `ck agents set fixer.model default` (and the same for `.effort`).
 
 Steps: `ck update` from a project directory, then commit `.claude/workflows`, `.claude/commands`, `.claude/agents` and `.claude/ck-manifest.json`.

@@ -155,7 +155,7 @@ The hooks provide spec context and enforce the definition of done:
 
 ### Main Commands
 - `ck setup [--force]` - Install global config to ~/.claude/ (once per machine)
-- `ck init [--force]` - Initialize a project with spec-driven setup
+- `ck init [--force] [--allow-workflow | --no-allow-workflow]` - Initialize a project with spec-driven setup. It asks whether to allow the Workflow tool in `.claude/settings.json`, so unattended runs (cloud sessions, `claude -p`) never stall on a permission prompt before a spec workflow launches. Run `ck init --allow-workflow` in an existing project to add just that rule
 - `ck doctor` - Check your Claude Kiro setup health
 - `ck migrate [--dry-run]` - Move specs from `.claude/specs/` to `specs/` (tracked files keep their history)
 - `ck gate <spec> [--task N]` - Run the verification gate; exits 1 on failure
