@@ -19,10 +19,12 @@ Used by `ck gate` and by the Stop/SubagentStop hook.
 """
 
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from claude_kiro import verified
 from claude_kiro.config import collect_command, load_config
 from claude_kiro.hooks._shared import git_utils
 from claude_kiro.hooks._shared.spec_parser import SpecTask, parse_tasks
@@ -271,6 +273,10 @@ def run_gate(
         )
 
     timeout = int(config.get("verify_timeout", 540))
+    # A pass of the full suite on a clean tree is stamped for safe-merge to reuse.
+    full_suite = list(config.get("verify") or [])
+    clean = verified.clean_tree(project_dir) if full_suite and all(c in commands for c in full_suite) else None
+    started = time.monotonic()
     collect = collect_command(config)
     if collect:
         check = _run(collect, project_dir, timeout)
@@ -284,4 +290,6 @@ def run_gate(
 
     owned = {f for t in tasks.values() if t.track == "test" for f in t.files}
     result.checks.append(_tamper(project_dir, config, owned))
+    if clean and result.ok and verified.tracked_unchanged(project_dir, clean):
+        verified.write_stamp(project_dir, clean, full_suite, "ck gate", int(time.monotonic() - started))
     return result

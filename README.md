@@ -159,6 +159,7 @@ The hooks provide spec context and enforce the definition of done:
 - `ck doctor` - Check your Claude Kiro setup health
 - `ck migrate [--dry-run]` - Move specs from `.claude/specs/` to `specs/` (tracked files keep their history)
 - `ck gate <spec> [--task N]` - Run the verification gate; exits 1 on failure
+  When it passes the full `verify` suite on a clean tree (no uncommitted or untracked files), it stamps the tree hash in `<git-common-dir>/ck-verified/<tree>.json`, so a merge script (e.g. the safe-merge skill) can skip re-running the same suite on the same tree.
 - `ck waves <spec> [--json]` - Show tasks by dependency level (display only; tasks start when their own dependencies merge)
 - `ck lint <spec>` - Check the task plan: dependency cycles, verify-order cycles (an impl task whose verifying tests need code from a task that depends on it), dependencies without a stated reason, critical path. Exits 1 on a cycle
 - `ck plan <spec> --json [--exclude N,M]` - Machine-readable plan with the tasks ready to start now; the workflow re-reads it after every task
