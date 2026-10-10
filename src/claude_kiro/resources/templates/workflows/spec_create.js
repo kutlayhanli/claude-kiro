@@ -6,7 +6,7 @@ export const meta = {
     { title: 'Requirements', detail: 'EARS requirements from PLAN.md decisions' },
     { title: 'Design + Test Plan', detail: 'in parallel; the test plan never sees the design' },
     { title: 'Task Tracks', detail: 'implementation and test task lists in parallel' },
-    { title: 'Link', detail: 'merge tracks into tasks.md, wire Verified by, compute waves' },
+    { title: 'Link', detail: 'merge tracks into tasks.md, wire Verified by, lint the dependency graph' },
     { title: 'Adversarial Review', detail: '4 lenses, each finding challenged by a refuter' },
     { title: 'Revise', detail: 'apply confirmed fixes, write review.md' },
   ],
@@ -333,11 +333,13 @@ Inputs: ${DRAFT_IMPL} (implementation track, IDs I1..), ${DRAFT_TEST} (test trac
 ## Dependency Graph
 A Mermaid graph TD of task dependencies, with test tasks visually distinct (e.g. a "test" class).
 
-## Parallel Groups
-Waves for /spawn-worktree, computed from Dependencies. Typically: Wave 1 = test infrastructure; Wave 2 = all test tasks plus impl tasks with no verifying tests (foundations); Wave 3+ = impl tasks whose tests are done. Tasks in one wave must not edit the same files.
+## Schedule
+There are no waves: each task starts as soon as its own Dependencies are merged, so the plan is the dependency graph above. Two lines, copied from \`ck lint\` in step 5:
+- **Ready at start:** Tasks …
+- **Critical path:** Task A -> Task B -> … (N of M tasks; the floor on wall-clock time however many agents run)
 
 4. Delete ${DRAFT_IMPL} and ${DRAFT_TEST}.
-5. Run \`ck lint ${A.feature}\` from ${ROOT}. Fix every dependency cycle and every verify-order cycle it reports, and add a reason to every dependency it lists as reasonless (or remove the dependency). Re-run it until it reports no cycles.
+5. Run \`ck lint ${A.feature}\` from ${ROOT}. Fix every dependency cycle and every verify-order cycle it reports, and add a reason to every dependency it lists as reasonless (or remove the dependency). Re-run it until it reports no cycles. Every edge on the critical path lengthens the run: drop any that has no code, data, test, or shared-file reason. Then fill the Schedule section from its "critical path" and "ready now" lines.
 
 Return the structured result.`, { label: 'link tracks into tasks.md', phase: 'Link', schema: WRITE_RESULT })
 
@@ -422,7 +424,7 @@ const LENSES = [
     prefix: 'T',
     focus: `TASKS AN ENGINEER CAN EXECUTE.
 - Is every requirement criterion covered by a task? List any orphans.
-- Are dependencies correct and acyclic? Is any task in a parallel wave editing the same file as another task in that wave?
+- Are dependencies correct and acyclic? Do two tasks that can run at the same time (neither depends on the other, directly or transitively) edit the same file? They will conflict at merge: flag it, and propose splitting the file's ownership or a dependency with the reason "shared file".
 - Does each task name its files and a **Verify:** command, and is it small enough to finish in one sitting?
 - Is every impl task linked to the test tasks that verify it (**Verified by:**), with those test tasks in its Dependencies? Do test tasks depend only on test infrastructure, never on impl tasks?
 - Verify-order: can each impl task's verifying tests pass when only that task and its dependencies exist? A test that drives a runner or entry point built by a LATER task (one that depends on this task) makes this task's gate unpassable. Flag it, with the fix: make this task a foundation task, and have the test task verify the later task.
@@ -552,8 +554,8 @@ ${JSON.stringify(refuted.map(f => ({ id: f.id, problem: f.problem, why: f.refuta
 ## Unverified
 ${unverified.length ? JSON.stringify(unverified.map(f => ({ id: f.id, problem: f.problem })), null, 2) : 'None'}
 
-## Parallel Groups
-Copy the waves from tasks.md.
+## Schedule
+Re-run \`ck lint ${A.feature}\` from ${ROOT} after your fixes. Update the Schedule section of tasks.md from its "critical path" and "ready now" lines, and copy those two lines here.
 
 Return the structured result.`, {
   label: 'revise spec + write review.md',
@@ -568,9 +570,9 @@ Return the structured result.`, {
         items: { type: 'object', properties: { id: { type: 'string' }, reason: { type: 'string' } }, required: ['id', 'reason'] },
       },
       result: { type: 'string', enum: ['Ready', 'Ready after decisions', 'Needs work'] },
-      parallelGroups: { type: 'string' },
+      schedule: { type: 'string', description: 'the ready-at-start and critical-path lines' },
     },
-    required: ['fixed', 'notFixed', 'result', 'parallelGroups'],
+    required: ['fixed', 'notFixed', 'result', 'schedule'],
   },
 })
 
@@ -591,5 +593,5 @@ return {
     unverified: unverified.map(f => ({ id: f.id, problem: f.problem })),
     lensesLost,
   },
-  parallelGroups: revision ? revision.parallelGroups : null,
+  schedule: revision ? revision.schedule : null,
 }

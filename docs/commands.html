@@ -225,8 +225,8 @@
               </ul>
               <p style="margin-top: var(--space-3)">
                 <strong>Parallel-ready:</strong>
-                Tasks are grouped into waves for
-                <code>/spawn-worktree</code>.
+                Each task starts as soon as its own dependencies merge; no waves.
+                <code>ck lint</code> reports the critical path.
               </p>
             </div>
 

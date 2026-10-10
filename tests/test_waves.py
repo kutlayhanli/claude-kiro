@@ -59,6 +59,7 @@ def test_missing_groups_compute_levels_and_split_shared_files(tmp_path):
     plan = plan_waves(spec(tmp_path, body))
     assert plan["source"] == "dependencies"
     assert plan["waves"] == [["1"], ["2", "4"], ["3"]]  # 2 and 3 both edit same.py
+    assert plan["warnings"] == []  # specs since 0.7 have no Parallel Groups; that's normal
 
 
 def test_done_tasks_are_reported(tmp_path):

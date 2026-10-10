@@ -146,7 +146,7 @@ The hooks provide spec context and enforce the definition of done:
    - Each task starts as soon as its own dependencies merge, in its own worktree, with a retry when a gate fails.
    - Merges happen one at a time, each checked with `ck gate --task`, plus a full gate every N merges and at the end.
    - The plan is re-read from tasks.md after every task, so relinks apply without a restart.
-   - It reports wall-clock time per task and per wave. By default tasks merge into an `integrate/<spec>` branch that you fast-forward into main when you're happy, and a failed task doesn't stop tasks that don't depend on it. `/spawn-worktree` covers a single wave or an ad-hoc batch
+   - It reports wall-clock time per task and per wave group (a display label; nothing waits for a wave). By default tasks merge into an `integrate/<spec>` branch that you fast-forward into main when you're happy, and a failed task doesn't stop tasks that don't depend on it. `/spawn-worktree` runs the same dependency-driven schedule with you approving the launch and merges, or an ad-hoc batch
 6. **No Workflow tool?** Some accounts block it. `/spec:create`, `/spec:review`, `/spec:implement` and `/spawn-worktree` then run the same steps with the Agent tool and a task list (`.claude/workflows/without-workflow-tool.md`): parallel agents in worktrees, merges one at a time, the same gates and reviewer. Models and efforts come from the `ck-*` agent types. Force it with `--no-workflow`.
 7. **Track progress:** TodoWrite tracks implementation automatically
 8. **Stay aligned:** Hooks provide context and maintain spec-driven discipline
@@ -159,7 +159,7 @@ The hooks provide spec context and enforce the definition of done:
 - `ck doctor` - Check your Claude Kiro setup health
 - `ck migrate [--dry-run]` - Move specs from `.claude/specs/` to `specs/` (tracked files keep their history)
 - `ck gate <spec> [--task N]` - Run the verification gate; exits 1 on failure
-- `ck waves <spec> [--json]` - Show the wave plan (Parallel Groups, or computed from Dependencies)
+- `ck waves <spec> [--json]` - Show tasks by dependency level (display only; tasks start when their own dependencies merge)
 - `ck lint <spec>` - Check the task plan: dependency cycles, verify-order cycles (an impl task whose verifying tests need code from a task that depends on it), dependencies without a stated reason, critical path. Exits 1 on a cycle
 - `ck plan <spec> --json [--exclude N,M]` - Machine-readable plan with the tasks ready to start now; the workflow re-reads it after every task
 - `ck worktree create|claim|release|merge|integration|status <spec> ...` - Per-task worktrees for parallel implementation (`.claude/worktrees/<spec>-task-N`, branch `feat/<spec>-task-N`); merges go one at a time and stop at the first conflict

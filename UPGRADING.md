@@ -1,10 +1,20 @@
 # Upgrading
 
-- **From 0.5 to 0.6:** see the next section.
+- **From 0.6 to 0.7:** see the next section.
+- **From 0.5 to 0.6:** see [0.5 → 0.6](#05--06), then the 0.7 notes.
 - **From 0.4 to 0.5:** see [0.4 → 0.5](#04--05).
 - **From 0.3 to 0.4:** see [0.3 → 0.4](#03--04).
 - **From 0.2:** apply the 0.3 notes below as well; the steps are the same.
 - **From 0.1:** skip to [Upgrading to 0.2](#upgrading-to-02), then come back for the 0.3 and 0.4 notes (same commands).
+
+## 0.6 → 0.7
+
+What changes:
+- **`/spawn-worktree` has no waves.** It starts the tasks in `ck plan`'s `ready` list, merges each one as soon as its gate passes, and (if you choose "Keep going") starts whatever that makes ready, without waiting for the rest of a wave. You approve once at launch: keep going, just these tasks, or hold merges for your approval. The wave gate is gone; each merge runs `ck gate <spec> --task N` and the full gate runs at the end.
+- **`ck plan` starts the critical path first.** Its `ready` list is ordered by the longest remaining chain of dependents (new `chain` field), so when there are more ready tasks than agent slots, the ones that hold up the most work start first.
+- **New specs have no `## Parallel Groups`.** `/spec:create` writes a `## Schedule` section instead (ready at start, critical path from `ck lint`). Older specs keep working: their Parallel Groups only label progress, and a spec without them no longer gets a warning. `ck lint` reports the critical path against open tasks and the ready set, instead of the wave count.
+
+Steps: `ck update` from a project directory (or reinstall and `ck upgrade`), then commit `.claude/commands` and `.claude/workflows`. Refresh the spawn-worktree skill note with `ck setup --diff` (see the 0.3 → 0.4 steps for how).
 
 ## 0.5 → 0.6
 

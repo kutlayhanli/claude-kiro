@@ -1,5 +1,5 @@
 ---
-description: Implement a spec task, or a whole spec wave by wave as a workflow
+description: Implement a spec task, or a whole spec as a workflow (each task starts when its dependencies merge)
 argument-hint: [spec-name | task-number] [--model M] [--effort E] [--test-model M] [--review-model M] [--no-review] [--no-workflow]
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash, TodoWrite, Workflow, Agent, SendMessage, TaskCreate, TaskUpdate
 ---
@@ -9,7 +9,7 @@ Implement: $ARGUMENTS
 # Two Modes
 
 - **A task number** (for example `/spec:implement 3` or `/spec:implement auth 3`): implement that one task yourself, following the Implementation Guidelines below.
-- **A spec with no task number** (for example `/spec:implement auth`, `/spec:implement auth all`, `/spec:implement auth in parallel`): run the whole spec as the `spec-implement` workflow. Tasks start as soon as their dependencies merge. That's the default for a spec. Running this command for a whole spec is my opt-in to the multi-agent workflow; don't ask me before each wave.
+- **A spec with no task number** (for example `/spec:implement auth`, `/spec:implement auth all`, `/spec:implement auth in parallel`): run the whole spec as the `spec-implement` workflow. Tasks start as soon as their dependencies merge. That's the default for a spec. Running this command for a whole spec is my opt-in to the multi-agent workflow; don't ask me before each task.
 
 **Without the Workflow tool.** If the Workflow tool isn't among your tools, or calling it is refused or blocked (some organizations disable it), or I pass `--no-workflow`: run the same steps yourself with the Agent tool and a task list, as `.claude/workflows/without-workflow-tool.md` describes. Everything else here still applies (agents and their models, lint, plan, merge target, report); only the launch differs. Tell me once that you're running without workflows. Don't ask whether to.
 
@@ -36,7 +36,7 @@ How each mode applies them:
 3. **Lint the plan:** `ck lint <spec>`.
    - **A dependency cycle or verify-order cycle:** don't launch. Show me the cycle and the suggested relink (for a verify-order cycle: make the task a foundation task with a smoke Verify, and have the test task verify the later task that its tests need). Offer to apply the relink in tasks.md; if I agree, apply it, re-run `ck lint`, and continue. A spec bug like this would otherwise halt the run hours in.
    - **Dependencies without a stated reason:** list them. Each one serializes the run. Ask whether to drop the ones with no code, data, test, or shared-file reason before launching.
-   - **The critical path:** report it, with the number of open waves.
+   - **The critical path:** report it, with the number of open tasks. It is the floor on wall-clock time however many agents run.
 4. **Plan.** Run `ck plan <spec> --json` and show me a short summary: the tasks remaining, how many are already Done (skipped), how many can start right away, and the critical-path length.
 5. **Choose the merge target:**
    - **Default: an integration branch.** Run `ck worktree integration <spec>`. It creates or reuses `.claude/worktrees/<spec>-integration` on branch `integrate/<spec>`, branched from the main checkout's current branch. Then set `into` = `integrate/<spec>` and `targetDir` = `<main checkout>/.claude/worktrees/<spec>-integration`. Task worktrees branch from it and every task merges into it, so the main branch is never touched mid-run. I fast-forward main at the end.
@@ -70,7 +70,7 @@ How each mode applies them:
 9. **When it returns,** report:
    - tasks merged, failed (with reasons and blockers), and not started (and why);
    - tests agents believe are wrong, and files touched outside their task;
-   - the timing: total wall-clock, minutes per wave group, and the slowest tasks;
+   - the timing: total wall-clock, minutes per wave group (dependency levels, a display label only), and the slowest tasks;
    - if it halted or refused, the reason.
    
    Then give me the next step: fix the blockers (or answer the wrong-test questions), then run `/spec:implement <spec>` again. That is a fresh run: Done tasks are skipped and worktrees and the integration branch are reused. Don't use `resumeFromRunId`, because its cached planning steps would be stale.
@@ -142,7 +142,7 @@ If `ck gate` reports that no verify commands are configured, tell me, and sugges
 When running as a subagent via `/spawn-worktree`:
 - You have your own copy of tasks.md in your worktree. Only update YOUR task's section.
 - Run `ck gate` in your worktree before marking Done; hooks may not be active there.
-- An impl task's verifying tests come from an earlier wave and are already merged into your branch. If they're missing, stop and report it.
+- An impl task's verifying tests come from test tasks in your Dependencies and are already merged into your branch. If they're missing, stop and report it.
 
 ## Spec Sync
 
@@ -158,4 +158,4 @@ Provide:
 2. Files changed/created, with commit hashes
 3. Gate result (paste the `ck gate` output)
 4. Any deviations from the spec, and any tests you believe are wrong (with reasoning)
-5. Next recommended task, from the next wave in tasks.md
+5. Next recommended task: the first of `ck plan <spec> --json`'s `ready` list

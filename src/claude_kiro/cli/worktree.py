@@ -53,7 +53,7 @@ def _emit(outcomes, as_json: bool, bad_states=("BUSY", "ERROR", "CONFLICT", "MIS
 @click.argument("spec")
 @click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
 def waves(spec: str, as_json: bool):
-    """Show the wave plan for SPEC: Parallel Groups from tasks.md, or computed from Dependencies."""
+    """Show SPEC's tasks by dependency level (display only; tasks start when their own dependencies merge)."""
     from ..waves import plan_waves
 
     plan = plan_waves(_spec_dir(Path.cwd(), spec))
@@ -99,8 +99,35 @@ def _plan(project_dir: Path, spec: str, exclude: set) -> dict:
         for n, deps in plan["deps"].items()
         if n not in done and n not in exclude and n not in blocked and all(d in done for d in deps)
     ]
-    ready.sort(key=lambda n: (wave_of.get(n, 0), int(n) if n.isdigit() else 0))
-    return {**plan, **lint, "wave": wave_of, "ready": ready, "remaining": [n for n in plan["deps"] if n not in done]}
+    chain = _chain_lengths(plan["deps"], done)
+    # Longest remaining chain first: when slots are short, the critical path starts first.
+    ready.sort(key=lambda n: (-chain.get(n, 1), int(n) if n.isdigit() else 0))
+    return {
+        **plan,
+        **lint,
+        "wave": wave_of,
+        "chain": chain,
+        "ready": ready,
+        "remaining": [n for n in plan["deps"] if n not in done],
+    }
+
+
+def _chain_lengths(deps: dict, done: set) -> dict:
+    """For each open task, the number of open tasks on its longest chain of dependents, itself included."""
+    dependents: dict = {n: [] for n in deps}
+    for n, ds in deps.items():
+        for d in ds:
+            if d in dependents and n not in done:
+                dependents[d].append(n)
+    lengths: dict = {}
+
+    def length(n: str, stack: frozenset) -> int:
+        if n not in lengths:
+            below = [length(m, stack | {m}) for m in dependents[n] if m not in stack]
+            lengths[n] = 1 + max(below, default=0)
+        return lengths[n]
+
+    return {n: length(n, frozenset({n})) for n in deps if n not in done}
 
 
 @click.command()
@@ -108,7 +135,7 @@ def _plan(project_dir: Path, spec: str, exclude: set) -> dict:
 @click.option("--exclude", default="", help="Comma-separated tasks to leave out of `ready` (running or failed)")
 @click.option("--json", "as_json", is_flag=True, hidden=True)  # output is always JSON; accepted because the docs and workflow pass it
 def plan(spec: str, exclude: str, as_json: bool):
-    """Machine-readable plan for SPEC (JSON): waves, deps, done, ready-to-start tasks, and lint results."""
+    """Machine-readable plan for SPEC (JSON): deps, done, ready-to-start tasks (longest remaining chain first), lint results, and display waves."""
     excluded = {x.strip() for x in exclude.split(",") if x.strip()}
     click.echo(json.dumps(_plan(Path.cwd(), spec, excluded), indent=2))
 
@@ -145,9 +172,9 @@ def lint(spec: str, as_json: bool):
             click.echo('      Add a reason in parentheses, e.g. "Task 3 (calls parse_config)", or drop the edge.'
                        " Specs written before ck 0.4 have no reasons; review the edges on the critical path first.")
         path = result["criticalPath"]
-        open_waves = sum(1 for wave in result["waves"] if any(n in result["remaining"] for n in wave))
         if path:
-            click.echo(f"  ℹ critical path ({len(path)} open tasks): {' -> '.join(path)}; open waves: {open_waves}")
+            click.echo(f"  ℹ critical path ({len(path)} of {len(result['remaining'])} open tasks): {' -> '.join(path)}")
+            click.echo(f"  ℹ ready now: {', '.join(result['ready']) or 'none'}")
     if result["cycles"] or result["verifyCycles"]:
         sys.exit(1)
 

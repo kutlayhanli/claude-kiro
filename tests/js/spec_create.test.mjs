@@ -21,7 +21,7 @@ function stub(overrides = {}) {
       { id: 'R3', file: 'requirements.md', location: '3', severity: 'minor', problem: 'p3', evidence: 'e', fix: 'f', needsUserDecision: false }] }
     if (l === 'refute: fidelity') return { verdicts: [{ id: 'R1', refuted: false, reason: 'real' }, { id: 'R2', refuted: false, reason: 'real' }, { id: 'R3', refuted: true, reason: 'style' }] }
     if (l.startsWith('review:')) return { findings: [] }
-    if (l.startsWith('revise')) return { fixed: ['R1'], notFixed: [], result: 'Ready after decisions', parallelGroups: 'Wave 1: 1' }
+    if (l.startsWith('revise')) return { fixed: ['R1'], notFixed: [], result: 'Ready after decisions', schedule: 'Ready at start: Task 1. Critical path: Task 1' }
     throw new Error('unexpected ' + l)
   }
   return { agent, calls }

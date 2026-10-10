@@ -130,6 +130,19 @@ def test_plan_ready_respects_done_deps_and_exclude(tmp_path):
     assert plan["remaining"] == ["2", "3", "4"]
 
 
+def test_plan_ready_puts_the_longest_remaining_chain_first(tmp_path):
+    # 2 -> 3 -> 4 is the critical path; 1 unblocks nothing. With fewer slots
+    # than ready tasks, starting 2 first shortens the run.
+    write_spec(
+        tmp_path,
+        block(1, "leaf") + block(2, "head") + block(3, "mid", deps="Task 2 (x)") + block(4, "tail", deps="Task 3 (x)")
+        + block(5, "short") + block(6, "after 5", deps="Task 5 (x)"),
+    )
+    plan = json.loads(ck(tmp_path, "plan", "sim").output)
+    assert plan["ready"] == ["2", "5", "1"]
+    assert plan["chain"] == {"1": 1, "2": 3, "3": 2, "4": 1, "5": 2, "6": 1}
+
+
 def test_notes_in_reference_fields_are_not_references(tmp_path):
     assert [n for n, _ in _ref_items("Task 39 (note: TC-25 also exercises Task 69)")] == ["39"]
     assert _ref_items("Task 76 (uses the report), Task 12 - shared file x.py") == [("76", "uses the report"), ("12", "shared file x.py")]

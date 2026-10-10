@@ -7,7 +7,7 @@ description: "Run a parallel implementation batch using git worktrees for true f
 
 Run parallel implementation batches with **actual git worktree isolation** for each subagent.
 
-> **Implementing a whole claude-kiro spec?** Use `/spec:implement <spec>` instead. It runs every wave of `tasks.md` as one workflow, with parallel task agents, merges as tasks finish, a `ck gate` check after each wave, and a halt on red. Use this skill for a single wave or an ad-hoc batch. For spec tasks, create and merge worktrees with `ck worktree create <spec> <N...> --install` and `ck worktree merge <spec> <N...>` rather than raw git, and run git as `command git` if a shell hook rewrites it.
+> **Implementing a whole claude-kiro spec?** Use `/spec:implement <spec>` instead. It runs `tasks.md` as one workflow: each task starts as soon as its own dependencies merge (no waves), merges are gate-checked one at a time, and a red branch halts the run. Use `/spawn-worktree <spec>` to steer the same schedule yourself, or this skill for an ad-hoc batch. For spec tasks, create and merge worktrees with `ck worktree create <spec> <N...> --install` and `ck worktree merge <spec> <N...>` rather than raw git, and run git as `command git` if a shell hook rewrites it.
 
 ## Overview
 

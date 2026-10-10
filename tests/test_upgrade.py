@@ -105,7 +105,7 @@ def test_untracked_customized_command_is_backed_up(old_project):
     custom.write_text("my own spawn-worktree tweaks\n")  # untracked
     run(old_project, "upgrade")
     assert (old_project / ".claude/commands/spawn-worktree.md.bak").read_text() == "my own spawn-worktree tweaks\n"
-    assert "Wave Gate" in custom.read_text()
+    assert "As Each Task Finishes" in custom.read_text()
 
 
 def test_no_migrate_leaves_specs(old_project):

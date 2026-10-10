@@ -27,7 +27,7 @@ The minimum is configurable: `ck agents set planning.min_model <model>`, `ck age
 
 1. writes `requirements.md` (EARS criteria, numbered for traceability),
 2. in parallel, writes `design.md` grounded in the real codebase and `test-plan.md`. The test plan is integration-first: it tests real boundaries (database, filesystem, HTTP, CLI) and never sees the design, so the tests stay an independent check,
-3. in parallel, writes an implementation track and a test track of tasks, then links them into `tasks.md`. Each impl task is **Verified by** test tasks that run first, and tasks are grouped into parallel waves,
+3. in parallel, writes an implementation track and a test track of tasks, then links them into `tasks.md`. Each impl task is **Verified by** test tasks that run first, and each task starts as soon as its own dependencies merge (no waves),
 4. runs an **adversarial review**: four reviewers attack the spec (plan fidelity, codebase grounding, implementability, test adequacy), and a separate skeptic tries to refute each finding,
 5. applies the findings that survive, and writes `review.md`.
 
@@ -89,14 +89,14 @@ When the workflow returns:
    requirements.md: [one-line summary]
    design.md:       [one-line summary]
    test-plan.md:    [N cases: X integration, Y e2e, Z unit/property; infrastructure to build]
-   tasks.md:        [N tasks (T test, I impl); waves]
+   tasks.md:        [N tasks (T test, I impl); critical path length]
 
    Adversarial review: [N] fixed, [M] refuted, [K] need your decision
    Assumptions to check: [only the ones that matter]
    ```
    Mention any `unverified` findings or lost review lenses so I know coverage was partial.
 3. **Open questions:** if `review.openQuestions` is non-empty, ask me with AskUserQuestion (up to 4 per call; put the reviewer's suggested fix first when it is a sensible default). Then apply my answers to the spec files, keeping requirements, design, and tasks consistent. Record each answer under a new "Decisions" entry in PLAN.md (if it exists) and in the "Needs Your Decision" table of `review.md`.
-4. Finish with: "Spec ready. Use `/spec:implement [task-number]` to start, or `/spawn-worktree specs/[feature-name]` to run wave 1. Tasks are only Done when `ck gate` passes."
+4. Finish with: "Spec ready. Use `/spec:implement [task-number]` to start, or `/spec:implement [feature-name]` to run the whole spec (`/spawn-worktree specs/[feature-name]` to steer it yourself). Tasks are only Done when `ck gate` passes."
 
 ---
 
@@ -110,7 +110,7 @@ specs/
     ├── requirements.md  # what: user stories, numbered EARS criteria
     ├── design.md        # how: components, public interfaces, traceability
     ├── test-plan.md     # proof: integration-first test cases, infrastructure, commands
-    ├── tasks.md         # steps: ### Task N, Track, Files, Verify, Verified by, waves
+    ├── tasks.md         # steps: ### Task N, Track, Files, Verify, Verified by, Dependencies, Schedule
     └── review.md        # adversarial review record
 ```
 

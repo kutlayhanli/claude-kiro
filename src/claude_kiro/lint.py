@@ -9,8 +9,8 @@
   before the module exists, because ownership comes from tasks.md.
 - Dependencies without a stated reason: every edge serializes work, so each
   should say why ("Task 3 (uses its parser API)"). Reported, not fatal.
-- Critical path vs. wave count: how much of the wave count is forced by the
-  dependency chain.
+- Critical path: the longest dependency chain, the floor on wall-clock time
+  however many agents run.
 """
 
 import re

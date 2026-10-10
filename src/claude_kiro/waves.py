@@ -1,10 +1,12 @@
-"""Wave plan for a spec: which tasks run together, in what order.
+"""Wave labels for a spec's tasks, for progress display and timing groups.
 
-The "## Parallel Groups" section of tasks.md is the plan /spec:create wrote.
-It is used when it is consistent: every task appears exactly once, and every
-dependency sits in an earlier wave. Otherwise waves are recomputed from
-**Dependencies:** (topological levels), splitting any level whose tasks edit
-the same file, and the reason is reported.
+Waves don't schedule anything: /spec:implement and /spawn-worktree start a task
+as soon as its own Dependencies are merged (`ck plan` "ready"). Specs written
+before 0.7 have a "## Parallel Groups" section; it is used for the labels when
+it is consistent (every task appears exactly once, every dependency sits in an
+earlier wave), and an inconsistency is reported. Otherwise waves are computed
+from **Dependencies:** (topological levels), splitting any level whose tasks
+edit the same file.
 """
 
 import re
@@ -120,9 +122,7 @@ def plan_waves(spec_dir: Path) -> Dict:
     if listed is not None and not _problems(listed, tasks):
         waves, source = listed, "parallel-groups"
     else:
-        if listed is None:
-            warnings.append("no readable \"## Parallel Groups\" section; waves computed from Dependencies")
-        else:
+        if listed is not None:
             warnings.extend(_problems(listed, tasks))
             warnings.append("Parallel Groups is inconsistent; waves computed from Dependencies instead")
         waves, more = compute_waves(tasks)
