@@ -58,23 +58,26 @@ How each mode applies them:
      "onFailure": "continue",
      "maxConcurrent": "<run.max_concurrent from ck agents --json>",
      "fullGateEvery": 10,
+     "mergeBatch": 4,
      "agents": "<the roles object from ck agents --json>"
    }
    ```
    - **agents:** see Agents above. Report the roles you passed (implementer, test_writer, reviewer) and the concurrency cap when you tell me it's running.
    - **risk / complexity:** copy them from `ck plan` as they are. Tell me how many tasks are safety (and which), since they run on the strong model and the risky reviewer. If `ck lint` warned about a task touching a risk path without `**Risk:** safety`, mention it: it is routed as safety anyway, but the tag belongs in tasks.md.
    - **onFailure:** by default a failed task doesn't stop the run. Tasks that don't depend on it keep starting, its dependents never start and are reported, and a red target branch always halts. Use `"onFailure": "halt"` if I asked to stop at the first failure.
+   - **mergeBatch:** the most finished tasks landed together in one step (default 4). Pass 1 if I asked for one merge at a time, or if the target's gate is often red (each red batch costs extra gates to find the culprit).
    - **maxConcurrent:** how many tasks may have an implementing agent at work at once; review and the merge queue don't hold a slot. Pass `run.max_concurrent` from `ck agents --json` (null means no cap). If I said the test suite is memory-heavy or asked to go easy on usage, pass a lower number (for example 4) for this run, and mention `ck agents set run.max_concurrent N` to make it stick.
 7. **Tell me it's running:**
    - Each task starts as soon as its own dependencies are merged; waves only group the progress display.
    - After every task, a cheap planning step re-reads the plan from tasks.md on the target. If we fix tasks.md mid-run (for example, removing a spurious dependency, committed to the target branch), it takes effect at the next step, with no restart.
-   - Each merge is checked with `ck gate <spec> --task N` on the target. The full `ck gate <spec>` runs every `fullGateEvery` merges and once at the end.
+   - Finished tasks land in batches: when a landing ends, every task waiting to merge (up to `mergeBatch`) lands in one `ck worktree land` step. It prechecks each branch with `git merge-tree` (a conflict never touches the target and goes to the resolver), merges the batch, and runs the task gates of the whole batch once. A red batch is bisected by halving until the culprit is found; the culprit stays off the target and goes to the fixer, the rest merge. The batch size halves after a red batch and grows by one after a green one. The full `ck gate <spec>` runs every `fullGateEvery` merges and once at the end.
    - I can watch with `/workflows`.
 8. **Questions while it runs** are for you, the orchestrator. Task agents are told to ignore chat messages and stick to their task.
 9. **When it returns,** report:
    - tasks merged, failed (with reasons and blockers), and not started (and why);
    - tests agents believe are wrong, and files touched outside their task;
    - the timing: total wall-clock, minutes per wave group (dependency levels, a display label only), and the slowest tasks;
+   - the landings: how many, their batch sizes and minutes, and which were bisected (and the culprits);
    - if it halted or refused, the reason.
    
    Then give me the next step: fix the blockers (or answer the wrong-test questions), then run `/spec:implement <spec>` again. That is a fresh run: Done tasks are skipped and worktrees and the integration branch are reused. Don't use `resumeFromRunId`, because its cached planning steps would be stale.

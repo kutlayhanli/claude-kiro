@@ -1,6 +1,6 @@
 export const meta = {
   name: 'spec-implement',
-  description: 'Implement a spec: start each task as soon as its dependencies merge, gate-checked retry, merges one at a time with a per-merge check, full gate every N merges and at the end',
+  description: 'Implement a spec: start each task as soon as its dependencies merge, gate-checked retry, finished tasks land in batches (one gate per batch, bisected when red), full gate every N merges and at the end',
   whenToUse: 'Invoked by /spec:implement <spec> with no task number',
 }
 
@@ -20,6 +20,8 @@ export const meta = {
 //   onFailure: 'continue' | 'halt',        // default continue: other ready tasks keep starting; a red target always halts
 //   maxConcurrent: null,                   // cap on tasks with an implementing agent at work (null = none); review and merge queue don't count
 //   fullGateEvery: 10,                     // run the full `ck gate <spec>` every N merges (0 = only at the end)
+//   mergeBatch: 4,                         // most tasks landed together (one `ck worktree land`, one gate); the window
+//                                          //   halves after a red batch (min 1) and grows by 1 after a green one, up to this
 //   agents: { implementer, test_writer, reviewer, fixer, orchestrator, resolver }  // "roles" from `ck agents --json`
 //                                          //   orchestrator: plan, merge, gate and re-check steps; resolver: merge conflicts
 //                                          //   ("inherit" = the session's). Absent: every agent inherits, no review.
@@ -46,6 +48,7 @@ const MAX_RETRIES = Number.isInteger(A.maxRetries) ? A.maxRetries : 1
 const CONTINUE = A.onFailure !== 'halt'
 const MAX_CONCURRENT = A.maxConcurrent && A.maxConcurrent > 0 ? A.maxConcurrent : Infinity
 const FULL_EVERY = Number.isInteger(A.fullGateEvery) ? A.fullGateEvery : 10
+const MERGE_BATCH = Number.isInteger(A.mergeBatch) && A.mergeBatch > 0 ? A.mergeBatch : 4
 const BRIEF = `${ROOT}/.claude/workflows/spec-implement-brief.md`
 
 if (!SPEC || !ROOT) throw new Error('spec-implement needs args.spec and args.root')
@@ -190,18 +193,45 @@ const RESULT = {
   },
   required: ['task', 'status', 'gatePassed', 'summary', 'commits'],
 }
-const MERGE = {
+const LAND = {
   type: 'object',
   properties: {
-    merged: { type: 'boolean' },
-    conflict: { type: 'boolean', description: 'ck worktree merge reported CONFLICT and you stopped without resolving it' },
-    conflicts: { type: 'string', description: 'files that conflicted and how they were resolved, or empty' },
-    error: { type: 'string', description: 'why it did not merge, including a refused/blocked command' },
-    checkGreen: { type: 'boolean', description: 'ck gate --task on the target after the merge exited 0' },
-    checkTail: { type: 'string', description: 'failing part of that gate output, if red' },
-    mergedAt: { type: 'string', description: `output of "${NOW}" right after the merge` },
+    tasks: {
+      type: 'array',
+      description: '"tasks" from the ck worktree land JSON, every entry, copied as is',
+      items: {
+        type: 'object',
+        properties: {
+          task: { type: 'string' },
+          state: { type: 'string', enum: ['MERGED', 'RED', 'CONFLICT', 'DEFERRED', 'SKIP', 'MISSING', 'BUSY', 'ERROR'] },
+          detail: { type: 'string' },
+          files: { type: 'array', items: { type: 'string' } },
+          checkGreen: { type: ['boolean', 'null'] },
+          checkTail: { type: 'string' },
+          mergedAt: { type: 'string' },
+        },
+        required: ['task', 'state'],
+      },
+    },
+    gates: {
+      type: 'array',
+      items: { type: 'object', properties: { tasks: { type: 'array', items: { type: 'string' } }, green: { type: 'boolean' }, seconds: { type: 'number' } }, required: ['tasks', 'green'] },
+    },
+    bisected: { type: 'boolean' },
+    startedAt: { type: 'string' },
+    finishedAt: { type: 'string' },
+    error: { type: 'string', description: 'only if the command printed no JSON (or was refused): what happened' },
   },
-  required: ['merged'],
+  required: ['tasks'],
+}
+const RESOLVED = {
+  type: 'object',
+  properties: {
+    resolved: { type: 'boolean', description: 'the conflict is resolved and committed in the task worktree, and its task gate passes there' },
+    conflicts: { type: 'string', description: 'the files that conflicted and how you resolved them' },
+    error: { type: 'string', description: 'why it is not resolved, including a refused/blocked command' },
+  },
+  required: ['resolved'],
 }
 const REVIEW_SCHEMA = {
   type: 'object',
@@ -300,28 +330,31 @@ ${GIT_NOTE}
 ${GATE_NOTE}
 Return the schema fields with task "${n}".`
 
-const AFTER_MERGE = n => `After MERGED: refresh dependencies in ${TARGET} if the project has an install step (e.g. "uv sync -q --directory ${TARGET}"), then run:  ck -C ${TARGET} gate ${SPEC} --task ${n}
-   checkGreen = whether it exited 0; if not, put the failing part in checkTail.
-Never edit files in ${TARGET} directly, never force anything, never touch other task branches.`
+// Landing is one ck command: it prechecks with git merge-tree, merges the batch,
+// gates it in-process, and bisects a red batch by itself. The agent only runs it.
+const landPrompt = tasks => `Landing step for spec ${SPEC}: run ONE command and copy its JSON output. Nothing else: no git commands, no fixes, no retries, no edits. ${GIT_NOTE}
+Command:  ck -C ${ROOT} worktree land ${SPEC} ${tasks.join(' ')} --into ${INTO} --gate --install --release --json
+It merges the tasks into ${INTO}, gates them, and bisects a red batch itself. ${GATE_NOTE} The same holds for this command, which runs the gate: wait for its EXIT line.
+A non-zero exit is normal (1: a task is RED, 2: a CONFLICT, 3: busy or missing); still copy the JSON. Copy "tasks" (every entry: task, state, detail, files, checkGreen, checkTail, mergedAt), "gates", "bisected", "startedAt" and "finishedAt" exactly as printed. Put a message in error only if the command printed no JSON (say what it printed, or that it was refused).`
 
-const mergePrompt = n => `Merge step for Task ${n} of spec ${SPEC}. ${GIT_NOTE} ${GATE_NOTE}
-1. Run:  ck -C ${ROOT} worktree merge ${SPEC} ${n} --into ${INTO} --json
-   - state MERGED: success; run "${NOW}" for mergedAt.
-   - state SKIP (no commits ahead): return merged=false, error "no commits".
-   - state BUSY: the worktree is still claimed. Run "ck -C ${ROOT} worktree release ${SPEC} ${n}" once, then retry the merge once.
-   - state CONFLICT: the merge was already aborted on ${INTO}. Do NOT resolve it: return merged=false, conflict=true, and the conflicting files in conflicts. A separate agent resolves conflicts.
-   - state ERROR: return merged=false with the detail.
-2. ${AFTER_MERGE(n)}
-Return merged, conflict, conflicts, error, checkGreen, checkTail, mergedAt.`
-
-const resolvePrompt = (n, files) => `Merge conflict for Task ${n} of spec ${SPEC}: merging ${BR(n)} into ${INTO} conflicted${files ? ` (${files})` : ''}, and the merge was already aborted on ${INTO}. ${GIT_NOTE} ${GATE_NOTE}
+const resolvePrompt = (n, files) => `Merge conflict for Task ${n} of spec ${SPEC}: ${BR(n)} conflicts with ${INTO}${files ? ` (${files})` : ''}. ${INTO} was not touched. ${GIT_NOTE} ${GATE_NOTE}
 1. Resolve it in the TASK WORKTREE, never in ${TARGET}:
+     ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover
      command git -C ${WT(n)} merge ${INTO}
    Resolve each conflicted file keeping both sides' intent: tasks.md, keep both sides' task sections; dependency manifests, take the union and re-lock (e.g. "uv lock"); test files, keep every test and assertion from both sides and never weaken one. Read the spec (specs/${SPEC}/design.md, requirements.md) when the two sides disagree about behaviour.
-   In the worktree, "ck -C ${WT(n)} gate ${SPEC} --task ${n}" must pass. Commit the merge.
-2. Run:  ck -C ${ROOT} worktree merge ${SPEC} ${n} --into ${INTO} --json  (state MERGED: run "${NOW}" for mergedAt; anything else: return merged=false with the detail).
-3. ${AFTER_MERGE(n)}
-Return merged, conflicts (the files and how you resolved them), error, checkGreen, checkTail, mergedAt.`
+2. In the worktree, "ck -C ${WT(n)} gate ${SPEC} --task ${n}" must pass. Commit the merge, then run "ck -C ${WT(n)} worktree release ${SPEC} ${n}".
+3. Do NOT merge into ${INTO} yourself: the workflow lands the task again.
+Return resolved, conflicts (the files and how you resolved them), and error if it is not resolved.`
+
+const landFixPrompt = (k, n, tail) => `${MANDATE}Task ${n} of spec ${SPEC} passed its own gate, but landing it on ${INTO} turns the gate red, so it was NOT merged (${INTO} stays green without it). Failure: ${trim(tail, 4000)}
+${READ_HANDOFF(n)} ${WRITE_HANDOFF(n)}
+Fix it without weakening any test and without editing requirements.md. ${GIT_NOTE} ${GATE_NOTE}
+1. Work only in the task worktree ${WT(n)} (branch ${BR(n)}). Claim it: ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover
+2. Bring in the target: command git -C ${WT(n)} merge ${INTO}  (resolve any conflict keeping both sides' tests).
+3. Reproduce the failing check in the worktree, fix the code (or a clearly broken fixture or harness), commit with a message starting "fix:", and get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" passing.
+4. Release: ck -C ${WT(n)} worktree release ${SPEC} ${n}. Do NOT merge into ${INTO}: the workflow lands the task again (fix number ${k}).
+If the only way to green is to weaken a test or change a requirement, stop and explain precisely instead.
+Return green=true only if the task gate passes in ${WT(n)} after your commit, else failing with the reason.`
 
 const verifyPrompt = what => `Verification (${what}) for spec ${SPEC}. In ${TARGET} (branch ${INTO}):
 1. Refresh dependencies if the project has an install step (e.g. "uv sync -q --directory ${TARGET}").
@@ -357,9 +390,16 @@ let redTarget = false
 let mergedCount = 0
 let fixCount = 0
 let refills = 0
-let mergeChain = Promise.resolve()
 const fullGates = []
 const fixerEscalations = []
+// Landing queue: finished tasks wait here; one `ck worktree land` runs at a time and
+// takes up to batchWindow of them. Waiting here never holds a slot.
+const landQueue = []         // { n, resolve }
+let landingBusy = false
+let landingIdle = Promise.resolve()
+let batchWindow = MERGE_BATCH
+const landings = []
+const MAX_RESOLVES = 3
 
 async function plan() {
   refills++
@@ -397,41 +437,113 @@ async function fixAndRecheck(what, failure, n) {
   return { fix, recheck, green: !!(recheck && recheck.green) }
 }
 
-function enqueueMerge(n) {
-  const link = mergeChain.then(async () => {
-    let m = await agent(mergePrompt(n), { label: `merge ${n}`, phase: phaseOf(n), schema: MERGE, ...LOW })
-    if (m && !m.merged && m.conflict) {
-      log(`Task ${n}: merge conflict, handing it to the resolver`)
-      m = await agent(resolvePrompt(n, m.conflicts), { label: `resolve ${n}`, phase: phaseOf(n), schema: MERGE, ...RESOLVE })
+function requestLanding(n) {
+  return new Promise(resolve => {
+    landQueue.push({ n, resolve })
+    pumpLandings()
+  })
+}
+
+function pumpLandings() {
+  if (landingBusy) return
+  landingBusy = true
+  landingIdle = (async () => {
+    try {
+      while (landQueue.length) await landBatch(landQueue.splice(0, batchWindow))
+    } finally {
+      landingBusy = false
     }
-    if (!m || !m.merged) return m
-    mergedCount++
-    let green = m.checkGreen === true
-    if (!green) {
-      log(`Task ${n}: ${INTO} red after merge, one fix attempt`)
-      const f = await fixAndRecheck(`after merging Task ${n}`, m.checkTail, n)
-      m.fix = f
-      green = f.green
+  })()
+}
+
+async function landBatch(batch) {
+  const tasks = batch.map(b => b.n)
+  const used = batchWindow
+  let res = null
+  try {
+    res = await agent(landPrompt(tasks), { label: `land ${tasks.join(' ')}`, phase: phaseOf(tasks[0]), schema: LAND, ...LOW })
+  } catch (e) {
+    res = { tasks: [], error: e && e.message }
+  }
+  const byTask = {}
+  for (const t of (res && res.tasks) || []) byTask[String(t.task)] = t
+  const entry = { tasks, size: tasks.length, window: used, merged: [], red: [], conflict: [], deferred: [], other: [], gates: ((res && res.gates) || []).length, bisected: !!(res && res.bisected), minutes: minutes(res && res.startedAt, res && res.finishedAt) }
+  const outcomes = []
+  const deferred = []
+  const before = mergedCount
+  for (const b of batch) {
+    const t = byTask[b.n] || { task: b.n, state: 'ERROR', detail: (res && res.error) || 'the landing step returned no result for this task' }
+    if (t.state === 'DEFERRED') { deferred.push(b); entry.deferred.push(b.n); continue }
+    if (t.state === 'MERGED') { entry.merged.push(b.n); mergedCount++ }
+    else if (t.state === 'RED') entry.red.push(b.n)
+    else if (t.state === 'CONFLICT') entry.conflict.push(b.n)
+    else entry.other.push(b.n)
+    outcomes.push([b, t])
+  }
+  landQueue.unshift(...deferred)  // they land in the next batch
+  // Zuul-style window: halve after a red batch, grow by one after a green one.
+  batchWindow = entry.red.length || entry.bisected ? Math.max(1, Math.floor(batchWindow / 2)) : Math.min(MERGE_BATCH, batchWindow + 1)
+  landings.push(entry)
+  if (entry.bisected || entry.red.length) log(`Landing ${tasks.join(' ')}: red, bisected; ${entry.red.length ? `culprit(s) ${entry.red.join(', ')}` : 'no culprit (flaky?)'}; window now ${batchWindow}`)
+
+  if (entry.merged.length && FULL_EVERY > 0 && Math.floor(mergedCount / FULL_EVERY) > Math.floor(before / FULL_EVERY)) {
+    let v = await agent(verifyPrompt(`full gate after ${mergedCount} merges`), { label: `full gate @${mergedCount}`, phase: phaseOf(tasks[0]), schema: VERIFY, ...ORCH })
+    if (!v || !v.green) {
+      log(`Full gate red after ${mergedCount} merges, one fix attempt`)
+      const f = await fixAndRecheck(`full gate after ${mergedCount} merges`, v)
+      v = { ...(v || {}), fix: f, green: f.green }
     }
-    if (green && FULL_EVERY > 0 && mergedCount % FULL_EVERY === 0) {
-      let v = await agent(verifyPrompt(`full gate after ${mergedCount} merges`), { label: `full gate @${mergedCount}`, phase: phaseOf(n), schema: VERIFY, ...ORCH })
-      if (!v || !v.green) {
-        log(`Full gate red after ${mergedCount} merges, one fix attempt`)
-        const f = await fixAndRecheck(`full gate after ${mergedCount} merges`, v)
-        v = { ...(v || {}), fix: f, green: f.green }
-      }
-      fullGates.push({ afterMerges: mergedCount, green: !!v.green })
-      green = !!v.green
-    }
-    if (!green) {
+    fullGates.push({ afterMerges: mergedCount, green: !!v.green })
+    if (!v.green) {
       redTarget = true
       stopLaunching = true
-      stopReason = stopReason || `${INTO} is red after merging Task ${n}`
+      stopReason = stopReason || `${INTO} is red: full gate after ${mergedCount} merges`
     }
-    return m
-  })
-  mergeChain = link.catch(() => null)
-  return link.catch(() => null)
+  }
+  for (const [b, t] of outcomes) b.resolve(t)
+}
+
+// Land task n: queue it, then handle what the landing says. CONFLICT goes to the
+// resolver and RED to the fixer (then up its ladder); both re-queue the task.
+async function landTask(n, rec) {
+  let resolves = 0
+  let fixes = 0
+  let lastEscalation = null
+  while (true) {
+    const t = await requestLanding(n)
+    rec.landing = t
+    if (t.state === 'MERGED') {
+      if (lastEscalation) lastEscalation.green = true
+      return { merged: true, mergedAt: t.mergedAt, checkGreen: t.checkGreen }
+    }
+    if (t.state === 'CONFLICT') {
+      if (resolves >= MAX_RESOLVES) return { merged: false, error: `still conflicting after ${resolves} resolution(s): ${(t.files || []).join(', ')}` }
+      resolves++
+      log(`Task ${n}: conflicts with ${INTO}, handing it to the resolver`)
+      const r = await agent(resolvePrompt(n, (t.files || []).join(', ') || t.detail), { label: `resolve ${n}${resolves > 1 ? ` round ${resolves}` : ''}`, phase: phaseOf(n), schema: RESOLVED, ...RESOLVE })
+      if (!r || !r.resolved) return { merged: false, error: `conflict not resolved: ${(r && r.error) || 'no result'}` }
+      continue
+    }
+    if (t.state === 'RED') {
+      let failure = t.checkTail || t.detail
+      let fixedGreen = false
+      while (!fixedGreen) {
+        if (fixes > FIX_UP.length) return { merged: false, error: `red on landing after ${fixes} fix(es): ${trim(failure, 600)}` }
+        const model = fixes ? FIX_UP[fixes - 1] : null
+        fixes++
+        fixCount++
+        rec.fixes = fixes
+        log(`Task ${n}: red on landing (not merged; ${INTO} stays green), fix ${fixes}${model ? ` on ${model}` : ''}`)
+        const f = await agent(landFixPrompt(fixCount, n, failure), { label: `fix ${fixCount} (Task ${n} red on landing)${model ? ` [${model}]` : ''}`, phase: phaseOf(n), schema: VERIFY, ...(model ? escalated(FIX, model) : FIX) })
+        if (model) { lastEscalation = { what: `landing Task ${n}`, model, green: false }; fixerEscalations.push(lastEscalation) }
+        fixedGreen = !!(f && f.green)
+        if (!fixedGreen) failure = (f && f.failing) || failure
+      }
+      continue
+    }
+    if (t.state === 'SKIP') return { merged: false, error: 'no commits' }
+    return { merged: false, error: `${t.state}: ${t.detail || ''}` }
+  }
 }
 
 async function runTask(n) {
@@ -501,7 +613,7 @@ async function runTask(n) {
       rec.reason = r ? r.blocker || `gate not passed (status ${r.status})` : 'agent died without a report'
       return rec
     }
-    const m = await enqueueMerge(n)
+    const m = await landTask(n, rec)
     rec.merge = m
     rec.mergedAt = m && m.mergedAt
     if (!m || !m.merged) {
@@ -596,7 +708,7 @@ while (running.size) {
   applyLint(current)
   launch(current)
 }
-await mergeChain
+await landingIdle
 
 // Final full gate on the target, unless it is already known to be red.
 let finalGate = null
@@ -629,7 +741,7 @@ const taskReport = Object.values(records).map(r => ({
   wrongTests: r.result && r.result.wrongTests,
   outsideFiles: r.result && r.result.outsideFiles,
   deviations: r.result && r.result.deviations,
-  fixedAfterMerge: !!(r.merge && r.merge.fix),
+  fixedAfterMerge: !!r.fixes,
   review: r.review,
   escalations: r.escalations || [],
   riskTag: r.riskTag || (isSafety(r.task) ? 'safety' : 'normal'),
@@ -671,7 +783,8 @@ return {
     phases,
   },
   tasks: taskReport,
+  landings,
   fullGates,
   finalGate,
-  stats: { initiallyDone, merged: merged.length, failed: failed.size, notStarted: notStarted.length, planSteps: refills, fixes: fixCount },
+  stats: { initiallyDone, merged: merged.length, failed: failed.size, notStarted: notStarted.length, planSteps: refills, fixes: fixCount, landings: landings.length, bisected: landings.filter(l => l.bisected).length },
 }
