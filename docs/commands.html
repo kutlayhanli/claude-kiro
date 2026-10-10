@@ -199,12 +199,38 @@
                 <li>Architecture overview and component analysis</li>
                 <li>Data models and interfaces</li>
                 <li>Component specifications</li>
-                <li>Testing strategy and performance considerations</li>
+                <li>Decision seams: pure functions for every allow/refuse rule</li>
               </ul>
               <p style="margin-top: var(--space-3)">
                 <strong>Grounded:</strong>
                 Written after reading the code it changes, with a traceability
                 table back to every requirement.
+              </p>
+            </div>
+
+            <div class="card">
+              <h4>Phase 2, in parallel: Test Plan</h4>
+              <p>
+                Claude writes
+                <code>test-plan.md</code>
+                from the requirements, never from the design:
+              </p>
+              <ul
+                style="margin-left: var(--space-6); margin-top: var(--space-2)"
+              >
+                <li>Integration-first test cases (TC-n) against real boundaries</li>
+                <li>
+                  A required Properties section (P-n): every "any", "every",
+                  "only", "never" or SHALL NOT criterion becomes a property
+                  test over all input surface forms and the negative space
+                </li>
+                <li>Harness contract, critical paths, and exact commands</li>
+              </ul>
+              <p style="margin-top: var(--space-3)">
+                <strong>Checked:</strong>
+                property test files carry a
+                <code>PROPERTIES = {"P-3": "test_name"}</code> map;
+                <code>ck gate</code> reports any property no map claims.
               </p>
             </div>
 

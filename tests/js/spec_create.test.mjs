@@ -79,3 +79,60 @@ await test('risk tags: both tracks and the link step are told to tag safety task
   assert.match(s.prompts['link tracks into tasks.md'], /risk path/)
   assert.match(s.prompts['review: implementability'], /untagged risky task/i)
 })
+
+function recording() {
+  const s = stub()
+  const prompts = {}
+  const agent = async (prompt, opts) => { prompts[opts.label] = prompt; return s.agent(prompt, opts) }
+  return { agent, prompts }
+}
+
+await test('test plan requires a Properties section with surface forms, negatives, complements, metamorphic relations', async () => {
+  const r = recording()
+  await runWorkflow(SCRIPT, { agent: r.agent, args: args('create') })
+  const p = r.prompts['write test-plan.md']
+  assert.match(p, /## Properties/)
+  assert.match(p, /REQUIRED/)
+  assert.match(p, /P-n \| /)
+  for (const word of ['"any"', '"every"', '"only"', '"never"', 'SHALL NOT']) assert.ok(p.includes(word), word)
+  assert.match(p, /surface form/i)
+  assert.match(p, /x to y/)
+  assert.match(p, /exist in the data source but are not permitted/i)
+  assert.match(p, /complement/i)
+  assert.match(p, /metamorphic/i)
+  assert.match(p, /Hypothesis/)
+  assert.match(p, /fast-check/)
+  assert.match(p, /derandomize/)
+  assert.match(p, /example database/i)
+  assert.match(p, /decision seam/i)
+  assert.match(p, /table-driven/i)
+  assert.doesNotMatch(p, /design\.md first/) // still written without the design
+})
+
+await test('task tracks carry properties: Properties field, PROPERTIES map, red-team task, link wiring', async () => {
+  const r = recording()
+  await runWorkflow(SCRIPT, { agent: r.agent, args: args('create') })
+  const t = r.prompts['write test track']
+  assert.match(t, /\*\*Properties:\*\* P-1, P-2/)
+  assert.match(t, /PROPERTIES = \{"P-3": "test_name"/)
+  assert.match(t, /one test task per property group/i)
+  assert.match(t, /red-team/i)
+  assert.match(t, /SHALL NOT/)
+  assert.match(t, /from the requirements only/i)
+  const link = r.prompts['link tracks into tasks.md']
+  assert.match(link, /\*\*Properties:\*\*/)
+  assert.match(link, /every P-n/i)
+  assert.match(link, /decision seam/i)
+  assert.match(r.prompts['write design.md'], /decision seam/i)
+})
+
+await test('verification lens checks every universal SHALL / SHALL NOT has a property with surface forms and negative space', async () => {
+  const r = recording()
+  await runWorkflow(SCRIPT, { agent: r.agent, args: args('create') })
+  const v = r.prompts['review: verification']
+  assert.match(v, /universally quantified/i)
+  assert.match(v, /SHALL NOT/)
+  assert.match(v, /surface forms/i)
+  assert.match(v, /negative space/i)
+  assert.match(v, /PROPERTIES/)
+})

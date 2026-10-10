@@ -8,7 +8,10 @@ A task may be marked Done only when:
 - the task's own **Verify:** commands pass, plus those of the test tasks that
   verify it,
 - no existing test was deleted or weakened on this branch unless a test-track
-  task owns that file.
+  task owns that file,
+- every correctness property (P-n in test-plan.md's ## Properties section) is
+  claimed by a test file's PROPERTIES map: a warning by default, a failure
+  with `"properties": "required"` in specs/ck.json.
 
 Test-track tasks are written before the code they test, so their tests are
 expected to fail until the implementation lands. For them the gate requires
@@ -18,12 +21,14 @@ commands to pass once every task they verify is Done.
 Used by `ck gate` and by the Stop/SubagentStop hook.
 """
 
+import os
 import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from claude_kiro import properties as props
 from claude_kiro import verified
 from claude_kiro.config import collect_command, load_config
 from claude_kiro.hooks._shared import git_utils
@@ -143,6 +148,132 @@ def _tamper(project_dir: Path, config: Dict[str, Any], owned: Iterable[str]) -> 
             "don't change it to make the task pass.)"
         )
     return Check(name, not problems, detail)
+
+
+MAX_SCAN_BYTES = 2_000_000
+_SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", "target", ".tox"}
+
+
+def _test_files(project_dir: Path, config: Dict[str, Any], listed: Iterable[str]) -> List[str]:
+    """Test files to scan for PROPERTIES maps: those tasks list, plus every test file in the project."""
+    files = git_utils.project_files(project_dir)
+    if files is None:  # not a git repository
+        files = []
+        for root, dirs, names in os.walk(project_dir):
+            dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
+            files.extend((Path(root) / n).relative_to(project_dir).as_posix() for n in names)
+    candidates = dict.fromkeys(list(listed) + [f for f in files if not _SKIP_DIRS.intersection(Path(f).parts[:-1])])
+    return [f for f in candidates if is_test_path(f, config)]
+
+
+def _property_coverage(project_dir: Path, files: Iterable[str]) -> tuple:
+    """(ids covered, {id: [dangling test names]}) across the PROPERTIES maps of `files`."""
+    ok, dangling = set(), {}
+    for rel in files:
+        path = project_dir / rel
+        try:
+            if not path.is_file() or path.stat().st_size > MAX_SCAN_BYTES:
+                continue
+            text = path.read_text(errors="replace")
+        except OSError:
+            continue
+        if "PROPERTIES" not in text:
+            continue
+        for pid, missing_names in props.covered(text).items():
+            if missing_names:
+                dangling.setdefault(pid, []).extend(f"{n} (named in {rel}, no such test there)" for n in missing_names)
+            else:
+                ok.add(pid)
+    return ok, {pid: names for pid, names in dangling.items() if pid not in ok}
+
+
+MAP_HINT = (
+    'Add each to the PROPERTIES map of the test file that checks it, e.g. '
+    'PROPERTIES = {"P-3": "test_name"}. Never drop a property from test-plan.md to get a pass.'
+)
+
+
+def _properties_checks(
+    project_dir: Path,
+    spec_dir: Path,
+    tasks: Dict[str, SpecTask],
+    selected: List[SpecTask],
+    whole_spec: bool,
+    assumed_done: set,
+    config: Dict[str, Any],
+) -> List[Check]:
+    mode = str(config.get("properties", "warn")).lower()
+    if mode == "off":
+        return []
+    required = mode == "required"
+    ids = props.plan_properties(spec_dir / "test-plan.md")
+    checks: List[Check] = []
+
+    # A test task claiming Done must map the properties it lists, in its own files.
+    for task in selected:
+        if task.track != "test" or not task.properties:
+            continue
+        files = [f for f in task.files if is_test_path(f, config)]
+        ok, dangling = _property_coverage(project_dir, files)
+        missing = [p for p in task.properties if p not in ok]
+        detail = ""
+        if missing:
+            detail = f"not in a PROPERTIES map of {', '.join(files) or 'its listed test files'}: {', '.join(missing)}"
+            detail += "".join(f"\n{pid} -> {n}" for pid in missing for n in dangling.get(pid, []))
+            detail += "\n" + MAP_HINT
+        checks.append(Check(f"Task {task.num} properties mapped", not (missing and required), detail, warning=bool(missing)))
+
+    if not whole_spec:
+        return checks
+    if ids is None:
+        if required and (spec_dir / "test-plan.md").exists():
+            checks.append(
+                Check(
+                    "Properties covered",
+                    False,
+                    'test-plan.md has no ## Properties section, and specs/ck.json sets "properties": "required". '
+                    "Add one (a P-n row per universally quantified criterion, or \"None\" with the reason).",
+                )
+            )
+        return checks
+    if not ids:
+        checks.append(Check("Properties covered", True))
+        return checks
+
+    listed = [f for t in tasks.values() for f in t.files]
+    ok, dangling = _property_coverage(project_dir, _test_files(project_dir, config, listed))
+    owners: Dict[str, List[str]] = {}
+    for t in tasks.values():
+        for pid in t.properties:
+            owners.setdefault(pid, []).append(t.num)
+    missing, pending = [], []
+    for pid in ids:
+        if pid in ok:
+            continue
+        owner = owners.get(pid, [])
+        if owner and not any(n in assumed_done for n in owner):
+            pending.append(f"{pid} (Task {', '.join(owner)})")
+        else:
+            missing.append(pid)
+    lines = []
+    if missing:
+        lines.append("in no test file's PROPERTIES map: " + ", ".join(missing))
+        lines.extend(f"{pid} -> {n}" for pid in missing for n in dangling.get(pid, []))
+        unowned = [pid for pid in missing if pid not in owners]
+        if unowned:
+            lines.append(f"no test task lists {', '.join(unowned)} under **Properties:**")
+        lines.append(MAP_HINT)
+    if pending:
+        lines.append("not written yet, owned by unfinished test tasks: " + ", ".join(pending))
+    checks.append(
+        Check(
+            f"Properties covered ({len(ids) - len(missing) - len(pending)}/{len(ids)})",
+            not (missing and required),
+            "\n".join(lines),
+            warning=bool(missing or pending),
+        )
+    )
+    return checks
 
 
 def run_gate(
@@ -287,6 +418,10 @@ def run_gate(
     for command in dict.fromkeys(commands):  # dedupe, keep order
         if command != collect:
             result.checks.append(_run(command, project_dir, timeout))
+
+    result.checks.extend(
+        _properties_checks(project_dir, spec_dir, tasks, selected, task_nums is None, assumed_done, config)
+    )
 
     owned = {f for t in tasks.values() if t.track == "test" for f in t.files}
     result.checks.append(_tamper(project_dir, config, owned))

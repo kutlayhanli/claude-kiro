@@ -46,6 +46,12 @@ def changed_files(project_dir: Path, base: str) -> List[Tuple[str, str]]:
     return sorted((status, path) for path, status in changes.items())
 
 
+def project_files(project_dir: Path) -> Optional[List[str]]:
+    """Tracked and untracked (not ignored) files, project-relative; None outside git."""
+    out = _git(project_dir, "ls-files", "--cached", "--others", "--exclude-standard")
+    return None if out is None else out.splitlines()
+
+
 def is_modified(project_dir: Path, path: Path) -> Optional[bool]:
     """Whether `path` differs from HEAD (modified, staged, or untracked).
 

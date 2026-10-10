@@ -155,6 +155,9 @@ How this fits the existing system, and which PLAN.md decisions shape it.
 ## Public Interfaces
 The entry points other code and tests will call: CLI commands, HTTP endpoints, public functions/classes, events, file formats. Exact names and signatures. A separate test plan is being written in parallel against the requirements and these kinds of boundaries, so keep public behavior faithful to the requirements and keep internals behind these interfaces.
 
+### Decision Seams
+For every rule that decides whether something is allowed, refused, or held (every SHALL NOT, allowlist, limit, tripwire, or "only"/"never" criterion), expose a pure decision function: no I/O, no clock, no network, all inputs as arguments, e.g. \`decide(inputs) -> Decision\`. Name it, its module, its input and output types, and the criteria it decides. The server, CLI, or handler calls it; it never re-implements the rule. The test plan writes property tests against these seams so the safety rules are checked before any server or HTTP task exists. List each seam's owning component here.
+
 ## Data Models
 Types and schemas in the project's own language. Every field typed and explained.
 
@@ -193,7 +196,7 @@ The most common failure of AI-written tests is a pile of shallow unit tests that
 - **Mock only what you don't own** (third-party APIs, payment providers, clocks, randomness). Never mock the project's own modules, database, or filesystem in an integration test.
 - **End-to-end smoke tests** for each critical user flow named in the requirements.
 - **Unit tests only for pure logic** with meaningful branching or edge cases.
-- **Property tests** for invariants (round-trips, idempotence, ordering, conservation) when the project's language has a property-testing library; name it.
+- **Property tests** for every universally quantified criterion (the ## Properties section below), plus invariants (round-trips, idempotence, ordering, conservation). Example tests check the cases someone thought of; properties check the ones nobody did.
 - Tests target public behavior: the entry points named in the requirements or that already exist (CLI commands, endpoints, public APIs, files written). They must not depend on private helpers, so they stay valid whatever internal design is chosen.
 - Every test must fail before the feature exists, for the right reason (missing behavior), and pass after.
 
@@ -211,8 +214,23 @@ What already exists (paths) and what must be added: fixtures, factories, temp DB
 | ID | Criterion | Level | Scenario (Given / When / Then) | Real boundary exercised | Test file |
 IDs TC-1, TC-2, ... Every acceptance criterion has at least one case. Error criteria get their own cases.
 
+## Properties   (REQUIRED)
+Correctness properties, one row per property:
+| ID | Requirement | Property | Generator domain | Expected decision |
+P-n | requirement | "for any X ..." | generator domain | expected decision
+IDs P-1, P-2, ... Rules:
+- **Which criteria.** Every acceptance criterion with a universal quantifier gets at least one property: "any", "every", "all", "only", "never", "no", "each", or SHALL NOT. Read each criterion and ask "for which inputs must this hold?"; if the answer is "all of them in some set", it is a property.
+- **Surface forms.** The generator domain enumerates every surface form the input can take, not just the canonical one. For an amount: "$x", "x USD", "USD x", "x.yy", "x,yyy", "x to y", "x-y", "between x and y", "x/unit"; for a range, BOTH ends must be checked. For an email address: case variants, display names ("Name" <addr>), plus-tags, whitespace. For a path: relative, absolute, "..", symlinks. A rule that only checks the first number of "$4.15 to 4.50" passes every example test and fails this property.
+- **Negative space.** For every allowlist (only values from a sheet, a config, a set of participants), draw negatives from values that exist in the data source but are not permitted: quantities and SKUs next to prices in the same sheet, the system's own address or the agent's own draft next to real thread participants, IDs of other tenants. Random strings are not negatives; near-misses from the real data are.
+- **Complements.** For every "only" or "never" clause, write the complement property too: "only A passes" means "for any non-A, it does not pass", and "never B" means "for any input that produces B, the decision is refuse/hold".
+- **Metamorphic relations** where there is no oracle for the exact output: state how the decision must move when the input changes, e.g. "adding an unquoted amount to a passing body can only move pass -> held, never held -> pass", "removing a recipient never turns refuse into pass", "reordering the list does not change the decision".
+- **Library and settings.** Name the property-testing library for the project's language (Python: Hypothesis; JS/TS: fast-check; Go: rapid or testing/quick; Rust: proptest; Java: jqwik; Ruby: rantly; Elixir: StreamData) and deterministic settings: derandomized or a fixed seed (Hypothesis: \`@settings(derandomize=True, max_examples=200, database=None)\`; fast-check: \`{ seed: 42, numRuns: 200 }\`), a bounded example count, no example database, so a run is reproducible and the gate never flakes.
+- **Decision seam.** Safety properties (SHALL NOT, allowlists, tripwires, limits) target a pure decision function the implementation must expose, e.g. \`decide(inputs) -> decision\`, not the server or HTTP layer, so they run before any server task exists. Name the seam you need (module, function, input and output shape) in the Harness Contract; add one integration test case that shows the boundary actually calls it.
+- If the project's language has no property-testing library, each property becomes a table-driven test over the enumerated domain (every surface form and every negative listed in the row).
+- If no criterion is universally quantified, write "None" and the reason. Do not drop the section.
+
 ## Harness Contract
-Interfaces the test harness relies on that the implementation must provide: factories, keyword arguments, entry points, event or file formats. Give exact names and signatures, so the implementation tasks can honor them.
+Interfaces the test harness relies on that the implementation must provide: factories, keyword arguments, entry points, event or file formats, and the decision seams the properties call. Give exact names and signatures, so the implementation tasks can honor them.
 
 ## Critical Paths
 The end-to-end flows that must work, as numbered steps, each mapped to TC IDs.
@@ -243,6 +261,7 @@ Return the structured result after writing the file.`, { label: 'write test-plan
 **Files:**
 - \`path/to/file\` - specific change
 **Verify:** \`exact command\` \`another command\`
+**Properties:** P-1, P-2   (test tasks that write property tests only; omit otherwise)
 
 **Acceptance:**
 - [ ] [Concrete check derived from the referenced criteria]
@@ -297,6 +316,8 @@ Rules:
 - Acceptance must include: tests exercise the real boundary named in the test plan; tests fail before the implementation exists for the right reason (missing behavior, not broken test code); no mocks of the project's own code in integration tests.
 - Test tasks depend only on other test tasks (infrastructure), never on implementation tasks, so they can start as soon as the spec is approved.
 ${RISK_RULE} A test task whose cases exercise such an effect is safety too: its tests are the oracle for it.
+- **Properties.** Write one test task per property group from ${TPL}'s ## Properties section (properties that share a decision seam or a requirement story). List its P-ids under **Properties:** (e.g. \`**Properties:** P-1, P-2\`) and in the Description; together the tasks cover every P-n. **Verify:** runs that task's property test file. The test file declares a module-level map from each property to the test that checks it, in the file's own language: \`PROPERTIES = {"P-3": "test_name", "P-4": ["test_a", "test_b"]}\` (JS/TS: \`export const PROPERTIES = { 'P-3': 'test name' }\`). \`ck gate\` reads these maps to check every P-n is covered. Acceptance includes: the generators cover every surface form and negative listed in the row; settings are deterministic; the tests call the decision seam, not a server.
+- **Red-team tasks.** For each user story with a SHALL NOT criterion, add a red-team test task. Like every test task it is written before the code and from the requirements only, never from the implementation. Its Description: "Try to break each SHALL NOT clause of Story N with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test." Its **Requirements:** are the story's SHALL NOT criteria; it verifies the impl tasks that implement them.
 
 Write the draft file, then return the structured result.`, { label: 'write test track', phase: 'Task Tracks', schema: WRITE_RESULT }),
   ])
@@ -324,7 +345,9 @@ Inputs: ${DRAFT_IMPL} (implementation track, IDs I1..), ${DRAFT_TEST} (test trac
    - Add each impl task's verifying test tasks to its **Dependencies:** with the reason "(its tests are the oracle)". Tests are written first.
    - **Verify-order rule:** a test task may only verify an impl task whose code the tests can run without help from later tasks. If test task T exercises a path through code owned by impl task Y (for example a runner or CLI entry point), and Y depends on impl task X, then T must verify Y, not X. X becomes a foundation task whose own **Verify:** is a smoke command, and its criteria are verified at Y. Otherwise X's gate can never pass.
    - Every impl task that implements a requirement criterion has at least one verifying test task; every test task verifies at least one impl task. If a gap exists, add the missing task, consistent with ${TPL}.
-   - Give every interface in ${TPL}'s Harness Contract an owning impl task, and note it in that task's Description.
+   - Give every interface in ${TPL}'s Harness Contract an owning impl task, and note it in that task's Description. Each decision seam gets its own small impl task (or is owned by the first task that needs it) with no dependency on server, HTTP, or CLI tasks.
+   - Property test tasks verify the impl task that owns their decision seam, not the server or handler built on it, so every P-n runs as soon as the seam exists. Keep each test task's **Properties:** field. Check that every P-n in ${TPL}'s ## Properties section is listed under **Properties:** by exactly one test task; add a test task for any that is not.
+   - Red-team test tasks verify the impl tasks that implement their story's SHALL NOT criteria.
    - Reference fields (**Dependencies:**, **Verified by:**, **Verifies:**) hold task references with their reasons in parentheses, nothing else. Put explanatory notes on their own line: tooling reads every "Task N" in those fields.
    - Every dependency keeps a one-line reason in parentheses. Drop any dependency that has no code, data, test, or shared-file reason.
    - Keep every **Risk:** line. A test task that verifies a safety impl task is safety too. Check every task once more against this rule:
@@ -338,7 +361,7 @@ ${RISK_RULE}
 
 ## Task Breakdown
 
-(all task blocks: "### Task N: Title" headers, "- \`path\` - note" file lines under **Files:**, fields **Status:** **Track:** **Requirements:** **Description:** **Files:** **Verify:** **Verified by:**/**Verifies:** **Acceptance:** **Dependencies:** **Complexity:** **Risk:**, separated by ---)
+(all task blocks: "### Task N: Title" headers, "- \`path\` - note" file lines under **Files:**, fields **Status:** **Track:** **Requirements:** **Description:** **Files:** **Verify:** **Properties:** (property test tasks) **Verified by:**/**Verifies:** **Acceptance:** **Dependencies:** **Complexity:** **Risk:**, separated by ---)
 
 ## Dependency Graph
 A Mermaid graph TD of task dependencies, with test tasks visually distinct (e.g. a "test" class).
@@ -455,7 +478,10 @@ const LENSES = [
 - Do tests target public interfaces (CLI, endpoints, public APIs, written files) rather than private helpers, so they survive refactoring? Check names against design.md's Public Interfaces and the existing code.
 - Is the test infrastructure (fixtures, harness, containers) concrete enough to build, and does a test task build it first?
 - Would each test fail before the feature exists for the right reason? Are the **Verify:** commands real, runnable commands for this repo?
-- Imagine a plausible implementation bug for the riskiest criterion. Which test catches it? If none, that is a finding.`,
+- Imagine a plausible implementation bug for the riskiest criterion. Which test catches it? If none, that is a finding.
+- Properties: does ${TPL} have a ## Properties section? Does every universally quantified SHALL / SHALL NOT criterion ("any", "every", "all", "only", "never", SHALL NOT) have a P-n row? A missing one is a major finding.
+- For each property: does the generator domain enumerate the input's surface forms (e.g. "$x", "x USD", "x to y", "x-y" for amounts, checking both ends of a range)? For each allowlist, does it draw from the negative space: values that exist in the data source but are not permitted (quantities next to prices, the system's own draft next to participants)? Does each "only"/"never" clause have its complement property? Where there is no oracle, is there a metamorphic relation?
+- Do safety properties target a pure decision seam that runs before any server task, with deterministic settings (derandomized, bounded examples, no example database)? Does every P-n belong to exactly one test task's **Properties:** field, whose test file will carry a PROPERTIES map? Does each story with a SHALL NOT have a red-team test task?`,
   },
 ]
 
@@ -538,7 +564,7 @@ ${BRIEF}
 
 Spec files: ${SPEC_FILES}.
 
-1. Apply each of these confirmed findings by editing the spec files. Keep the documents consistent with each other (if you change a criterion, update design traceability, the test plan's cases, and the covering impl and test tasks). Keep the tasks.md format intact ("### Task N: Title", "- \`path\` - note").
+1. Apply each of these confirmed findings by editing the spec files. Keep the documents consistent with each other (if you change a criterion, update design traceability, the test plan's cases and properties, and the covering impl and test tasks). Keep the tasks.md format intact ("### Task N: Title", "- \`path\` - note").
 ${JSON.stringify(toFix, null, 2)}
 
 2. Do NOT resolve these; they need the user's decision. Leave the spec as is for them:

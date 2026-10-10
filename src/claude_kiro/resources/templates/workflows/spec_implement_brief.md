@@ -32,9 +32,12 @@ Your task's dependencies are already merged into your branch. If something you d
 
 **test track:** Write the listed test cases against real boundaries: the real CLI or entry point, real temp directories and databases, a real HTTP test client or loopback stubs. Mock only things the project doesn't own. Target the public interfaces from design.md.
 - Before the implementation exists, your tests must fail **for the right reason**: a missing module, command, or behavior. They must never fail from syntax errors, broken fixtures, or typos. Confirm by running your Verify command.
+- **Property tests** (your task lists **Properties:** P-n): implement each P-n row of `test-plan.md`'s ## Properties section with the library and deterministic settings it names (derandomized or seeded, bounded examples, no example database), generators covering every surface form and negative the row lists, calling the named decision seam rather than a server. Put a module-level `PROPERTIES = {"P-3": "test_name", ...}` map in the test file (JS/TS: `export const PROPERTIES = {...}`); the gate checks every P-n appears in one.
+- **Red-team tasks:** working from the requirements only, try to break each SHALL NOT clause with adversarial inputs (unusual surface forms, near-miss values from the real data, the system's own output fed back in). Every break becomes a test.
 - Tests that need unimplemented code must still be **collectable**. Import project modules inside the test body or a fixture, not at module level. Don't use skip-if-missing patterns (`pytest.importorskip` and the like): skips weaken the gate. A module-level import of missing code breaks collection of the whole suite for every other agent.
 
 **impl track:** Implement per design.md. Make the tests under **Verified by** pass, plus your own **Verify:** command.
+- **Property failures:** a failing property test prints a shrunk counterexample. Usually it is a real bug: fix the code. If you believe the property or the spec is wrong, stop and report it in wrongTests: the property ID, the shrunk counterexample verbatim, what your code decides for it, and the question "fix the code, the spec, or the property?". Never silently edit a property: changing its generators, narrowing its domain, lowering its example count, or removing it from a PROPERTIES map is weakening a test.
 
 ## Hard rules
 
@@ -79,6 +82,6 @@ Return the structured fields your prompt asks for:
 - gateTail (the last ~15 lines of the gate output)
 - blocker (if any)
 - deviations from the spec
-- wrongTests (tests you believe are wrong, with your reasoning)
+- wrongTests (tests you believe are wrong, with your reasoning; for a property, its ID, the shrunk counterexample, and whether you think the code, the spec, or the property should change)
 - outsideFiles (files you touched that your task doesn't list)
 - startedAt and finishedAt (from `date -u +%Y-%m-%dT%H:%M:%SZ`)
