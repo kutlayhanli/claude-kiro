@@ -53,14 +53,14 @@ How each mode applies them:
      "tracks": "<tracks from ck plan>",
      "maxRetries": 1,
      "onFailure": "continue",
-     "maxConcurrent": null,
+     "maxConcurrent": "<run.max_concurrent from ck agents --json>",
      "fullGateEvery": 10,
      "agents": "<the roles object from ck agents --json>"
    }
    ```
-   - **agents:** see Agents above. Report the roles you passed (implementer, test_writer, reviewer) when you tell me it's running.
+   - **agents:** see Agents above. Report the roles you passed (implementer, test_writer, reviewer) and the concurrency cap when you tell me it's running.
    - **onFailure:** by default a failed task doesn't stop the run. Tasks that don't depend on it keep starting, its dependents never start and are reported, and a red target branch always halts. Use `"onFailure": "halt"` if I asked to stop at the first failure.
-   - **maxConcurrent:** set it (for example 4) if I said the test suite is memory-heavy.
+   - **maxConcurrent:** how many tasks may have an implementing agent at work at once; review and the merge queue don't hold a slot. Pass `run.max_concurrent` from `ck agents --json` (null means no cap). If I said the test suite is memory-heavy or asked to go easy on usage, pass a lower number (for example 4) for this run, and mention `ck agents set run.max_concurrent N` to make it stick.
 7. **Tell me it's running:**
    - Each task starts as soon as its own dependencies are merged; waves only group the progress display.
    - After every task, a cheap planning step re-reads the plan from tasks.md on the target. If we fix tasks.md mid-run (for example, removing a spurious dependency, committed to the target branch), it takes effect at the next step, with no restart.

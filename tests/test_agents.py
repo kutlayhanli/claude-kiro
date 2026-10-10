@@ -94,6 +94,26 @@ def test_bad_values_are_refused(home, args, message):
     assert message in out.output
 
 
+def test_max_concurrent_defaults_to_unlimited_and_is_settable(home):
+    assert roles(home)["roles"]["run"]["max_concurrent"] is None  # no cap
+    assert "max_concurrent=unlimited" in ck(home, "agents").output
+    assert ck(home, "agents", "set", "run.max_concurrent", "8").exit_code == 0
+    assert roles(home)["roles"]["run"]["max_concurrent"] == 8
+    assert ck(home, "agents", "set", "run.max_concurrent", "3", "--project").exit_code == 0
+    assert roles(home, "--override", "run.max_concurrent=2")["roles"]["run"]["max_concurrent"] == 2
+    assert roles(home)["roles"]["run"]["max_concurrent"] == 3
+    # "unlimited" is a value, so it can lift a cap set in a lower layer
+    assert roles(home, "--override", "run.max_concurrent=unlimited")["roles"]["run"]["max_concurrent"] is None
+    ck(home, "agents", "set", "run.max_concurrent", "unlimited", "--project")
+    assert roles(home)["roles"]["run"]["max_concurrent"] is None
+
+
+@pytest.mark.parametrize("value", ["0", "0.5", "many"])
+def test_max_concurrent_must_be_a_positive_number(home, value):
+    out = ck(home, "agents", "set", "run.max_concurrent", value)
+    assert out.exit_code == 2 and "run.max_concurrent" in out.output
+
+
 def test_bad_project_config_is_reported(home):
     (home / "specs/ck.json").write_text(json.dumps({"agents": {"implementer": {"model": "gpt-5"}}}))
     out = ck(home, "agents")

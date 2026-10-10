@@ -42,7 +42,7 @@ Run multiple implementation tasks concurrently, each in its own git worktree wit
    - Clean up stale worktrees from previous runs if found
 
 4. **Confirm the plan** with me before proceeding. Show:
-   - The tasks that start now (at most 6 at once unless I gave another limit), with branch names and tracks
+   - The tasks that start now (at most `run.max_concurrent` from `ck agents --json` (null means no cap), unless I gave another limit), with branch names and tracks
    - The critical path, and how many tasks are still waiting on dependencies
    - Use AskUserQuestion to get approval, with these choices:
      - **Keep going** (recommended for a spec): merge each task as soon as its gate passes, and start every task that this makes ready, until nothing is ready or running
@@ -100,7 +100,7 @@ Don't wait for the others. Handle each agent's report as it arrives:
    ```
    `ck worktree merge` merges the branch into the current branch (`--no-ff`), then removes the worktree and branch. The task gate checks that task on the merged result, where its tests and the code they verify meet: its Verify, its verifying tests, and that no existing test was weakened.
    **Ad-hoc tasks (no spec):** `command git merge --no-ff feat/<feature>-<n>`, then run the project's tests. There's no dependency graph, so nothing new becomes ready.
-3. **Start what became ready** (spec tasks, unless I chose "Just these tasks"): `ck plan <spec> --json --exclude <running and failed tasks>`, then Phases 2 and 3 for its `ready` tasks, keeping at most 6 running. Re-planning re-reads tasks.md, so a dependency we fix mid-run takes effect.
+3. **Start what became ready** (spec tasks, unless I chose "Just these tasks"): `ck plan <spec> --json --exclude <running and failed tasks>`, then Phases 2 and 3 for its `ready` tasks, within the same cap. Only tasks whose agent is still implementing count: one that is merging or waiting to merge has freed its slot. Re-planning re-reads tasks.md, so a dependency we fix mid-run takes effect.
 
 If a merge reports **CONFLICT**:
 - The merge is already aborted. Nothing is half-merged on the current branch.

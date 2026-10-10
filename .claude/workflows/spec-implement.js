@@ -14,7 +14,7 @@ export const meta = {
 //   titles: { '1': '...' }, tracks: { '1': 'test' },
 //   maxRetries: 1,                         // extra attempts per task after a failed gate or a no-op attempt
 //   onFailure: 'continue' | 'halt',        // default continue: other ready tasks keep starting; a red target always halts
-//   maxConcurrent: null,                   // cap on task agents at once (memory-heavy test suites)
+//   maxConcurrent: null,                   // cap on tasks with an implementing agent at work (null = none); review and merge queue don't count
 //   fullGateEvery: 10,                     // run the full `ck gate <spec>` every N merges (0 = only at the end)
 //   agents: { implementer, test_writer, reviewer, fixer }  // "roles" from `ck agents --json`: model/effort per role
 //                                          //   ("inherit" = the session's). Absent: every agent inherits, no review.
@@ -255,6 +255,11 @@ Return green=true only if ${INTO} is green after your merge, else failing with t
 // --- scheduler ---------------------------------------------------------------
 
 const running = new Map()    // task -> promise of its record
+// Tasks holding a slot: an implementing agent (first attempt, retry, revision) is at work.
+// Review and the merge queue don't hold one, so a slow merge never keeps a ready task waiting.
+const working = new Set()
+let slotFreed = false
+let wakeLoop = null
 const records = {}           // task -> record
 const failed = new Map()     // task -> reason
 const busyReported = new Set()
@@ -270,10 +275,21 @@ const fullGates = []
 async function plan() {
   refills++
   const exclude = [...running.keys(), ...failed.keys()]
-  const slots = MAX_CONCURRENT - running.size
+  const slots = MAX_CONCURRENT - working.size
   const p = await agent(planPrompt(exclude, slots), { label: `plan ${refills}`, phase: 'Plan', schema: PLAN, effort: 'low' })
   if (!p || p.error) return null
   return p
+}
+
+// A task's implementing agent finished; wake the scheduler to fill the slot.
+function releaseSlot(n) {
+  if (!working.delete(n)) return
+  slotFreed = true
+  if (wakeLoop) { wakeLoop({ freed: n }); wakeLoop = null }
+}
+
+function slotSignal() {
+  return slotFreed ? Promise.resolve({ freed: true }) : new Promise(resolve => { wakeLoop = resolve })
 }
 
 async function fixAndRecheck(what, failure, n) {
@@ -328,13 +344,16 @@ async function runTask(n) {
       rec.attempts++
       rec.startedAt = rec.startedAt || (r && r.startedAt)
     }
+    releaseSlot(n)
     if (ok(r) && REVIEW_ON) {
       let review = await agent(reviewPrompt(n, r), { label: `review ${n}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...REVIEW })
       let round = 0
       while (review && review.verdict === 'changes' && round < REVIEW_ROUNDS && ok(r)) {
         round++
         log(`Task ${n}: reviewer asked for changes, revision ${round}/${REVIEW_ROUNDS}`)
+        working.add(n)  // a revision takes a slot but never waits for one: the task is nearly done
         r = await agent(revisePrompt(n, review, round), { label: `${label(n)} revise ${round}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
+        releaseSlot(n)
         if (ok(r)) review = await agent(reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...REVIEW })
       }
       rec.review = review ? { verdict: review.verdict, rounds: round, findings: review.findings, summary: review.summary } : { verdict: 'unreviewed', rounds: round }
@@ -378,9 +397,10 @@ function launch(p) {
     }
   }
   for (const n of p.ready.map(String)) {
-    if (stopLaunching || running.size >= MAX_CONCURRENT) break
+    if (stopLaunching || working.size >= MAX_CONCURRENT) break
     if (running.has(n) || failed.has(n) || (records[n] && records[n].ok) || p.done.includes(n)) continue
-    running.set(n, runTask(n).then(rec => ({ n, rec })))
+    working.add(n)
+    running.set(n, runTask(n).then(rec => { working.delete(n); return { n, rec } }))
   }
 }
 
@@ -419,7 +439,19 @@ log(`${current.remaining.length} task(s) remaining, ${initiallyDone} already Don
 launch(current)
 
 while (running.size) {
-  const { n, rec } = await Promise.race(running.values())
+  const event = await Promise.race([...running.values(), slotSignal()])
+  if (event.freed) {
+    // A task moved on to review or the merge queue: fill its slot now.
+    slotFreed = false
+    if (stopLaunching || working.size >= MAX_CONCURRENT) continue
+    const next = await plan()
+    if (!next) { stopLaunching = true; stopReason = 'planning step failed'; continue }
+    current = next
+    applyLint(current)
+    launch(current)
+    continue
+  }
+  const { n, rec } = event
   running.delete(n)
   records[n] = rec
   if (!rec.ok) {

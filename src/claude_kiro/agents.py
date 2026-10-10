@@ -37,6 +37,10 @@ DEFAULTS: Dict[str, Dict[str, Any]] = {
     "reviewer": {"model": "opus", "effort": "high", "enabled": True, "rounds": 1},
     # Repairs a red target branch. null = same as implementer.
     "fixer": {"model": None, "effort": None},
+    # How many tasks may have an implementing agent at work at once (review and the
+    # merge queue don't count). null = unlimited; lower it for memory-heavy test
+    # suites or a tight usage budget.
+    "run": {"max_concurrent": None},
 }
 
 ROLE_KEYS = {
@@ -45,7 +49,9 @@ ROLE_KEYS = {
     "test_writer": {"model", "effort"},
     "reviewer": {"model", "effort", "enabled", "rounds"},
     "fixer": {"model", "effort"},
+    "run": {"max_concurrent"},
 }
+UNLIMITED = "unlimited"
 
 
 class AgentConfigError(ValueError):
@@ -93,6 +99,16 @@ def _coerce(role: str, key: str, value: Any) -> Any:
         if not isinstance(value, bool):
             raise AgentConfigError(f"{role}.{key} must be true or false")
         return value
+    if key == "max_concurrent":
+        if value is None or value == UNLIMITED:
+            return value
+        try:
+            number = int(str(value))
+        except ValueError:
+            number = 0
+        if number < 1:
+            raise AgentConfigError(f"{role}.max_concurrent must be a whole number of 1 or more, or {UNLIMITED}")
+        return number
     if key == "rounds":
         try:
             value = int(value)
@@ -150,6 +166,8 @@ def resolve(project_dir: Path, overrides: Optional[List[str]] = None) -> Dict[st
             if roles[role][key] is None:
                 roles[role][key] = roles["implementer"][key]
                 sources[f"{role}.{key}"] = f"implementer ({sources['implementer.' + key]})"
+    if roles["run"]["max_concurrent"] == UNLIMITED:
+        roles["run"]["max_concurrent"] = None
     return {"roles": roles, "sources": sources}
 
 

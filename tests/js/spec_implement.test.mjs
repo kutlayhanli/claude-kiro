@@ -10,7 +10,7 @@ const SCRIPT = path.join(here, '../../src/claude_kiro/resources/templates/workfl
 const baseArgs = { spec: 'demo', root: '/repo', into: 'integrate/demo', targetDir: '/repo/.claude/worktrees/demo-integration' }
 
 // A fake project: `ck plan` semantics over deps/done, task durations, failures, timestamps.
-function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {} }) {
+function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {} }) {
   const state = { deps: { ...deps }, done: new Set(done), events: [], prompts: {}, opts: {}, reviewCount: {}, attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0 }
   let clock = Date.parse('2026-10-04T10:00:00Z')
   const stamp = () => new Date((clock += 60000)).toISOString().replace('.000', '')
@@ -56,14 +56,17 @@ function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFir
       const n = l.match(/merge (\d+)/)[1]
       state.merging++
       state.maxMerging = Math.max(state.maxMerging, state.merging)
-      await sleep(2)
+      await sleep(mergeDurations[n] ?? 2)
       state.merging--
+      state.events.push(`${l} end`)
       state.done.add(n)
       return { merged: true, checkGreen: !checkRed.includes(n), checkTail: checkRed.includes(n) ? 'red' : '', mergedAt: stamp() }
     }
     if (l.startsWith('review')) {
       const n = l.match(/review (\d+)/)[1]
       state.reviewCount[n] = (state.reviewCount[n] || 0) + 1
+      await sleep(reviewDurations[n] ?? 0)
+      state.events.push(`${l} end`)
       const verdict = (reviews[n] || [])[state.reviewCount[n] - 1] || 'approve'
       return { verdict, findings: verdict === 'changes' ? [{ severity: 'blocking', issue: 'contradicts design.md' }] : [], summary: verdict }
     }
@@ -190,6 +193,26 @@ await test('maxConcurrent caps task agents at once', async () => {
   const p = project({ deps: { 1: [], 2: [], 3: [], 4: [] } })
   await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxConcurrent: 2 } })
   assert.equal(p.state.maxRunning, 2)
+})
+
+const REVIEW_ON = { reviewer: { model: 'opus', effort: 'high', enabled: true, rounds: 1 } }
+
+await test('a task in review or waiting to merge does not hold a slot', async () => {
+  // One slot. Task 1's merge is slow and task 2's review is slow; neither should keep the next task waiting.
+  const p = project({ deps: { 1: [], 2: [], 3: [] }, durations: { 1: 2, 2: 2, 3: 2 }, mergeDurations: { 1: 80 }, reviewDurations: { 2: 80 } })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxConcurrent: 1, agents: REVIEW_ON } })
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3'])
+  assert.equal(p.state.maxRunning, 1, 'still one implementing agent at a time')
+  assert.ok(idx(p.state, 'task 2') < idx(p.state, 'merge 1 end'), 'task 2 started while task 1 waited to merge')
+  assert.ok(idx(p.state, 'task 3') < idx(p.state, 'review 2 end'), 'task 3 started while task 2 was in review')
+})
+
+await test('a revision after review still runs when the slots are full', async () => {
+  const p = project({ deps: { 1: [], 2: [] }, durations: { 1: 2, 2: 40 }, reviews: { 1: ['changes', 'approve'] } })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxConcurrent: 1, agents: REVIEW_ON } })
+  assert.deepEqual(result.merged.sort(), ['1', '2'])
+  assert.ok(idx(p.state, 'task 1 revise 1') > -1, 'task 1 was revised')
+  assert.ok(idx(p.state, 'task 1 revise 1') < idx(p.state, 'task 2 end'), 'the revision did not wait for task 2')
 })
 
 await test('wall-clock timing per task and per wave group', async () => {
