@@ -394,6 +394,26 @@ await test('escalation: a red branch the fixer could not repair gets a fix on th
   assert.deepEqual(result.fixerEscalations, [{ what: 'after merging Task 1', model: 'opus', green: true }])
 })
 
+await test('handoff: agents leave a note on failure and every retry or revision reads it first', async () => {
+  const p = project({ deps: { 1: [] }, failUntil: { 1: 2 }, reviews: { 1: ['changes', 'approve'] } })
+  await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxRetries: 1, agents: HAIKU(['sonnet']) } })
+  const note = '/repo/.claude/worktrees/demo-task-1.handoff.md'
+  assert.match(p.state.prompts['task 1'], new RegExp(`write a handoff note to ${note}`))
+  for (const l of ['task 1 retry 1', 'task 1 retry 2 (sonnet)', 'task 1 revise 1']) {
+    assert.match(p.state.prompts[l], new RegExp(`read ${note}`), l)
+    assert.match(p.state.prompts[l], new RegExp(`write a handoff note to ${note}`), l)
+  }
+})
+
+await test('agents run ck with -C <dir>, never cd', async () => {
+  const p = project({ deps: { 1: [] } })
+  await runWorkflow(SCRIPT, { agent: p.agent, args: baseArgs })
+  for (const l of ['plan 1', 'task 1', 'merge 1']) {
+    assert.match(p.state.prompts[l], /ck -C /, l)
+    assert.doesNotMatch(p.state.prompts[l], /\bcd \/[^ ]+ &&/, l)  // a real cd into a path, not the rule's own wording
+  }
+})
+
 await test('escalation: a role never escalates to a model that is not above its own', async () => {
   // The fixer is Opus and follows the implementer's ladder (sonnet > opus): nothing is above Opus, so no fixer escalation.
   const p = project({ deps: { 1: [] }, checkRed: ['1'], recheckRed: 5 })

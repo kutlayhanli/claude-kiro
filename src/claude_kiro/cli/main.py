@@ -4,6 +4,7 @@ Provides the `ck` command with subcommands for project management and a hidden
 hook runner for Claude Code integration.
 """
 
+import os
 import sys
 import json
 import logging
@@ -27,6 +28,7 @@ from ..paths import (
 from .agents import agents
 from .update import update
 from .hooks import hook
+from .run import run
 from .worktree import lint, plan, waves, worktree
 from .runner import HOOK_SETTINGS, configured_hooks, execute_hook, install_hook_settings
 
@@ -43,13 +45,21 @@ logger = logging.getLogger(__name__)
     hidden=True,
     help="Execute a hook (for Claude Code integration)",
 )
+@click.option(
+    "-C",
+    "directory",
+    type=click.Path(exists=True, file_okay=False),
+    help="Run as if ck was started in DIRECTORY (like git -C), so agents never need `cd ... &&`",
+)
 @click.pass_context
-def cli(ctx: click.Context, hook_name: Optional[str]):
+def cli(ctx: click.Context, hook_name: Optional[str], directory: Optional[str]):
     """Claude Kiro - Spec-driven development methodology for use with Claude Code.
 
     Initialize projects with spec-driven workflow, configure Claude Code hooks,
     and verify setup with the unified `ck` command.
     """
+    if directory:
+        os.chdir(directory)
     if hook_name:
         # Hidden hook execution mode for Claude Code
         try:
@@ -844,6 +854,7 @@ cli.add_command(plan)
 cli.add_command(lint)
 cli.add_command(agents)
 cli.add_command(update)
+cli.add_command(run)
 
 
 if __name__ == "__main__":

@@ -10,9 +10,9 @@ The user started this run with `/spec:implement <spec>`, which instructs the wor
 
 - Work ONLY in your worktree directory. Use absolute paths. Never cd into or edit the main checkout or any other worktree.
 - Commit to your branch only (it is already checked out). Never push, rebase, or switch branches. The only merge you run is `git merge <target>` into your own branch (see Finish).
-- Run git as `command git ...`. Some shells rewrite plain `git` through a hook, and the `command` prefix bypasses it. Prefer `command git -C <worktree> ...` over `cd`, because compound `cd ... && ...` commands may be refused.
-- First thing: claim the worktree: `ck worktree claim <spec> <N>` (run it from your worktree). If it prints BUSY, another agent owns this worktree: stop at once and report "worktree busy" as your blocker. If your prompt says you are continuing a previous agent's work, use `ck worktree claim <spec> <N> --takeover`.
-- Install dependencies once if the project needs it (for example `uv sync --frozen`, or `uv sync` if your task adds dependencies).
+- Keep every shell command a single simple command with absolute paths: `command git -C <worktree> ...`, `ck -C <worktree> ...`, `uv sync --directory <worktree>`, test runners with absolute paths. Never `cd <dir> && ...`, pipes into another command, or loops: permission checks cannot verify compound commands, so they stall or get refused in unattended runs. The `command` prefix on git stops a shell hook from rewriting it.
+- First thing: claim the worktree: `ck -C <worktree> worktree claim <spec> <N>`. If it prints BUSY, another agent owns this worktree: stop at once and report "worktree busy" as your blocker. If your prompt says you are continuing a previous agent's work, use `ck -C <worktree> worktree claim <spec> <N> --takeover`.
+- Install dependencies once if the project needs it (for example `uv sync --frozen --directory <worktree>`, or `uv sync --directory <worktree>` if your task adds dependencies).
 
 ## Spec context (read before coding)
 
@@ -48,7 +48,7 @@ Your task's dependencies are already merged into your branch. If something you d
 1. Note the time (`date -u +%Y-%m-%dT%H:%M:%SZ`) for your report's startedAt. Claim the worktree (see above). Set your task to `**Status:** In Progress` and commit `task [N]: mark in progress`.
 2. Do the work. Commit at milestones with `task [N]: <what>`.
 3. Tick the acceptance boxes you actually satisfied.
-4. Run `ck gate <spec> --task <N>` in your worktree and fix until it passes. While the spec is in progress the gate runs only the tests that should already pass, plus a test-collection check. For a test task whose impl tasks aren't Done, it checks that the test files exist, contain tests, and collect.
+4. Run `ck -C <worktree> gate <spec> --task <N>` and fix until it passes. While the spec is in progress the gate runs only the tests that should already pass, plus a test-collection check. For a test task whose impl tasks aren't Done, it checks that the test files exist, contain tests, and collect.
 5. On pass: set `**Status:** Done` and commit `task [N]: complete - <summary>`. If you can't make it pass without weakening a test or changing a requirement: leave the task In Progress and report why.
 
 ## Finish
@@ -58,15 +58,15 @@ Your task's dependencies are already merged into your branch. If something you d
    - Dependency manifests: take the union, then re-lock (for example `uv lock`).
    - Test files: keep every test and assertion from both sides.
    
-   Commit the merge, then re-run `ck gate <spec> --task <N>`.
+   Commit the merge, then re-run `ck -C <worktree> gate <spec> --task <N>`.
 2. Make sure nothing is left uncommitted (`command git -C <worktree> status --short` is empty).
-3. Release the worktree: `ck worktree release <spec> <N>`. Do this even if you are stopping with a blocker.
+3. Release the worktree: `ck -C <worktree> worktree release <spec> <N>`. Do this even if you are stopping with a blocker.
 
 ## Report back
 
 Return the structured fields your prompt asks for:
 - status: done, in_progress, or blocked
-- gatePassed: true only if your final `ck gate <spec> --task <N>` exited 0
+- gatePassed: true only if your final `ck -C <worktree> gate <spec> --task <N>` exited 0
 - summary
 - commits (hashes)
 - gateTail (the last ~15 lines of the gate output)

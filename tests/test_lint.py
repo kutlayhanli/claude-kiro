@@ -143,6 +143,19 @@ def test_plan_ready_puts_the_longest_remaining_chain_first(tmp_path):
     assert plan["chain"] == {"1": 1, "2": 3, "3": 2, "4": 1, "5": 2, "6": 1}
 
 
+def test_dash_c_runs_in_another_directory_without_cd(tmp_path):
+    # Agents use `ck -C <worktree> ...` instead of `cd <worktree> && ck ...`, which permission
+    # checks can't verify. The result must match running from inside that directory.
+    write_spec(tmp_path, block(1, "a") + block(2, "b", deps="Task 1 (x)"))
+    here = json.loads(ck(tmp_path, "plan", "sim").output)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    remote = ck(elsewhere, "-C", str(tmp_path), "plan", "sim")
+    assert remote.exit_code == 0, remote.output
+    assert json.loads(remote.output) == here
+    assert ck(elsewhere, "-C", str(tmp_path / "missing"), "plan", "sim").exit_code != 0
+
+
 def test_notes_in_reference_fields_are_not_references(tmp_path):
     assert [n for n, _ in _ref_items("Task 39 (note: TC-25 also exercises Task 69)")] == ["39"]
     assert _ref_items("Task 76 (uses the report), Task 12 - shared file x.py") == [("76", "uses the report"), ("12", "shared file x.py")]
