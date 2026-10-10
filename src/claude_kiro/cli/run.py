@@ -41,7 +41,12 @@ def _linked_worktree(cwd: Path) -> bool:
 @click.option("--effort", default="low", show_default=True, help="Effort of the orchestrating session")
 @click.option("--dry-run", is_flag=True, help="Print the command instead of running it")
 @click.option("--json", "as_json", is_flag=True, help="With --dry-run: print the command as JSON")
-def run(spec: str, extra: tuple, model: str, effort: str, dry_run: bool, as_json: bool):
+@click.option("--output-format", type=click.Choice(["text", "json", "stream-json"]), default="text", show_default=True,
+              help="claude -p output format; json/stream-json write stdout to the log and stderr to <log>.stderr (used by ck bench)")
+@click.option("--session-id", default=None, help="Session UUID for the claude session (used by ck bench to find its transcripts)")
+@click.option("--log", "log_path", type=click.Path(dir_okay=False), default=None, help="Log file (default .claude/ck-runs/<spec>-<time>.log)")
+def run(spec: str, extra: tuple, model: str, effort: str, dry_run: bool, as_json: bool,
+        output_format: str, session_id: str, log_path: str):
     """Run every task of SPEC unattended: headless, no permission prompts.
 
     \b
@@ -65,11 +70,17 @@ def run(spec: str, extra: tuple, model: str, effort: str, dry_run: bool, as_json
         "--model", model,
         "--effort", effort,
     ]
+    if output_format != "text":
+        argv += ["--output-format", output_format] + (["--verbose"] if output_format == "stream-json" else [])
+    if session_id:
+        argv += ["--session-id", session_id]
     env = {"CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0"}
-    log = cwd / ".claude" / "ck-runs" / f"{name}-{time.strftime('%Y%m%d-%H%M%S')}.log"
+    log = Path(log_path).absolute() if log_path else cwd / ".claude" / "ck-runs" / f"{name}-{time.strftime('%Y%m%d-%H%M%S')}.log"
+    # A machine-readable result must not be interleaved with stderr.
+    err = Path(f"{log}.stderr") if output_format != "text" else None
     if dry_run:
         if as_json:
-            click.echo(json.dumps({"argv": argv, "env": env, "cwd": str(cwd), "log": str(log)}, indent=2))
+            click.echo(json.dumps({"argv": argv, "env": env, "cwd": str(cwd), "log": str(log), "stderr": err and str(err)}, indent=2))
         else:
             click.echo(" ".join(f"{k}={v}" for k, v in env.items()) + " " + " ".join(argv[:2]) + f" {json.dumps(prompt)} " + " ".join(argv[3:]))
             click.echo(f"log: {log}")
@@ -79,7 +90,7 @@ def run(spec: str, extra: tuple, model: str, effort: str, dry_run: bool, as_json
         sys.exit(2)
     log.parent.mkdir(parents=True, exist_ok=True)
     click.echo(f"Running {name} unattended (orchestrator session {model}/{effort}); log: {log}")
-    with log.open("w") as out:
-        code = subprocess.call(argv, cwd=cwd, env={**os.environ, **env}, stdout=out, stderr=subprocess.STDOUT)
+    with log.open("w") as out, (err.open("w") if err else open(os.devnull, "w")) as errf:
+        code = subprocess.call(argv, cwd=cwd, env={**os.environ, **env}, stdout=out, stderr=errf if err else subprocess.STDOUT)
     click.echo(f"{'✓' if code == 0 else '❌'} claude exited {code}; log: {log}")
     sys.exit(code)

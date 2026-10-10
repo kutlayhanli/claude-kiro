@@ -22,6 +22,9 @@ What changes:
 - **Unattended runs: `ck run <spec>`.** Starts the whole spec headless from the main checkout, with auto permissions and no prompts, the Workflow launch and ck/git commands allowed, and the process kept open until the workflow ends. Pass `/spec:implement` flags after `--`, e.g. `ck run auth -- --escalate sonnet,opus`.
 - **No more `cd ... &&` in agent commands.** Agents run `ck -C <dir> ...`, `command git -C <dir> ...` and `uv sync --directory <dir>` as single simple commands. Compound commands were the main source of permission prompts and of refusals in worktree-isolated sessions.
 - **The report lists escalations:** `escalated` (task, models tried, merged or not) and `fixerEscalations`, so you can see which tasks needed more than the cheap model.
+- **`ck bench`: compare configurations properly.** `ck bench run bench.json` runs every (spec, config, rep) arm one at a time, in a seeded random order, each in a fresh clone at a pinned base with its agent settings committed; `ck bench score` overlays per-spec hidden acceptance tests and safety invariants (kept outside the repo) on each arm's final integration tree and reports hidden pass rate, USD per passing task, merged rate, escalations and wall time per arm with bootstrap CIs, plus paired per-task differences. Runs that needed a human (permission denial, `AskUserQuestion`) fail closed. `ck bench import` converts an existing workflow output file so pilot runs can be scored the same way. See the README section "Benchmarking model configurations".
+- **`ck run` options for machine-readable runs:** `--output-format json|stream-json` (stdout to the log, stderr to `<log>.stderr`), `--session-id <uuid>` and `--log <path>`. The default is unchanged.
+- **`ck --version`** prints the installed version.
 
 Steps: `ck update` from a project directory, then commit `.claude/workflows`, `.claude/commands`, `.claude/agents` and `.claude/ck-manifest.json`.
 

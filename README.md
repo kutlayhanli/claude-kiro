@@ -162,7 +162,8 @@ The hooks provide spec context and enforce the definition of done:
   When it passes the full `verify` suite on a clean tree (no uncommitted or untracked files), it stamps the tree hash in `<git-common-dir>/ck-verified/<tree>.json`, so a merge script (e.g. the safe-merge skill) can skip re-running the same suite on the same tree.
 - `ck waves <spec> [--json]` - Show tasks by dependency level (display only; tasks start when their own dependencies merge)
 - `ck lint <spec>` - Check the task plan: dependency cycles, verify-order cycles (an impl task whose verifying tests need code from a task that depends on it), dependencies without a stated reason, critical path. Exits 1 on a cycle
-- `ck run <spec> [--model M] [--effort E] [-- <args for /spec:implement>]` - Run a whole spec unattended: starts `claude -p "/spec:implement <spec> all"` from the main checkout with auto permissions and no prompts (anything that would ask is denied and reported), allows the Workflow launch and the agents' `ck`/`git` commands, and stays open until the workflow ends. The orchestrating session runs on Sonnet at low effort; agents use `ck agents`. Logs go to `.claude/ck-runs/`. `--dry-run` prints the command
+- `ck run <spec> [--model M] [--effort E] [-- <args for /spec:implement>]` - Run a whole spec unattended: starts `claude -p "/spec:implement <spec> all"` from the main checkout with auto permissions and no prompts (anything that would ask is denied and reported), allows the Workflow launch and the agents' `ck`/`git` commands, and stays open until the workflow ends. The orchestrating session runs on Sonnet at low effort; agents use `ck agents`. Logs go to `.claude/ck-runs/`. `--dry-run` prints the command. `--output-format json`, `--session-id` and `--log` make a run machine-readable (used by `ck bench`)
+- `ck bench run|score|import` - Compare agent configurations on whole-spec runs: sequential runs in fresh clones, scored on hidden acceptance tests with bootstrap CIs (see [Benchmarking model configurations](#benchmarking-model-configurations))
 - `ck -C <dir> <command>` - Run any ck command as if started in `<dir>` (like `git -C`). The workflow's agents use it instead of `cd <dir> && ck ...`, which permission checks can't verify
 - `ck plan <spec> --json [--exclude N,M]` - Machine-readable plan with the tasks ready to start now; the workflow re-reads it after every task
 - `ck worktree create|claim|release|merge|integration|status <spec> ...` - Per-task worktrees for parallel implementation (`.claude/worktrees/<spec>-task-N`, branch `feat/<spec>-task-N`); merges go one at a time and stop at the first conflict
@@ -183,6 +184,47 @@ The hooks provide spec context and enforce the definition of done:
 - `/spec:implement <spec | task> [--model M] [--effort E] [--review-model M] [--no-review]` - Implement a task or a whole spec (Done is enforced by `ck gate`; models per role from `ck agents`)
 - `/spec:review <spec>` - Adversarially review an existing spec and apply surviving fixes
 - `/spawn-worktree <spec-or-tasks>` - Run tasks in parallel with git worktree isolation
+
+## Benchmarking model configurations
+
+`ck bench` answers "is configuration B as good as A for less money?" with numbers you can defend. One pilot (n=1, concurrent runs, different ck versions, operator interventions, different merged task sets, unpriced tokens, quality judged only by LLM reviewers) can't. The protocol:
+
+- **Sequential, fresh, pinned.** Each arm `(spec, config, rep)` runs alone, in a fresh `git clone --no-hardlinks` of the repo at a pinned base commit, on branch `bench/<config>-<rep>`, after `ck upgrade` with the installed ck (its version is recorded). Arms run in a seeded random order, so drift (API load, time of day) spreads across configurations. Never run two arms at once.
+- **Configurations are agent settings.** Each config's `agents` are written with `ck agents set <role.key> <value> --project` and committed before launch; `run_args` go to `ck run` (put `/spec:implement` flags after `--`).
+- **Hidden acceptance suite per spec.** Pytest files kept outside the repo and never shown to the agents. `ck bench score` copies them into a throwaway checkout of each arm's final integration branch and runs them; that, not the LLM reviewer, is the quality measure. Name tests `test_task<N>_...` (or map them with `task_map`) so results are per task.
+- **Safety invariants.** A second pytest suite (things that must stay true: no weakened auth, no deleted data paths, the existing API still answers) run the same way.
+- **Fail closed.** A run that hit a permission denial, called `AskUserQuestion`, had a task fail citing a permission refusal, or timed out is flagged `fail_closed` and scores 0 on the hidden suite: an unattended configuration that needs a human did not work unattended.
+- **Cost.** The `claude -p --output-format json` result's `total_cost_usd` when present, plus every agent's transcript priced per request (input, output, cache read, cache write) with the list prices in `claude_kiro/bench.py` (2026-10; override with `"pricing"`). Both are kept; a disagreement over 25% is flagged.
+- **How many runs.** Prefer more specs over more reps: specs differ more than reps of one spec. About 3 reps × 5–6 small specs (10–20 tasks each) per arm resolves a 20–30% paired difference in hidden pass rate; one spec resolves nothing, however many reps.
+
+```json
+{
+  "repo": "../my-project", "base": "a1b2c3d", "reps": 3, "seed": 1,
+  "specs": [{"name": "csv-export", "hidden_tests": "hidden/csv-export", "invariants": "invariants/",
+             "test_cmd": ["uv", "run", "pytest"], "task_map": {"test_export_api.py": "4"}}],
+  "configs": [
+    {"name": "default", "agents": {}},
+    {"name": "haiku-escalate", "agents": {"implementer.model": "haiku", "implementer.escalate": "sonnet,opus"},
+     "run_args": ["--", "--max-concurrent", "4"]}
+  ],
+  "env": {"CLAUDE_CODE_ENABLE_TELEMETRY": "1", "OTEL_METRICS_EXPORTER": "otlp"},
+  "timeout_minutes": 240
+}
+```
+
+Relative paths are relative to the config file. Optional keys: `bench_dir` (clones, default `bench-runs/`), `results_dir` (default `bench-results/`), `ck` (command, default `ck`), `env` (added to every run, e.g. OpenTelemetry settings for your own collector), `pricing`, `timeout_minutes`; per spec `hidden_dest` / `invariants_dest` (where the suites are copied in the checkout) and `test_cmd` (default `python -m pytest`). YAML works if PyYAML is installed.
+
+```bash
+ck bench run bench.json --dry-run     # the arms, in run order
+ck bench run bench.json               # hours; re-run to resume (finished arms are skipped)
+ck bench score bench-results --config bench.json
+```
+
+**Where the results come from.** `ck bench` launches `ck run <spec> --output-format json --session-id <uuid> --log <results>/logs/<arm>.json`. Knowing the session id, it reads what Claude Code persists for that session under `$CLAUDE_CONFIG_DIR` (default `~/.claude`): `projects/*/<session>/workflows/wf_*.json`, whose `result` is the `/spec:implement` report (merged, failed, notStarted, tasks with attempts, review rounds and escalations, timing, final gate), and the session and subagent transcripts (`projects/*/<session>.jsonl`, `projects/*/<session>/subagents/**/agent-*.jsonl`) for per-request token usage, `AskUserQuestion` calls and permission refusals. Each arm's `results/<arm>.json` holds that plus wall time, base and setup commits, the final integration commit, the ck version and the exact command.
+
+**Scoring.** `ck bench score` writes `score.md` and `score.json`: per arm, the hidden pass rate, tasks passing their hidden tests, USD per passing task, USD per run, merged rate, escalations and review rounds per run, wall minutes and the invariant pass rate, each with a 95% percentile bootstrap CI that resamples specs (seeded, `--seed`). Against the baseline (the first config, or `--baseline`) it pairs tasks both arms merged and reports the hidden-pass difference, resampling tasks (`--cluster spec` to resample specs instead).
+
+**Pilot data.** `ck bench import <workflow-output.json> --spec S --config C --rep N --out bench-results` turns an existing Workflow output (the JSON with `result` and `workflowProgress`) into a result so it can be scored the same way. Pass `--transcripts <session>/subagents/workflows/<runId>` for real token usage. Without it, each agent's `tokens` are priced at the input rate and marked as an estimate: `workflowProgress` tokens are the agent's final context size, not its cumulative usage (cache reads alone are typically 5–15× larger), so that estimate is low. Pass `--clone` (and `--ref`) to score the run's final tree.
 
 ## Key Features
 

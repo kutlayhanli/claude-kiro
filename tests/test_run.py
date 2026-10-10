@@ -67,3 +67,33 @@ def test_unknown_spec_is_refused(tmp_path):
     root = repo(tmp_path)
     out = ck(root, "run", "nope", "--dry-run")
     assert out.exit_code == 2 and "nope" in out.output
+
+
+def test_bench_passthrough_output_format_session_id_and_log(tmp_path):
+    """`ck bench` launches `ck run` with a JSON result, a known session id and a known log path."""
+    root = repo(tmp_path)
+    log = tmp_path / "logs" / "arm.json"
+    sid = "0b5c2f8e-6a7d-4c43-9a59-7b1a2f9e0c11"
+    out = ck(root, "run", "demo", "--dry-run", "--json", "--output-format", "json", "--session-id", sid, "--log", str(log), "--", "--escalate", "opus")
+    assert out.exit_code == 0, out.output
+    plan = json.loads(out.output)
+    argv = plan["argv"]
+    assert argv[2] == "/spec:implement demo all --escalate opus"
+    assert argv[argv.index("--output-format") + 1] == "json"
+    assert argv[argv.index("--session-id") + 1] == sid
+    assert plan["log"] == str(log)
+    # With a machine-readable result, stdout (the JSON) and stderr go to separate files.
+    assert plan["stderr"] == str(log) + ".stderr"
+
+
+def test_default_run_keeps_text_output_and_one_log(tmp_path):
+    root = repo(tmp_path)
+    plan = json.loads(ck(root, "run", "demo", "--dry-run", "--json").output)
+    assert "--output-format" not in plan["argv"] and "--session-id" not in plan["argv"]
+    assert plan["stderr"] is None
+
+
+def test_stream_json_adds_verbose(tmp_path):
+    root = repo(tmp_path)
+    argv = json.loads(ck(root, "run", "demo", "--dry-run", "--json", "--output-format", "stream-json").output)["argv"]
+    assert argv[argv.index("--output-format") + 1] == "stream-json" and "--verbose" in argv
