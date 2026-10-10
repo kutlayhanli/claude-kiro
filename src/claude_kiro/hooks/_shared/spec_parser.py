@@ -208,6 +208,12 @@ class SpecTask:
     dependencies: List[str] = field(default_factory=list)  # **Dependencies:** Task 1, Task 3
     dependency_reasons: dict = field(default_factory=dict)  # {"1": "uses its API", "3": None}
     acceptance: List[Tuple[bool, str]] = field(default_factory=list)
+    # **Risk:** safety (reason) | normal. "safety" marks code with irreversible
+    # external effects (sending messages, money, auth, deletion): it starts on a
+    # stronger model and always gets the risky reviewer. Anything else is normal.
+    risk: str = "normal"
+    risk_reason: Optional[str] = None
+    complexity: Optional[str] = None  # **Complexity:** low | medium | high
 
     @property
     def done(self) -> bool:
@@ -275,6 +281,15 @@ def _task_refs(value: Optional[str]) -> List[str]:
     return [num for num, _ in _ref_items(value)]
 
 
+def _risk(value: Optional[str]) -> Tuple[str, Optional[str]]:
+    """"safety (sends email)" / "Safety - deletes rows" -> ("safety", reason); anything else -> ("normal", None)."""
+    match = re.match(r"\W*safety\b\W*(.*?)\W*$", value or "", re.IGNORECASE)
+    if not match:
+        return "normal", None
+    reason = re.sub(r"^\(|\)$", "", match.group(1)).strip()
+    return "safety", reason or None
+
+
 def parse_tasks(task_file_path: Path) -> List[SpecTask]:
     """Parse every task block in tasks.md, including tasks with no files."""
     try:
@@ -295,6 +310,10 @@ def parse_tasks(task_file_path: Path) -> List[SpecTask]:
         track = (_field(block, "Track") or "").lower()
         if track.startswith("test"):
             task.track = "test"
+
+        task.risk, task.risk_reason = _risk(_field(block, "Risk"))
+        complexity = re.match(r"(low|medium|high)\b", (_field(block, "Complexity") or "").lower())
+        task.complexity = complexity.group(1) if complexity else None
 
         task.files = [f.removeprefix("./") for f in re.findall(r"^- `([^`]+)`", block, re.MULTILINE)]
         task.verify = re.findall(r"`([^`]+)`", _field(block, "Verify") or "")

@@ -31,12 +31,24 @@ DEFAULTS: Dict[str, Dict[str, Any]] = {
     # Agents that write code for impl-track tasks (and their retries).
     # escalate: bigger models to try, in order, once a task's retries or review
     # rounds run out on the role's model (one extra attempt each). [] = off.
-    "implementer": {"model": "sonnet", "effort": "medium", "escalate": []},
+    # Starting tier per task (both tracks; escalation then climbs only above it):
+    # risky_model: where a **Risk:** safety task (tagged, or touching a risk_paths
+    #   file in specs/ck.json) starts. null = the top of `escalate`, else `model`.
+    #   Escalation only fires on failures we detect; safety bugs often pass every
+    #   test, so a safety task starts on the strong model instead of earning it.
+    # complexity_routing: true = a **Complexity:** High task starts at the first
+    #   `escalate` model, skipping the cheap one; Low/Medium start at `model`.
+    # A starting tier never steps below `model`.
+    "implementer": {"model": "sonnet", "effort": "medium", "escalate": [], "risky_model": None, "complexity_routing": False},
     # Agents that write test-track tasks. null = same as implementer.
     "test_writer": {"model": None, "effort": None, "escalate": None},
     # Reviews each task's diff against design.md and requirements.md before it merges.
     # rounds: how many times the implementer may revise after blocking findings.
-    "reviewer": {"model": "opus", "effort": "high", "enabled": True, "rounds": 1},
+    # model/effort review normal tasks; set a cheaper model (e.g. sonnet) to save on them.
+    # risky_model/risky_effort review every **Risk:** safety task, whatever model/effort
+    # say (never below them): a cheap reviewer approved send-path and price-tripwire
+    # code with real safety bugs that an Opus reviewer caught.
+    "reviewer": {"model": "opus", "effort": "high", "enabled": True, "rounds": 1, "risky_model": "opus", "risky_effort": "high"},
     # Repairs a red target branch: reads the failing gate, decides environment vs code, fixes.
     # Judgment-heavy and rare (about once a run). null = same as implementer.
     # escalate: null = the implementer's list (models not above the fixer's are skipped).
@@ -56,9 +68,9 @@ DEFAULTS: Dict[str, Dict[str, Any]] = {
 
 ROLE_KEYS = {
     "planning": {"min_model", "min_effort", "ask"},
-    "implementer": {"model", "effort", "escalate"},
+    "implementer": {"model", "effort", "escalate", "risky_model", "complexity_routing"},
     "test_writer": {"model", "effort", "escalate"},
-    "reviewer": {"model", "effort", "enabled", "rounds"},
+    "reviewer": {"model", "effort", "enabled", "rounds", "risky_model", "risky_effort"},
     "fixer": {"model", "effort", "escalate"},
     "orchestrator": {"model", "effort"},
     "resolver": {"model", "effort"},
@@ -106,7 +118,7 @@ def _coerce(role: str, key: str, value: Any) -> Any:
         value = []  # an explicit "no escalation", so it can switch off a list saved in a lower layer
     if isinstance(value, str) and value.lower() in ("null", "none", "default"):
         value = None
-    if key in ("ask", "enabled"):
+    if key in ("ask", "enabled", "complexity_routing"):
         if isinstance(value, str):
             if value.lower() not in ("true", "false", "yes", "no", "on", "off"):
                 raise AgentConfigError(f"{role}.{key} must be true or false")
@@ -140,12 +152,14 @@ def _coerce(role: str, key: str, value: Any) -> Any:
         if value < 0:
             raise AgentConfigError(f"{role}.rounds must be 0 or more")
         return value
-    if key in ("model", "min_model"):
-        if not _valid_model(value, allow_inherit=key == "model"):
-            raise AgentConfigError(f"{role}.{key}: unknown model {value!r} (use {', '.join(MODELS)}, a claude-* ID, or inherit)")
+    if key in ("model", "min_model", "risky_model"):
+        # implementer.risky_model names a tier to start at; "inherit" is no tier.
+        inherit_ok = key == "model" or (key == "risky_model" and role == "reviewer")
+        if not _valid_model(value, allow_inherit=inherit_ok):
+            raise AgentConfigError(f"{role}.{key}: unknown model {value!r} (use {', '.join(MODELS)}, a claude-* ID{', or inherit' if inherit_ok else ''})")
         return value
-    if key in ("effort", "min_effort"):
-        if not _valid_effort(value, allow_inherit=key == "effort"):
+    if key in ("effort", "min_effort", "risky_effort"):
+        if not _valid_effort(value, allow_inherit=key in ("effort", "risky_effort")):
             raise AgentConfigError(f"{role}.{key}: unknown effort {value!r} (use {', '.join(EFFORTS)} or inherit)")
         return value
     return value

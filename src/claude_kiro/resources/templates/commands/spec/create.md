@@ -27,7 +27,7 @@ The minimum is configurable: `ck agents set planning.min_model <model>`, `ck age
 
 1. writes `requirements.md` (EARS criteria, numbered for traceability),
 2. in parallel, writes `design.md` grounded in the real codebase and `test-plan.md`. The test plan is integration-first: it tests real boundaries (database, filesystem, HTTP, CLI) and never sees the design, so the tests stay an independent check,
-3. in parallel, writes an implementation track and a test track of tasks, then links them into `tasks.md`. Each impl task is **Verified by** test tasks that run first, and each task starts as soon as its own dependencies merge (no waves),
+3. in parallel, writes an implementation track and a test track of tasks, then links them into `tasks.md`. Each impl task is **Verified by** test tasks that run first, and each task starts as soon as its own dependencies merge (no waves). Tasks that send messages, move money, touch auth or credentials, delete, or have another irreversible external effect get `**Risk:** safety (reason)`: `/spec:implement` starts them on the strong model and always has the risky reviewer check them,
 4. runs an **adversarial review**: four reviewers attack the spec (plan fidelity, codebase grounding, implementability, test adequacy), and a separate skeptic tries to refute each finding,
 5. applies the findings that survive, and writes `review.md`.
 
@@ -110,7 +110,7 @@ specs/
     ├── requirements.md  # what: user stories, numbered EARS criteria
     ├── design.md        # how: components, public interfaces, traceability
     ├── test-plan.md     # proof: integration-first test cases, infrastructure, commands
-    ├── tasks.md         # steps: ### Task N, Track, Files, Verify, Verified by, Dependencies, Schedule
+    ├── tasks.md         # steps: ### Task N, Track, Files, Verify, Verified by, Dependencies, Risk, Schedule
     └── review.md        # adversarial review record
 ```
 

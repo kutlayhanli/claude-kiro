@@ -9,11 +9,14 @@
   before the module exists, because ownership comes from tasks.md.
 - Dependencies without a stated reason: every edge serializes work, so each
   should say why ("Task 3 (uses its parser API)"). Reported, not fatal.
+- Risk paths: a task whose **Files:** match a `risk_paths` glob in specs/ck.json
+  is treated as **Risk:** safety; an untagged one is reported, not fatal.
 - Critical path: the longest dependency chain, the floor on wall-clock time
   however many agents run.
 """
 
 import re
+from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 from typing import Dict, List, Optional, Set
 
@@ -208,10 +211,43 @@ def critical_path(tasks: Dict[str, SpecTask], only_open: bool = True) -> List[st
     return max(paths, key=len, default=[])
 
 
+def _matches(path: str, pattern: str) -> bool:
+    """Glob match on a project-relative path; a leading "**/" also matches at the root."""
+    path, pattern = path.removeprefix("./"), pattern.removeprefix("./")
+    return fnmatchcase(path, pattern) or (pattern.startswith("**/") and fnmatchcase(path, pattern[3:]))
+
+
+def risk_path_hits(tasks: Dict[str, SpecTask], patterns: List[str]) -> Dict[str, List[Dict[str, str]]]:
+    """{task: [{file, pattern}]} for tasks whose **Files:** match a risk_paths glob."""
+    hits: Dict[str, List[Dict[str, str]]] = {}
+    for num, task in tasks.items():
+        for f in task.files:
+            pattern = next((p for p in patterns if isinstance(p, str) and _matches(f, p)), None)
+            if pattern:
+                hits.setdefault(num, []).append({"file": f, "pattern": pattern})
+    return hits
+
+
+def task_risk(tasks: Dict[str, SpecTask], config: dict) -> Dict:
+    """Effective risk per task (a **Risk:** safety tag, or a file on a risk path) and the untagged risk-path tasks."""
+    patterns = config.get("risk_paths") or []
+    hits = risk_path_hits(tasks, patterns if isinstance(patterns, list) else [patterns])
+    risk = {n: "safety" if t.risk == "safety" or n in hits else "normal" for n, t in tasks.items()}
+    untagged = [
+        {"task": n, "file": hit["file"], "pattern": hit["pattern"]}
+        for n, t in tasks.items()
+        if t.risk != "safety" and not t.done
+        for hit in hits.get(n, [])[:1]
+    ]
+    return {"risk": risk, "riskUntagged": untagged}
+
+
 def lint_spec(spec_dir: Path, project_dir: Path) -> Dict:
     tasks = {t.num: t for t in parse_tasks(spec_dir / "tasks.md")}
     cycles = dependency_cycles(tasks)
+    risk = task_risk(tasks, load_config(project_dir))
     return {
+        "riskUntagged": risk["riskUntagged"],
         "cycles": cycles,
         "verifyCycles": [] if cycles else verify_order_cycles(tasks, project_dir),
         "reasonless": reasonless_dependencies(tasks),

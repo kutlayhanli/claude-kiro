@@ -70,15 +70,14 @@ def waves(spec: str, as_json: bool):
 
 
 def _plan(project_dir: Path, spec: str, exclude: set) -> dict:
-    from ..lint import lint_spec
+    from ..hooks._shared.spec_parser import parse_tasks
+    from ..lint import lint_spec, task_risk
     from ..waves import plan_waves
 
     spec_dir = _spec_dir(project_dir, spec)
     lint = lint_spec(spec_dir, project_dir)
+    tasks = parse_tasks(spec_dir / "tasks.md")
     if lint["cycles"]:
-        from ..hooks._shared.spec_parser import parse_tasks
-
-        tasks = parse_tasks(spec_dir / "tasks.md")
         plan = {
             "spec": spec_dir.name,
             "waves": [],
@@ -105,6 +104,10 @@ def _plan(project_dir: Path, spec: str, exclude: set) -> dict:
     return {
         **plan,
         **lint,
+        # Routing inputs for /spec:implement: "safety" tasks start on a stronger model
+        # and get the risky reviewer; complexity feeds implementer.complexity_routing.
+        "risk": task_risk({t.num: t for t in tasks}, load_config(project_dir))["risk"],
+        "complexity": {t.num: t.complexity for t in tasks},
         "wave": wave_of,
         "chain": chain,
         "ready": ready,
@@ -144,13 +147,13 @@ def plan(spec: str, exclude: str, as_json: bool):
 @click.argument("spec")
 @click.option("--json", "as_json", is_flag=True)
 def lint(spec: str, as_json: bool):
-    """Check SPEC's task plan: dependency cycles, verify-order cycles, reasonless dependencies, critical path.
+    """Check SPEC's task plan: dependency cycles, verify-order cycles, reasonless dependencies, untagged risk-path tasks, critical path.
 
     Exits 1 if there is a cycle (the plan can't be executed as written).
     """
     result = _plan(Path.cwd(), spec, set())
     if as_json:
-        click.echo(json.dumps({k: result[k] for k in ("cycles", "verifyCycles", "reasonless", "criticalPath", "waves")}, indent=2))
+        click.echo(json.dumps({k: result[k] for k in ("cycles", "verifyCycles", "reasonless", "criticalPath", "waves", "riskUntagged")}, indent=2))
     else:
         click.echo(f"Plan lint for {result['spec']}:")
         if result["cycles"]:
@@ -171,6 +174,10 @@ def lint(spec: str, as_json: bool):
                 click.echo(f"      ... and {len(result['reasonless']) - 25} more (see --json)")
             click.echo('      Add a reason in parentheses, e.g. "Task 3 (calls parse_config)", or drop the edge.'
                        " Specs written before ck 0.4 have no reasons; review the edges on the critical path first.")
+        for item in result["riskUntagged"]:
+            click.echo(f"  ⚠ Task {item['task']} touches risk path {item['file']} but has no **Risk:** safety (matches {item['pattern']} in risk_paths)")
+        if result["riskUntagged"]:
+            click.echo("      It is routed as safety anyway. Add \"**Risk:** safety (one-line reason)\" so the spec says so.")
         path = result["criticalPath"]
         if path:
             click.echo(f"  ℹ critical path ({len(path)} of {len(result['remaining'])} open tasks): {' -> '.join(path)}")
