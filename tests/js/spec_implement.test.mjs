@@ -449,3 +449,104 @@ await test('resolver: a merge conflict goes to the resolver, which merges it', a
   assert.deepEqual(result.merged.sort(), ['1', '2'])
   assert.ok(!p.state.events.includes('resolve 1'), 'no resolver without a conflict')
 })
+
+// --- risk and complexity routing ----------------------------------------------
+
+const TIERED = (extra = {}) => ({
+  implementer: { model: 'haiku', effort: 'medium', escalate: ['sonnet', 'opus'], risky_model: null, complexity_routing: false, ...(extra.implementer || {}) },
+  test_writer: { model: 'haiku', effort: 'medium', escalate: ['sonnet', 'opus'] },
+  fixer: { model: 'opus', effort: 'medium', escalate: ['sonnet', 'opus'] },
+  reviewer: { model: 'sonnet', effort: 'medium', enabled: true, rounds: 1, risky_model: 'opus', risky_effort: 'high', ...(extra.reviewer || {}) },
+  orchestrator: { model: 'sonnet', effort: 'low' },
+  resolver: { model: 'opus', effort: 'high' },
+})
+
+await test('risk: a safety task starts at the top of the ladder and gets the risky reviewer', async () => {
+  const p = project({ deps: { 1: [], 2: [] } })
+  const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: TIERED(), risk: { 1: 'safety', 2: 'normal' } } })
+  assert.deepEqual([p.state.opts['task 1'].model, p.state.opts['task 1'].effort], ['opus', 'medium'])
+  assert.deepEqual([p.state.opts['review 1'].model, p.state.opts['review 1'].effort], ['opus', 'high'])
+  assert.deepEqual([p.state.opts['task 2'].model, p.state.opts['review 2'].model, p.state.opts['review 2'].effort], ['haiku', 'sonnet', 'medium'])
+  const t1 = result.tasks.find(t => t.task === '1')
+  const t2 = result.tasks.find(t => t.task === '2')
+  assert.deepEqual([t1.riskTag, t1.startModel, t1.reviewModel], ['safety', 'opus', 'opus'])
+  assert.deepEqual([t2.riskTag, t2.startModel, t2.reviewModel], ['normal', 'haiku', 'sonnet'])
+  // escapes metric: the review summary records which reviewer judged the task
+  assert.deepEqual([t1.review.model, t1.review.effort], ['opus', 'high'])
+  assert.deepEqual([t2.review.model, t2.review.effort], ['sonnet', 'medium'])
+  assert.ok(logs.some(l => /Task 1: risk safety, start opus\/medium \(routed\), review opus\/high/.test(l)), logs.join('\n'))
+})
+
+await test('risk: implementer.risky_model sets the start; escalation climbs only above it', async () => {
+  const p = project({ deps: { 1: [] }, failUntil: { 1: 2 } })
+  const agents = TIERED({ implementer: { risky_model: 'sonnet' } })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxRetries: 1, agents, risk: { 1: 'safety' } } })
+  assert.deepEqual(modelsOf(p.state, 'task 1'), ['sonnet', 'sonnet', 'opus'])
+  assert.deepEqual(result.tasks[0].escalations, [{ stage: 'retry', model: 'opus' }])
+  assert.equal(result.tasks[0].startModel, 'sonnet')
+})
+
+await test('risk: a safety task revision runs at its start tier, and re-reviews stay risky', async () => {
+  const p = project({ deps: { 1: [] }, reviews: { 1: ['changes', 'approve'] } })
+  await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: TIERED(), risk: { 1: 'safety' } } })
+  assert.equal(p.state.opts['task 1 revise 1'].model, 'opus')
+  assert.equal(p.state.opts['review 1 round 2'].model, 'opus')
+})
+
+await test('risk: the risky reviewer never steps below the normal reviewer', async () => {
+  const p = project({ deps: { 1: [] } })
+  const agents = TIERED({ reviewer: { model: 'fable', effort: 'xhigh', risky_model: 'opus', risky_effort: 'high' } })
+  await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents, risk: { 1: 'safety' } } })
+  assert.deepEqual([p.state.opts['review 1'].model, p.state.opts['review 1'].effort], ['fable', 'xhigh'])
+})
+
+await test('reviewer tiers: a normal task gets the cheaper reviewer.model', async () => {
+  const p = project({ deps: { 1: [] } })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: TIERED() } })
+  assert.deepEqual([p.state.opts['review 1'].model, p.state.opts['review 1'].effort], ['sonnet', 'medium'])
+  assert.equal(result.tasks[0].riskTag, 'normal')
+  assert.equal(result.agents.reviewer, 'sonnet/medium')
+  assert.equal(result.agents.reviewer_risky, 'opus/high')
+})
+
+await test('complexity routing: High starts at the first escalate tier, Low/Medium at the role model', async () => {
+  const p = project({ deps: { 1: [], 2: [], 3: [] } })
+  const agents = TIERED({ implementer: { complexity_routing: true } })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents, complexity: { 1: 'high', 2: 'Low', 3: 'medium' } } })
+  assert.deepEqual(['task 1', 'task 2', 'task 3'].map(l => p.state.opts[l].model), ['sonnet', 'haiku', 'haiku'])
+  assert.equal(result.tasks.find(t => t.task === '1').startModel, 'sonnet')
+})
+
+await test('complexity routing: off by default, so High still starts on the cheap model', async () => {
+  const p = project({ deps: { 1: [] } })
+  await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: TIERED(), complexity: { 1: 'High' } } })
+  assert.equal(p.state.opts['task 1'].model, 'haiku')
+})
+
+await test('complexity routing: escalation climbs from the start tier, skipping the cheap model', async () => {
+  const p = project({ deps: { 1: [] }, failUntil: { 1: 2 } })
+  const agents = TIERED({ implementer: { complexity_routing: true } })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxRetries: 1, agents, complexity: { 1: 'high' } } })
+  assert.deepEqual(modelsOf(p.state, 'task 1'), ['sonnet', 'sonnet', 'opus'])
+  assert.deepEqual(result.merged, ['1'])
+})
+
+await test('risk: a safety test-track task also starts high and gets the risky reviewer', async () => {
+  const p = project({ deps: { 1: [] } })
+  await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: TIERED(), tracks: { 1: 'test' }, risk: { 1: 'safety' } } })
+  assert.equal(p.state.opts['task 1 [test]'].model, 'opus')
+  assert.equal(p.state.opts['review 1'].model, 'opus')
+})
+
+await test('risk: a one-run --model override wins over routing for code-writing agents', async () => {
+  const p = project({ deps: { 1: [] } })
+  await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: TIERED(), model: 'haiku', risk: { 1: 'safety' } } })
+  assert.equal(p.state.opts['task 1'].model, 'haiku')
+  assert.equal(p.state.opts['review 1'].model, 'opus')  // the reviewer still follows risk
+})
+
+await test('risk: a bad risky model is refused before any agent runs', async () => {
+  const p = project({ deps: { 1: [] } })
+  await assert.rejects(runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: TIERED({ reviewer: { risky_model: 'gpt-5' } }) } }), /unknown model/)
+  assert.equal(p.state.events.length, 0)
+})

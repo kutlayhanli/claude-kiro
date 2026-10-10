@@ -33,6 +33,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # Dependency install step for fresh worktrees (`ck worktree create --install`).
     # null = detected from lockfiles.
     "install": None,
+    # Glob patterns for files whose bugs are costly and silent (send paths,
+    # payment code, price tripwires, auth), e.g. ["**/gate.py", "**/send*.py"].
+    # A task whose **Files:** match one is treated as **Risk:** safety (stronger
+    # starting model, risky reviewer) even without the tag; `ck lint` warns.
+    "risk_paths": [],
     # Extra glob patterns the spec-context hook never comments on.
     "context_ignore": [],
     # How test files are recognized. A path is a test file if any directory

@@ -39,10 +39,20 @@ def agents(ctx: click.Context, as_json: bool, overrides: tuple):
     roles, sources = resolved["roles"], resolved["sources"]
     click.echo("Spec workflow agents:")
     for role, settings in roles.items():
-        unset = "unlimited" if role == "run" else "(same as implementer)"
-        parts = ", ".join(
-            f"{k}={((',' if k == 'allowed_domains' else '>').join(v) or ('none' if k == 'allowed_domains' else 'off')) if isinstance(v, list) else unset if v is None else v}" for k, v in settings.items()
-        )
+        def shown(key, value):
+            if isinstance(value, list):
+                if key == "allowed_domains":
+                    return ",".join(value) or "none"
+                return ">".join(value) or "off"
+            if value is not None:
+                return value
+            if role == "run":
+                return "unlimited"
+            if key == "risky_model":
+                return "(top of escalate, else model)"
+            return "(same as implementer)"
+
+        parts = ", ".join(f"{k}={shown(k, v)}" for k, v in settings.items())
         origin = sorted({sources[f"{role}.{k}"] for k in settings} - {"default"})
         click.echo(f"  {role:12} {parts}" + (f"   [{'; '.join(origin)}]" if origin else ""))
     click.echo(f"\nGlobal preferences: {ag.global_config_path()}\nProject settings:   {CONFIG_FILE}")

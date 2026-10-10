@@ -12,6 +12,10 @@ export const meta = {
 //   targetDir: '/abs/checkout/of/into',    // checkout that has `into` checked out (integration worktree, or root)
 //   wave: { '1': 1, ... },                 // display grouping only (from ck plan)
 //   titles: { '1': '...' }, tracks: { '1': 'test' },
+//   risk: { '1': 'safety' },               // from ck plan: "safety" (a **Risk:** safety tag or a risk_paths file) or "normal"
+//                                          //   safety: starts at implementer.risky_model (or the top of escalate), always reviewed at reviewer.risky_model/risky_effort
+//   complexity: { '1': 'high' },           // from ck plan: low | medium | high | null; with implementer.complexity_routing,
+//                                          //   High starts at the first escalate model instead of the role's model
 //   maxRetries: 1,                         // extra attempts per task after a failed gate or a no-op attempt
 //   onFailure: 'continue' | 'halt',        // default continue: other ready tasks keep starting; a red target always halts
 //   maxConcurrent: null,                   // cap on tasks with an implementing agent at work (null = none); review and merge queue don't count
@@ -36,6 +40,8 @@ const TARGET = A.targetDir || ROOT
 const WAVE = A.wave || {}
 const TITLES = A.titles || {}
 const TRACKS = A.tracks || {}
+const RISK = A.risk || {}
+const COMPLEXITY = A.complexity || {}
 const MAX_RETRIES = Number.isInteger(A.maxRetries) ? A.maxRetries : 1
 const CONTINUE = A.onFailure !== 'halt'
 const MAX_CONCURRENT = A.maxConcurrent && A.maxConcurrent > 0 ? A.maxConcurrent : Infinity
@@ -71,6 +77,7 @@ const FIX = roleOpts('fixer', ROLES.fixer || ROLES.implementer, OVERRIDE)
 const REVIEWER = ROLES.reviewer || {}
 const REVIEW_ON = !!A.agents && REVIEWER.enabled !== false
 const REVIEW = roleOpts('reviewer', REVIEWER, null)
+const EFFORT_RANK = e => EFFORTS.indexOf(e)
 const REVIEW_ROUNDS = Number.isInteger(REVIEWER.rounds) ? REVIEWER.rounds : 1
 const ORCH = roleOpts('orchestrator', ROLES.orchestrator, null)
 const LOW = { effort: 'low', ...ORCH }
@@ -92,12 +99,51 @@ const TEST_UP = ladder('test_writer', followsImpl(ROLES.test_writer), TEST)
 const FIX_UP = ladder('fixer', followsImpl(ROLES.fixer), FIX)
 const desc = o => `${o.model || 'inherited'}/${o.effort || 'inherited'}`
 const up = list => (list.length ? ` (escalate ${list.join(' > ')})` : '')
-if (A.agents || A.model || A.effort) {
-  log(`Agents: impl ${desc(IMPL)}${up(IMPL_UP)}, test ${desc(TEST)}${up(TEST_UP)}, fix ${desc(FIX)}${up(FIX_UP)}, review ${REVIEW_ON ? desc(REVIEW) : 'off'}, orchestration ${desc(LOW)}, conflicts ${desc(RESOLVE)}`)
-}
-const codeOpts = n => (TRACKS[n] === 'test' ? TEST : IMPL)
-const ladderOf = n => (TRACKS[n] === 'test' ? TEST_UP : IMPL_UP)
+const baseOpts = n => (TRACKS[n] === 'test' ? TEST : IMPL)
+const baseLadder = n => (TRACKS[n] === 'test' ? TEST_UP : IMPL_UP)
 const escalated = (opts, model) => ({ ...opts, model })
+
+// Risk and complexity routing. Escalation only fires on failures we detect, and
+// the costly bugs (a send path or price tripwire that passes every test) are the
+// ones nobody detects. So a safety task starts on the strong model and is always
+// reviewed by the risky reviewer, and (with implementer.complexity_routing) a High
+// complexity task skips the cheap model. A start never steps below the role's model;
+// escalation then climbs only through models above the start. A one-run --model
+// override wins for code-writing agents.
+const IMPL_ROLE = ROLES.implementer || {}
+const RISKY_START = IMPL_ROLE.risky_model ? roleOpts('implementer.risky_model', { model: IMPL_ROLE.risky_model }, null).model : null
+const COMPLEXITY_ROUTING = IMPL_ROLE.complexity_routing === true
+const isSafety = n => String(RISK[n] || '').toLowerCase() === 'safety'
+const isHigh = n => String(COMPLEXITY[n] || '').toLowerCase() === 'high'
+const above = (target, base) => !!target && (rank(base) < 0 || rank(target) > rank(base))
+function startTarget(n) {
+  if (OVERRIDE.model) return null
+  const ladder = baseLadder(n)
+  if (isSafety(n)) return RISKY_START || ladder[ladder.length - 1] || null
+  if (COMPLEXITY_ROUTING && isHigh(n)) return ladder[0] || null
+  return null
+}
+const codeOpts = n => {
+  const base = baseOpts(n)
+  const target = startTarget(n)
+  return above(target, base.model) ? escalated(base, target) : base
+}
+const ladderOf = n => {
+  const start = codeOpts(n).model
+  return rank(start) < 0 ? baseLadder(n) : baseLadder(n).filter(m => rank(m) > rank(start))
+}
+// The risky reviewer: reviewer.risky_model/risky_effort, never below reviewer.model/effort.
+const RISKY_REVIEW = (() => {
+  const risky = roleOpts('reviewer.risky', { model: REVIEWER.risky_model || REVIEWER.model, effort: REVIEWER.risky_effort || REVIEWER.effort }, null)
+  const opts = { ...REVIEW }
+  if (risky.model && (!REVIEW.model || rank(risky.model) >= rank(REVIEW.model))) opts.model = risky.model
+  if (risky.effort && (!REVIEW.effort || EFFORT_RANK(risky.effort) >= EFFORT_RANK(REVIEW.effort))) opts.effort = risky.effort
+  return opts
+})()
+const reviewOpts = n => (isSafety(n) ? RISKY_REVIEW : REVIEW)
+if (A.agents || A.model || A.effort) {
+  log(`Agents: impl ${desc(IMPL)}${up(IMPL_UP)}, test ${desc(TEST)}${up(TEST_UP)}, fix ${desc(FIX)}${up(FIX_UP)}, review ${REVIEW_ON ? `${desc(REVIEW)} (safety ${desc(RISKY_REVIEW)})` : 'off'}${COMPLEXITY_ROUTING ? ', complexity routing on' : ''}, orchestration ${desc(LOW)}, conflicts ${desc(RESOLVE)}`)
+}
 
 const WT = n => `${ROOT}/.claude/worktrees/${SPEC}-task-${n}`
 const BR = n => `feat/${SPEC}-task-${n}`
@@ -391,6 +437,13 @@ function enqueueMerge(n) {
 async function runTask(n) {
   const rec = { task: n, wave: waveOf(n), title: TITLES[n], attempts: 0, ok: false, escalations: [] }
   const busy = r => !!(r && r.blocker && /worktree busy/i.test(r.blocker))
+  rec.riskTag = isSafety(n) ? 'safety' : 'normal'
+  rec.startModel = codeOpts(n).model || 'inherited'
+  rec.reviewModel = REVIEW_ON ? reviewOpts(n).model || 'inherited' : null
+  if (A.agents || A.model || A.effort) {
+    const routed = isSafety(n) || (COMPLEXITY_ROUTING && isHigh(n))
+    log(`Task ${n}: risk ${rec.riskTag}${COMPLEXITY[n] ? `, complexity ${String(COMPLEXITY[n]).toLowerCase()}` : ''}, start ${desc(codeOpts(n))}${routed ? ' (routed)' : ''}${up(ladderOf(n))}, review ${REVIEW_ON ? desc(reviewOpts(n)) : 'off'}`)
+  }
   try {
     let r = await agent(taskPrompt(n), { label: label(n), phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
     rec.attempts = 1
@@ -411,7 +464,7 @@ async function runTask(n) {
     }
     releaseSlot(n)
     if (ok(r) && REVIEW_ON) {
-      let review = await agent(reviewPrompt(n, r), { label: `review ${n}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...REVIEW })
+      let review = await agent(reviewPrompt(n, r), { label: `review ${n}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
       let round = 0
       while (review && review.verdict === 'changes' && round < REVIEW_ROUNDS && ok(r)) {
         round++
@@ -419,7 +472,7 @@ async function runTask(n) {
         working.add(n)  // a revision takes a slot but never waits for one: the task is nearly done
         r = await agent(revisePrompt(n, review, round), { label: `${label(n)} revise ${round}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
         releaseSlot(n)
-        if (ok(r)) review = await agent(reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...REVIEW })
+        if (ok(r)) review = await agent(reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
       }
       for (const model of ladderOf(n)) {
         if (!(review && review.verdict === 'changes' && ok(r))) break
@@ -429,9 +482,11 @@ async function runTask(n) {
         r = await agent(revisePrompt(n, review, round), { label: `${label(n)} revise ${round} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
         releaseSlot(n)
         rec.escalations.push({ stage: 'revise', model })
-        if (ok(r)) review = await agent(reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...REVIEW })
+        if (ok(r)) review = await agent(reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
       }
-      rec.review = review ? { verdict: review.verdict, rounds: round, findings: review.findings, summary: review.summary } : { verdict: 'unreviewed', rounds: round }
+      // model/effort: who judged the task, so an audit can count escapes (approved bugs) per reviewer tier.
+      const by = { model: reviewOpts(n).model || 'inherited', effort: reviewOpts(n).effort || 'inherited', riskTag: rec.riskTag }
+      rec.review = review ? { verdict: review.verdict, rounds: round, findings: review.findings, summary: review.summary, ...by } : { verdict: 'unreviewed', rounds: round, ...by }
       if (!review) log(`Task ${n}: review agent returned nothing; merging unreviewed`)
       else if (review.verdict === 'changes' && ok(r)) {
         rec.result = r
@@ -577,6 +632,9 @@ const taskReport = Object.values(records).map(r => ({
   fixedAfterMerge: !!(r.merge && r.merge.fix),
   review: r.review,
   escalations: r.escalations || [],
+  riskTag: r.riskTag || (isSafety(r.task) ? 'safety' : 'normal'),
+  startModel: r.startModel || null,
+  reviewModel: r.reviewModel || null,
 }))
 const spans = {}
 for (const t of taskReport) {
@@ -599,7 +657,7 @@ return {
   reason: stopReason,
   into: INTO,
   taskAgents: { model: IMPL.model || 'inherited', effort: IMPL.effort || 'inherited' },
-  agents: { implementer: desc(IMPL), test_writer: desc(TEST), fixer: desc(FIX), reviewer: REVIEW_ON ? desc(REVIEW) : 'off', orchestrator: desc(LOW), resolver: desc(RESOLVE) },
+  agents: { implementer: desc(IMPL), test_writer: desc(TEST), fixer: desc(FIX), reviewer: REVIEW_ON ? desc(REVIEW) : 'off', reviewer_risky: REVIEW_ON ? desc(RISKY_REVIEW) : 'off', orchestrator: desc(LOW), resolver: desc(RESOLVE) },
   targetGreen: !redTarget,
   merged,
   failed: [...failed.entries()].map(([task, reason]) => ({ task, reason })),

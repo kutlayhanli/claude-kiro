@@ -249,7 +249,13 @@ Return the structured result after writing the file.`, { label: 'write test-plan
 
 **Dependencies:** None | Task <ID> (reason), Task <ID> (reason)
 **Complexity:** Low | Medium | High
+**Risk:** normal | safety (one-line reason)
 `
+
+  // Risk drives routing in /spec:implement: a safety task starts on the strong model
+  // and is always reviewed by the risky reviewer. Escalation only reacts to failures
+  // the gate detects; a send path or price tripwire with a safety bug passes its tests.
+  const RISK_RULE = `- **Risk:** write \`**Risk:** safety (one-line reason)\` on every task whose requirements or files involve sending messages, money or payments, auth or credentials, deletion, or any other irreversible external effect (an email that goes out, an order placed, a price tripwire, a record removed). The reason names the effect, e.g. "(sends the customer's order confirmation)". Every other task gets \`**Risk:** normal\`. When unsure, choose safety: it costs a stronger model; a missed safety bug ships.`
 
   phase('Task Tracks')
   const [implTasks, testTasks] = await parallel([
@@ -269,6 +275,7 @@ Rules:
 - Small tasks, one focused change set each. Two tasks that could run in parallel must not edit the same file.
 - Add a dependency only when this task calls code, reads data, or edits a file that the other task creates. Every dependency carries a one-line reason in parentheses, e.g. "Task I3 (calls parse_config)". Every dependency serializes the run, so don't add order-only edges.
 - No task references a component absent from design.md.
+${RISK_RULE}
 
 Write the draft file, then return the structured result.`, { label: 'write implementation track', phase: 'Task Tracks', schema: WRITE_RESULT }),
 
@@ -289,6 +296,7 @@ Rules:
 - **Verify:** the exact command that runs this task's tests (from ${TPL} Commands).
 - Acceptance must include: tests exercise the real boundary named in the test plan; tests fail before the implementation exists for the right reason (missing behavior, not broken test code); no mocks of the project's own code in integration tests.
 - Test tasks depend only on other test tasks (infrastructure), never on implementation tasks, so they can start as soon as the spec is approved.
+${RISK_RULE} A test task whose cases exercise such an effect is safety too: its tests are the oracle for it.
 
 Write the draft file, then return the structured result.`, { label: 'write test track', phase: 'Task Tracks', schema: WRITE_RESULT }),
   ])
@@ -319,6 +327,8 @@ Inputs: ${DRAFT_IMPL} (implementation track, IDs I1..), ${DRAFT_TEST} (test trac
    - Give every interface in ${TPL}'s Harness Contract an owning impl task, and note it in that task's Description.
    - Reference fields (**Dependencies:**, **Verified by:**, **Verifies:**) hold task references with their reasons in parentheses, nothing else. Put explanatory notes on their own line: tooling reads every "Task N" in those fields.
    - Every dependency keeps a one-line reason in parentheses. Drop any dependency that has no code, data, test, or shared-file reason.
+   - Keep every **Risk:** line. A test task that verifies a safety impl task is safety too. Check every task once more against this rule:
+${RISK_RULE}
 3. Write ${TSK}:
 
 # Implementation Tasks: [Feature Name]
@@ -328,7 +338,7 @@ Inputs: ${DRAFT_IMPL} (implementation track, IDs I1..), ${DRAFT_TEST} (test trac
 
 ## Task Breakdown
 
-(all task blocks: "### Task N: Title" headers, "- \`path\` - note" file lines under **Files:**, fields **Status:** **Track:** **Requirements:** **Description:** **Files:** **Verify:** **Verified by:**/**Verifies:** **Acceptance:** **Dependencies:** **Complexity:**, separated by ---)
+(all task blocks: "### Task N: Title" headers, "- \`path\` - note" file lines under **Files:**, fields **Status:** **Track:** **Requirements:** **Description:** **Files:** **Verify:** **Verified by:**/**Verifies:** **Acceptance:** **Dependencies:** **Complexity:** **Risk:**, separated by ---)
 
 ## Dependency Graph
 A Mermaid graph TD of task dependencies, with test tasks visually distinct (e.g. a "test" class).
@@ -339,7 +349,7 @@ There are no waves: each task starts as soon as its own Dependencies are merged,
 - **Critical path:** Task A -> Task B -> … (N of M tasks; the floor on wall-clock time however many agents run)
 
 4. Delete ${DRAFT_IMPL} and ${DRAFT_TEST}.
-5. Run \`ck lint ${A.feature}\` from ${ROOT}. Fix every dependency cycle and every verify-order cycle it reports, and add a reason to every dependency it lists as reasonless (or remove the dependency). Re-run it until it reports no cycles. Every edge on the critical path lengthens the run: drop any that has no code, data, test, or shared-file reason. Then fill the Schedule section from its "critical path" and "ready now" lines.
+5. Run \`ck lint ${A.feature}\` from ${ROOT}. Fix every dependency cycle and every verify-order cycle it reports, and add a reason to every dependency it lists as reasonless (or remove the dependency). For every task it reports as touching a risk path without **Risk:** safety, add the tag with its reason (the project's risk_paths in specs/ck.json mark files whose bugs are costly). Re-run it until it reports no cycles. Every edge on the critical path lengthens the run: drop any that has no code, data, test, or shared-file reason. Then fill the Schedule section from its "critical path" and "ready now" lines.
 
 Return the structured result.`, { label: 'link tracks into tasks.md', phase: 'Link', schema: WRITE_RESULT })
 
@@ -431,6 +441,7 @@ const LENSES = [
 - Dependencies: does each dependency have a reason (calls its code, reads its data, its tests are the oracle, a shared file)? Every dependency serializes the run, so flag edges with no such reason and propose removing them. Run \`ck lint ${A.feature}\` from ${ROOT} and include what it reports.
 - Does any impl task list a test file owned by a test task (the guard will block it from weakening those)?
 - Format: "### Task N: Title" headers, "- \`path\` - note" file lines, and **Status:** / **Track:** / **Verify:** / **Verified by:** / **Verifies:** fields (tooling parses these).
+- Risk: does every task whose requirements or files involve sending messages, money or payments, auth or credentials, deletion, or another irreversible external effect carry \`**Risk:** safety (reason)\`? Each untagged risky task is a major finding (it would start on the cheap model and get the cheap reviewer); the fix is the tag with its reason. Include any task \`ck lint\` reports as touching a risk path without the tag.
 - Pretend you are implementing Task 1 and the riskiest task right now. Where would you get stuck or have to guess?`,
   },
   {

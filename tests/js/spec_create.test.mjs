@@ -10,8 +10,10 @@ const args = mode => ({ mode, feature: 'f', projectRoot: '/p', specDir: '/p/spec
 
 function stub(overrides = {}) {
   const calls = []
+  const prompts = {}
   const agent = async (prompt, opts) => {
     calls.push(opts.label)
+    prompts[opts.label] = prompt
     if (opts.label in overrides) return overrides[opts.label]
     const l = opts.label
     if (l.startsWith('write') || l.startsWith('link')) return { path: 'x', summary: 's', assumptions: [], concerns: [] }
@@ -24,7 +26,7 @@ function stub(overrides = {}) {
     if (l.startsWith('revise')) return { fixed: ['R1'], notFixed: [], result: 'Ready after decisions', schedule: 'Ready at start: Task 1. Critical path: Task 1' }
     throw new Error('unexpected ' + l)
   }
-  return { agent, calls }
+  return { agent, calls, prompts }
 }
 
 async function test(name, fn) {
@@ -65,4 +67,15 @@ await test('a dead reviewer is reported as a lost lens; a dead refuter leaves fi
   const { result } = await runWorkflow(SCRIPT, { agent: s.agent, args: args('create') })
   assert.equal(result.review.lensesLost, 1)
   assert.deepEqual(result.review.unverified.map(f => f.id), ['T1'])
+})
+
+await test('risk tags: both tracks and the link step are told to tag safety tasks; the implementability lens checks them', async () => {
+  const s = stub()
+  await runWorkflow(SCRIPT, { agent: s.agent, args: args('create') })
+  for (const l of ['write implementation track', 'write test track', 'link tracks into tasks.md']) {
+    assert.match(s.prompts[l], /\*\*Risk:\*\* safety/, l)
+    assert.match(s.prompts[l], /sending messages, money or payments, auth or credentials, deletion/, l)
+  }
+  assert.match(s.prompts['link tracks into tasks.md'], /risk path/)
+  assert.match(s.prompts['review: implementability'], /untagged risky task/i)
 })
