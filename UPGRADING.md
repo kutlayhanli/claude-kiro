@@ -12,9 +12,14 @@
 
 What changes:
 - **Escalation to bigger models on failure.** Run cheap and pay for a bigger model only where the cheap one fails: `ck agents set implementer.escalate sonnet,opus` (or `--escalate sonnet,opus` for one `/spec:implement` run). Once a task's own budget runs out on its role's model, it gets one more attempt per listed model, in order, at the role's effort: a retry after its gate keeps failing, a revision after blocking review findings survive the rounds, a fix after a red branch survives the fix. The test writer and fixer follow the implementer's list unless set; `none` turns it off. Off by default, so nothing changes until you set it.
+- **Orchestration runs on a cheaper model.** The workflow's mechanical steps (plan, conflict-free merges, the per-merge, full and final gates, re-checks) used to run on the session's model, usually Opus. They now use the new **orchestrator** role, Sonnet at low effort. In the October benchmark these steps cost $1.9–3.1 per run on Opus.
+- **Merge conflicts go to a strong model.** A merge step that hits a conflict now stops and hands it to the new **resolver** role (Opus, high effort, agent type `ck-resolver`) instead of resolving it at low effort.
+- **The fixer defaults to Opus at medium effort** instead of following the implementer. Repairing a red target means deciding whether the environment or the code is at fault; Haiku fix agents got this wrong in 2 of 5 benchmark runs.
+- **`ck init` offers a Workflow allow rule.** In auto mode a classifier may stop to ask before a spec workflow launches; an unattended session (cloud, `claude -p`) then waits forever. `ck init` now asks whether to add `"Workflow"` to `permissions.allow` in `.claude/settings.json` (default no). For an existing project, `ck init --allow-workflow` adds just that rule and skips files that already exist.
+- Restore the old behaviour with `ck agents set orchestrator.model inherit`, `ck agents set resolver.model inherit` and `ck agents set fixer.model default` (and the same for `.effort`).
 - **The report lists escalations:** `escalated` (task, models tried, merged or not) and `fixerEscalations`, so you can see which tasks needed more than the cheap model.
 
-Steps: `ck update` from a project directory, then commit `.claude/commands` and `.claude/workflows`.
+Steps: `ck update` from a project directory, then commit `.claude/workflows`, `.claude/commands`, `.claude/agents` and `.claude/ck-manifest.json`.
 
 ## 0.6 → 0.7
 

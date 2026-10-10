@@ -175,14 +175,66 @@ def _sync_agent_types(project_dir: Path, dry_run: bool = False) -> list:
     ]
 
 
+WORKFLOW_RULE = "Workflow"
+SHARED_SETTINGS = ".claude/settings.json"
+
+
+def _interactive() -> bool:
+    return sys.stdin.isatty()
+
+
+def _allow_workflow(project_dir: Path) -> str:
+    """Add the Workflow allow rule to the shared .claude/settings.json, keeping every other setting.
+
+    Returns "added", "present", or "invalid" (the file isn't a JSON object; left alone).
+    """
+    path = project_dir / SHARED_SETTINGS
+    try:
+        data = json.loads(path.read_text()) if path.exists() else {}
+    except json.JSONDecodeError:
+        return "invalid"
+    if not isinstance(data, dict) or not isinstance(data.get("permissions", {}), dict):
+        return "invalid"
+    allow = data.setdefault("permissions", {}).setdefault("allow", [])
+    if not isinstance(allow, list):
+        return "invalid"
+    if WORKFLOW_RULE in allow:
+        return "present"
+    allow.append(WORKFLOW_RULE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n")
+    return "added"
+
+
+def _offer_workflow_rule(project_dir: Path, choice: Optional[bool]) -> Optional[str]:
+    """Ask (or follow --allow-workflow/--no-allow-workflow) whether to allow the Workflow tool."""
+    if choice is None:
+        if not _interactive():
+            return None
+        click.echo(
+            "\n/spec:create, /spec:review and /spec:implement launch multi-agent workflows. In auto mode a\n"
+            "classifier may stop to ask before each launch, and an unattended session (cloud, claude -p)\n"
+            f"then waits forever. Allowing the Workflow tool in {SHARED_SETTINGS} skips that question\n"
+            "for everyone who uses this repository."
+        )
+        choice = click.confirm("Allow the Workflow tool?", default=False)
+    return _allow_workflow(project_dir) if choice else None
+
+
 @cli.command()
 @click.option("--force", is_flag=True, help="Overwrite existing files")
-def init(force: bool):
+@click.option(
+    "--allow-workflow/--no-allow-workflow",
+    default=None,
+    help=f"Add (or don't) a Workflow allow rule to {SHARED_SETTINGS}, so spec workflows launch without a permission prompt. Asked interactively if not given.",
+)
+def init(force: bool, allow_workflow: Optional[bool]):
     """Initialize a Claude Kiro project in the current directory.
 
     Creates .claude directory structure with output styles, slash commands,
     the spec workflow, a specs/ directory, and configures hooks in
-    settings.local.json.
+    settings.local.json. Offers to allow the Workflow tool in
+    .claude/settings.json so unattended runs never wait on a prompt.
     """
     from .. import manifest
     from ..resources import ResourceLoader
@@ -259,6 +311,12 @@ def init(force: bool):
     else:
         skipped.append(CONFIG_FILE)
 
+    rule = _offer_workflow_rule(project_dir, allow_workflow)
+    if rule == "added":
+        created.append(f"{SHARED_SETTINGS} (allow: {WORKFLOW_RULE})")
+    elif rule == "invalid":
+        click.echo(f"⚠️  {SHARED_SETTINGS} isn't a settings object; add \"{WORKFLOW_RULE}\" to permissions.allow by hand.")
+
     # Report results
     click.echo("\n✨ Claude Kiro initialized successfully!")
 
@@ -278,6 +336,11 @@ def init(force: bool):
     click.echo("  1. Review .claude/CLAUDE.md and customize for your project")
     click.echo("  2. Run 'ck doctor' to verify setup")
     click.echo("  3. Use /spec:plan to decide the approach, then /spec:create to write the spec")
+    if allow_workflow is None and rule is None and not _interactive():
+        click.echo(
+            f"\n💡 Unattended runs (cloud, claude -p) can stall on a Workflow permission prompt. "
+            f"Run 'ck init --allow-workflow' or add \"{WORKFLOW_RULE}\" to permissions.allow in {SHARED_SETTINGS}."
+        )
     click.echo(f"\n📝 Specs are written to {SPECS_DIR}/ (outside .claude/, so no approval prompts)")
     if (project_dir / LEGACY_SPECS_DIR).is_dir():
         click.echo(f"⚠️  Found specs in {LEGACY_SPECS_DIR}/ - run 'ck migrate' to move them")

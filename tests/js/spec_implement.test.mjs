@@ -10,7 +10,7 @@ const SCRIPT = path.join(here, '../../src/claude_kiro/resources/templates/workfl
 const baseArgs = { spec: 'demo', root: '/repo', into: 'integrate/demo', targetDir: '/repo/.claude/worktrees/demo-integration' }
 
 // A fake project: `ck plan` semantics over deps/done, task durations, failures, timestamps.
-function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0 }) {
+function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [] }) {
   let rechecksLeftRed = recheckRed
   const state = { deps: { ...deps }, done: new Set(done), events: [], prompts: {}, opts: {}, reviewCount: {}, attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0 }
   let clock = Date.parse('2026-10-04T10:00:00Z')
@@ -53,8 +53,9 @@ function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFir
       const pass = state.attempts[n] > (failUntil[n] || 0)
       return { task: n, status: pass ? 'done' : 'in_progress', gatePassed: pass, summary: `attempt ${state.attempts[n]}`, commits: 'abc123', startedAt, finishedAt: stamp() }
     }
-    if (l.startsWith('merge')) {
-      const n = l.match(/merge (\d+)/)[1]
+    if (l.startsWith('merge') || l.startsWith('resolve')) {
+      const n = l.match(/(?:merge|resolve) (\d+)/)[1]
+      if (l.startsWith('merge') && conflicts.includes(n)) return { merged: false, conflict: true, conflicts: 'specs/demo/tasks.md' }
       state.merging++
       state.maxMerging = Math.max(state.maxMerging, state.merging)
       await sleep(mergeDurations[n] ?? 2)
@@ -273,6 +274,8 @@ const ROLES = {
   test_writer: { model: 'opus', effort: 'high' },
   reviewer: { model: 'opus', effort: 'high', enabled: true, rounds: 1 },
   fixer: { model: 'sonnet', effort: 'medium' },
+  orchestrator: { model: 'sonnet', effort: 'low' },
+  resolver: { model: 'opus', effort: 'high' },
 }
 
 await test('roles: impl tasks use the implementer, test tasks the test writer, fixes the fixer', async () => {
@@ -389,4 +392,40 @@ await test('escalation: a red branch the fixer could not repair gets a fix on th
   assert.equal(result.targetGreen, true)
   assert.deepEqual(result.merged, ['1'])
   assert.deepEqual(result.fixerEscalations, [{ what: 'after merging Task 1', model: 'opus', green: true }])
+})
+
+await test('escalation: a role never escalates to a model that is not above its own', async () => {
+  // The fixer is Opus and follows the implementer's ladder (sonnet > opus): nothing is above Opus, so no fixer escalation.
+  const p = project({ deps: { 1: [] }, checkRed: ['1'], recheckRed: 5 })
+  const agents = { ...HAIKU(['sonnet', 'opus'], { reviewer: { enabled: false } }), fixer: { model: 'opus', effort: 'medium', escalate: null } }
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents } })
+  assert.deepEqual(modelsOf(p.state, 'fix'), ['opus'])
+  assert.deepEqual(result.fixerEscalations, [])
+})
+
+await test('orchestrator: plan, merge, gate and re-check steps use the orchestrator role', async () => {
+  const p = project({ deps: { 1: [], 2: ['1'] }, checkRed: ['2'] })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })
+  for (const l of ['plan 1', 'merge 1', 'merge 2', 're-check 1', 'final gate']) {
+    assert.deepEqual([p.state.opts[l].model, p.state.opts[l].effort], ['sonnet', 'low'], l)
+  }
+  assert.equal(result.agents.orchestrator, 'sonnet/low')
+})
+
+await test('orchestrator: without agents settings plan and merge stay at low effort on the session model', async () => {
+  const p = project({ deps: { 1: [] } })
+  await runWorkflow(SCRIPT, { agent: p.agent, args: baseArgs })
+  assert.deepEqual([p.state.opts['plan 1'].model, p.state.opts['plan 1'].effort], [undefined, 'low'])
+  assert.deepEqual([p.state.opts['merge 1'].model, p.state.opts['merge 1'].effort], [undefined, 'low'])
+  assert.equal('model' in p.state.opts['final gate'], false)
+})
+
+await test('resolver: a merge conflict goes to the resolver, which merges it', async () => {
+  const p = project({ deps: { 1: [], 2: ['1'] }, conflicts: ['2'] })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })
+  assert.ok(idx(p.state, 'merge 2') < idx(p.state, 'resolve 2'))
+  assert.deepEqual([p.state.opts['resolve 2'].model, p.state.opts['resolve 2'].effort], ['opus', 'high'])
+  assert.match(p.state.prompts['resolve 2'], /specs\/demo\/tasks\.md/)
+  assert.deepEqual(result.merged.sort(), ['1', '2'])
+  assert.ok(!p.state.events.includes('resolve 1'), 'no resolver without a conflict')
 })
