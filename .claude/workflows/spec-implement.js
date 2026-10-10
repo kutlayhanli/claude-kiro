@@ -70,11 +70,26 @@ const REVIEWER = ROLES.reviewer || {}
 const REVIEW_ON = !!A.agents && REVIEWER.enabled !== false
 const REVIEW = roleOpts('reviewer', REVIEWER, null)
 const REVIEW_ROUNDS = Number.isInteger(REVIEWER.rounds) ? REVIEWER.rounds : 1
+// Escalation: bigger models to try, in order, once a role's own budget runs out
+// (its retries for a failing gate, its review rounds for blocking findings, its
+// one fix for a red branch). One extra attempt per model, at the role's effort.
+function ladder(name, role) {
+  const list = role && Array.isArray(role.escalate) ? role.escalate : []
+  for (const model of list) roleOpts(`${name}.escalate`, { model }, null)  // validates
+  return list
+}
+const followsImpl = role => (role && Array.isArray(role.escalate) ? role : ROLES.implementer)
+const IMPL_UP = ladder('implementer', ROLES.implementer)
+const TEST_UP = ladder('test_writer', followsImpl(ROLES.test_writer))
+const FIX_UP = ladder('fixer', followsImpl(ROLES.fixer))
 const desc = o => `${o.model || 'inherited'}/${o.effort || 'inherited'}`
+const up = list => (list.length ? ` (escalate ${list.join(' > ')})` : '')
 if (A.agents || A.model || A.effort) {
-  log(`Agents: impl ${desc(IMPL)}, test ${desc(TEST)}, fix ${desc(FIX)}, review ${REVIEW_ON ? desc(REVIEW) : 'off'}`)
+  log(`Agents: impl ${desc(IMPL)}${up(IMPL_UP)}, test ${desc(TEST)}${up(TEST_UP)}, fix ${desc(FIX)}${up(FIX_UP)}, review ${REVIEW_ON ? desc(REVIEW) : 'off'}`)
 }
 const codeOpts = n => (TRACKS[n] === 'test' ? TEST : IMPL)
+const ladderOf = n => (TRACKS[n] === 'test' ? TEST_UP : IMPL_UP)
+const escalated = (opts, model) => ({ ...opts, model })
 
 const WT = n => `${ROOT}/.claude/worktrees/${SPEC}-task-${n}`
 const BR = n => `feat/${SPEC}-task-${n}`
@@ -271,6 +286,7 @@ let fixCount = 0
 let refills = 0
 let mergeChain = Promise.resolve()
 const fullGates = []
+const fixerEscalations = []
 
 async function plan() {
   refills++
@@ -293,9 +309,18 @@ function slotSignal() {
 }
 
 async function fixAndRecheck(what, failure, n) {
+  const ph = n ? phaseOf(n) : 'Final gate'
   fixCount++
-  const fix = await agent(fixPrompt(fixCount, what, failure), { label: `fix ${fixCount} (${what})`, phase: n ? phaseOf(n) : 'Final gate', schema: VERIFY, ...FIX })
-  const recheck = await agent(recheckPrompt(n), { label: `re-check ${fixCount}`, phase: n ? phaseOf(n) : 'Final gate', schema: VERIFY })
+  let fix = await agent(fixPrompt(fixCount, what, failure), { label: `fix ${fixCount} (${what})`, phase: ph, schema: VERIFY, ...FIX })
+  let recheck = await agent(recheckPrompt(n), { label: `re-check ${fixCount}`, phase: ph, schema: VERIFY })
+  for (const model of FIX_UP) {
+    if (recheck && recheck.green) break
+    fixCount++
+    log(`${what}: still red after the fix, escalating the fixer to ${model}`)
+    fix = await agent(fixPrompt(fixCount, what, recheck), { label: `fix ${fixCount} (${what}) [${model}]`, phase: ph, schema: VERIFY, ...escalated(FIX, model) })
+    recheck = await agent(recheckPrompt(n), { label: `re-check ${fixCount}`, phase: ph, schema: VERIFY })
+    fixerEscalations.push({ what, model, green: !!(recheck && recheck.green) })
+  }
   return { fix, recheck, green: !!(recheck && recheck.green) }
 }
 
@@ -333,15 +358,24 @@ function enqueueMerge(n) {
 }
 
 async function runTask(n) {
-  const rec = { task: n, wave: waveOf(n), title: TITLES[n], attempts: 0, ok: false }
+  const rec = { task: n, wave: waveOf(n), title: TITLES[n], attempts: 0, ok: false, escalations: [] }
+  const busy = r => !!(r && r.blocker && /worktree busy/i.test(r.blocker))
   try {
     let r = await agent(taskPrompt(n), { label: label(n), phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
     rec.attempts = 1
     rec.startedAt = r && r.startedAt
-    while (!ok(r) && rec.attempts <= MAX_RETRIES && !(r && r.blocker && /worktree busy/i.test(r.blocker))) {
+    while (!ok(r) && rec.attempts <= MAX_RETRIES && !busy(r)) {
       log(`Task ${n}: ${r && !(r.commits || '').trim() ? 'no commits' : 'gate not passed'}, retry ${rec.attempts}/${MAX_RETRIES}`)
       r = await agent(retryPrompt(n, r, rec.attempts), { label: `${label(n)} retry ${rec.attempts}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
       rec.attempts++
+      rec.startedAt = rec.startedAt || (r && r.startedAt)
+    }
+    for (const model of ladderOf(n)) {
+      if (ok(r) || busy(r)) break
+      log(`Task ${n}: still failing after ${rec.attempts} attempt(s), escalating to ${model}`)
+      r = await agent(retryPrompt(n, r, rec.attempts), { label: `${label(n)} retry ${rec.attempts} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
+      rec.attempts++
+      rec.escalations.push({ stage: 'retry', model })
       rec.startedAt = rec.startedAt || (r && r.startedAt)
     }
     releaseSlot(n)
@@ -354,6 +388,16 @@ async function runTask(n) {
         working.add(n)  // a revision takes a slot but never waits for one: the task is nearly done
         r = await agent(revisePrompt(n, review, round), { label: `${label(n)} revise ${round}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
         releaseSlot(n)
+        if (ok(r)) review = await agent(reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...REVIEW })
+      }
+      for (const model of ladderOf(n)) {
+        if (!(review && review.verdict === 'changes' && ok(r))) break
+        round++
+        log(`Task ${n}: blocking findings remain, escalating the revision to ${model}`)
+        working.add(n)
+        r = await agent(revisePrompt(n, review, round), { label: `${label(n)} revise ${round} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
+        releaseSlot(n)
+        rec.escalations.push({ stage: 'revise', model })
         if (ok(r)) review = await agent(reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...REVIEW })
       }
       rec.review = review ? { verdict: review.verdict, rounds: round, findings: review.findings, summary: review.summary } : { verdict: 'unreviewed', rounds: round }
@@ -501,6 +545,7 @@ const taskReport = Object.values(records).map(r => ({
   deviations: r.result && r.result.deviations,
   fixedAfterMerge: !!(r.merge && r.merge.fix),
   review: r.review,
+  escalations: r.escalations || [],
 }))
 const spans = {}
 for (const t of taskReport) {
@@ -528,6 +573,8 @@ return {
   merged,
   failed: [...failed.entries()].map(([task, reason]) => ({ task, reason })),
   notStarted,
+  escalated: taskReport.filter(t => t.escalations.length).map(t => ({ task: t.task, models: t.escalations.map(e => e.model), ok: t.ok })),
+  fixerEscalations,
   timing: {
     start: starts[0] || null,
     end: ends[ends.length - 1] || null,

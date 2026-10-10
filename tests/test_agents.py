@@ -114,6 +114,27 @@ def test_max_concurrent_must_be_a_positive_number(home, value):
     assert out.exit_code == 2 and "run.max_concurrent" in out.output
 
 
+def test_escalation_is_off_by_default_and_followers_inherit_it(home):
+    r = roles(home)["roles"]
+    assert r["implementer"]["escalate"] == [] and r["test_writer"]["escalate"] == [] and r["fixer"]["escalate"] == []
+    assert ck(home, "agents", "set", "implementer.escalate", "sonnet,opus").exit_code == 0
+    r = roles(home)["roles"]
+    assert r["implementer"]["escalate"] == ["sonnet", "opus"]
+    assert r["test_writer"]["escalate"] == ["sonnet", "opus"]  # follows the implementer
+    assert r["fixer"]["escalate"] == ["sonnet", "opus"]
+    ck(home, "agents", "set", "fixer.escalate", "opus", "--project")
+    assert roles(home)["roles"]["fixer"]["escalate"] == ["opus"]
+    assert "escalate=sonnet>opus" in ck(home, "agents").output
+    # "none" turns it off for one run even when saved
+    assert roles(home, "--override", "implementer.escalate=none")["roles"]["implementer"]["escalate"] == []
+
+
+@pytest.mark.parametrize("value", ["gpt-5,opus", "inherit", "opus,,sonnet"])
+def test_escalation_models_are_validated(home, value):
+    out = ck(home, "agents", "set", "implementer.escalate", value)
+    assert out.exit_code == 2 and "implementer.escalate" in out.output
+
+
 def test_bad_project_config_is_reported(home):
     (home / "specs/ck.json").write_text(json.dumps({"agents": {"implementer": {"model": "gpt-5"}}}))
     out = ck(home, "agents")

@@ -29,14 +29,16 @@ DEFAULTS: Dict[str, Dict[str, Any]] = {
     # /spec:plan and /spec:create: if the session runs below this, ask me whether to switch.
     "planning": {"min_model": "opus", "min_effort": "medium", "ask": True},
     # Agents that write code for impl-track tasks (and their retries).
-    "implementer": {"model": "sonnet", "effort": "medium"},
+    # escalate: bigger models to try, in order, once a task's retries or review
+    # rounds run out on the role's model (one extra attempt each). [] = off.
+    "implementer": {"model": "sonnet", "effort": "medium", "escalate": []},
     # Agents that write test-track tasks. null = same as implementer.
-    "test_writer": {"model": None, "effort": None},
+    "test_writer": {"model": None, "effort": None, "escalate": None},
     # Reviews each task's diff against design.md and requirements.md before it merges.
     # rounds: how many times the implementer may revise after blocking findings.
     "reviewer": {"model": "opus", "effort": "high", "enabled": True, "rounds": 1},
     # Repairs a red target branch. null = same as implementer.
-    "fixer": {"model": None, "effort": None},
+    "fixer": {"model": None, "effort": None, "escalate": None},
     # How many tasks may have an implementing agent at work at once (review and the
     # merge queue don't count). null = unlimited; lower it for memory-heavy test
     # suites or a tight usage budget.
@@ -45,10 +47,10 @@ DEFAULTS: Dict[str, Dict[str, Any]] = {
 
 ROLE_KEYS = {
     "planning": {"min_model", "min_effort", "ask"},
-    "implementer": {"model", "effort"},
-    "test_writer": {"model", "effort"},
+    "implementer": {"model", "effort", "escalate"},
+    "test_writer": {"model", "effort", "escalate"},
     "reviewer": {"model", "effort", "enabled", "rounds"},
-    "fixer": {"model", "effort"},
+    "fixer": {"model", "effort", "escalate"},
     "run": {"max_concurrent"},
 }
 UNLIMITED = "unlimited"
@@ -89,6 +91,8 @@ def _coerce(role: str, key: str, value: Any) -> Any:
     """Validate one setting; strings from the command line are converted."""
     if key not in ROLE_KEYS.get(role, set()):
         raise AgentConfigError(f"unknown setting {role}.{key} (known: {', '.join(sorted(ROLE_KEYS.get(role, ())) or '-')})")
+    if key == "escalate" and isinstance(value, str) and value.strip().lower() in ("none", "off"):
+        value = []  # an explicit "no escalation", so it can switch off a list saved in a lower layer
     if isinstance(value, str) and value.lower() in ("null", "none", "default"):
         value = None
     if key in ("ask", "enabled"):
@@ -98,6 +102,14 @@ def _coerce(role: str, key: str, value: Any) -> Any:
             value = value.lower() in ("true", "yes", "on")
         if not isinstance(value, bool):
             raise AgentConfigError(f"{role}.{key} must be true or false")
+        return value
+    if key == "escalate":
+        if value is None:
+            return None
+        if isinstance(value, str):
+            value = [] if value.strip().lower() in ("", "off", "[]") else [m.strip() for m in value.split(",")]
+        if not isinstance(value, list) or any(not isinstance(m, str) or not m or not _valid_model(m, allow_inherit=False) for m in value):
+            raise AgentConfigError(f"{role}.escalate must be a comma-separated list of models ({', '.join(MODELS)} or claude-* IDs), or none")
         return value
     if key == "max_concurrent":
         if value is None or value == UNLIMITED:
@@ -162,7 +174,7 @@ def resolve(project_dir: Path, overrides: Optional[List[str]] = None) -> Dict[st
 
     # Roles that follow the implementer unless set.
     for role in ("test_writer", "fixer"):
-        for key in ("model", "effort"):
+        for key in ("model", "effort", "escalate"):
             if roles[role][key] is None:
                 roles[role][key] = roles["implementer"][key]
                 sources[f"{role}.{key}"] = f"implementer ({sources['implementer.' + key]})"

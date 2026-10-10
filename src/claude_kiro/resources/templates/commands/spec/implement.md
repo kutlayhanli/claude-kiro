@@ -1,6 +1,6 @@
 ---
 description: Implement a spec task, or a whole spec as a workflow (each task starts when its dependencies merge)
-argument-hint: [spec-name | task-number] [--model M] [--effort E] [--test-model M] [--review-model M] [--no-review] [--no-workflow]
+argument-hint: [spec-name | task-number] [--model M] [--effort E] [--test-model M] [--review-model M] [--no-review] [--escalate M,M] [--no-workflow]
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash, TodoWrite, Workflow, Agent, SendMessage, TaskCreate, TaskUpdate
 ---
 
@@ -15,12 +15,13 @@ Implement: $ARGUMENTS
 
 ## Agents: Models, Effort, and Review
 
-Each role has a model and effort, resolved by `ck agents --json` (run it first). Defaults: **implementer** Sonnet, medium effort, for impl-track tasks; **test_writer** and **fixer** follow the implementer unless set; **reviewer** Opus, high effort, reviews every task's diff against the spec before it merges, with up to 1 revision round. My preferences (`ck agents set ...`, global or `--project`) override the defaults; `ck agents` shows the effective values and where each comes from.
+Each role has a model and effort, resolved by `ck agents --json` (run it first). Defaults: **implementer** Sonnet, medium effort, for impl-track tasks; **test_writer** and **fixer** follow the implementer unless set; **reviewer** Opus, high effort, reviews every task's diff against the spec before it merges, with up to 1 revision round. **Escalation** is off by default: `implementer.escalate` (test_writer and fixer follow it unless set) lists bigger models to try, in order, once a task's own budget runs out on its role's model: one extra retry per model after its gate keeps failing, one extra revision per model after blocking review findings survive the rounds, one extra fix per model after a red branch survives the fix. Each escalated attempt keeps the role's effort. My preferences (`ck agents set ...`, global or `--project`) override the defaults; `ck agents` shows the effective values and where each comes from.
 
 For this run only, turn what I ask into `--override` arguments to `ck agents --json`:
 - `--model X` / `--effort Y` (or in words, "with haiku at low effort"): `implementer.model=X`, `implementer.effort=Y`
 - `--test-model` / `--test-effort`: `test_writer.model=…`, `test_writer.effort=…`
 - `--review-model` / `--review-effort`: `reviewer.model=…`, `reviewer.effort=…`; `--no-review`: `reviewer.enabled=false`
+- `--escalate sonnet,opus` (or in words, "escalate to opus on failure"): `implementer.escalate=sonnet,opus`; `--no-escalate`: `implementer.escalate=none`
 - any `role.key=value` I give: pass it through as is.
 
 Models: `sonnet`, `opus`, `haiku`, `fable` (each means the newest model of that family; pass a full ID such as `claude-sonnet-5` only if I name a specific older version) or `inherit` (this session's model). Efforts: `low`, `medium`, `high`, `xhigh`, `max`, or `inherit`. `ck agents` refuses anything else; if it does, ask me rather than guess.

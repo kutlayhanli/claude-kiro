@@ -10,7 +10,8 @@ const SCRIPT = path.join(here, '../../src/claude_kiro/resources/templates/workfl
 const baseArgs = { spec: 'demo', root: '/repo', into: 'integrate/demo', targetDir: '/repo/.claude/worktrees/demo-integration' }
 
 // A fake project: `ck plan` semantics over deps/done, task durations, failures, timestamps.
-function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {} }) {
+function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0 }) {
+  let rechecksLeftRed = recheckRed
   const state = { deps: { ...deps }, done: new Set(done), events: [], prompts: {}, opts: {}, reviewCount: {}, attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0 }
   let clock = Date.parse('2026-10-04T10:00:00Z')
   const stamp = () => new Date((clock += 60000)).toISOString().replace('.000', '')
@@ -71,7 +72,7 @@ function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFir
       return { verdict, findings: verdict === 'changes' ? [{ severity: 'blocking', issue: 'contradicts design.md' }] : [], summary: verdict }
     }
     if (l.startsWith('fix')) return { green: true }
-    if (l.startsWith('re-check')) return { green: true }
+    if (l.startsWith('re-check')) return { green: rechecksLeftRed-- <= 0 }
     if (l.startsWith('full gate')) return { green: !fullRed }
     if (l === 'final gate') return { green: true }
     throw new Error('unexpected agent ' + l)
@@ -335,4 +336,57 @@ await test('roles: inherit means the session model; model/effort args override c
   await runWorkflow(SCRIPT, { agent: q.agent, args: { ...baseArgs, agents: ROLES, model: 'haiku', effort: 'low' } })
   assert.deepEqual([q.state.opts['task 1'].model, q.state.opts['task 1'].effort], ['haiku', 'low'])
   assert.equal(q.state.opts['review 1'].model, 'opus')  // the override does not touch the reviewer
+})
+
+// --- escalation to bigger models ---------------------------------------------
+
+const HAIKU = (escalate, extra = {}) => ({
+  implementer: { model: 'haiku', effort: 'medium', escalate },
+  test_writer: { model: 'haiku', effort: 'medium', escalate },
+  fixer: { model: 'haiku', effort: 'medium', escalate },
+  reviewer: { model: 'haiku', effort: 'medium', enabled: true, rounds: 1 },
+  ...extra,
+})
+const modelsOf = (s, prefix) => s.events.filter(e => e.startsWith(prefix) && !e.endsWith(' end')).map(e => s.opts[e].model)
+
+await test('escalation: retries climb the ladder after the normal retries fail, at the role effort', async () => {
+  const p = project({ deps: { 1: [] }, failUntil: { 1: 3 } })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxRetries: 1, agents: HAIKU(['sonnet', 'opus']) } })
+  assert.deepEqual(modelsOf(p.state, 'task 1'), ['haiku', 'haiku', 'sonnet', 'opus'])
+  assert.ok(p.state.events.filter(e => e.startsWith('task 1') && !e.endsWith(' end')).every(e => p.state.opts[e].effort === 'medium'))
+  assert.deepEqual(result.merged, ['1'])
+  assert.deepEqual(result.tasks[0].escalations, [{ stage: 'retry', model: 'sonnet' }, { stage: 'retry', model: 'opus' }])
+  assert.deepEqual(result.escalated, [{ task: '1', models: ['sonnet', 'opus'], ok: true }])
+})
+
+await test('escalation: stops at the first model that passes', async () => {
+  const p = project({ deps: { 1: [] }, failUntil: { 1: 2 } })
+  await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxRetries: 1, agents: HAIKU(['sonnet', 'opus']) } })
+  assert.deepEqual(modelsOf(p.state, 'task 1'), ['haiku', 'haiku', 'sonnet'])
+})
+
+await test('escalation: off by default, so a failing task just fails', async () => {
+  const p = project({ deps: { 1: [] }, failUntil: { 1: 5 } })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxRetries: 1, agents: HAIKU([]) } })
+  assert.deepEqual(modelsOf(p.state, 'task 1'), ['haiku', 'haiku'])
+  assert.deepEqual(result.escalated, [])
+  assert.equal(result.failed[0].task, '1')
+})
+
+await test('escalation: blocking review findings that survive the rounds get a revision on the next model', async () => {
+  const p = project({ deps: { 1: [] }, reviews: { 1: ['changes', 'changes', 'approve'] } })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: HAIKU(['opus']) } })
+  assert.deepEqual(modelsOf(p.state, 'task 1 revise'), ['haiku', 'opus'])
+  assert.deepEqual(result.merged, ['1'])
+  assert.deepEqual(result.tasks[0].escalations, [{ stage: 'revise', model: 'opus' }])
+  assert.equal(result.tasks[0].review.verdict, 'approve')
+})
+
+await test('escalation: a red branch the fixer could not repair gets a fix on the next model', async () => {
+  const p = project({ deps: { 1: [] }, checkRed: ['1'], recheckRed: 1 })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: HAIKU(['opus'], { reviewer: { enabled: false } }) } })
+  assert.deepEqual(modelsOf(p.state, 'fix'), ['haiku', 'opus'])
+  assert.equal(result.targetGreen, true)
+  assert.deepEqual(result.merged, ['1'])
+  assert.deepEqual(result.fixerEscalations, [{ what: 'after merging Task 1', model: 'opus', green: true }])
 })

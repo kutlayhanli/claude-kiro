@@ -1,11 +1,20 @@
 # Upgrading
 
-- **From 0.6 to 0.7:** see the next section.
+- **From 0.7 to 0.8:** see the next section.
+- **From 0.6 to 0.7:** see [0.6 → 0.7](#06--07), then the 0.8 notes.
 - **From 0.5 to 0.6:** see [0.5 → 0.6](#05--06), then the 0.7 notes.
 - **From 0.4 to 0.5:** see [0.4 → 0.5](#04--05).
 - **From 0.3 to 0.4:** see [0.3 → 0.4](#03--04).
 - **From 0.2:** apply the 0.3 notes below as well; the steps are the same.
 - **From 0.1:** skip to [Upgrading to 0.2](#upgrading-to-02), then come back for the 0.3 and 0.4 notes (same commands).
+
+## 0.7 → 0.8
+
+What changes:
+- **Escalation to bigger models on failure.** Run cheap and pay for a bigger model only where the cheap one fails: `ck agents set implementer.escalate sonnet,opus` (or `--escalate sonnet,opus` for one `/spec:implement` run). Once a task's own budget runs out on its role's model, it gets one more attempt per listed model, in order, at the role's effort: a retry after its gate keeps failing, a revision after blocking review findings survive the rounds, a fix after a red branch survives the fix. The test writer and fixer follow the implementer's list unless set; `none` turns it off. Off by default, so nothing changes until you set it.
+- **The report lists escalations:** `escalated` (task, models tried, merged or not) and `fixerEscalations`, so you can see which tasks needed more than the cheap model.
+
+Steps: `ck update` from a project directory, then commit `.claude/commands` and `.claude/workflows`.
 
 ## 0.6 → 0.7
 
