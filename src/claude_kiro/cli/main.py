@@ -29,6 +29,7 @@ from .agents import agents
 from .update import update
 from .hooks import hook
 from .run import run
+from .bench import bench
 from .worktree import lint, plan, waves, worktree
 from .runner import HOOK_SETTINGS, configured_hooks, execute_hook, install_hook_settings
 
@@ -39,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 
 @click.group(invoke_without_command=True)
+@click.version_option(package_name="claude-kiro", prog_name="ck")
 @click.option(
     "--hook",
     "hook_name",
@@ -863,6 +865,7 @@ cli.add_command(lint)
 cli.add_command(agents)
 cli.add_command(update)
 cli.add_command(run)
+cli.add_command(bench)
 
 
 if __name__ == "__main__":
