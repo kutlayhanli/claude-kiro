@@ -10,7 +10,7 @@ const SCRIPT = path.join(here, '../../src/claude_kiro/resources/templates/workfl
 const baseArgs = { spec: 'demo', root: '/repo', into: 'integrate/demo', targetDir: '/repo/.claude/worktrees/demo-integration' }
 
 // A fake project: `ck plan` semantics over deps/done, task durations, failures, timestamps.
-function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [] }) {
+function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null }) {
   let rechecksLeftRed = recheckRed
   // RED landings left per task: checkRed tasks are red on their first landing, redLands sets a count.
   const redLeft = { ...Object.fromEntries(checkRed.map(n => [n, 1])), ...redLands }
@@ -93,7 +93,7 @@ function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFir
       await sleep(reviewDurations[n] ?? 0)
       state.events.push(`${l} end`)
       const verdict = (reviews[n] || [])[state.reviewCount[n] - 1] || 'approve'
-      return { verdict, findings: verdict === 'changes' ? [{ severity: 'blocking', issue: 'contradicts design.md' }] : [], summary: verdict }
+      return { verdict, findings: verdict === 'changes' ? [{ severity: 'blocking', issue: reviewIssue || 'contradicts design.md' }] : [], summary: verdict }
     }
     if (l.startsWith('fix')) return { green: true }
     if (l.startsWith('re-check')) return { green: rechecksLeftRed-- <= 0 }
@@ -662,4 +662,13 @@ await test('landing: a conflict in a batch goes to the resolver while the rest o
   assert.deepEqual(result.landings[1].merged, ['2', '4'])
   assert.ok(p.state.events.includes('resolve 3'))
   assert.deepEqual(result.merged.sort(), ['1', '2', '3', '4'])
+})
+
+await test('a long blocking finding reaches the reviser intact, and the failure reason keeps the whole issue', async () => {
+  // A thorough Opus review runs to thousands of characters; cutting it mid-sentence left a reviser guessing.
+  const issue = 'FakeGmail holds its lock while running on_send. ' + 'x'.repeat(6000) + ' END-OF-FINDING'
+  const p = project({ deps: { 1: [] }, reviews: { 1: ['changes', 'changes'] }, reviewIssue: issue })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: { reviewer: { model: 'opus', effort: 'high', enabled: true, rounds: 1 } } } })
+  assert.ok(p.state.prompts['task 1 revise 1'].includes('END-OF-FINDING'), 'revise prompt has the whole finding')
+  assert.ok(result.failed[0].reason.includes('END-OF-FINDING'), 'failure reason has the whole finding')
 })

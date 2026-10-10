@@ -265,6 +265,10 @@ const VERIFY = {
 
 const ok = r => r && r.status === 'done' && r.gatePassed === true
 const trim = (v, n = 3000) => JSON.stringify(v || null).slice(0, n)
+// Review findings go to the reviser and into the report whole: a finding cut
+// mid-sentence leaves the reviser guessing what was wrong. The cap only guards
+// against a runaway reviewer.
+const FINDINGS_LIMIT = 60000
 const minutes = (a, b) => {
   const d = (Date.parse(b) - Date.parse(a)) / 60000
   return Number.isFinite(d) && d >= 0 ? Math.round(d * 10) / 10 : null
@@ -323,7 +327,7 @@ The implementer reported: ${trim(r && { summary: r.summary, deviations: r.deviat
 Mark a finding "blocking" only if it should stop the merge; style and taste are "minor". verdict is "changes" only if there is at least one blocking finding.`
 
 const revisePrompt = (n, review, round) => `${MANDATE}Revise Task ${n} of spec ${SPEC} (review round ${round}). The task's gate passed, but the reviewer found blocking problems:
-${trim(review && review.findings, 4000)}
+${trim(review && review.findings, FINDINGS_LIMIT)}
 ${READ_HANDOFF(n)} ${WRITE_HANDOFF(n)}
 Worktree: ${WT(n)} (branch ${BR(n)}). Run "${NOW}" for startedAt. Claim with "ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover", fix each blocking finding without weakening any test or editing requirements.md, get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" passing again, merge ${INTO} into your branch, re-run the gate, and release the worktree. If a finding is wrong (it contradicts the spec), do not change the code for it: say why in deviations. Run "${NOW}" for finishedAt.
 ${GIT_NOTE}
@@ -603,7 +607,7 @@ async function runTask(n) {
       else if (review.verdict === 'changes' && ok(r)) {
         rec.result = r
         rec.finishedAt = r && r.finishedAt
-        rec.reason = `review: blocking findings remain after ${round} revision(s): ${trim(review.findings.filter(f => f.severity === 'blocking').map(f => f.issue), 600)}`
+        rec.reason = `review: blocking findings remain after ${round} revision(s): ${trim(review.findings.filter(f => f.severity === 'blocking').map(f => f.issue), FINDINGS_LIMIT)}`
         return rec
       }
     }
