@@ -41,7 +41,14 @@ Your task's dependencies are already merged into your branch. If something you d
 - Never delete, skip, xfail, or weaken a test, and never edit `requirements.md`. A guard will stop you. If a test or the spec looks wrong, STOP and report it: quote the test, the requirement, and what you think is wrong.
 - Only edit the files your task block lists, plus your own task section in tasks.md. Don't touch other tasks' sections or the tasks.md header. If you must touch an unlisted file, keep the change minimal and report it, since parallel agents may edit nearby files.
 - If you deviate from design.md, document it in your task section and update design.md for that part only.
-- Never read or print secrets (`.env` values, tokens).
+- Never read or print secrets (`.env` values, tokens), and never open credential files or directories (`~/.ssh`, `~/.aws`, `~/.config/gcloud`, `.env`, `.netrc` and the like), not even to check that they exist.
+
+## Sandbox and guards
+
+An unattended run (`ck run`) may put your shell commands in Claude Code's sandbox: your home directory is hidden apart from toolchains, and only a short list of hosts (package registries, GitHub) is reachable.
+- A host outside that list is refused. Report the refused host and the command in your blocker or summary; don't retry it another way (another tool, a mirror, a different URL, `sh -c`).
+- Never set `dangerouslyDisableSandbox`, and never edit `.claude/settings*.json` to widen permissions.
+- Some commands are denied outright: `git push`, `git reset --hard`, `git clean`, `git worktree remove --force`, `git -c ...`, `curl`, `wget`, `ssh`, `scp`, `rsync`, `nc`, and WebFetch. You don't need them; don't look for substitutes. These rules match the command text, so a commit whose message contains such a phrase (for example "clean up" or "push") can be refused: reword the message.
 
 ## Steps
 

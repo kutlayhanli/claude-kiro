@@ -454,15 +454,23 @@ def _setup_diff(loader) -> None:
 
 
 @cli.command()
-def doctor():
+@click.option("--unattended", is_flag=True, help="Check this machine for unattended `ck run`s: sandbox tools, credentials, risky allow rules")
+def doctor(unattended: bool):
     """Check Claude Kiro setup health.
 
     Verifies installation, directory structure, file presence, and hook configuration.
+    With --unattended: what an unattended `ck run` is exposed to here, with
+    recommendations (always exits 0).
     """
     import shutil
     import json
 
     project_dir = Path.cwd()
+    if unattended:
+        from .run import doctor_unattended
+
+        doctor_unattended(project_dir)
+        return
     claude_dir = project_dir / ".claude"
     issues = []
     warnings = []

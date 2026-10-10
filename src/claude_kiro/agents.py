@@ -16,6 +16,7 @@ Effort values: low, medium, high, xhigh, max, or "inherit".
 import copy
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -24,6 +25,16 @@ from claude_kiro.paths import CONFIG_FILE
 MODELS = ("haiku", "sonnet", "opus", "fable")  # ascending capability
 EFFORTS = ("low", "medium", "high", "xhigh", "max")  # ascending
 INHERIT = "inherit"
+
+DEFAULT_ALLOWED_DOMAINS = (
+    "pypi.org",
+    "files.pythonhosted.org",
+    "registry.npmjs.org",
+    "github.com",
+    "codeload.github.com",
+    "objects.githubusercontent.com",
+)
+_DOMAIN = re.compile(r"^(\*\.)?[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*(:\d+)?$")
 
 DEFAULTS: Dict[str, Dict[str, Any]] = {
     # /spec:plan and /spec:create: if the session runs below this, ask me whether to switch.
@@ -51,7 +62,9 @@ DEFAULTS: Dict[str, Dict[str, Any]] = {
     # How many tasks may have an implementing agent at work at once (review and the
     # merge queue don't count). null = unlimited; lower it for memory-heavy test
     # suites or a tight usage budget.
-    "run": {"max_concurrent": None},
+    # allowed_domains: the only hosts shell commands may reach when `ck run` sandboxes
+    # the session (package registries and GitHub). [] = no network at all.
+    "run": {"max_concurrent": None, "allowed_domains": list(DEFAULT_ALLOWED_DOMAINS)},
 }
 
 ROLE_KEYS = {
@@ -62,7 +75,7 @@ ROLE_KEYS = {
     "fixer": {"model", "effort", "escalate"},
     "orchestrator": {"model", "effort"},
     "resolver": {"model", "effort"},
-    "run": {"max_concurrent"},
+    "run": {"max_concurrent", "allowed_domains"},
 }
 UNLIMITED = "unlimited"
 
@@ -104,6 +117,8 @@ def _coerce(role: str, key: str, value: Any) -> Any:
         raise AgentConfigError(f"unknown setting {role}.{key} (known: {', '.join(sorted(ROLE_KEYS.get(role, ())) or '-')})")
     if key == "escalate" and isinstance(value, str) and value.strip().lower() in ("none", "off"):
         value = []  # an explicit "no escalation", so it can switch off a list saved in a lower layer
+    if key == "allowed_domains" and isinstance(value, str) and value.strip().lower() in ("none", "off", "[]", ""):
+        value = []  # no network for sandboxed commands
     if isinstance(value, str) and value.lower() in ("null", "none", "default"):
         value = None
     if key in ("ask", "enabled"):
@@ -121,6 +136,14 @@ def _coerce(role: str, key: str, value: Any) -> Any:
             value = [] if value.strip().lower() in ("", "off", "[]") else [m.strip() for m in value.split(",")]
         if not isinstance(value, list) or any(not isinstance(m, str) or not m or not _valid_model(m, allow_inherit=False) for m in value):
             raise AgentConfigError(f"{role}.escalate must be a comma-separated list of models ({', '.join(MODELS)} or claude-* IDs), or none")
+        return value
+    if key == "allowed_domains":
+        if value is None:
+            return None
+        if isinstance(value, str):
+            value = [d.strip() for d in value.split(",")]
+        if not isinstance(value, list) or any(not isinstance(d, str) or not _DOMAIN.match(d) for d in value):
+            raise AgentConfigError(f"{role}.allowed_domains must be a comma-separated list of host names (e.g. pypi.org,*.github.com), or none")
         return value
     if key == "max_concurrent":
         if value is None or value == UNLIMITED:
@@ -189,6 +212,8 @@ def resolve(project_dir: Path, overrides: Optional[List[str]] = None) -> Dict[st
             if roles[role][key] is None:
                 roles[role][key] = roles["implementer"][key]
                 sources[f"{role}.{key}"] = f"implementer ({sources['implementer.' + key]})"
+    if roles["run"]["allowed_domains"] is None:
+        roles["run"]["allowed_domains"] = list(DEFAULT_ALLOWED_DOMAINS)
     if roles["run"]["max_concurrent"] == UNLIMITED:
         roles["run"]["max_concurrent"] = None
     return {"roles": roles, "sources": sources}

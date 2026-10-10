@@ -252,3 +252,21 @@ def test_sync_writes_a_resolver_but_no_orchestrator_type(home):
     resolver = frontmatter(home / ".claude/agents/ck-resolver.md")
     assert (resolver["model"], resolver["effort"]) == ("opus", "high")
     assert not (home / ".claude/agents/ck-orchestrator.md").exists()  # without workflows the main session orchestrates
+
+
+def test_run_allowed_domains_default_and_settable(home):
+    default = roles(home)["roles"]["run"]["allowed_domains"]
+    assert default == ["pypi.org", "files.pythonhosted.org", "registry.npmjs.org", "github.com",
+                       "codeload.github.com", "objects.githubusercontent.com"]
+    assert "pypi.org" in ck(home, "agents").output
+    assert ck(home, "agents", "set", "run.allowed_domains", "example.com, *.example.org").exit_code == 0
+    assert roles(home)["roles"]["run"]["allowed_domains"] == ["example.com", "*.example.org"]
+    assert roles(home, "--override", "run.allowed_domains=none")["roles"]["run"]["allowed_domains"] == []
+    assert ck(home, "agents", "set", "run.allowed_domains", "default").exit_code == 0
+    assert roles(home)["roles"]["run"]["allowed_domains"] == default
+
+
+@pytest.mark.parametrize("value", ["bad domain", "https://pypi.org", "a,,b"])
+def test_run_allowed_domains_rejects_non_hostnames(home, value):
+    out = ck(home, "agents", "set", "run.allowed_domains", value)
+    assert out.exit_code == 2 and "run.allowed_domains" in out.output
