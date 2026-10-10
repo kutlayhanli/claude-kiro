@@ -26,7 +26,7 @@ The minimum is configurable: `ck agents set planning.min_model <model>`, `ck age
 `/spec:plan` is where we decide. This command turns those decisions into a spec without another round of questions. It runs the `spec-create` workflow, which:
 
 1. writes `requirements.md` (EARS criteria, numbered for traceability),
-2. in parallel, writes `design.md` grounded in the real codebase and `test-plan.md`. The test plan is integration-first: it tests real boundaries (database, filesystem, HTTP, CLI) and never sees the design, so the tests stay an independent check,
+2. in parallel, writes `design.md` grounded in the real codebase and `test-plan.md`. The test plan is integration-first: it tests real boundaries (database, filesystem, HTTP, CLI) and never sees the design, so the tests stay an independent check. Its required ## Properties section turns every universally quantified criterion (any, every, only, never, SHALL NOT) into a property test over all the input's surface forms and its negative space, against a pure decision seam,
 3. in parallel, writes an implementation track and a test track of tasks, then links them into `tasks.md`. Each impl task is **Verified by** test tasks that run first, and each task starts as soon as its own dependencies merge (no waves),
 4. runs an **adversarial review**: four reviewers attack the spec (plan fidelity, codebase grounding, implementability, test adequacy), and a separate skeptic tries to refute each finding,
 5. applies the findings that survive, and writes `review.md`.
@@ -88,7 +88,7 @@ When the workflow returns:
 
    requirements.md: [one-line summary]
    design.md:       [one-line summary]
-   test-plan.md:    [N cases: X integration, Y e2e, Z unit/property; infrastructure to build]
+   test-plan.md:    [N cases: X integration, Y e2e, Z unit; P properties (P-1..P-n), library; infrastructure to build]
    tasks.md:        [N tasks (T test, I impl); critical path length]
 
    Adversarial review: [N] fixed, [M] refuted, [K] need your decision

@@ -128,12 +128,14 @@ The hooks provide spec context and enforce the definition of done:
 - **When editing spec files:** Shows which task you're implementing
 - **When editing new files:** Suggests creating a spec first
 - **Verification gate (Stop hook):** When a task is marked Done, runs `ck gate`: acceptance boxes, the verify commands in `specs/ck.json`, the task's `**Verify:**` commands, the tests that verify it, and a check that no existing test was weakened. A failing Done claim blocks Claude from finishing; moving the task back to In Progress is always allowed.
-- **Test-tamper guard (PreToolUse hook):** Asks you before Claude removes tests or assertions, adds skip/xfail/only markers, deletes test files, or edits `requirements.md` once implementation has started. Set `"guard"` in `specs/ck.json` to `ask`, `deny`, or `off`.
+- **Test-tamper guard (PreToolUse hook):** Asks you before Claude removes tests or assertions, adds skip/xfail/only markers, drops a property from a `PROPERTIES` map or lowers its example count, deletes test files, or edits `requirements.md` once implementation has started. Set `"guard"` in `specs/ck.json` to `ask`, `deny`, or `off`.
 - **Smart caching:** Shows messages only once per file per session (no spam!)
 
 ### Testing model
 
 `/spec:create` writes a `test-plan.md` in parallel with the design, from the requirements and the codebase's real boundaries, never from the design. It is integration-first: anything touching I/O, persistence, network, or several components gets a test against the real boundary, and unit tests are reserved for pure logic. Tasks come in two tracks. **Test** tasks write those tests first; **impl** tasks are **Verified by** them and are Done only when they pass.
+
+The test plan has a required **Properties** section. Every universally quantified criterion ("any", "every", "only", "never", SHALL NOT) becomes a row `P-n | requirement | "for any X ..." | generator domain | expected decision`. The generator domain enumerates every surface form of the input (for an amount: `$x`, `x USD`, `x to y`, `x-y`, checking both ends of a range). Allowlists draw negatives from values that exist in the data but are not permitted. Every "only"/"never" clause gets its complement, and where there is no oracle a metamorphic relation stands in (adding an unquoted amount can only move pass to held). Properties use the language's property-testing library (Hypothesis, fast-check, ...) with deterministic settings, or table-driven tests where there is none. Safety properties call a pure decision seam (`decide(inputs) -> decision`) that the design must expose, so they run before any server exists. Each property test file maps properties to tests in a `PROPERTIES = {"P-3": "test_name"}` map, and `ck gate` reports any P-n no map claims: a warning by default, a failure with `"properties": "required"` in `specs/ck.json`. Each story with a SHALL NOT also gets a red-team test task that tries to break it from the requirements alone.
 
 ## How It Works
 

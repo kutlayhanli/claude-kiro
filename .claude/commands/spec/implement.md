@@ -105,6 +105,8 @@ Every task in `tasks.md` has a **Track**:
 1. Build what the test plan's **Test Infrastructure** calls for if your task owns it: fixtures, temp databases or containers, a server or CLI harness, factories.
 2. Write the test cases listed in your task (TC IDs) **against real boundaries**: the real CLI entry point, a real HTTP test client, a real database (in-memory or temp), real temp directories, real subprocesses. Mock only things the project doesn't own (third-party APIs, clocks, randomness). Never mock the project's own modules, database, or filesystem in an integration test.
 3. Target public interfaces from `design.md` and the requirements, not private helpers, so the tests survive refactoring.
+   - **Property tests** (your task lists **Properties:** P-n): write each P-n row of `test-plan.md`'s ## Properties section with the library and deterministic settings it names (derandomized or seeded, bounded examples, no example database). Generators cover every surface form and every negative the row lists. Call the decision seam the test plan names, not a server. Declare a module-level `PROPERTIES = {"P-3": "test_name", ...}` map in the test file (JS/TS: `export const PROPERTIES = {...}`); `ck gate` checks every P-n appears in one.
+   - **Red-team tasks:** from the requirements only, try to break each SHALL NOT clause with adversarial inputs (unusual surface forms, near-miss values from the real data, the system's own output fed back in). Every break you find becomes a test.
 4. Run your **Verify:** command. Before the implementation exists, the tests should **fail for the right reason** (missing behavior, a missing command or endpoint), not because of a syntax error, a broken fixture, or a typo. Fix the test code until that's true.
 5. Mark Done. The gate checks that your test files exist and contain test cases. It requires them to pass only once the impl tasks they verify are Done.
 
@@ -113,7 +115,8 @@ Every task in `tasks.md` has a **Track**:
 1. Implement as specified in `design.md`: file paths, interfaces, error handling.
 2. Run the verifying tests (the **Verify:** commands of the tasks under **Verified by:**) and your own **Verify:** command. Iterate until they pass.
 3. Add unit tests only for pure logic you introduce, if useful. The integration tests from the test track are the real check.
-4. **Tests and requirements are not yours to change.** A guard asks me before any edit that deletes tests, removes assertions, adds skip/xfail/only markers, or edits `requirements.md` mid-implementation. If a test seems wrong or contradicts the spec, **stop and tell me**: quote the test, the requirement, and what you think is wrong. Don't edit the test to get a pass, and don't change the code to match a wrong test.
+4. **Property failures.** When a property test fails, the library prints a shrunk (minimal) counterexample. Fix the code if the counterexample shows a real bug, which is the usual case. If you believe the property itself or the spec is wrong, stop and report: the property ID, the shrunk counterexample verbatim, what the code decides for it, and your question for me: fix the code, the spec, or the property? **Never silently edit a property**: changing its generators, narrowing its domain, lowering its example count, or dropping it from a PROPERTIES map is weakening a test.
+5. **Tests and requirements are not yours to change.** A guard asks me before any edit that deletes tests, removes assertions, adds skip/xfail/only markers, drops a property from a PROPERTIES map, lowers a property example count, or edits `requirements.md` mid-implementation. If a test seems wrong or contradicts the spec, **stop and tell me**: quote the test, the requirement, and what you think is wrong. Don't edit the test to get a pass, and don't change the code to match a wrong test.
 
 ## Granular Commits
 
@@ -132,7 +135,7 @@ Commit after each meaningful milestone, prefixed with `task [N]:` so commits sta
    ```bash
    ck gate [spec-name] --task [N]
    ```
-   It checks your acceptance boxes, runs the project verify commands (`specs/ck.json`), your task's **Verify:** commands, and (for impl tasks) the verifying test tasks' commands. It also confirms no existing test was deleted or weakened on this branch.
+   It checks your acceptance boxes, runs the project verify commands (`specs/ck.json`), your task's **Verify:** commands, and (for impl tasks) the verifying test tasks' commands. It also confirms no existing test was deleted or weakened on this branch, and that the properties your task lists (and, for the whole spec, every P-n in `test-plan.md`) appear in a test file's PROPERTIES map: a warning, or a failure when `specs/ck.json` sets `"properties": "required"`.
 3. **Pass:** set `**Status:** Done`, update TodoWrite, and commit: `git commit -m "task [N]: complete - <summary>"`.
 4. **Fail:** fix the cause and re-run. If you can't make it pass without weakening a test or changing a requirement, leave the task In Progress and tell me what's blocking it. Stopping with a task In Progress is always fine; claiming Done on a red gate is not.
 

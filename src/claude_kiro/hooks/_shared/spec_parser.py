@@ -208,6 +208,7 @@ class SpecTask:
     dependencies: List[str] = field(default_factory=list)  # **Dependencies:** Task 1, Task 3
     dependency_reasons: dict = field(default_factory=dict)  # {"1": "uses its API", "3": None}
     acceptance: List[Tuple[bool, str]] = field(default_factory=list)
+    properties: List[str] = field(default_factory=list)  # **Properties:** P-1, P-2 (test tasks)
 
     @property
     def done(self) -> bool:
@@ -303,6 +304,7 @@ def parse_tasks(task_file_path: Path) -> List[SpecTask]:
         dep_items = _ref_items(_field(block, "Dependencies"))
         task.dependencies = [num for num, _ in dep_items]
         task.dependency_reasons = dict(dep_items)
+        task.properties = list(dict.fromkeys(re.findall(r"\bP-\d+\b", _field(block, "Properties") or "")))
         task.acceptance = [
             (mark.lower() == "x", text.strip())
             for mark, text in re.findall(r"^\s*- \[([ xX])\]\s*(.+)$", block, re.MULTILINE)

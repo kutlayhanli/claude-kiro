@@ -10,6 +10,8 @@ import re
 from pathlib import PurePosixPath
 from typing import Any, Dict, List, NamedTuple
 
+from claude_kiro.properties import map_ids
+
 TEST_DEF = re.compile(
     r"^\s*(?:async\s+)?def\s+test\w*\s*\("  # pytest / unittest
     r"|^\s*(?:it|test|specify)(?:\.each\s*\(.*?\))?\s*\("  # jest / vitest / mocha
@@ -45,6 +47,17 @@ SKIP_MARKER = re.compile(
 )
 
 
+# Property-test example budgets (Hypothesis max_examples, fast-check numRuns).
+EXAMPLE_BUDGET = re.compile(r"\b(max_examples|numRuns)\b\s*[=:]\s*(\d+)")
+
+
+def _budgets(text: str) -> Dict[str, int]:
+    budgets: Dict[str, int] = {}
+    for name, value in EXAMPLE_BUDGET.findall(text):
+        budgets[name] = max(budgets.get(name, 0), int(value))
+    return budgets
+
+
 class TestMetrics(NamedTuple):
     tests: int
     assertions: int
@@ -69,6 +82,15 @@ def weakening(old: str, new: str) -> List[str]:
         reasons.append(f"removes {before.assertions - after.assertions} assertion(s)")
     if after.skips > before.skips:
         reasons.append(f"adds {after.skips - before.skips} skip/xfail/only marker(s)")
+    dropped = sorted(map_ids(old) - map_ids(new), key=lambda p: int(p[2:]))
+    if dropped and "PROPERTIES" in new:
+        reasons.append(f"drops property {', '.join(dropped)} from PROPERTIES")
+    elif dropped:
+        reasons.append(f"drops property {', '.join(dropped)} (PROPERTIES map removed)")
+    old_budget, new_budget = _budgets(old), _budgets(new)
+    for name, value in old_budget.items():
+        if name in new_budget and new_budget[name] < value:
+            reasons.append(f"lowers {name} from {value} to {new_budget[name]}")
     return reasons
 
 

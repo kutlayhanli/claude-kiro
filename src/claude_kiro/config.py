@@ -28,6 +28,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # Command that fails when any test file cannot be collected/imported.
     # null = derived from a pytest command in `verify`; "" disables the check.
     "collect": None,
+    # Properties coverage: every P-n in a spec's test-plan.md ## Properties
+    # section must be a key of some test file's PROPERTIES map.
+    # "warn": report missing ones; "required": fail the gate; "off": skip.
+    "properties": "warn",
     # Seconds allowed per verify command.
     "verify_timeout": 540,
     # Dependency install step for fresh worktrees (`ck worktree create --install`).
