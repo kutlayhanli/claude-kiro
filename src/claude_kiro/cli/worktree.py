@@ -264,6 +264,101 @@ def merge_cmd(spec, tasks, into, keep, as_json):
     _emit(outcomes, as_json, bad_states=("CONFLICT", "ERROR", "BUSY"))
 
 
+def _gate_fn(spec: str):
+    """Run the task gate in-process in the target checkout: (green, failing part of the report)."""
+    from ..gate import run_gate
+
+    def gate(target: Path, nums):
+        spec_dir = next((r / spec for r in spec_roots(target) if (r / spec / "tasks.md").exists()), None)
+        if spec_dir is None:
+            return False, f"no tasks.md for {spec} in {target}"
+        result = run_gate(target, spec_dir, list(nums))
+        if result.ok:
+            return True, ""
+        lines = []
+        for check in result.checks:
+            if not check.ok:
+                lines.append(f"✗ {check.name}")
+                lines.extend(f"    {line}" for line in check.detail.rstrip().splitlines())
+        return False, "\n".join(lines[-80:])
+
+    return gate
+
+
+def _priority(target: Path, spec: str) -> dict:
+    """Longest remaining dependency chain per task, from tasks.md on the target (critical path lands first)."""
+    from ..waves import plan_waves
+
+    for r in spec_roots(target):
+        if (r / spec / "tasks.md").exists():
+            try:
+                plan = plan_waves(r / spec)
+                return _chain_lengths(plan["deps"], set(plan["done"]))
+            except Exception:  # an unparsable plan only loses the ordering
+                return {}
+    return {}
+
+
+@worktree.command("land")
+@click.argument("spec")
+@click.argument("tasks", nargs=-1, required=True)
+@click.option("--into", help="Target branch (default: the main checkout's branch)")
+@click.option("--gate", "do_gate", is_flag=True, help="Gate the batch (ck gate --task for every landed task) and bisect a red batch")
+@click.option("--install", "do_install", is_flag=True, help="Refresh dependencies in the target (specs/ck.json \"install\", or detected) before each gate")
+@click.option("--release", "release_claims", is_flag=True, help="Release claims left on the task worktrees (their agents have finished)")
+@click.option("--keep", is_flag=True, help="Keep merged tasks' worktrees and branches")
+@click.option("--json", "as_json", is_flag=True)
+def land_cmd(spec, tasks, into, do_gate, do_install, release_claims, keep, as_json):
+    """Land a batch of TASKS on the target: precheck, merge, one gate, bisect if red.
+
+    \b
+    Each branch is checked with `git merge-tree` first, so a CONFLICT never touches
+    the target; a branch that only conflicts with an earlier one in the batch is
+    DEFERRED to the next batch. The clean ones merge (--no-ff, critical path first)
+    and, with --gate, are gated together. A red batch is bisected by halving:
+    the target is reset to its pre-batch commit and the halves re-landed until the
+    culprits are found. Culprits are RED and stay off the target (branch kept).
+    Exit codes: 0 ok, 1 a task RED, 2 a CONFLICT, 3 busy/missing/failed.
+    """
+    root = _root()
+    name = _spec_name(spec)
+    try:
+        target_branch = into or wt.current_branch(root)
+        target = wt.checkout_of(root, target_branch)
+        result = wt.land(
+            root,
+            name,
+            list(tasks),
+            into=target_branch,
+            gate=_gate_fn(name) if do_gate else None,
+            install=install_command(load_config(target or root), target or root) if do_install else None,
+            keep=keep,
+            release_claims=release_claims,
+            priority=_priority(target, name) if target else {},
+        )
+    except wt.WorktreeError as e:
+        if as_json:
+            click.echo(json.dumps({"error": str(e), "tasks": []}, indent=2))
+        else:
+            click.echo(f"❌ {e}")
+        sys.exit(3)
+    if as_json:
+        click.echo(json.dumps(result, indent=2))
+    else:
+        for item in result["tasks"]:
+            click.echo(wt.Landed(**item).line())
+        gates = result["gates"]
+        if gates:
+            click.echo(f"{len(gates)} gate run(s){' (bisected)' if result['bisected'] else ''}")
+    states = {t["state"] for t in result["tasks"]}
+    if states & {"BUSY", "ERROR", "MISSING"}:
+        sys.exit(3)
+    if "CONFLICT" in states:
+        sys.exit(2)
+    if "RED" in states:
+        sys.exit(1)
+
+
 @worktree.command("status")
 @click.argument("spec")
 @click.option("--json", "as_json", is_flag=True)

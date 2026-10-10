@@ -10,9 +10,11 @@ const SCRIPT = path.join(here, '../../src/claude_kiro/resources/templates/workfl
 const baseArgs = { spec: 'demo', root: '/repo', into: 'integrate/demo', targetDir: '/repo/.claude/worktrees/demo-integration' }
 
 // A fake project: `ck plan` semantics over deps/done, task durations, failures, timestamps.
-function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [] }) {
+function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [] }) {
   let rechecksLeftRed = recheckRed
-  const state = { deps: { ...deps }, done: new Set(done), events: [], prompts: {}, opts: {}, reviewCount: {}, attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0 }
+  // RED landings left per task: checkRed tasks are red on their first landing, redLands sets a count.
+  const redLeft = { ...Object.fromEntries(checkRed.map(n => [n, 1])), ...redLands }
+  const state = { deps: { ...deps }, done: new Set(done), events: [], prompts: {}, opts: {}, reviewCount: {}, attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0, landings: [], resolved: new Set() }
   let clock = Date.parse('2026-10-04T10:00:00Z')
   const stamp = () => new Date((clock += 60000)).toISOString().replace('.000', '')
   const ready = exclude =>
@@ -53,16 +55,37 @@ function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFir
       const pass = state.attempts[n] > (failUntil[n] || 0)
       return { task: n, status: pass ? 'done' : 'in_progress', gatePassed: pass, summary: `attempt ${state.attempts[n]}`, commits: 'abc123', startedAt, finishedAt: stamp() }
     }
-    if (l.startsWith('merge') || l.startsWith('resolve')) {
-      const n = l.match(/(?:merge|resolve) (\d+)/)[1]
-      if (l.startsWith('merge') && conflicts.includes(n)) return { merged: false, conflict: true, conflicts: 'specs/demo/tasks.md' }
+    if (l.startsWith('land ')) {
+      // `ck worktree land`: precheck (conflicts, pairwise deferral), one gate, bisect a red batch.
+      const tasks = l.slice(5).split(' ')
+      state.landings.push(tasks)
       state.merging++
       state.maxMerging = Math.max(state.maxMerging, state.merging)
-      await sleep(mergeDurations[n] ?? 2)
+      const startedAt = stamp()
+      await sleep(Math.max(...tasks.map(n => mergeDurations[n] ?? 2)))
       state.merging--
       state.events.push(`${l} end`)
-      state.done.add(n)
-      return { merged: true, checkGreen: !checkRed.includes(n), checkTail: checkRed.includes(n) ? 'red' : '', mergedAt: stamp() }
+      const out = []
+      const landing = []
+      for (const n of tasks) {
+        if (conflicts.includes(n) && !state.resolved.has(n)) { out.push({ task: n, state: 'CONFLICT', files: ['specs/demo/tasks.md'] }); continue }
+        const mate = pairConflicts.find(([a, b]) => b === n && landing.includes(a))
+        if (mate) { out.push({ task: n, state: 'DEFERRED', detail: `conflicts with Task ${mate[0]} in this batch`, files: ['x.py'] }); continue }
+        landing.push(n)
+      }
+      const red = landing.filter(n => (redLeft[n] || 0) > 0)
+      const gates = landing.length ? [{ tasks: landing, green: !red.length }] : []
+      if (red.length && landing.length > 1) gates.push({ tasks: landing.slice(0, 1), green: true })
+      for (const n of landing) {
+        if (red.includes(n)) { redLeft[n]--; out.push({ task: n, state: 'RED', checkGreen: false, checkTail: `red: task ${n}` }) }
+        else { state.done.add(n); out.push({ task: n, state: 'MERGED', checkGreen: true, mergedAt: stamp() }) }
+      }
+      return { tasks: out, gates, bisected: gates.length > 1, startedAt, finishedAt: stamp() }
+    }
+    if (l.startsWith('resolve')) {
+      const n = l.match(/resolve (\d+)/)[1]
+      state.resolved.add(n)
+      return { resolved: true, conflicts: 'specs/demo/tasks.md: kept both task sections' }
     }
     if (l.startsWith('review')) {
       const n = l.match(/review (\d+)/)[1]
@@ -85,6 +108,8 @@ async function test(name, fn) {
   try { await fn(); console.log('ok  ', name) } catch (e) { console.log('FAIL', name); console.log(e); process.exitCode = 1 }
 }
 const idx = (s, l) => s.events.indexOf(l)
+// Label of the first landing that included task n (or its end event).
+const landOf = (s, n, end = false) => s.events.find(e => e.startsWith('land ') && e.endsWith(' end') === end && e.replace(/ end$/, '').slice(5).split(' ').includes(n))
 
 await test('no wave barrier: a task starts as soon as its own dependencies merge', async () => {
   // 1 -> {2 (fast), 3 (slow)}; 4 needs only 2. Waves would hold 4 until 3 finished.
@@ -149,7 +174,7 @@ await test('halt: a failure stops new launches, running tasks still finish and m
   const p = project({ deps: { 1: [], 2: ['1'], 3: ['1'], 4: ['2'] }, failUntil: { 3: 99 }, durations: { 2: 30, 3: 5 } })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, onFailure: 'halt', maxRetries: 0 } })
   assert.equal(result.halted, true)
-  assert.ok(p.state.events.includes('merge 2'), 'task 2 was running and still merged')
+  assert.ok(landOf(p.state, '2'), 'task 2 was running and still merged')
   assert.ok(!p.state.events.includes('task 4'))
   assert.match(result.reason, /Task 3 failed/)
 })
@@ -163,18 +188,29 @@ await test('an attempt with no commits (answered a chat message) is retried with
   assert.match(p.state.prompts['task 1 retry 1'], /^MANDATE/)
 })
 
-await test('per-merge check: red after a merge gets one fix, then continues', async () => {
+await test('per-landing check: a task red on landing stays off the target, gets one fix, then lands', async () => {
   const p = project({ deps: { 1: [], 2: ['1'] }, checkRed: ['1'] })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: baseArgs })
-  assert.ok(p.state.events.some(e => e.startsWith('fix 1')))
+  assert.ok(p.state.events.includes('fix 1 (Task 1 red on landing)'))
+  assert.match(p.state.prompts['fix 1 (Task 1 red on landing)'], /red: task 1/)
+  assert.match(p.state.prompts['fix 1 (Task 1 red on landing)'], /Work only in the task worktree \/repo\/\.claude\/worktrees\/demo-task-1/)
+  assert.deepEqual(p.state.landings, [['1'], ['1'], ['2']])
   assert.deepEqual(result.merged.sort(), ['1', '2'])
   assert.equal(result.tasks.find(t => t.task === '1').fixedAfterMerge, true)
+  assert.equal(result.targetGreen, true)
 })
+
+const QUEUED_FULL = { deps: { 1: [], 2: [], 3: [], 4: [] }, durations: { 1: 2, 2: 10, 3: 10, 4: 10 }, mergeDurations: { 1: 60 } }
 
 await test('full gate every N merges; red full gate after a failed fix halts', async () => {
   const p = project({ deps: { 1: [], 2: [], 3: [], 4: ['1'] } })
-  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, fullGateEvery: 2 } })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, fullGateEvery: 2, mergeBatch: 1 } })
   assert.deepEqual(result.fullGates.map(g => g.afterMerges), [2, 4])
+  // With batches, the full gate runs after the landing that crosses each multiple of N.
+  const b = project({ ...QUEUED_FULL })
+  const rb = await runWorkflow(SCRIPT, { agent: b.agent, args: { ...baseArgs, fullGateEvery: 2 } })
+  assert.deepEqual(b.state.landings, [['1'], ['2', '3', '4']])
+  assert.deepEqual(rb.result.fullGates.map(g => g.afterMerges), [4])
 
   const q = project({ deps: { 1: [], 2: [], 3: ['1', '2'] }, fullRed: true })
   const agent = async (prompt, opts) => (opts.label.startsWith('re-check') ? { green: false } : q.agent(prompt, opts))
@@ -205,7 +241,7 @@ await test('a task in review or waiting to merge does not hold a slot', async ()
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxConcurrent: 1, agents: REVIEW_ON } })
   assert.deepEqual(result.merged.sort(), ['1', '2', '3'])
   assert.equal(p.state.maxRunning, 1, 'still one implementing agent at a time')
-  assert.ok(idx(p.state, 'task 2') < idx(p.state, 'merge 1 end'), 'task 2 started while task 1 waited to merge')
+  assert.ok(idx(p.state, 'task 2') < idx(p.state, landOf(p.state, '1', true)), 'task 2 started while task 1 waited to merge')
   assert.ok(idx(p.state, 'task 3') < idx(p.state, 'review 2 end'), 'task 3 started while task 2 was in review')
 })
 
@@ -238,15 +274,15 @@ await test('model and effort: unset means task agents inherit the session', asyn
 await test('model and effort: applied to task, retry and fix agents only', async () => {
   const p = project({ deps: { 1: [] }, failUntil: { 1: 1 }, checkRed: ['1'] })
   const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, model: 'sonnet', effort: 'medium' } })
-  for (const l of ['task 1', 'task 1 retry 1', 'fix 1 (after merging Task 1)']) {
+  for (const l of ['task 1', 'task 1 retry 1', 'fix 1 (Task 1 red on landing)']) {
     assert.equal(p.state.opts[l].model, 'sonnet', l)
     assert.equal(p.state.opts[l].effort, 'medium', l)
   }
-  for (const l of ['plan 1', 'merge 1']) {
+  for (const l of ['plan 1', 'land 1']) {
     assert.equal('model' in p.state.opts[l], false, l)
     assert.equal(p.state.opts[l].effort, 'low', l)
   }
-  assert.equal('model' in p.state.opts['re-check 1'], false)
+  assert.equal('model' in p.state.opts['final gate'], false)
   assert.deepEqual(result.taskAgents, { model: 'sonnet', effort: 'medium' })
   assert.ok(logs.some(m => m.includes('impl sonnet/medium')))
 })
@@ -262,7 +298,7 @@ await test('model and effort: unknown values are refused before any agent runs',
 await test('every gate-running prompt tells the agent to wait for the real exit code', async () => {
   const p = project({ deps: { 1: [] }, failUntil: { 1: 1 }, checkRed: ['1'] })
   await runWorkflow(SCRIPT, { agent: p.agent, args: baseArgs })
-  for (const l of ['task 1', 'task 1 retry 1', 'merge 1', 'fix 1 (after merging Task 1)', 're-check 1', 'final gate']) {
+  for (const l of ['task 1', 'task 1 retry 1', 'land 1', 'fix 1 (Task 1 red on landing)', 'final gate']) {
     assert.ok(p.state.prompts[l], `no prompt for ${l}`)
     assert.match(p.state.prompts[l], /A slow gate is not a failed gate/, l)
   }
@@ -283,7 +319,7 @@ await test('roles: impl tasks use the implementer, test tasks the test writer, f
   await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, tracks: { 1: 'test', 2: 'impl' }, agents: ROLES } })
   assert.deepEqual([p.state.opts['task 1 [test]'].model, p.state.opts['task 1 [test]'].effort], ['opus', 'high'])
   assert.deepEqual([p.state.opts['task 2'].model, p.state.opts['task 2'].effort], ['sonnet', 'medium'])
-  assert.deepEqual([p.state.opts['fix 1 (after merging Task 2)'].model, p.state.opts['fix 1 (after merging Task 2)'].effort], ['sonnet', 'medium'])
+  assert.deepEqual([p.state.opts['fix 1 (Task 2 red on landing)'].model, p.state.opts['fix 1 (Task 2 red on landing)'].effort], ['sonnet', 'medium'])
 })
 
 await test('reviewer: approves, then the task merges; review runs at the reviewer settings', async () => {
@@ -291,7 +327,7 @@ await test('reviewer: approves, then the task merges; review runs at the reviewe
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })
   assert.deepEqual(result.merged, ['1'])
   assert.deepEqual([p.state.opts['review 1'].model, p.state.opts['review 1'].effort], ['opus', 'high'])
-  assert.ok(idx(p.state, 'review 1') < idx(p.state, 'merge 1'))
+  assert.ok(idx(p.state, 'review 1') < idx(p.state, 'land 1'))
   assert.equal(result.tasks[0].review.verdict, 'approve')
   assert.match(p.state.prompts['review 1'], /diff integrate\/demo\.\.\.feat\/demo-task-1/)
 })
@@ -303,7 +339,7 @@ await test('reviewer: blocking findings send the task back once, then it merges'
   assert.ok(p.state.events.includes('task 1 revise 1'))
   assert.match(p.state.prompts['task 1 revise 1'], /contradicts design\.md/)
   assert.equal(p.state.opts['task 1 revise 1'].model, 'sonnet')
-  assert.ok(idx(p.state, 'review 1 round 2') < idx(p.state, 'merge 1'))
+  assert.ok(idx(p.state, 'review 1 round 2') < idx(p.state, 'land 1'))
   assert.deepEqual([result.tasks[0].review.verdict, result.tasks[0].review.rounds], ['approve', 1])
 })
 
@@ -312,7 +348,7 @@ await test('reviewer: findings that survive the revisions fail the task and noth
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })
   assert.deepEqual(result.merged, [])
   assert.match(result.failed[0].reason, /review: blocking findings remain after 1 revision/)
-  assert.ok(!p.state.events.includes('merge 1'))
+  assert.ok(!landOf(p.state, '1'))
   assert.ok(!p.state.events.includes('task 2'))  // its dependent never starts
 })
 
@@ -385,13 +421,21 @@ await test('escalation: blocking review findings that survive the rounds get a r
   assert.equal(result.tasks[0].review.verdict, 'approve')
 })
 
-await test('escalation: a red branch the fixer could not repair gets a fix on the next model', async () => {
-  const p = project({ deps: { 1: [] }, checkRed: ['1'], recheckRed: 1 })
+await test('escalation: a task still red on landing after the fix gets a fix on the next model', async () => {
+  const p = project({ deps: { 1: [] }, redLands: { 1: 2 } })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: HAIKU(['opus'], { reviewer: { enabled: false } }) } })
   assert.deepEqual(modelsOf(p.state, 'fix'), ['haiku', 'opus'])
   assert.equal(result.targetGreen, true)
   assert.deepEqual(result.merged, ['1'])
-  assert.deepEqual(result.fixerEscalations, [{ what: 'after merging Task 1', model: 'opus', green: true }])
+  assert.deepEqual(result.fixerEscalations, [{ what: 'landing Task 1', model: 'opus', green: true }])
+})
+
+await test('escalation: a red full gate the fixer could not repair gets a fix on the next model', async () => {
+  const p = project({ deps: { 1: [] }, fullRed: true, recheckRed: 1 })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, fullGateEvery: 1, agents: HAIKU(['opus'], { reviewer: { enabled: false } }) } })
+  assert.deepEqual(modelsOf(p.state, 'fix'), ['haiku', 'opus'])
+  assert.equal(result.targetGreen, true)
+  assert.deepEqual(result.fixerEscalations, [{ what: 'full gate after 1 merges', model: 'opus', green: true }])
 })
 
 await test('handoff: agents leave a note on failure and every retry or revision reads it first', async () => {
@@ -408,7 +452,7 @@ await test('handoff: agents leave a note on failure and every retry or revision 
 await test('agents run ck with -C <dir>, never cd', async () => {
   const p = project({ deps: { 1: [] } })
   await runWorkflow(SCRIPT, { agent: p.agent, args: baseArgs })
-  for (const l of ['plan 1', 'task 1', 'merge 1']) {
+  for (const l of ['plan 1', 'task 1', 'land 1']) {
     assert.match(p.state.prompts[l], /ck -C /, l)
     assert.doesNotMatch(p.state.prompts[l], /\bcd \/[^ ]+ &&/, l)  // a real cd into a path, not the rule's own wording
   }
@@ -416,17 +460,19 @@ await test('agents run ck with -C <dir>, never cd', async () => {
 
 await test('escalation: a role never escalates to a model that is not above its own', async () => {
   // The fixer is Opus and follows the implementer's ladder (sonnet > opus): nothing is above Opus, so no fixer escalation.
-  const p = project({ deps: { 1: [] }, checkRed: ['1'], recheckRed: 5 })
+  const p = project({ deps: { 1: [] }, redLands: { 1: 5 } })
   const agents = { ...HAIKU(['sonnet', 'opus'], { reviewer: { enabled: false } }), fixer: { model: 'opus', effort: 'medium', escalate: null } }
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents } })
   assert.deepEqual(modelsOf(p.state, 'fix'), ['opus'])
   assert.deepEqual(result.fixerEscalations, [])
+  assert.match(result.failed[0].reason, /red on landing after 1 fix/)
+  assert.equal(result.targetGreen, true, 'the red task never landed')
 })
 
-await test('orchestrator: plan, merge, gate and re-check steps use the orchestrator role', async () => {
-  const p = project({ deps: { 1: [], 2: ['1'] }, checkRed: ['2'] })
-  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })
-  for (const l of ['plan 1', 'merge 1', 'merge 2', 're-check 1', 'final gate']) {
+await test('orchestrator: plan, landing, gate and re-check steps use the orchestrator role', async () => {
+  const p = project({ deps: { 1: [], 2: ['1'] }, fullRed: true })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, fullGateEvery: 1, agents: ROLES } })
+  for (const l of ['plan 1', 'land 1', 'full gate @1', 're-check 1']) {
     assert.deepEqual([p.state.opts[l].model, p.state.opts[l].effort], ['sonnet', 'low'], l)
   }
   assert.equal(result.agents.orchestrator, 'sonnet/low')
@@ -436,16 +482,83 @@ await test('orchestrator: without agents settings plan and merge stay at low eff
   const p = project({ deps: { 1: [] } })
   await runWorkflow(SCRIPT, { agent: p.agent, args: baseArgs })
   assert.deepEqual([p.state.opts['plan 1'].model, p.state.opts['plan 1'].effort], [undefined, 'low'])
-  assert.deepEqual([p.state.opts['merge 1'].model, p.state.opts['merge 1'].effort], [undefined, 'low'])
+  assert.deepEqual([p.state.opts['land 1'].model, p.state.opts['land 1'].effort], [undefined, 'low'])
   assert.equal('model' in p.state.opts['final gate'], false)
 })
 
-await test('resolver: a merge conflict goes to the resolver, which merges it', async () => {
+await test('resolver: a conflict goes to the resolver, then the task lands again', async () => {
   const p = project({ deps: { 1: [], 2: ['1'] }, conflicts: ['2'] })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })
-  assert.ok(idx(p.state, 'merge 2') < idx(p.state, 'resolve 2'))
+  assert.ok(idx(p.state, 'land 2') < idx(p.state, 'resolve 2'))
+  assert.deepEqual(p.state.landings, [['1'], ['2'], ['2']])
+  assert.match(p.state.prompts['resolve 2'], /Do NOT merge into integrate\/demo yourself/)
   assert.deepEqual([p.state.opts['resolve 2'].model, p.state.opts['resolve 2'].effort], ['opus', 'high'])
   assert.match(p.state.prompts['resolve 2'], /specs\/demo\/tasks\.md/)
   assert.deepEqual(result.merged.sort(), ['1', '2'])
   assert.ok(!p.state.events.includes('resolve 1'), 'no resolver without a conflict')
+})
+
+// --- batch landing -------------------------------------------------------------
+
+// Task 1 finishes first and its landing is slow; 2, 3 and 4 finish meanwhile and queue up.
+const QUEUED = { deps: { 1: [], 2: [], 3: [], 4: [] }, durations: { 1: 2, 2: 10, 3: 10, 4: 10 }, mergeDurations: { 1: 60 } }
+
+await test('landing: tasks waiting together land in one ck worktree land step', async () => {
+  const p = project(QUEUED)
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: baseArgs })
+  assert.deepEqual(p.state.landings, [['1'], ['2', '3', '4']])
+  assert.equal(p.state.maxMerging, 1, 'one landing at a time')
+  assert.match(p.state.prompts['land 2 3 4'], /ck -C \/repo worktree land demo 2 3 4 --into integrate\/demo --gate --install --release --json/)
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3', '4'])
+  assert.deepEqual(result.landings.map(l => l.size), [1, 3])
+  assert.equal(result.stats.landings, 2)
+  assert.ok(p.state.events.includes('final gate'))
+})
+
+await test('landing: a red batch is bisected by ck and only the culprit goes to the fixer', async () => {
+  const p = project({ ...QUEUED, checkRed: ['3'] })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: baseArgs })
+  const fixes = p.state.events.filter(e => e.startsWith('fix'))
+  assert.deepEqual(fixes, ['fix 1 (Task 3 red on landing)'])
+  assert.deepEqual(result.landings[1].red, ['3'])
+  assert.deepEqual(result.landings[1].merged, ['2', '4'])
+  assert.equal(result.landings[1].bisected, true)
+  assert.deepEqual(p.state.landings[2], ['3'], 'the fixed culprit lands again')
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3', '4'])
+  assert.equal(result.targetGreen, true)
+  assert.equal(result.stats.bisected, 1)
+})
+
+await test('landing: the batch window halves after a red batch and grows after a green one', async () => {
+  const deps = Object.fromEntries(['1', '2', '3', '4', '5', '6', '7'].map(n => [n, []]))
+  const durations = { 1: 2, 2: 10, 3: 10, 4: 10, 5: 10, 6: 10, 7: 10 }
+  const p = project({ deps, durations, mergeDurations: { 1: 60 }, checkRed: ['3'] })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, mergeBatch: 4 } })
+  assert.deepEqual(result.landings.map(l => l.window), [4, 4, 2, 3])
+  assert.deepEqual(result.landings.map(l => l.size), [1, 4, 2, 1])
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3', '4', '5', '6', '7'])
+})
+
+await test('landing: mergeBatch 1 lands one task per step', async () => {
+  const p = project(QUEUED)
+  await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, mergeBatch: 1 } })
+  assert.deepEqual(p.state.landings, [['1'], ['2'], ['3'], ['4']])
+})
+
+await test('landing: a task deferred for conflicting with a batch-mate lands first in the next batch', async () => {
+  const p = project({ ...QUEUED, pairConflicts: [['2', '3']] })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: baseArgs })
+  assert.deepEqual(result.landings[1].deferred, ['3'])
+  assert.deepEqual(p.state.landings[2], ['3'])
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3', '4'])
+  assert.ok(!p.state.events.some(e => e.startsWith('resolve')), 'a deferral is not a conflict')
+})
+
+await test('landing: a conflict in a batch goes to the resolver while the rest of the batch lands', async () => {
+  const p = project({ ...QUEUED, conflicts: ['3'], agents: ROLES })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })
+  assert.deepEqual(result.landings[1].conflict, ['3'])
+  assert.deepEqual(result.landings[1].merged, ['2', '4'])
+  assert.ok(p.state.events.includes('resolve 3'))
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3', '4'])
 })
