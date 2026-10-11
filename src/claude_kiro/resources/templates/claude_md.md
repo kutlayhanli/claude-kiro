@@ -19,10 +19,7 @@ This project follows spec-driven development:
 
 - `specs/` - Feature specifications (PLAN, requirements, design, test-plan, tasks, review)
 - `specs/ck.json` - Verify commands, test patterns, and guard settings for the verification gate
-- `.claude/workflows/spec-create.js` - Workflow run by /spec:create and /spec:review
-- `.claude/output-styles/` - Claude Code behavioral configuration
-- `.claude/commands/spec/` - Slash commands for spec workflow
-- `.claude/settings.local.json` - Hook configuration
+- `.claude/settings.json` - Enables the `spec@claude-kiro` plugin (the /spec:* commands, workflows, agents and hooks; `ck setup` installs it once per machine). Projects set up with `ck vendor` carry copies in `.claude/commands/spec/` and `.claude/workflows/` instead
 
 ## Quick Start
 
@@ -43,7 +40,7 @@ This project follows spec-driven development:
 ck gate [spec-name] --task [N]
 
 # Run tasks in parallel with worktree isolation
-/spawn-worktree [spec-directory-or-task-list]
+/spec:spawn-worktree [spec-directory-or-task-list]
 ```
 
 ## Conventions

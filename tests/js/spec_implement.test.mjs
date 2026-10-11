@@ -5,7 +5,7 @@ import path from 'node:path'
 import { runWorkflow, sleep } from './load_workflow.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
-const SCRIPT = path.join(here, '../../src/claude_kiro/resources/templates/workflows/spec_implement.js')
+const SCRIPT = path.join(here, '../../plugin/workflows/spec-implement.js')
 
 const baseArgs = { spec: 'demo', root: '/repo', into: 'integrate/demo', targetDir: '/repo/.claude/worktrees/demo-integration' }
 
@@ -671,4 +671,20 @@ await test('a long blocking finding reaches the reviser intact, and the failure 
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: { reviewer: { model: 'opus', effort: 'high', enabled: true, rounds: 1 } } } })
   assert.ok(p.state.prompts['task 1 revise 1'].includes('END-OF-FINDING'), 'revise prompt has the whole finding')
   assert.ok(result.failed[0].reason.includes('END-OF-FINDING'), 'failure reason has the whole finding')
+})
+
+await test('the brief path comes from args.brief (plugin), with the vendored path as fallback', async () => {
+  const brief = '/home/u/.claude/plugins/cache/claude-kiro/spec/0.9.0/resources/spec-implement-brief.md'
+  const p = project({ deps: { 1: [] } })
+  await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, brief } })
+  assert.ok(p.state.prompts['task 1'].includes(brief), 'task prompt points at the plugin brief')
+  assert.ok(!p.state.prompts['task 1'].includes('/repo/.claude/workflows/spec-implement-brief.md'))
+
+  const old = project({ deps: { 1: [] } })
+  await runWorkflow(SCRIPT, { agent: old.agent, args: baseArgs })
+  assert.ok(old.state.prompts['task 1'].includes('/repo/.claude/workflows/spec-implement-brief.md'), 'vendored fallback')
+
+  const rel = project({ deps: { 1: [] } })
+  await runWorkflow(SCRIPT, { agent: rel.agent, args: { ...baseArgs, brief: '.claude/workflows/spec-implement-brief.md' } })
+  assert.ok(rel.state.prompts['task 1'].includes('/repo/.claude/workflows/spec-implement-brief.md'), 'relative brief resolves against root')
 })

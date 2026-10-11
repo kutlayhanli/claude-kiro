@@ -1,0 +1,14 @@
+{
+  "name": "claude-kiro",
+  "owner": { "name": "Kutlay Hanli" },
+  "metadata": {
+    "description": "claude-kiro: spec-driven development for Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "spec",
+      "source": "./plugin",
+      "description": "Spec-driven development: plan, create, review and implement specs with gate-checked multi-agent workflows"
+    }
+  ]
+}

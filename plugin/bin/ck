@@ -1,0 +1,52 @@
+#!/bin/sh
+# claude-kiro plugin shim: run the installed `ck` CLI.
+# The plugin's bin/ is on the Bash tool's PATH (after the user's own entries),
+# and its hooks call this file, so it must never find itself: skip this
+# directory and any other copy of this shim (another plugin version).
+# CK_BIN overrides the lookup.
+MARK="claude-kiro plugin shim"
+self_dir=$(cd "$(dirname "$0")" 2>/dev/null && pwd -P)
+
+is_real_ck() {
+  [ -f "$1" ] && [ -x "$1" ] || return 1
+  grep -q "$MARK" "$1" 2>/dev/null && return 1
+  return 0
+}
+
+if [ -n "$CK_BIN" ] && is_real_ck "$CK_BIN"; then
+  exec "$CK_BIN" "$@"
+fi
+
+old_ifs=$IFS
+IFS=:
+for dir in $PATH; do
+  [ -n "$dir" ] || continue
+  [ "$(cd "$dir" 2>/dev/null && pwd -P)" = "$self_dir" ] && continue
+  if is_real_ck "$dir/ck"; then
+    IFS=$old_ifs
+    exec "$dir/ck" "$@"
+  fi
+done
+IFS=$old_ifs
+
+# Hooks run with a minimal PATH on some systems; uv installs tools here.
+for candidate in "$HOME/.local/bin/ck" "${XDG_BIN_HOME:-}/ck" "$HOME/.cargo/bin/ck"; do
+  if is_real_ck "$candidate"; then
+    exec "$candidate" "$@"
+  fi
+done
+
+if [ "$1" = "--hook" ]; then
+  # A missing CLI must never block a session: the hook just does nothing.
+  echo "claude-kiro: the ck CLI is not installed, so the spec hooks are off. Install it: uv tool install git+https://github.com/kutlayhanli/claude-kiro" >&2
+  exit 0
+fi
+cat >&2 <<'MSG'
+claude-kiro: the `ck` CLI is not installed (the spec plugin needs it).
+Install it once per machine, then re-run the command:
+
+  uv tool install git+https://github.com/kutlayhanli/claude-kiro
+
+(uv: https://docs.astral.sh/uv/). `ck --version` should then work in a new shell.
+MSG
+exit 127

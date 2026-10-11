@@ -9,7 +9,7 @@ When working on new features, follow the spec-driven workflow:
 1. `/spec:plan` - Discuss and decide the approach with me, interactively (writes PLAN.md)
 2. `/spec:create` - Workflow that writes requirements, design, and tasks, then adversarially reviews them
 3. `/spec:implement` - Implement a test-track or impl-track task; Done only when `ck gate` passes
-4. `/spawn-worktree` - Run independent tasks in parallel with git worktree isolation
+4. `/spec:spawn-worktree` - Run independent tasks in parallel with git worktree isolation
 
 ## Parallel Implementation
 
@@ -17,7 +17,7 @@ When running parallel implementation tasks (e.g., multiple subagents implementin
 
 ### Worktree Isolation
 
-Use `/spawn-worktree` to run tasks in parallel. Each subagent gets its own git worktree and branch, preventing working directory conflicts.
+Use `/spec:spawn-worktree` to run tasks in parallel. Each subagent gets its own git worktree and branch, preventing working directory conflicts.
 
 ### Naming Conventions
 

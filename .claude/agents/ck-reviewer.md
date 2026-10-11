@@ -1,6 +1,6 @@
 ---
 name: ck-reviewer
-description: claude-kiro reviewer: checks a task's diff against design.md and requirements.md before it merges; never edits
+description: "claude-kiro reviewer: checks a task's diff against design.md and requirements.md before it merges; never edits"
 model: opus
 effort: high
 tools: Read, Grep, Glob, Bash

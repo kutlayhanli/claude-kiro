@@ -74,7 +74,11 @@ def set_cmd(setting: str, value: str, project: bool):
     except ag.AgentConfigError as e:
         _fail(e)
     click.echo(f"✓ {role}.{key} = {value} in {path}")
-    if (Path.cwd() / ".claude").is_dir():
+    from .. import plugin
+
+    # Vendored projects carry per-project ck-* agent types; with the plugin, the
+    # spec skills pass model and effort per call, so there is nothing to write.
+    if plugin.mode(Path.cwd()) in ("vendor", "legacy"):
         _report_sync(ag.sync_agent_types(Path.cwd()))
 
 
@@ -97,10 +101,12 @@ def sync(overrides: tuple, dry_run: bool, as_json: bool):
     """Write the ck-* agent types (.claude/agents/) with each role's model and effort.
 
     \b
-    For running spec commands without the Workflow tool: the Agent tool can pick
-    a model per call but not an effort, so ck-implementer, ck-test-writer,
-    ck-fixer and ck-reviewer carry both. `ck agents set` and `ck upgrade` keep
-    them current; run this with --override for a one-off run.
+    For vendored projects (`ck vendor`) running spec commands without the
+    Workflow tool: ck-implementer, ck-test-writer, ck-fixer, ck-resolver and
+    ck-reviewer carry each role's model and effort. `ck agents set` and
+    `ck upgrade` keep them current. With the plugin, the spec skills use the
+    plugin's agent types (spec:implementer, ...) and pass model and effort per
+    call, so this isn't needed.
     """
     try:
         result = ag.sync_agent_types(Path.cwd(), list(overrides), dry_run=dry_run)

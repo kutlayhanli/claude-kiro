@@ -1,6 +1,6 @@
 [project]
 name = "claude-kiro"
-version = "0.8.0"
+version = "0.9.0"
 description = "Spec-driven development methodology for Claude Code"
 readme = "README.md"
 license = { text = "MIT" }
@@ -29,8 +29,20 @@ Issues = "https://github.com/angelsen/claude-kiro/issues"
 ck = "claude_kiro.cli:cli"
 
 [build-system]
-requires = ["uv_build>=0.8.22,<0.9.0"]
-build-backend = "uv_build"
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+# plugin/ (the Claude Code plugin, at the repo root so the marketplace can point
+# at it) is the one source of the commands, workflows and agents. The wheel
+# carries it as package data (claude_kiro/_plugin) so `ck vendor` works offline.
+[tool.hatch.build.targets.sdist]
+include = ["src", "plugin", ".claude-plugin", "README.md", "UPGRADING.md"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/claude_kiro"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"plugin" = "claude_kiro/_plugin"
 
 [dependency-groups]
 dev = [

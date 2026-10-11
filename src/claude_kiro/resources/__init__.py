@@ -72,7 +72,7 @@ class ResourceLoader:
                     resources_list.append(resource)
 
             # Check subdirectories
-            subdirs = ["output_styles", "commands", "commands.spec"]
+            subdirs = ["global"]
             for subdir in subdirs:
                 try:
                     subpackage = f"{self._package}.{subdir.replace('/', '.')}"

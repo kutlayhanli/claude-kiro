@@ -1,7 +1,7 @@
 """Version stamp for the files ck manages in a project (.claude/ck-manifest.json).
 
-`ck init` and `ck upgrade` record the ck version that wrote the managed files
-and a hash of each. That lets a later `ck upgrade`:
+`ck init`, `ck vendor` and `ck upgrade` record the ck version, the project's
+mode (plugin or vendor), and in vendored projects a hash of each copied file. That lets a later `ck upgrade`:
 - refuse to downgrade: an older ck must not replace files a newer ck wrote;
 - tell when a managed file was edited by hand since ck last wrote it.
 
@@ -50,17 +50,24 @@ def read(project_dir: Path) -> Optional[Dict]:
     return data if isinstance(data, dict) and "version" in data else None
 
 
-def build(project_dir: Path, managed_paths) -> Dict:
+def build(project_dir: Path, managed_paths, mode: Optional[str] = None) -> Dict:
+    """mode: "plugin" (the project enables the spec plugin; nothing copied) or
+    "vendor" (the plugin's files are copied into .claude/). Stamps written by
+    ck 0.8 and earlier have no mode."""
     files = {}
     for rel in managed_paths:
         path = project_dir / rel
         if path.exists():
             files[rel] = digest(path.read_text())
-    return {"version": ck_version(), "files": files}
+    data: Dict = {"version": ck_version()}
+    if mode:
+        data["mode"] = mode
+    data["files"] = files
+    return data
 
 
-def write(project_dir: Path, managed_paths) -> Dict:
-    data = build(project_dir, managed_paths)
+def write(project_dir: Path, managed_paths, mode: Optional[str] = None) -> Dict:
+    data = build(project_dir, managed_paths, mode)
     path = project_dir / MANIFEST_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n")
