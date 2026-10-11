@@ -141,7 +141,7 @@ The test plan has a required **Properties** section. Every universally quantifie
 
 1. **Initialize:** `ck init` sets up your project with all necessary files
 2. **Plan:** `/spec:plan "feature"` - Discuss interactively, decide one question at a time, record decisions in `specs/<name>/PLAN.md`
-3. **Create specs:** `/spec:create <name>` - A workflow writes requirements, then design and an integration-first test plan in parallel, then test and impl task tracks in parallel, then adversarially reviews and revises them
+3. **Create specs:** `/spec:create <name>` - A workflow writes requirements, then design and an integration-first test plan in parallel, then test and impl task tracks in parallel, then adversarially reviews and revises them. A fix that would change behaviour a criterion governs comes back to you as a decision, and a consistency check diffs the revision against a pre-revision snapshot to catch contradictions the fixes introduced
 4. **Implement:** `/spec:implement task` - Test-track tasks write integration tests first; impl-track tasks make them pass. Done only when `ck gate` passes
 5. **Parallelize:** `/spec:implement <spec>` (no task number) runs the whole spec as a workflow:
    - It lints the plan first and refuses to launch on a cycle.
@@ -186,7 +186,7 @@ The test plan has a required **Properties** section. Every universally quantifie
 - `/spec:plan <feature>` - Discuss and decide the approach interactively (writes PLAN.md)
 - `/spec:create <name>` - Write the spec as a workflow, ending in adversarial review
 - `/spec:implement <spec | task> [--model M] [--effort E] [--review-model M] [--no-review]` - Implement a task or a whole spec (Done is enforced by `ck gate`; models per role from `ck agents`)
-- `/spec:review <spec>` - Adversarially review an existing spec and apply surviving fixes
+- `/spec:review <spec>` - Adversarially review an existing spec, apply surviving fixes, and check the revision for contradictions with the criteria
 - `/spawn-worktree <spec-or-tasks>` - Run tasks in parallel with git worktree isolation
 
 ## Benchmarking model configurations

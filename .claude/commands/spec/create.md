@@ -29,7 +29,8 @@ The minimum is configurable: `ck agents set planning.min_model <model>`, `ck age
 2. in parallel, writes `design.md` grounded in the real codebase and `test-plan.md`. The test plan is integration-first: it tests real boundaries (database, filesystem, HTTP, CLI) and never sees the design, so the tests stay an independent check. Its required ## Properties section turns every universally quantified criterion (any, every, only, never, SHALL NOT) into a property test over all the input's surface forms and its negative space, against a pure decision seam,
 3. in parallel, writes an implementation track and a test track of tasks, then links them into `tasks.md`. Each impl task is **Verified by** test tasks that run first, and each task starts as soon as its own dependencies merge (no waves). Tasks that send messages, move money, touch auth or credentials, delete, or have another irreversible external effect get `**Risk:** safety (reason)`: `/spec:implement` starts them on the strong model and always has the risky reviewer check them,
 4. runs an **adversarial review**: four reviewers attack the spec (plan fidelity, codebase grounding, implementability, test adequacy), and a separate skeptic tries to refute each finding,
-5. applies the findings that survive, and writes `review.md`.
+5. applies the findings that survive, and writes `review.md`. A fix that would change behaviour a requirement criterion or property governs is not applied; it comes back to me as a decision ("raised while applying fixes"),
+6. runs a **consistency check** on what the revision changed: it diffs each file against a pre-revision snapshot and checks every changed passage against the criteria and the Properties section (and properties and test cases against each other on overlapping inputs). Wording and traceability drift it fixes itself (then checks once more); behaviour conflicts come back to me as decisions ("found by the consistency check").
 
 Your job here is to set up the run, launch it, and bring back anything that needs my decision.
 
@@ -92,10 +93,11 @@ When the workflow returns:
    tasks.md:        [N tasks (T test, I impl); critical path length]
 
    Adversarial review: [N] fixed, [M] refuted, [K] need your decision
+   Consistency check: [passes] pass(es), [F] drift fixed, [D] behaviour conflicts for your decision
    Assumptions to check: [only the ones that matter]
    ```
-   Mention any `unverified` findings or lost review lenses so I know coverage was partial.
-3. **Open questions:** if `review.openQuestions` is non-empty, ask me with AskUserQuestion (up to 4 per call; put the reviewer's suggested fix first when it is a sensible default). Then apply my answers to the spec files, keeping requirements, design, and tasks consistent. Record each answer under a new "Decisions" entry in PLAN.md (if it exists) and in the "Needs Your Decision" table of `review.md`.
+   Mention any `unverified` findings, lost review lenses, or `consistency.lost` so I know coverage was partial.
+3. **Open questions:** if `review.openQuestions` is non-empty, ask me with AskUserQuestion (up to 4 per call; put the reviewer's suggested fix first when it is a sensible default). Each item has a `source`: `review` (a reviewer's question), `revise` (a fix that would have changed behaviour a criterion governs, so it was not applied) or `consistency` (a contradiction the consistency check found after the revision). For `revise` and `consistency` items, show the criterion or property in `conflictsWith` next to the question and offer the item's `options`; don't pick one yourself. Applying my answer may mean changing the criterion, the design, or both: keep requirements, design, test plan and tasks consistent. Then apply my answers to the spec files, keeping requirements, design, and tasks consistent. Record each answer under a new "Decisions" entry in PLAN.md (if it exists) and in the "Needs Your Decision" table of `review.md`.
 4. Finish with: "Spec ready. Use `/spec:implement [task-number]` to start, or `/spec:implement [feature-name]` to run the whole spec (`/spawn-worktree specs/[feature-name]` to steer it yourself). Tasks are only Done when `ck gate` passes."
 
 ---

@@ -8,7 +8,8 @@ export const meta = {
     { title: 'Task Tracks', detail: 'implementation and test task lists in parallel' },
     { title: 'Link', detail: 'merge tracks into tasks.md, wire Verified by, lint the dependency graph' },
     { title: 'Adversarial Review', detail: '4 lenses, each finding challenged by a refuter' },
-    { title: 'Revise', detail: 'apply confirmed fixes, write review.md' },
+    { title: 'Revise', detail: 'snapshot the spec, apply confirmed fixes, write review.md' },
+    { title: 'Consistency Check', detail: 'diff the revision against the snapshot and check it against the criteria and properties' },
   ],
 }
 
@@ -219,6 +220,7 @@ Correctness properties, one row per property:
 | ID | Requirement | Property | Generator domain | Expected decision |
 P-n | requirement | "for any X ..." | generator domain | expected decision
 IDs P-1, P-2, ... Rules:
+- **Governing criterion.** The Requirement column names the governing criterion id(s) (e.g. "9.16"), never just a story or a paraphrase, so any property, including one a review fix adds later, can be traced to the criterion it must agree with.
 - **Which criteria.** Every acceptance criterion with a universal quantifier gets at least one property: "any", "every", "all", "only", "never", "no", "each", or SHALL NOT. Read each criterion and ask "for which inputs must this hold?"; if the answer is "all of them in some set", it is a property.
 - **Surface forms.** The generator domain enumerates every surface form the input can take, not just the canonical one. For an amount: "$x", "x USD", "USD x", "x.yy", "x,yyy", "x to y", "x-y", "between x and y", "x/unit"; for a range, BOTH ends must be checked. For an email address: case variants, display names ("Name" <addr>), plus-tags, whitespace. For a path: relative, absolute, "..", symlinks. A rule that only checks the first number of "$4.15 to 4.50" passes every example test and fails this property.
 - **Negative space.** For every allowlist (only values from a sheet, a config, a set of participants), draw negatives from values that exist in the data source but are not permitted: quantities and SKUs next to prices in the same sheet, the system's own address or the agent's own draft next to real thread participants, IDs of other tenants. Random strings are not negatives; near-misses from the real data are.
@@ -481,7 +483,8 @@ const LENSES = [
 - Imagine a plausible implementation bug for the riskiest criterion. Which test catches it? If none, that is a finding.
 - Properties: does ${TPL} have a ## Properties section? Does every universally quantified SHALL / SHALL NOT criterion ("any", "every", "all", "only", "never", SHALL NOT) have a P-n row? A missing one is a major finding.
 - For each property: does the generator domain enumerate the input's surface forms (e.g. "$x", "x USD", "x to y", "x-y" for amounts, checking both ends of a range)? For each allowlist, does it draw from the negative space: values that exist in the data source but are not permitted (quantities next to prices, the system's own draft next to participants)? Does each "only"/"never" clause have its complement property? Where there is no oracle, is there a metamorphic relation?
-- Do safety properties target a pure decision seam that runs before any server task, with deterministic settings (derandomized, bounded examples, no example database)? Does every P-n belong to exactly one test task's **Properties:** field, whose test file will carry a PROPERTIES map? Does each story with a SHALL NOT have a red-team test task?`,
+- Do safety properties target a pure decision seam that runs before any server task, with deterministic settings (derandomized, bounded examples, no example database)? Does every P-n belong to exactly one test task's **Properties:** field, whose test file will carry a PROPERTIES map? Does each story with a SHALL NOT have a red-team test task?
+- Property conflicts: for each pair of properties/test cases over overlapping input domains (e.g. an approved send whose body changes), confirm they expect the same outcome; two expectations that differ on the same input are a conflict. Report both ids and the input, and quote the criterion each claims to follow. If the criteria themselves disagree, or settling it means choosing between two behaviours, set needsUserDecision.`,
   },
 ]
 
@@ -556,7 +559,49 @@ log(`Review: ${confirmed.length} confirmed (${toFix.length} to fix, ${forUser.le
 // Revise: apply confirmed fixes and write the review record.
 // ---------------------------------------------------------------------------
 
+// The lenses reviewed the pre-revision spec. One revise agent then applies every
+// fix in one pass, and a fix can quietly turn into a behaviour change that
+// contradicts a criterion nobody touched (a real incident: a fix made the system
+// refuse a changed body after an operator Approve, while 9.16 said re-evaluate it).
+// So: snapshot the four files first, tell the reviser to check each behaviour fix
+// against its governing criteria and escalate instead of deciding, and afterwards
+// have a consistency check diff the result against the snapshot.
+const FILE_NAMES = ['requirements.md', 'design.md', 'test-plan.md', 'tasks.md']
+const SNAP = `${DIR}/.pre-revision`
+
 phase('Revise')
+let snapshot = null
+if (toFix.length) {
+  // Workflow scripts have no filesystem access, so a cheap agent copies the files.
+  snapshot = await agent(`
+Mechanical step. Do exactly this, nothing else, and edit no file.
+
+Copy the spec files that exist into a fresh snapshot directory, so the revision that follows can be diffed against them:
+1. \`rm -rf ${SNAP}\`
+2. \`mkdir -p ${SNAP}\`
+3. For each of ${FILE_NAMES.map(f => `${DIR}/${f}`).join(', ')}: if it exists, \`cp -p\` it into ${SNAP}/ under the same name.
+4. \`ls ${SNAP}\` and return the file names it lists as "copied".`, {
+    label: 'snapshot spec before revision',
+    phase: 'Revise',
+    effort: 'low',
+    schema: {
+      type: 'object',
+      properties: { copied: { type: 'array', items: { type: 'string' } } },
+      required: ['copied'],
+    },
+  })
+  if (!snapshot || !(snapshot.copied || []).length) {
+    log('Snapshot before revision failed; the consistency check will review the whole spec instead of a diff.')
+    snapshot = null
+  }
+}
+
+const GOVERNING_RULE = `**Fixes that change behaviour.** A fix changes behaviour when it changes what the system does, refuses, sends, or stores, a refusal reason, a number or limit, who may act, or the order of states. Before applying such a fix in design.md, test-plan.md, or tasks.md:
+   a. Find every requirement criterion (EARS id, N.M) and every row of test-plan.md's ## Properties (P-n) that governs that behaviour, including ones the finding does not mention, and quote them to yourself. Search requirements.md for the behaviour's nouns and states (e.g. "Approve", "body changes", "hold"), not just the ids the finding names.
+   b. If the fix can conform to all of them, apply it in a form that does, and cite the criterion id in the passage you write (a new test case or property names its governing criterion id).
+   c. If the fix needs behaviour that differs from any of them (it would refuse what a criterion accepts or re-evaluates, add a state, change a number or an actor), do NOT apply it, and do not edit the criterion to make room for it. Choosing between the two is a product decision. Return it under "escalated": the finding id, the question (state both behaviours plainly), 2-3 options (one of them "follow criterion N.M as written" and what that means for the finding), and conflictsWith (the criterion ids and P-ids, with a short quote).
+   A finding you escalate goes in "escalated" only, not in "fixed" or "notFixed".`
+
 const revision = await agent(`
 You are revising a spec after adversarial review.
 
@@ -567,6 +612,8 @@ Spec files: ${SPEC_FILES}.
 1. Apply each of these confirmed findings by editing the spec files. Keep the documents consistent with each other (if you change a criterion, update design traceability, the test plan's cases and properties, and the covering impl and test tasks). Keep the tasks.md format intact ("### Task N: Title", "- \`path\` - note").
 ${JSON.stringify(toFix, null, 2)}
 
+   ${GOVERNING_RULE}
+
 2. Do NOT resolve these; they need the user's decision. Leave the spec as is for them:
 ${JSON.stringify(forUser.map(f => ({ id: f.id, question: f.question || f.problem })), null, 2)}
 
@@ -576,13 +623,14 @@ ${JSON.stringify(forUser.map(f => ({ id: f.id, question: f.question || f.problem
 
 **Date:** ${A.date || ''}
 **Mode:** ${MODE}
-**Result:** [Ready | Ready after decisions | Needs work]
+**Result:** [Ready | Ready after decisions | Needs work]  (Ready after decisions whenever "Needs Your Decision" has a row, including ones you escalated)
 
 ## Fixed
 | ID | File | Severity | Problem | Fix applied |
 
 ## Needs Your Decision
-| ID | Question |
+| ID | Question | Options | Conflicts with | Raised by |
+The items from step 2 ("adversarial review"), then every finding you escalated in step 1 ("raised while applying fixes").
 
 ## Refuted
 | ID | Problem | Why it was refuted |
@@ -593,7 +641,7 @@ ${unverified.length ? JSON.stringify(unverified.map(f => ({ id: f.id, problem: f
 
 ## Schedule
 Re-run \`ck lint ${A.feature}\` from ${ROOT} after your fixes. Update the Schedule section of tasks.md from its "critical path" and "ready now" lines, and copy those two lines here.
-
+${snapshot ? `\nDo not touch ${SNAP}/; it is the pre-revision snapshot a later check diffs against.\n` : ''}
 Return the structured result.`, {
   label: 'revise spec + write review.md',
   phase: 'Revise',
@@ -606,12 +654,145 @@ Return the structured result.`, {
         type: 'array',
         items: { type: 'object', properties: { id: { type: 'string' }, reason: { type: 'string' } }, required: ['id', 'reason'] },
       },
+      escalated: {
+        type: 'array',
+        description: 'fixes not applied because they would change behaviour a criterion or property governs',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: 'the finding id' },
+            question: { type: 'string' },
+            options: { type: 'array', items: { type: 'string' } },
+            conflictsWith: { type: 'string', description: 'criterion ids / P-ids with a short quote' },
+          },
+          required: ['id', 'question', 'conflictsWith'],
+        },
+      },
       result: { type: 'string', enum: ['Ready', 'Ready after decisions', 'Needs work'] },
       schedule: { type: 'string', description: 'the ready-at-start and critical-path lines' },
     },
-    required: ['fixed', 'notFixed', 'result', 'schedule'],
+    required: ['fixed', 'notFixed', 'escalated', 'result', 'schedule'],
   },
 })
+const escalated = (revision && revision.escalated) || []
+if (escalated.length) log(`Revise: ${escalated.length} fix(es) would change governed behaviour and were raised for your decision: ${escalated.map(e => e.id).join(', ')}.`)
+
+// ---------------------------------------------------------------------------
+// Consistency check: re-review what the revision changed, against the criteria
+// and properties. Fixes wording/traceability drift itself; behaviour conflicts
+// become decisions. A pass that fixed something gets one more pass (max 2).
+// ---------------------------------------------------------------------------
+
+const CONTRADICTIONS = {
+  type: 'object',
+  properties: {
+    contradictions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'C<pass>.<n>, e.g. C1.3' },
+          kind: { type: 'string', enum: ['drift', 'behaviour', 'property-conflict'] },
+          description: { type: 'string' },
+          changedSide: { type: 'string', description: 'file:line and a quote of the changed passage' },
+          otherSide: { type: 'string', description: 'file:line and a quote of the criterion, property, or passage it contradicts' },
+          input: { type: 'string', description: 'for property conflicts: the input both expectations cover' },
+          resolution: { type: 'string', enum: ['fixed', 'decision'] },
+          fix: { type: 'string', description: 'the edit made, when resolution is fixed' },
+          question: { type: 'string', description: 'the decision to put to the user, when resolution is decision' },
+          options: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['id', 'kind', 'description', 'changedSide', 'otherSide', 'resolution'],
+      },
+    },
+  },
+  required: ['contradictions'],
+}
+
+const MAX_CONSISTENCY_PASSES = 2
+const consistency = { passes: 0, fixed: [], decisions: [], lost: false }
+
+if (toFix.length) {
+  phase('Consistency Check')
+  const applied = revision ? revision.fixed : []
+  let lastFixed = []
+  for (let pass = 1; pass <= MAX_CONSISTENCY_PASSES; pass++) {
+    const scope = snapshot
+      ? `The revision step just edited the spec. The pre-revision copies are in ${SNAP}/ (${snapshot.copied.join(', ')}). Diff each spec file against its snapshot (\`diff -u ${SNAP}/<file> ${DIR}/<file>\`; a file with no snapshot is new, so all of it changed). Every changed passage is in scope.`
+      : `There is no snapshot of the pre-revision spec (taking it failed), so you cannot diff. Treat every passage the applied findings below touched as changed, and read all four files in full.`
+    const previous = pass > 1
+      ? `\nThis is pass ${pass}. Pass ${pass - 1} fixed these contradictions; check its edits especially, since a fix can introduce a new contradiction:\n${JSON.stringify(lastFixed.map(c => ({ id: c.id, fix: c.fix, changedSide: c.changedSide })), null, 2)}\nDo not re-report contradictions already resolved; report only what remains or is new.\n`
+      : ''
+    const check = await agent(`
+You are the consistency check of a spec, run after a revision that applied many review fixes in one pass. The review lenses only saw the spec before those fixes, so nobody has checked the fixes against each other or against the criteria they did not mention. A fix that silently changes governed behaviour (for example making the system refuse something a criterion says it re-evaluates) is the defect you are here to catch.
+
+${BRIEF}
+
+Spec files: ${SPEC_FILES}.
+
+${scope}
+
+Findings the revision applied (ids): ${JSON.stringify(applied)}. Their details:
+${JSON.stringify(toFix.filter(f => applied.includes(f.id)).map(f => ({ id: f.id, file: f.file, location: f.location, fix: f.fix })), null, 2)}
+${previous}
+Check:
+1. Every changed passage in design.md, test-plan.md, and tasks.md against requirements.md's criteria (EARS ids) and test-plan.md's ## Properties: does it contradict any of them on behaviour (what the system does, refuses, sends, stores), states and their order, refusal reasons, numbers and limits, or actors (who may act)? Search requirements.md for the passage's nouns and states, not just the ids it cites.
+2. Every changed criterion in requirements.md against design.md, test-plan.md (cases and properties), and tasks.md: does anything still describe the old behaviour?
+3. Property conflicts: for each pair of properties/test cases over overlapping input domains (e.g. an approved send whose body changes), confirm they expect the same outcome. Two expectations that differ on the same input are a conflict: report both ids and the input.
+
+For each contradiction, give evidence on both sides as file:line with a quote.
+- **Drift** (wording, traceability, a stale reference, a number copied wrong, a test or task that lags a criterion whose meaning is clear): fix it directly in the spec files, resolution "fixed".
+- **Behaviour conflict** (the two sides want different behaviour, and choosing is a product decision): do NOT edit either side. Resolution "decision", with a question that states both behaviours plainly and 2-3 options (one is "follow criterion N.M as written").
+- Never resolve a conflict by editing a criterion to match a fix.
+
+Then update ${REVIEW}: append each decision as a row to its "Needs Your Decision" table, with "found by the consistency check" in its Raised by column; if there is any decision, set its **Result:** line to "Ready after decisions" (leave "Needs work" as is). Append (or extend) a "## Consistency Check" section: pass ${pass}, one line per contradiction (id, kind, both sides, fixed or decision). If ${REVIEW} does not exist, create it with just those sections.
+Do not modify or delete ${SNAP}/.
+Use ids C${pass}.1, C${pass}.2, ... If you find nothing, return an empty list. Return the structured result.`, {
+      label: `consistency check: pass ${pass}`,
+      phase: 'Consistency Check',
+      effort: 'high',
+      schema: CONTRADICTIONS,
+    })
+    if (!check) {
+      log(`Consistency check pass ${pass} failed to return; the revision is not fully checked.`)
+      consistency.lost = true
+      break
+    }
+    consistency.passes = pass
+    const found = check.contradictions || []
+    lastFixed = found.filter(c => c.resolution === 'fixed')
+    const decided = found.filter(c => c.resolution !== 'fixed')
+    consistency.fixed.push(...lastFixed)
+    consistency.decisions.push(...decided)
+    log(`Consistency check pass ${pass}: ${found.length} contradiction(s), ${lastFixed.length} fixed, ${decided.length} for your decision.`)
+    if (!lastFixed.length) break
+  }
+
+  if (snapshot) {
+    await agent(`
+Mechanical step. Run \`rm -rf ${SNAP}\` and nothing else. Return removed: true if ${SNAP} no longer exists.`, {
+      label: 'remove pre-revision snapshot',
+      phase: 'Consistency Check',
+      effort: 'low',
+      schema: { type: 'object', properties: { removed: { type: 'boolean' } }, required: ['removed'] },
+    })
+  }
+} else {
+  log('No fixes to apply; skipping the snapshot and the consistency check.')
+}
+
+const byFindingId = Object.fromEntries(toFix.map(f => [f.id, f]))
+const openQuestions = [
+  ...forUser.map(f => ({ id: f.id, source: 'review', file: f.file, location: f.location, question: f.question || f.problem, fix: f.fix })),
+  ...escalated.map(e => {
+    const f = byFindingId[e.id] || {}
+    return { id: e.id, source: 'revise', file: f.file || null, location: f.location || null, question: e.question, options: e.options || [], conflictsWith: e.conflictsWith, fix: f.fix || null }
+  }),
+  ...consistency.decisions.map(c => ({ id: c.id, source: 'consistency', file: (c.changedSide || '').split(':')[0] || null, location: c.changedSide, question: c.question || c.description, options: c.options || [], conflictsWith: c.otherSide, fix: null })),
+]
+
+let result = revision ? revision.result : 'Needs work'
+if (result === 'Ready' && openQuestions.length) result = 'Ready after decisions'
 
 return {
   mode: MODE,
@@ -622,13 +803,15 @@ return {
     ? Object.fromEntries(Object.entries(authored).map(([k, v]) => [k, { summary: v.summary, assumptions: v.assumptions, concerns: v.concerns }]))
     : null,
   review: {
-    result: revision ? revision.result : 'Needs work',
+    result,
     fixed: revision ? revision.fixed : [],
     notFixed: revision ? revision.notFixed : toFix.map(f => ({ id: f.id, reason: 'revise step failed' })),
-    openQuestions: forUser.map(f => ({ id: f.id, file: f.file, location: f.location, question: f.question || f.problem, fix: f.fix })),
+    escalated,
+    openQuestions,
     refutedCount: refuted.length,
     unverified: unverified.map(f => ({ id: f.id, problem: f.problem })),
     lensesLost,
   },
+  consistency,
   schedule: revision ? revision.schedule : null,
 }

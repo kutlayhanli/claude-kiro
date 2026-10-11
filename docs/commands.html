@@ -259,12 +259,23 @@
             <div class="card">
               <h4>Phase 4: Adversarial Review</h4>
               <p>
-                Three reviewers attack the spec from different angles: plan
-                fidelity, grounding in the real codebase, and implementability.
-                A separate skeptic tries to refute every finding. Findings that
-                survive are applied, questions that need a product decision are
-                brought back to you, and everything is recorded in
-                <code>review.md</code>.
+                Four reviewers attack the spec from different angles: plan
+                fidelity, grounding in the real codebase, implementability, and
+                test adequacy. A separate skeptic tries to refute every finding.
+                Findings that survive are applied, questions that need a product
+                decision are brought back to you, and everything is recorded in
+                <code>review.md</code>. A fix that would change behaviour a
+                requirement criterion or property governs is not applied; it is
+                brought back to you as a decision too.
+              </p>
+              <p style="margin-top: var(--space-3)">
+                <strong>Consistency check:</strong>
+                after the revision, a strong agent diffs each spec file against a
+                pre-revision snapshot and checks every changed passage against
+                the criteria and the Properties section, and properties and test
+                cases against each other on overlapping inputs. It fixes wording
+                drift itself (at most two passes) and brings behaviour conflicts
+                to you.
               </p>
             </div>
           </div>
@@ -387,7 +398,8 @@
             Run the adversarial review half of the
             <code>/spec:create</code>
             workflow on an existing spec, for example after hand edits or code
-            drift. Findings that survive refutation are applied.
+            drift. Findings that survive refutation are applied, and the same
+            consistency check runs on the revision.
           </p>
 
           <div class="code-block">
