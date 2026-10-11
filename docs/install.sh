@@ -6,7 +6,7 @@
 set -e  # Exit on error
 
 # This fork is installed from GitHub (PyPI only has the upstream 0.1.0).
-CK_SOURCE="${CK_SOURCE:-git+https://github.com/kutlayhanli/claude-kiro@feat/specs-dir-and-workflow-create}"
+CK_SOURCE="${CK_SOURCE:-git+https://github.com/kutlayhanli/claude-kiro}"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -56,6 +56,10 @@ if ! command -v ck &> /dev/null; then
 else
     echo -e "${GREEN}✓ Claude Kiro CLI is installed${NC}"
 fi
+
+# Install the spec plugin for this user (idempotent: updates it if present)
+echo -e "${YELLOW}Installing the spec Claude Code plugin...${NC}"
+ck setup || echo -e "${RED}Plugin not installed; run 'ck setup' once the claude CLI is on PATH.${NC}"
 
 # Initialize the project
 echo -e "${YELLOW}Initializing project for spec-driven development...${NC}"

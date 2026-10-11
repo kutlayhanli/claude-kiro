@@ -1,4 +1,7 @@
-"""`ck upgrade` on a project set up by ck 0.1.x, and `ck setup --diff` on an existing machine."""
+"""`ck upgrade` on a project set up by ck 0.1.x, and `ck setup --diff` on an existing machine.
+
+Without flags, upgrade moves such a project to the spec plugin (see test_plugin_modes.py);
+`--vendor` keeps refreshed copies in .claude/, which most tests here exercise."""
 
 import json
 import os
@@ -57,15 +60,18 @@ def test_dry_run_reports_plan_and_writes_nothing(old_project):
     before = git(old_project, "status", "--porcelain")
     result = run(old_project, "upgrade", "--dry-run")
     assert result.exit_code == 0, result.output
-    assert "updated  .claude/commands/spec/create.md" in result.output
-    assert "added  .claude/workflows/spec-create.js" in result.output
+    assert "updated  .claude/settings.json (enabledPlugins: spec@claude-kiro)" in result.output
+    assert ".claude/commands/spec/create.md" in result.output.split("Kept")[1]  # no hash to prove it unedited
     assert "moved  .claude/specs/auth -> specs/auth" in result.output
+    vendored = run(old_project, "upgrade", "--dry-run", "--vendor")
+    assert "updated  .claude/commands/spec/create.md" in vendored.output
+    assert "added  .claude/workflows/spec-create.js" in vendored.output
     assert git(old_project, "status", "--porcelain") == before
     assert not (old_project / "specs").exists()
 
 
 def test_upgrade_refreshes_managed_files_and_keeps_project_files(old_project):
-    result = run(old_project, "upgrade")
+    result = run(old_project, "upgrade", "--vendor")
     assert result.exit_code == 0, result.output
 
     # project-owned file untouched
@@ -101,10 +107,10 @@ def test_upgrade_is_idempotent(old_project):
 
 
 def test_untracked_customized_command_is_backed_up(old_project):
-    custom = old_project / ".claude/commands/spawn-worktree.md"
+    custom = old_project / ".claude/commands/spec/spawn-worktree.md"
     custom.write_text("my own spawn-worktree tweaks\n")  # untracked
-    run(old_project, "upgrade")
-    assert (old_project / ".claude/commands/spawn-worktree.md.bak").read_text() == "my own spawn-worktree tweaks\n"
+    run(old_project, "upgrade", "--vendor")
+    assert (old_project / ".claude/commands/spec/spawn-worktree.md.bak").read_text() == "my own spawn-worktree tweaks\n"
     assert "As Each Task Finishes" in custom.read_text()
 
 
@@ -129,7 +135,6 @@ def test_setup_diff_shows_changes_without_writing(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "-- Specs live in `.claude/specs/[feature-name]/`" in result.output
     assert "+- Specs live in `specs/[feature-name]/`" in result.output
-    assert "does not exist" in result.output  # skill not installed in this fake HOME
     assert claude_md.read_text().startswith("# My global notes")
     assert not (tmp_path / ".claude/skills").exists()
 
@@ -179,7 +184,7 @@ def stamp_of(root: Path) -> dict:
 
 
 def test_upgrade_writes_version_stamp(old_project):
-    run(old_project, "upgrade")
+    run(old_project, "upgrade", "--vendor")
     stamp = stamp_of(old_project)
     assert stamp["version"] == ck_manifest.ck_version()
     implement = (old_project / ".claude/commands/spec/implement.md").read_text()
@@ -205,7 +210,7 @@ def test_older_ck_refuses_to_downgrade_newer_files(old_project):
 
 
 def test_hand_edits_to_tracked_managed_files_are_reported(old_project):
-    run(old_project, "upgrade")
+    run(old_project, "upgrade", "--vendor")
     git(old_project, "add", "-A")
     git(old_project, "commit", "-qm", "upgrade")
     review = old_project / ".claude/commands/spec/review.md"
@@ -246,11 +251,11 @@ def test_version_key_ordering():
 
 
 def test_upgrade_installs_the_no_workflow_guide_and_agent_types(old_project):
-    dry = run(old_project, "upgrade", "--dry-run")
+    dry = run(old_project, "upgrade", "--dry-run", "--vendor")
     assert "ck-implementer.md" in dry.output
     assert not (old_project / ".claude/agents").exists()
 
-    result = run(old_project, "upgrade")
+    result = run(old_project, "upgrade", "--vendor")
     assert result.exit_code == 0, result.output
     assert (old_project / ".claude/workflows/without-workflow-tool.md").exists()
     impl = (old_project / ".claude/agents/ck-implementer.md").read_text()

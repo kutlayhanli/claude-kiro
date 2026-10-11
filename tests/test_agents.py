@@ -209,8 +209,9 @@ def test_inherit_leaves_the_field_out(home):
     assert "model" not in fm and "effort" not in fm
 
 
-def test_set_resyncs_agent_types_in_a_project(home):
+def test_set_resyncs_agent_types_in_a_vendored_project(home):
     (home / ".claude").mkdir()
+    (home / ".claude/ck-manifest.json").write_text(json.dumps({"version": "0.9.0", "mode": "vendor", "files": {}}))
     out = ck(home, "agents", "set", "reviewer.model", "fable", "--project")
     assert out.exit_code == 0, out.output
     assert frontmatter(home / ".claude/agents/ck-reviewer.md")["model"] == "fable"

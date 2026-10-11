@@ -26,6 +26,9 @@ export const meta = {
 //                                          //   orchestrator: plan, merge, gate and re-check steps; resolver: merge conflicts
 //                                          //   ("inherit" = the session's). Absent: every agent inherits, no review.
 //   model: null, effort: null,             // one-run override for every code-writing agent (task, retry, fix)
+//   brief: '/abs/plugin/resources/spec-implement-brief.md',  // the task agents' brief (the plugin passes
+//                                          //   ${CLAUDE_PLUGIN_ROOT}/resources/...); relative paths resolve against root;
+//                                          //   absent: <root>/.claude/workflows/spec-implement-brief.md (vendored projects)
 // }
 //
 // Scheduling is driven by the plan in tasks.md on the target branch, re-read
@@ -49,7 +52,9 @@ const CONTINUE = A.onFailure !== 'halt'
 const MAX_CONCURRENT = A.maxConcurrent && A.maxConcurrent > 0 ? A.maxConcurrent : Infinity
 const FULL_EVERY = Number.isInteger(A.fullGateEvery) ? A.fullGateEvery : 10
 const MERGE_BATCH = Number.isInteger(A.mergeBatch) && A.mergeBatch > 0 ? A.mergeBatch : 4
-const BRIEF = `${ROOT}/.claude/workflows/spec-implement-brief.md`
+const BRIEF = !A.brief
+  ? `${ROOT}/.claude/workflows/spec-implement-brief.md`
+  : String(A.brief).startsWith('/') ? String(A.brief) : `${ROOT}/${String(A.brief).replace(/^\.\//, '')}`
 
 if (!SPEC || !ROOT) throw new Error('spec-implement needs args.spec and args.root')
 

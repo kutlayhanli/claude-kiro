@@ -122,7 +122,7 @@
             </div>
             <div class="tab-panel active" role="tabpanel">
               <div class="code-block">
-                <code>uv tool install --force "git+https://github.com/kutlayhanli/claude-kiro@feat/specs-dir-and-workflow-create"</code>
+                <code>uv tool install --force "git+https://github.com/kutlayhanli/claude-kiro"</code>
               </div>
             </div>
             <div class="tab-panel" role="tabpanel" hidden>
@@ -146,54 +146,68 @@
 
           <ul>
             <li>
+              <code>--vendor</code>
+              - Copy the spec commands, workflows, agent types and hooks into
+              <code>.claude/</code>
+              instead of using the plugin (for cloud sessions, which don't
+              load plugins). Same as
+              <code>ck vendor</code>
+              later.
+            </li>
+            <li>
               <code>--force</code>
               - Overwrite existing files if they already exist
+            </li>
+            <li>
+              <code>--allow-workflow / --no-allow-workflow</code>
+              - Allow the Workflow tool in
+              <code>.claude/settings.json</code>
             </li>
           </ul>
 
           <h4>What It Does</h4>
 
-          <p>Creates the following structure in your project:</p>
+          <p>
+            By default it enables the
+            <code>spec@claude-kiro</code>
+            plugin for the project and copies nothing; the commands come from
+            the plugin that
+            <code>ck setup</code>
+            installs once per machine:
+          </p>
 
           <div class="code-block">
             <pre><code>.claude/
-├── commands/
-│   ├── spec/
-│   │   ├── plan.md
-│   │   ├── create.md
-│   │   ├── implement.md
-│   │   └── review.md
-│   └── spawn-worktree.md
-├── workflows/
-│   └── spec-create.js
-├── output-styles/
-│   └── spec-driven.md
+├── settings.json        # enabledPlugins: spec@claude-kiro, extraKnownMarketplaces: claude-kiro
+├── ck-manifest.json     # ck version and mode (plugin | vendor)
 └── CLAUDE.md
 specs/
+├── ck.json              # verify commands, guard settings, agent models
 └── (your specs go here, outside .claude/ so writes need no approval)</code></pre>
+          </div>
+
+          <p>With <code>--vendor</code>, it also writes:</p>
+
+          <div class="code-block">
+            <pre><code>.claude/
+├── commands/spec/{plan,create,implement,review,spawn-worktree}.md
+├── workflows/{spec-create.js,spec-implement.js,spec-implement-brief.md,without-workflow-tool.md}
+├── output-styles/spec-driven.md
+├── agents/ck-{implementer,test-writer,fixer,resolver,reviewer}.md
+└── settings.local.json  # hooks</code></pre>
           </div>
 
           <h4>Example</h4>
 
           <div class="code-block">
-            <pre><code># Initialize in current project
+            <pre><code># Once per machine: install the plugin
+ck setup
+
+# Initialize in current project
 ck init
 
-# Force overwrite existing configuration
-ck init --force</code></pre>
-          </div>
-
-          <h4>Output</h4>
-
-          <div class="code-block">
-            <pre><code>✅ Created .claude directory
-✅ Installed slash commands
-✅ Configured spec-driven output style
-✅ Created specs/ directory
-✅ Installed spec-create workflow
-✅ Generated CLAUDE.md
-
-🎉 Claude Kiro initialized! Run 'ck doctor' to verify.</code></pre>
+# A repository used from cloud sessions
+ck init --vendor</code></pre>
           </div>
 
           <hr

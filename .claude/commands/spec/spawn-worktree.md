@@ -70,7 +70,7 @@ For each task, spawn an agent with `run_in_background: true`:
 ```json
 {
   "description": "implement <feature>: <task-summary>",
-  "prompt": "Your task: Task <N> of spec <name>.\nWorktree: <absolute main checkout>/.claude/worktrees/<name>-task-<N> (branch feat/<name>-task-<N>). Target branch for the final merge: <current branch>.\nRead your operating brief at <absolute main checkout>/.claude/workflows/spec-implement-brief.md and follow it exactly: claim the worktree with `ck worktree claim <name> <N>`, implement per your track, get `ck gate <name> --task <N>` passing, merge the target into your branch before finishing, release the worktree.\nReport: status, gatePassed, summary, commits, gate output tail, blocker, deviations, wrong tests, files outside your task.",
+  "prompt": "Your task: Task <N> of spec <name>.\nWorktree: <absolute main checkout>/.claude/worktrees/<name>-task-<N> (branch feat/<name>-task-<N>). Target branch for the final merge: <current branch>.\nRead your operating brief at .claude/workflows/spec-implement-brief.md and follow it exactly: claim the worktree with `ck worktree claim <name> <N>`, implement per your track, get `ck gate <name> --task <N>` passing, merge the target into your branch before finishing, release the worktree.\nReport: status, gatePassed, summary, commits, gate output tail, blocker, deviations, wrong tests, files outside your task.",
   "subagent_type": "general-purpose",
   "run_in_background": true
 }
@@ -78,8 +78,8 @@ For each task, spawn an agent with `run_in_background: true`:
 
 **Models, effort, and review:** run `ck agents --json` (adding `--override` for anything I asked, as described in `/spec:implement` under Agents) and use its roles: the implementer for impl-track tasks, the test_writer for test-track tasks, the reviewer after each task. Values are a family alias (`sonnet`, `opus`, `haiku`, `fable`, each the newest of its family) or `inherit`, and an effort from `low` to `max` or `inherit`.
 - **Everything `inherit`, review off:** use the Agent calls above as they are.
-- **Otherwise:** the Agent tool can't set effort, so launch the tasks you start together as one Workflow call instead of separate Agent calls (workflows run in the background, so a later launch never waits for an earlier one): an inline script that runs the same per-task prompts in `parallel()`, each `agent(prompt, { label: 'task <N>', model, effort })` with that task's role settings (omit any that are `inherit`). If the reviewer is enabled, the script runs a reviewer `agent()` with the reviewer's `{ model, effort }` for each task whose gate passed, reading `command git -C <worktree> diff <target>...<branch>` and the spec without editing, and gives blocking findings to one revising implementer `agent()` (up to the reviewer's `rounds`) before the merge phase. The worktrees are already created, so don't pass `isolation`. Running this command is my opt-in to that workflow.
-- **No Workflow tool** (missing, refused, or blocked): run `ck agents sync` (with the same overrides) and spawn the Agent calls above with `subagent_type` set to the task's type, `ck-implementer` or `ck-test-writer`. Those types carry the role's model and effort. If the reviewer is enabled, run a `ck-reviewer` for each task whose gate passed, before the merge phase. Send blocking findings back to that task's agent with SendMessage, up to the reviewer's `rounds`. Details: `.claude/workflows/without-workflow-tool.md`.
+- **Otherwise:** launch the tasks you start together as one Workflow call instead of separate Agent calls (workflows run in the background, so a later launch never waits for an earlier one): an inline script that runs the same per-task prompts in `parallel()`, each `agent(prompt, { label: 'task <N>', model, effort })` with that task's role settings (omit any that are `inherit`). If the reviewer is enabled, the script runs a reviewer `agent()` with the reviewer's `{ model, effort }` for each task whose gate passed, reading `command git -C <worktree> diff <target>...<branch>` and the spec without editing, and gives blocking findings to one revising implementer `agent()` (up to the reviewer's `rounds`) before the merge phase. The worktrees are already created, so don't pass `isolation`. Running this command is my opt-in to that workflow.
+- **No Workflow tool** (missing, refused, or blocked): spawn the Agent calls above with `subagent_type` set to the task's type, `ck-implementer` or `ck-test-writer`, and the role's `model` and `effort` on each call (omit any that are `inherit`). If the reviewer is enabled, run a `ck-reviewer` (with the reviewer's `model` and `effort`) for each task whose gate passed, before the merge phase. Send blocking findings back to that task's agent with SendMessage, up to the reviewer's `rounds`. Details: `.claude/workflows/without-workflow-tool.md`.
 
 Name each role's model and effort, and whether review is on, in the Phase 1 plan you show me.
 
@@ -161,7 +161,7 @@ git worktree prune
 ## Example
 
 ```
-User: /spawn-worktree specs/auth-system
+User: /spec:spawn-worktree specs/auth-system
 
 Claude: Task 1 (test infrastructure) is Done. Ready now, longest chain first:
 

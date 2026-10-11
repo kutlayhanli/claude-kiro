@@ -21,8 +21,10 @@ def init(cwd: Path, *args: str, input: str = None):
 
 
 def settings(project: Path):
+    """The permissions part of .claude/settings.json (ck init also enables the plugin there)."""
     path = project / ".claude" / "settings.json"
-    return json.loads(path.read_text()) if path.exists() else None
+    data = json.loads(path.read_text()) if path.exists() else {}
+    return {"permissions": data["permissions"]} if "permissions" in data else None
 
 
 @pytest.fixture
@@ -45,7 +47,7 @@ def test_existing_settings_are_kept_and_the_rule_is_not_duplicated(project):
     )
     init(project, "--allow-workflow")
     init(project, "--allow-workflow")
-    data = settings(project)
+    data = json.loads((project / ".claude/settings.json").read_text())
     assert data["model"] == "opus" and data["permissions"]["defaultMode"] == "auto"
     assert data["permissions"]["allow"] == ["Bash(ls:*)", "Workflow"]
 

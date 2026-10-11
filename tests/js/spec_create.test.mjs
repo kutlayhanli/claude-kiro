@@ -5,7 +5,7 @@ import path from 'node:path'
 import { runWorkflow } from './load_workflow.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
-const SCRIPT = path.join(here, '../../src/claude_kiro/resources/templates/workflows/spec_create.js')
+const SCRIPT = path.join(here, '../../plugin/workflows/spec-create.js')
 const args = mode => ({ mode, feature: 'f', projectRoot: '/p', specDir: '/p/specs/f', date: '2026-10-04' })
 
 function stub(overrides = {}) {

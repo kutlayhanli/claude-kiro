@@ -14,17 +14,9 @@ from typing import Optional
 
 import click
 
+from .. import plugin
 from ..config import initial_config, load_config
-from ..paths import (
-    CONFIG_FILE,
-    IMPLEMENT_BRIEF,
-    IMPLEMENT_WORKFLOW,
-    LEGACY_SPECS_DIR,
-    NO_WORKFLOW_GUIDE,
-    SPECS_DIR,
-    SPEC_WORKFLOW,
-    spec_roots,
-)
+from ..paths import CONFIG_FILE, LEGACY_SPECS_DIR, SPECS_DIR, spec_roots
 from .agents import agents
 from .update import update
 from .hooks import hook
@@ -48,13 +40,19 @@ logger = logging.getLogger(__name__)
     help="Execute a hook (for Claude Code integration)",
 )
 @click.option(
+    "--plugin-hook",
+    is_flag=True,
+    hidden=True,
+    help="The hook runs from the spec plugin: do nothing outside claude-kiro projects",
+)
+@click.option(
     "-C",
     "directory",
     type=click.Path(exists=True, file_okay=False),
     help="Run as if ck was started in DIRECTORY (like git -C), so agents never need `cd ... &&`",
 )
 @click.pass_context
-def cli(ctx: click.Context, hook_name: Optional[str], directory: Optional[str]):
+def cli(ctx: click.Context, hook_name: Optional[str], plugin_hook: bool, directory: Optional[str]):
     """Claude Kiro - Spec-driven development methodology for use with Claude Code.
 
     Initialize projects with spec-driven workflow, configure Claude Code hooks,
@@ -68,6 +66,10 @@ def cli(ctx: click.Context, hook_name: Optional[str], directory: Optional[str]):
             # Read JSON from stdin
             input_data = sys.stdin.read()
             input_json = json.loads(input_data) if input_data else {}
+
+            # A user-scope plugin loads in every project; its hooks only act in ck projects.
+            if plugin_hook and not _is_ck_project(Path(input_json.get("cwd") or os.getcwd())):
+                sys.exit(0)
 
             # Execute the hook
             result = execute_hook(hook_name, input_json)
@@ -85,20 +87,19 @@ def cli(ctx: click.Context, hook_name: Optional[str], directory: Optional[str]):
         click.echo(ctx.get_help())
 
 
-# Files ck owns and refreshes on upgrade. .claude/CLAUDE.md is not here: it is
-# created once by `ck init` and then belongs to the project.
-MANAGED_FILES = [
-    (".claude/output-styles/spec-driven.md", "output_styles/spec_driven.md"),
-    (".claude/commands/spec/plan.md", "commands/spec/plan.md"),
-    (".claude/commands/spec/create.md", "commands/spec/create.md"),
-    (".claude/commands/spec/implement.md", "commands/spec/implement.md"),
-    (".claude/commands/spec/review.md", "commands/spec/review.md"),
-    (".claude/commands/spawn-worktree.md", "commands/spawn-worktree.md"),
-    (SPEC_WORKFLOW, "workflows/spec_create.js"),
-    (IMPLEMENT_WORKFLOW, "workflows/spec_implement.js"),
-    (IMPLEMENT_BRIEF, "workflows/spec_implement_brief.md"),
-    (NO_WORKFLOW_GUIDE, "workflows/without_workflow_tool.md"),
-]
+def _is_ck_project(path: Path) -> bool:
+    """A claude-kiro project: it has specs/ck.json, a ck manifest, or legacy .claude/specs/."""
+    return (
+        (path / CONFIG_FILE).exists()
+        or (path / ".claude" / "ck-manifest.json").exists()
+        or (path / LEGACY_SPECS_DIR).is_dir()
+    )
+
+
+# Files a vendored project gets copied into .claude/ (rendered from plugin/).
+# .claude/CLAUDE.md is not here: it is created once by `ck init` and then
+# belongs to the project.
+MANAGED_FILES = plugin.VENDOR_MAP
 
 RUFF_HOOK = re.compile(r"^(\s*)-\s+id:\s*(ruff|ruff-check|ruff-format)\s*$")
 
@@ -233,6 +234,175 @@ def _offer_workflow_rule(project_dir: Path, choice: Optional[bool]) -> Optional[
     return _allow_workflow(project_dir) if choice else None
 
 
+def _edit_shared_settings(project_dir: Path, change, dry_run: bool = False) -> str:
+    """Apply change(settings dict) -> bool to .claude/settings.json, keeping every other setting.
+
+    Returns "changed", "unchanged", or "invalid" (the file isn't a JSON object; left alone).
+    """
+    path = project_dir / SHARED_SETTINGS
+    try:
+        data = json.loads(path.read_text()) if path.exists() else {}
+    except json.JSONDecodeError:
+        return "invalid"
+    if not isinstance(data, dict):
+        return "invalid"
+    if not change(data):
+        return "unchanged"
+    if not dry_run:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2) + "\n")
+    return "changed"
+
+
+def _remove_ck_hooks(project_dir: Path, dry_run: bool = False) -> bool:
+    """Drop ck's hooks from .claude/settings.local.json (the plugin brings them). Returns True if any were there."""
+    path = project_dir / ".claude" / "settings.local.json"
+    try:
+        settings = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    hooks = settings.get("hooks") if isinstance(settings, dict) else None
+    if not isinstance(hooks, dict):
+        return False
+
+    def ours(h) -> bool:
+        cmd = h.get("command", "") if isinstance(h, dict) else ""
+        return cmd.startswith("ck --hook ") or "ckh-" in cmd
+
+    removed = False
+    for event in list(hooks):
+        groups = hooks[event] if isinstance(hooks[event], list) else []
+        kept_groups = []
+        for group in groups:
+            entries = group.get("hooks", []) if isinstance(group, dict) else []
+            kept = [h for h in entries if not ours(h)]
+            removed |= len(kept) != len(entries)
+            if kept or not entries:
+                kept_groups.append({**group, "hooks": kept} if isinstance(group, dict) else group)
+        if kept_groups:
+            hooks[event] = kept_groups
+        else:
+            del hooks[event]
+    if not hooks:
+        settings.pop("hooks")
+    if removed and not dry_run:
+        path.write_text(json.dumps(settings, indent=2))
+    return removed
+
+
+def _write_vendored(project_dir: Path, overwrite: bool, dry_run: bool = False) -> dict:
+    """Copy the plugin's files into .claude/ (rendered for a project without the plugin).
+
+    overwrite=False skips existing files (ck init); True refreshes them like ck
+    upgrade: untracked files that differ are backed up first, and files edited
+    since ck wrote them are reported. Copies from older layouts that are no
+    longer vendored are removed when unedited, else kept and listed.
+    """
+    from .. import manifest
+
+    stamp = manifest.read(project_dir)
+    result = {"changes": [], "skipped": [], "backups": [], "edited": [], "kept": []}
+    files = plugin.vendor_files()
+    for target_path, content in files.items():
+        target = project_dir / target_path
+        current = target.read_text() if target.exists() else None
+        if current == content:
+            continue
+        if current is not None and not overwrite:
+            result["skipped"].append(target_path)
+            continue
+        if current is not None and manifest.edited_since_written(stamp, target_path, current):
+            result["edited"].append(target_path)
+        result["changes"].append(("updated" if current is not None else "added", target_path))
+        if dry_run:
+            continue
+        if current is not None and not _git_tracked(project_dir, target):
+            backup = target.with_name(target.name + ".bak")
+            backup.write_text(current)
+            result["backups"].append(str(backup.relative_to(project_dir)))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+
+    obsolete = [rel for rel in plugin.LEGACY_MANAGED if rel not in files]
+    removed, kept = _remove_unedited(project_dir, obsolete, stamp, files, dry_run)
+    result["changes"].extend(("removed", rel) for rel in removed)
+    result["kept"].extend(kept)
+
+    settings_file = project_dir / ".claude" / "settings.local.json"
+    before = settings_file.read_text() if settings_file.exists() else ""
+    try:
+        merged = json.dumps(install_hook_settings(json.loads(before) if before else {}), indent=2)
+    except json.JSONDecodeError:
+        merged = None
+    if merged != before:
+        result["changes"].append(("updated" if before else "added", ".claude/settings.local.json (hooks)"))
+        if not dry_run:
+            _install_hooks(project_dir)
+
+    result["changes"].extend(_sync_agent_types(project_dir, dry_run=dry_run))
+
+    state = _edit_shared_settings(project_dir, lambda s: plugin.set_enabled(s, False), dry_run)
+    if state == "changed":
+        result["changes"].append(("updated", f"{SHARED_SETTINGS} (enabledPlugins: {plugin.PLUGIN_ID} off; the copies replace it here)"))
+    return result
+
+
+def _remove_unedited(project_dir: Path, rels, stamp, rendered: dict, dry_run: bool) -> tuple:
+    """Remove copies ck wrote that nobody edited. Returns (removed, kept).
+
+    A copy is unedited when its hash matches the manifest, or (older ck with no
+    hashes) when it equals this version's rendering. Anything else is kept.
+    """
+    from .. import manifest
+
+    removed, kept = [], []
+    for rel in rels:
+        path = project_dir / rel
+        if not path.is_file():
+            continue
+        text = path.read_text()
+        recorded = (stamp or {}).get("files", {}).get(rel)
+        if (recorded and recorded == manifest.digest(text)) or text == rendered.get(rel):
+            removed.append(rel)
+            if not dry_run:
+                path.unlink()
+        else:
+            kept.append(rel)
+    return removed, kept
+
+
+def _prune_empty_dirs(project_dir: Path, dry_run: bool) -> None:
+    if dry_run:
+        return
+    for rel in plugin.MANAGED_DIRS:
+        path = project_dir / rel
+        if path.is_dir() and not any(path.iterdir()):
+            path.rmdir()
+
+
+def _migrate_to_plugin(project_dir: Path, stamp, dry_run: bool) -> dict:
+    """Switch a project from managed copies to the plugin: remove unedited copies and generated agent types."""
+    from .. import agents as ag
+
+    result = {"changes": [], "kept": []}
+    removed, kept = _remove_unedited(project_dir, plugin.LEGACY_MANAGED, stamp, plugin.vendor_files(), dry_run)
+    result["changes"].extend(("removed", rel) for rel in removed)
+    result["kept"].extend(kept)
+    for path in ag.generated_agent_files(project_dir):
+        result["changes"].append(("removed", str(path.relative_to(project_dir))))
+        if not dry_run:
+            path.unlink()
+    if _remove_ck_hooks(project_dir, dry_run):
+        result["changes"].append(("updated", ".claude/settings.local.json (ck hooks removed; the plugin brings them)"))
+    state = _edit_shared_settings(project_dir, lambda s: plugin.set_enabled(s, True), dry_run)
+    if state == "changed":
+        result["changes"].append(("updated", f"{SHARED_SETTINGS} (enabledPlugins: {plugin.PLUGIN_ID})"))
+    elif state == "invalid":
+        click.echo(f"⚠️  {SHARED_SETTINGS} isn't a settings object; enable {plugin.PLUGIN_ID} in enabledPlugins by hand.")
+    _prune_empty_dirs(project_dir, dry_run)
+    return result
+
+
 @cli.command()
 @click.option("--force", is_flag=True, help="Overwrite existing files")
 @click.option(
@@ -240,17 +410,22 @@ def _offer_workflow_rule(project_dir: Path, choice: Optional[bool]) -> Optional[
     default=None,
     help=f"Add (or don't) a Workflow allow rule to {SHARED_SETTINGS}, so spec workflows launch without a permission prompt. Asked interactively if not given.",
 )
-def init(force: bool, allow_workflow: Optional[bool]):
+@click.option("--vendor", is_flag=True, help="Copy the spec commands, workflows and agents into .claude/ instead of using the plugin (for cloud sessions, which don't load plugins)")
+def init(force: bool, allow_workflow: Optional[bool], vendor: bool):
     """Initialize a Claude Kiro project in the current directory.
 
-    Creates .claude directory structure with output styles, slash commands,
-    the spec workflow, a specs/ directory, and configures hooks in
-    settings.local.json. Offers to allow the Workflow tool in
-    .claude/settings.json so unattended runs never wait on a prompt.
+    \b
+    Default (plugin mode): enables the `spec` plugin for this project in
+    .claude/settings.json (enabledPlugins + the claude-kiro marketplace) and
+    writes specs/ck.json. Nothing is copied: the commands, workflows, agents
+    and hooks come from the plugin, which `ck setup` installs once per machine.
+    --vendor: copies them into .claude/ instead (see `ck vendor`).
+
+    Offers to allow the Workflow tool in .claude/settings.json so unattended
+    runs never wait on a prompt.
     """
     from .. import manifest
     from ..resources import ResourceLoader
-    import json
 
     project_dir = Path.cwd()
     claude_dir = project_dir / ".claude"
@@ -263,56 +438,44 @@ def init(force: bool, allow_workflow: Optional[bool]):
         )
         sys.exit(1)
 
-    # Track what we create/skip
     created = []
     skipped = []
+    existing_mode = plugin.mode(project_dir)
 
-    # Create directory structure
-    directories = [
-        claude_dir,
-        claude_dir / "output-styles",
-        claude_dir / "commands",
-        claude_dir / "commands" / "spec",
-        claude_dir / "workflows",
-        project_dir / SPECS_DIR,
-    ]
-
-    for directory in directories:
+    for directory in (claude_dir, project_dir / SPECS_DIR):
         if not directory.exists():
             directory.mkdir(parents=True, exist_ok=True)
             created.append(str(directory.relative_to(project_dir)))
 
-    # Load resources and create files
-    loader = ResourceLoader()
+    claude_md = claude_dir / "CLAUDE.md"
+    if claude_md.exists() and not force:
+        skipped.append(".claude/CLAUDE.md")
+    else:
+        claude_md.write_text(ResourceLoader().get_resource("claude_md.md"))
+        created.append(".claude/CLAUDE.md")
 
-    files_to_create = [(".claude/CLAUDE.md", "claude_md.md"), *MANAGED_FILES]
-
-    for target_path, resource_path in files_to_create:
-        target = project_dir / target_path
-
-        if target.exists() and not force:
-            skipped.append(target_path)
-            continue
-
-        try:
-            content = loader.get_resource(resource_path)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content)
-            created.append(target_path)
-        except Exception as e:
-            logger.error(f"Failed to create {target_path}: {e}")
-
-    _install_hooks(project_dir)
-    created.append(".claude/settings.local.json")
-
-    created.extend(item for _, item in _sync_agent_types(project_dir))
-
-    # Stamp the version only if this ck actually wrote every managed file;
-    # skipped files may be older, and `ck upgrade` is the way to refresh those.
     managed = [target for target, _ in MANAGED_FILES]
-    if not any(path in skipped for path in managed):
-        manifest.write(project_dir, managed)
-        created.append(manifest.MANIFEST_FILE)
+    if vendor:
+        result = _write_vendored(project_dir, overwrite=force)
+        created.extend(f"{item} ({kind})" if kind != "added" else item for kind, item in result["changes"])
+        skipped.extend(result["skipped"])
+        # Stamp only if this ck wrote every vendored file; `ck vendor` refreshes skipped ones.
+        if not result["skipped"]:
+            manifest.write(project_dir, managed, mode="vendor")
+            created.append(f"{manifest.MANIFEST_FILE} (vendored)")
+    else:
+        state = _edit_shared_settings(project_dir, lambda s: plugin.set_enabled(s, True))
+        if state == "changed":
+            created.append(f"{SHARED_SETTINGS} (enabledPlugins: {plugin.PLUGIN_ID})")
+        elif state == "invalid":
+            click.echo(f"⚠️  {SHARED_SETTINGS} isn't a settings object; enable {plugin.PLUGIN_ID} in enabledPlugins by hand.")
+        if existing_mode in ("legacy", "vendor"):
+            click.echo("⚠️  This project has copies of the spec commands in .claude/. Run 'ck upgrade --plugin' to remove the unedited ones.")
+        else:
+            if _remove_ck_hooks(project_dir):
+                created.append(".claude/settings.local.json (ck hooks removed; the plugin brings them)")
+            manifest.write(project_dir, [], mode="plugin")
+            created.append(f"{manifest.MANIFEST_FILE} (plugin mode)")
 
     patched = _patch_precommit(project_dir)
     if patched:
@@ -329,8 +492,7 @@ def init(force: bool, allow_workflow: Optional[bool]):
     elif rule == "invalid":
         click.echo(f"⚠️  {SHARED_SETTINGS} isn't a settings object; add \"{WORKFLOW_RULE}\" to permissions.allow by hand.")
 
-    # Report results
-    click.echo("\n✨ Claude Kiro initialized successfully!")
+    click.echo("\n✨ Claude Kiro initialized successfully!" + (" (vendored)" if vendor else ""))
 
     if created:
         click.echo("\n📁 Created:")
@@ -343,11 +505,14 @@ def init(force: bool, allow_workflow: Optional[bool]):
             click.echo(f"  - {item}")
         click.echo("\n💡 Use --force to overwrite existing files")
 
-    # Show next steps
     click.echo("\n🚀 Next steps:")
-    click.echo("  1. Review .claude/CLAUDE.md and customize for your project")
-    click.echo("  2. Run 'ck doctor' to verify setup")
-    click.echo("  3. Use /spec:plan to decide the approach, then /spec:create to write the spec")
+    if vendor:
+        click.echo("  1. Commit .claude/ (commands, workflows, agents, output-styles, ck-manifest.json, settings.json) and specs/")
+    else:
+        click.echo(f"  1. Run 'ck setup' once on each machine: it installs the {plugin.PLUGIN_ID} plugin")
+        click.echo(f"  2. Commit {SHARED_SETTINGS}, {manifest.MANIFEST_FILE} and {CONFIG_FILE}; teammates are offered the plugin")
+    click.echo("  •  Review .claude/CLAUDE.md and customize it; run 'ck doctor' to verify the setup")
+    click.echo("  •  Use /spec:plan to decide the approach, then /spec:create to write the spec")
     if allow_workflow is None and rule is None and not _interactive():
         click.echo(
             f"\n💡 Unattended runs (cloud, claude -p) can stall on a Workflow permission prompt. "
@@ -356,77 +521,106 @@ def init(force: bool, allow_workflow: Optional[bool]):
     click.echo(f"\n📝 Specs are written to {SPECS_DIR}/ (outside .claude/, so no approval prompts)")
     if (project_dir / LEGACY_SPECS_DIR).is_dir():
         click.echo(f"⚠️  Found specs in {LEGACY_SPECS_DIR}/ - run 'ck migrate' to move them")
-    click.echo(
-        "\n📚 Claude Code hooks docs: https://docs.claude.com/en/docs/claude-code/hooks"
-    )
 
 
 @cli.command()
-@click.option("--force", is_flag=True, help="Overwrite existing files")
-@click.option("--diff", "show_diff", is_flag=True, help="Show how existing global files differ from this version; write nothing")
-def setup(force: bool, show_diff: bool):
-    """Set up global Claude Kiro configuration in ~/.claude/.
+@click.option("--dry-run", is_flag=True, help="Show what would change without writing anything")
+def vendor(dry_run: bool):
+    """Copy the spec plugin into this project's .claude/ (for cloud sessions).
 
-    Installs global CLAUDE.md and skills that apply across all projects.
-    Run this once per machine after installing claude-kiro. On an existing
-    machine, use --diff to see what changed before deciding on --force.
+    \b
+    Claude Code on the web and other places that don't load plugins need the
+    commands in the repository. This writes .claude/commands/spec/*.md (still
+    /spec:plan, /spec:create, /spec:review, /spec:implement,
+    /spec:spawn-worktree), .claude/workflows/, .claude/output-styles/, the
+    ck-* agent types with this project's models, and the hooks in
+    .claude/settings.local.json. It switches the plugin off for this project
+    in .claude/settings.json, so a machine with the plugin installed doesn't
+    see every command twice. Re-run (or `ck upgrade`) after updating ck.
+    `ck upgrade --plugin` goes back to the plugin.
+    """
+    ctx = click.get_current_context()
+    ctx.invoke(upgrade, dry_run=dry_run, no_migrate=True, allow_downgrade=False, to_vendor=True, to_plugin=False)
+
+
+@cli.command()
+@click.option("--force", is_flag=True, help="Overwrite an existing ~/.claude/CLAUDE.md")
+@click.option("--diff", "show_diff", is_flag=True, help="Show how the existing global CLAUDE.md differs from this version; write nothing")
+@click.option("--dry-run", is_flag=True, help="Print what would run and be written; change nothing")
+@click.option(
+    "--source",
+    envvar="CK_MARKETPLACE",
+    default=plugin.MARKETPLACE_REPO,
+    show_default=True,
+    help="Where the claude-kiro marketplace is: owner/repo, a git URL, or a local checkout (env: CK_MARKETPLACE)",
+)
+def setup(force: bool, show_diff: bool, dry_run: bool, source: str):
+    """Set up this machine: install the spec plugin and the global CLAUDE.md.
+
+    \b
+    1. Installs (or updates) the `spec` Claude Code plugin at user scope:
+         claude plugin marketplace add <source>
+         claude plugin install spec@claude-kiro --scope user
+    2. Writes ~/.claude/CLAUDE.md if it doesn't exist (never overwrites
+       without --force; see changes with --diff).
+
+    Run once per machine after installing ck, and again after `ck update`.
     """
     from ..resources import ResourceLoader
-
-    if show_diff:
-        _setup_diff(ResourceLoader())
-        return
-
-    home_claude = Path.home() / ".claude"
-    skills_dir = home_claude / "skills" / "spawn-worktree"
-
-    # Track what we create/skip
-    created = []
-    skipped = []
+    import shlex
+    import shutil
+    import subprocess
 
     loader = ResourceLoader()
+    if show_diff:
+        _setup_diff(loader)
+        return
 
-    # Global files to install
-    global_files = [
-        (home_claude / "CLAUDE.md", "global/claude_md.md"),
-        (skills_dir / "SKILL.md", "global/spawn_worktree_skill.md"),
-    ]
+    target = Path.home() / ".claude" / "CLAUDE.md"
+    if target.exists() and not force:
+        click.echo(f"⏭️  {target} exists; left alone (compare with 'ck setup --diff')")
+    elif dry_run:
+        click.echo(f"would write {target}")
+    else:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(loader.get_resource("global/claude_md.md"))
+        click.echo(f"✓ wrote {target}")
 
-    for target, resource_path in global_files:
-        if target.exists() and not force:
-            skipped.append(str(target))
-            continue
+    status, detail = plugin.installed()
+    commands = plugin.setup_commands(source, status is True)
+    if dry_run:
+        click.echo(f"\n{plugin.PLUGIN_ID}: {'installed, ' + detail if status else 'not installed'}. Would run:")
+        for cmd in commands:
+            click.echo(f"  {shlex.join(cmd)}")
+        return
 
-        try:
-            content = loader.get_resource(resource_path)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content)
-            created.append(str(target))
-        except Exception as e:
-            logger.error(f"Failed to create {target}: {e}")
+    claude = shutil.which("claude")
+    if not claude:
+        click.echo("\n❌ The claude CLI is not on PATH, so the plugin was not installed. Run these where it is:")
+        for cmd in plugin.setup_commands(source, False):
+            click.echo(f"  {shlex.join(cmd)}")
+        click.echo("  (or inside Claude Code: /plugin marketplace add ..., then /plugin install spec@claude-kiro)")
+        sys.exit(1)
 
-    # Report results
-    click.echo("\n✨ Claude Kiro global setup complete!")
-
-    if created:
-        click.echo("\n📁 Created:")
-        for item in created:
-            click.echo(f"  ✓ {item}")
-
-    if skipped:
-        click.echo("\n⏭️  Skipped (already exists):")
-        for item in skipped:
-            click.echo(f"  - {item}")
-        click.echo("\n💡 Use --force to overwrite existing files")
-
-    click.echo("\n🚀 Next steps:")
-    click.echo("  1. Review ~/.claude/CLAUDE.md and customize")
-    click.echo("  2. Run 'ck init' in each project to set up project-level config")
+    failed = False
+    for i, cmd in enumerate(commands):
+        click.echo(f"\n$ {shlex.join(cmd)}")
+        code = subprocess.run([claude, *cmd[1:]]).returncode
+        if code != 0:
+            # The marketplace may already be known (added by hand): the install step decides.
+            if i == 0:
+                click.echo("  (continuing: the next step tells whether the plugin is available)")
+                continue
+            failed = True
+    if failed:
+        click.echo(f"\n❌ Installing {plugin.PLUGIN_ID} failed; see above. Inside Claude Code, /plugin shows the details.")
+        sys.exit(1)
+    click.echo(f"\n✨ {plugin.PLUGIN_ID} is installed for your user. Restart open Claude Code sessions to load it.")
+    click.echo("🚀 Next: 'ck init' in each new project ('ck upgrade' in projects set up by ck 0.8 or earlier).")
 
 
 GLOBAL_FILES = [
     (Path(".claude") / "CLAUDE.md", "global/claude_md.md"),
-    (Path(".claude") / "skills" / "spawn-worktree" / "SKILL.md", "global/spawn_worktree_skill.md"),
 ]
 
 
@@ -460,12 +654,14 @@ def _setup_diff(loader) -> None:
 def doctor(unattended: bool):
     """Check Claude Kiro setup health.
 
-    Verifies installation, directory structure, file presence, and hook configuration.
+    Reports how the project gets the spec commands (the plugin, or vendored
+    copies), whether the plugin is installed on this machine, and checks
+    files, hooks, the version stamp and verify commands.
     With --unattended: what an unattended `ck run` is exposed to here, with
     recommendations (always exits 0).
     """
     import shutil
-    import json
+    from .. import manifest
 
     project_dir = Path.cwd()
     if unattended:
@@ -479,86 +675,94 @@ def doctor(unattended: bool):
 
     click.echo("🔍 Checking Claude Kiro setup...\n")
 
-    # Check 1: ck command installed
     if shutil.which("ck"):
         click.echo("✓ ck command is installed")
     else:
         issues.append("ck command not found in PATH")
 
-    # Check 2: .claude directory exists
-    if claude_dir.exists():
-        click.echo("✓ .claude directory exists")
-    else:
+    if not claude_dir.exists():
         issues.append(".claude directory not found - run 'ck init'")
-        # Can't continue other checks without .claude
         _report_doctor_results(issues, warnings)
         return
 
-    # Check 3: Required files present
-    required_files = [
-        ".claude/output-styles/spec-driven.md",
-        ".claude/commands/spec/plan.md",
-        ".claude/commands/spec/create.md",
-        ".claude/commands/spec/implement.md",
-        ".claude/commands/spec/review.md",
-        ".claude/commands/spawn-worktree.md",
-        SPEC_WORKFLOW,
-        IMPLEMENT_WORKFLOW,
-        IMPLEMENT_BRIEF,
-        NO_WORKFLOW_GUIDE,
-    ]
-
-    missing_files = []
-    for file_path in required_files:
-        if not (project_dir / file_path).exists():
-            missing_files.append(file_path)
-
-    if missing_files:
-        issues.append(f"Missing files: {', '.join(missing_files)}")
-    else:
-        click.echo("✓ All required files present")
-
-    # Check 4: Hooks configured
-    settings_file = claude_dir / "settings.local.json"
-    if settings_file.exists():
+    stamp = manifest.read(project_dir)
+    mode = plugin.mode(project_dir)
+    if mode == "plugin":
+        click.echo(f"✓ Mode: plugin ({plugin.PLUGIN_ID} enabled in {SHARED_SETTINGS})")
         try:
-            settings = json.loads(settings_file.read_text())
-            found = configured_hooks(settings)
-            for spec in HOOK_SETTINGS:
-                if spec["hook"] in found.get(spec["event"], []):
-                    click.echo(f"✓ {spec['event']} hook configured: ck --hook {spec['hook']}")
-                else:
-                    issues.append(
-                        f"{spec['event']} hook 'ck --hook {spec['hook']}' not configured - run 'ck init' to fix"
-                    )
-            for event, groups in settings.get("hooks", {}).items():
-                for group in groups if isinstance(groups, list) else []:
-                    for h in group.get("hooks", []) if isinstance(group, dict) else []:
-                        if isinstance(h, dict) and str(h.get("command", "")).startswith("ck --hook") and h.get("timeout", 0) > 3600:
-                            warnings.append(
-                                f"{event} hook timeout {h['timeout']} looks like milliseconds; Claude Code uses seconds - run 'ck init' to fix"
-                            )
-        except json.JSONDecodeError:
-            issues.append("settings.local.json is corrupted")
+            shared = json.loads((project_dir / SHARED_SETTINGS).read_text())
+        except (OSError, json.JSONDecodeError):
+            shared = {}
+        if not (isinstance(shared, dict) and plugin.enabled_in(shared)):
+            issues.append(f"{plugin.PLUGIN_ID} is not enabled in {SHARED_SETTINGS} - run 'ck upgrade'")
+    elif mode == "vendor":
+        click.echo("✓ Mode: vendored (spec commands copied into .claude/ by 'ck vendor')")
+    elif mode == "legacy":
+        source = f"ck {stamp['version']}" if stamp else "an older ck"
+        warnings.append(
+            f"Mode: legacy (managed copies from {source} in .claude/) - run 'ck upgrade' to switch to the plugin, "
+            "or 'ck vendor' to keep copies"
+        )
     else:
-        warnings.append("settings.local.json not found - hooks may not be configured")
+        issues.append("Not set up: run 'ck init'")
 
-    # Check 5: Global setup
-    home_claude = Path.home() / ".claude"
-    global_claude_md = home_claude / "CLAUDE.md"
-    spawn_skill = home_claude / "skills" / "spawn-worktree" / "SKILL.md"
+    status, detail = plugin.installed()
+    if status:
+        click.echo(f"✓ Plugin {plugin.PLUGIN_ID} installed: {detail}")
+        installed_version = detail.split(" ", 1)[0]
+        if mode == "plugin" and installed_version not in ("?", manifest.ck_version()):
+            warnings.append(
+                f"Plugin {plugin.PLUGIN_ID} is {installed_version} but ck is {manifest.ck_version()} - "
+                "run 'ck update' so the commands and the CLI match"
+            )
+    elif mode == "plugin":
+        if status is False:
+            warnings.append(f"Plugin {plugin.PLUGIN_ID} is not installed on this machine ({detail}) - run 'ck setup'")
+        else:
+            warnings.append(f"Can't tell whether {plugin.PLUGIN_ID} is installed ({detail}) - run 'ck setup' if /spec:plan is missing")
 
+    if mode == "vendor":
+        missing_files = [target for target, _ in MANAGED_FILES if not (project_dir / target).exists()]
+        if missing_files:
+            issues.append(f"Missing files: {', '.join(missing_files)} - run 'ck vendor'")
+        else:
+            click.echo("✓ All vendored files present")
+
+    settings_file = claude_dir / "settings.local.json"
+    if mode in ("vendor", "legacy"):
+        if settings_file.exists():
+            try:
+                settings = json.loads(settings_file.read_text())
+                found = configured_hooks(settings)
+                for spec in HOOK_SETTINGS:
+                    if spec["hook"] in found.get(spec["event"], []):
+                        click.echo(f"✓ {spec['event']} hook configured: ck --hook {spec['hook']}")
+                    else:
+                        issues.append(
+                            f"{spec['event']} hook 'ck --hook {spec['hook']}' not configured - run 'ck upgrade' to fix"
+                        )
+                for event, groups in settings.get("hooks", {}).items():
+                    for group in groups if isinstance(groups, list) else []:
+                        for h in group.get("hooks", []) if isinstance(group, dict) else []:
+                            if isinstance(h, dict) and str(h.get("command", "")).startswith("ck --hook") and h.get("timeout", 0) > 3600:
+                                warnings.append(
+                                    f"{event} hook timeout {h['timeout']} looks like milliseconds; Claude Code uses seconds - run 'ck upgrade' to fix"
+                                )
+            except json.JSONDecodeError:
+                issues.append("settings.local.json is corrupted")
+        else:
+            warnings.append("settings.local.json not found - hooks may not be configured")
+    elif mode == "plugin" and _remove_ck_hooks(project_dir, dry_run=True):
+        warnings.append("ck hooks in .claude/settings.local.json run twice with the plugin's - run 'ck upgrade' to remove them")
+    elif mode == "plugin":
+        click.echo("✓ Hooks come from the plugin")
+
+    global_claude_md = Path.home() / ".claude" / "CLAUDE.md"
     if global_claude_md.exists():
         click.echo("✓ Global ~/.claude/CLAUDE.md found")
     else:
         warnings.append("Global ~/.claude/CLAUDE.md not found - run 'ck setup'")
 
-    if spawn_skill.exists():
-        click.echo("✓ Global spawn-worktree skill found")
-    else:
-        warnings.append("spawn-worktree skill not found - run 'ck setup'")
-
-    # Check 6: Count existing specs
     roots = spec_roots(project_dir)
     spec_count = sum(len(list(root.glob("*/requirements.md"))) for root in roots)
     if spec_count > 0:
@@ -566,12 +770,9 @@ def doctor(unattended: bool):
     else:
         click.echo(f"ℹ️  No specs created yet (they go in {SPECS_DIR}/)")
 
-    from .. import manifest
-
-    stamp = manifest.read(project_dir)
     running = manifest.ck_version()
     if not stamp:
-        warnings.append(f"No {manifest.MANIFEST_FILE} version stamp - run 'ck upgrade' to refresh managed files and record it")
+        warnings.append(f"No {manifest.MANIFEST_FILE} version stamp - run 'ck upgrade' to record it")
     elif manifest.newer_than_running(stamp):
         issues.append(
             f"Project files were written by ck {stamp['version']} but this ck is {running} - reinstall ck before running 'ck upgrade' (see UPGRADING.md)"
@@ -579,7 +780,7 @@ def doctor(unattended: bool):
     elif manifest.version_key(stamp["version"]) < manifest.version_key(running):
         warnings.append(f"Project files are from ck {stamp['version']}; this ck is {running} - run 'ck upgrade'")
     else:
-        click.echo(f"✓ Managed files stamped by ck {stamp['version']} (this ck)")
+        click.echo(f"✓ Project stamped by ck {stamp['version']} (this ck)")
 
     if _patch_precommit(project_dir, dry_run=True):
         warnings.append("ruff pre-commit hooks also run on Markdown code blocks in specs - run 'ck upgrade' to limit them to Python")
@@ -681,32 +882,38 @@ def _migrate_specs(project_dir: Path, dry_run: bool) -> tuple:
 @click.option("--dry-run", is_flag=True, help="Show what would change without writing anything")
 @click.option("--no-migrate", is_flag=True, help=f"Leave specs in {LEGACY_SPECS_DIR}/")
 @click.option("--allow-downgrade", is_flag=True, help="Proceed even if a newer ck wrote this project's files")
-def upgrade(dry_run: bool, no_migrate: bool, allow_downgrade: bool):
+@click.option("--vendor", "to_vendor", is_flag=True, help="Keep (or switch to) vendored copies in .claude/ and refresh them")
+@click.option("--plugin", "to_plugin", is_flag=True, help="Switch a vendored project to the plugin")
+def upgrade(dry_run: bool, no_migrate: bool, allow_downgrade: bool, to_vendor: bool, to_plugin: bool):
     """Bring an existing Claude Kiro project up to date with this ck version.
 
     \b
-    - Refreshes ck-managed files: spec commands, /spawn-worktree, the output
-      style, and the spec-create workflow
-    - Merges the current hooks into .claude/settings.local.json, keeping hooks
-      from other tools and fixing old millisecond timeouts
-    - Creates specs/ck.json (verify commands, guard settings) if missing
-    - Moves specs from .claude/specs/ to specs/ (unless --no-migrate)
+    Projects set up by ck 0.8 or earlier carry copies of the spec commands in
+    .claude/. By default this migrates them to the `spec` plugin:
+    - removes each copy ck wrote that nobody edited (its hash matches
+      .claude/ck-manifest.json); edited copies are kept and listed
+    - removes the generated .claude/agents/ck-*.md agent types
+    - removes ck's hooks from .claude/settings.local.json (the plugin has them)
+    - enables spec@claude-kiro in .claude/settings.json
+    A vendored project (`ck vendor`) stays vendored and gets fresh copies;
+    --plugin switches it to the plugin, --vendor vendors a legacy project.
+    In every mode:
+    - creates specs/ck.json (verify commands, guard settings) if missing
+    - moves specs from .claude/specs/ to specs/ (unless --no-migrate)
 
-    Never touches .claude/CLAUDE.md or the content of your specs. Managed files
-    that differ from the new version and are not tracked by git are backed up
-    as <file>.bak first.
-
-    Records the ck version and file hashes in .claude/ck-manifest.json. An
-    older ck refuses to upgrade a project stamped by a newer one (it would
-    replace newer files with older copies) unless --allow-downgrade is given.
+    Never touches .claude/CLAUDE.md or the content of your specs. Records the
+    ck version and mode in .claude/ck-manifest.json. An older ck refuses to
+    upgrade a project stamped by a newer one unless --allow-downgrade is given.
     """
     from .. import manifest
-    from ..resources import ResourceLoader
 
     project_dir = Path.cwd()
     if not (project_dir / ".claude").is_dir():
         click.echo("❌ No .claude/ directory here. Run 'ck init' for a new project.")
         sys.exit(1)
+    if to_vendor and to_plugin:
+        click.echo("❌ Pick one of --vendor and --plugin.")
+        sys.exit(2)
 
     stamp = manifest.read(project_dir)
     if manifest.newer_than_running(stamp) and not allow_downgrade:
@@ -717,43 +924,28 @@ def upgrade(dry_run: bool, no_migrate: bool, allow_downgrade: bool):
         )
         sys.exit(1)
 
-    loader = ResourceLoader()
-    changes, backups, edited = [], [], []
-    for target_path, resource_path in MANAGED_FILES:
-        target = project_dir / target_path
-        content = loader.get_resource(resource_path)
-        current = target.read_text() if target.exists() else None
-        if current == content:
-            continue
-        if current is not None and manifest.edited_since_written(stamp, target_path, current):
-            edited.append(target_path)
-        changes.append(("updated" if target.exists() else "added", target_path))
-        if dry_run:
-            continue
-        if target.exists() and not _git_tracked(project_dir, target):
-            backup = target.with_name(target.name + ".bak")
-            backup.write_text(target.read_text())
-            backups.append(str(backup.relative_to(project_dir)))
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content)
+    current = plugin.mode(project_dir)
+    target_mode = "vendor" if to_vendor else "plugin" if to_plugin else ("vendor" if current == "vendor" else "plugin")
+    migrating = target_mode == "plugin" and current in ("legacy", "vendor")
 
-    settings_file = project_dir / ".claude" / "settings.local.json"
-    before = settings_file.read_text() if settings_file.exists() else ""
-    try:
-        merged = json.dumps(install_hook_settings(json.loads(before) if before else {}), indent=2)
-    except json.JSONDecodeError:
-        merged = None
-    if merged != before:
-        changes.append(("updated" if before else "added", ".claude/settings.local.json (hooks)"))
-        if not dry_run:
-            _install_hooks(project_dir)
+    changes, backups, edited, kept = [], [], [], []
+    if target_mode == "vendor":
+        result = _write_vendored(project_dir, overwrite=True, dry_run=dry_run)
+        changes += result["changes"]
+        backups += result["backups"]
+        edited += result["edited"]
+        kept += result["kept"]
+        managed = [target for target, _ in MANAGED_FILES]
+    else:
+        result = _migrate_to_plugin(project_dir, stamp, dry_run)
+        changes += result["changes"]
+        kept += result["kept"]
+        managed = []
 
     if not (project_dir / CONFIG_FILE).exists():
         changes.append(("added", f"{CONFIG_FILE} (verify: {', '.join(initial_config(project_dir)['verify']) or 'none detected'})"))
         if not dry_run:
             _ensure_config(project_dir)
-
-    changes.extend(_sync_agent_types(project_dir, dry_run=dry_run))
 
     patched = _patch_precommit(project_dir, dry_run=dry_run)
     if patched:
@@ -763,18 +955,24 @@ def upgrade(dry_run: bool, no_migrate: bool, allow_downgrade: bool):
     for name in moved:
         changes.append(("moved", f"{LEGACY_SPECS_DIR}/{name} -> {SPECS_DIR}/{name}"))
 
-    managed = [target for target, _ in MANAGED_FILES]
     if dry_run:
-        stale = not stamp or stamp.get("version") != manifest.ck_version() or bool(changes)
+        stale = not stamp or stamp.get("version") != manifest.ck_version() or stamp.get("mode") != target_mode or bool(changes)
     else:
-        stale = manifest.build(project_dir, managed) != stamp
+        stale = manifest.build(project_dir, managed, target_mode) != stamp
     if stale:
-        changes.append(("updated" if stamp else "added", f"{manifest.MANIFEST_FILE} (ck {manifest.ck_version()})"))
+        changes.append(("updated" if stamp else "added", f"{manifest.MANIFEST_FILE} (ck {manifest.ck_version()}, {target_mode} mode)"))
         if not dry_run:
-            manifest.write(project_dir, managed)
+            manifest.write(project_dir, managed, mode=target_mode)
 
-    title = "Upgrade plan (dry run, nothing written)" if dry_run else "Claude Kiro project upgraded"
+    if dry_run:
+        title = "Upgrade plan (dry run, nothing written)"
+    elif migrating:
+        title = f"Claude Kiro project moved to the {plugin.PLUGIN_ID} plugin"
+    else:
+        title = "Claude Kiro project upgraded" + (" (vendored)" if target_mode == "vendor" else "")
     click.echo(f"\n✨ {title}")
+    if migrating:
+        click.echo("   The spec commands, workflows, agents and hooks now come from the plugin; ck's copies go.")
     if not changes:
         click.echo("\n✓ Already up to date.")
     for kind, item in changes:
@@ -790,15 +988,27 @@ def upgrade(dry_run: bool, no_migrate: bool, allow_downgrade: bool):
         click.echo(f"\n✋ Edited by hand since ck last wrote them ({verb}; see git diff and re-apply what you need):")
         for item in edited:
             click.echo(f"  - {item}")
+    if kept:
+        why = "they shadow the plugin's commands" if target_mode == "plugin" else "this ck no longer uses them"
+        click.echo(
+            "\n✋ Kept (edited by hand, or written by a ck too old to tell; delete them yourself once you've moved "
+            f"anything you need, since {why}):"
+        )
+        for item in kept:
+            click.echo(f"  - {item}")
     if no_migrate and (project_dir / LEGACY_SPECS_DIR).is_dir():
         click.echo(f"\n⚠️  Specs are still in {LEGACY_SPECS_DIR}/; run 'ck migrate' when ready.")
 
     if changes and not dry_run:
         click.echo("\n🚀 Next steps:")
-        click.echo("  1. Review: git status && git diff .claude specs")
-        click.echo(f"  2. Check the \"verify\" command in {CONFIG_FILE} runs your test suite")
-        click.echo("  3. Commit .claude/commands, .claude/workflows, .claude/agents, .claude/output-styles, .claude/ck-manifest.json and specs/")
-        click.echo("  4. Restart open Claude Code sessions in this project so the new hooks load")
+        if target_mode == "plugin":
+            click.echo(f"  1. Run 'ck setup' once on this machine if you haven't: it installs {plugin.PLUGIN_ID}")
+            click.echo("  2. Review and commit, removals included: git status && git add -A .claude specs && git commit")
+        else:
+            click.echo("  1. Review: git status && git diff .claude specs")
+            click.echo("  2. Commit .claude/commands, .claude/workflows, .claude/agents, .claude/output-styles, .claude/settings.json, .claude/ck-manifest.json and specs/")
+        click.echo(f"  3. Check the \"verify\" command in {CONFIG_FILE} runs your test suite")
+        click.echo("  4. Restart open Claude Code sessions in this project so they load the change")
         click.echo("  5. Run 'ck doctor'")
 
 

@@ -147,8 +147,29 @@
           </p>
 
           <div class="code-block">
-            <code>uv tool install --force "git+https://github.com/kutlayhanli/claude-kiro@feat/specs-dir-and-workflow-create"</code>
+            <code>uv tool install --force "git+https://github.com/kutlayhanli/claude-kiro"</code>
           </div>
+
+          <p>
+            Then, once per machine, install the
+            <code>spec</code>
+            Claude Code plugin (the
+            <code>/spec:*</code>
+            commands, workflows, agents and hooks) at user scope:
+          </p>
+
+          <div class="code-block">
+            <code>ck setup</code>
+          </div>
+
+          <p>
+            It runs
+            <code>claude plugin marketplace add kutlayhanli/claude-kiro</code>
+            and
+            <code>claude plugin install spec@claude-kiro --scope user</code>
+            (<code>ck setup --dry-run</code> prints them). Inside Claude Code:
+            <code>/plugin install spec --marketplace kutlayhanli/claude-kiro</code>.
+          </p>
 
           <p>Verify installation:</p>
 
@@ -168,16 +189,14 @@
 
           <ul>
             <li>
-              <code>.claude/</code>
-              - Configuration directory
+              <code>.claude/settings.json</code>
+              - Enables the
+              <code>spec@claude-kiro</code>
+              plugin for the project (nothing is copied)
             </li>
             <li>
-              <code>.claude/commands/spec/</code>
-              - Slash commands (create, implement, review)
-            </li>
-            <li>
-              <code>.claude/output-styles/</code>
-              - Spec-driven output style
+              <code>specs/ck.json</code>
+              - Verify commands and per-project agent models
             </li>
             <li>
               <code>specs/</code>
@@ -193,10 +212,16 @@
             <strong>What's happening?</strong>
             The
             <code>ck init</code>
-            command sets up the Claude Code configuration that enables
-            spec-driven development. It adds slash commands, configures the
-            output style, and creates the directory structure for your
-            specifications.
+            command enables the plugin for the project and creates the
+            directory structure for your specifications. The commands come
+            from the plugin installed on each machine, so projects never drift.
+            For cloud sessions, which don't load plugins, use
+            <code>ck init --vendor</code>
+            (or
+            <code>ck vendor</code>
+            ) to copy them into
+            <code>.claude/</code>
+            instead.
           </div>
 
           <h2>Verify Setup</h2>
@@ -323,11 +348,15 @@ export PATH="$HOME/.local/bin:$PATH"</code></pre>
           <h3>Slash Commands Not Working</h3>
 
           <p>
-            Make sure you're running
+            Run
+            <code>ck doctor</code>
+            : it reports whether the
+            <code>spec@claude-kiro</code>
+            plugin is installed (run
+            <code>ck setup</code>
+            if not) and enabled for the project (run
             <code>ck init</code>
-            from your project root. Slash commands require the
-            <code>.claude/commands/</code>
-            directory structure.
+            from your project root). Restart Claude Code after installing.
           </p>
 
           <h3>Spec Not Loading</h3>

@@ -57,9 +57,8 @@ Also read `specs/ck.json`. If it is missing or has no `"verify"` commands, tell 
 
 ## Step 3: Launch the workflow
 
-1. Check that `.claude/workflows/spec-create.js` exists in the project root. If it doesn't, tell me to run `ck init` (it installs missing files without overwriting others) and stop.
-2. Call the **Workflow** tool with:
-   - `scriptPath`: the absolute path to `.claude/workflows/spec-create.js`
+1. Call the **Workflow** tool with:
+   - `name: "spec:spec-create"` (the workflow this plugin ships). If no workflow by that name is found (a project with vendored copies), use `scriptPath` set to the absolute path of `.claude/workflows/spec-create.js` instead; if that file is missing too, tell me to run `ck setup` (installs the plugin) and stop.
    - `args` (a JSON object, not a string):
      ```json
      {
@@ -74,9 +73,9 @@ Also read `specs/ck.json`. If it is missing or has no `"verify"` commands, tell 
        "date": "[today, YYYY-MM-DD]"
      }
      ```
-3. Tell me it's running: requirements, then design and test plan in parallel, then two task tracks in parallel and a link step, then adversarial review and revision. I can watch it with `/workflows`.
+2. Tell me it's running: requirements, then design and test plan in parallel, then two task tracks in parallel and a link step, then adversarial review and revision. I can watch it with `/workflows`.
 
-**Without the Workflow tool** (it isn't among your tools, or calling it is refused or blocked, or I pass `--no-workflow`): run `.claude/workflows/spec-create.js` by hand with the Agent tool and the same args, as `.claude/workflows/without-workflow-tool.md` describes, and tell me once that you're doing so. The steps, prompts, and result are the same.
+**Without the Workflow tool** (it isn't among your tools, or calling it is refused or blocked, or I pass `--no-workflow`): run `${CLAUDE_PLUGIN_ROOT}/workflows/spec-create.js` by hand with the Agent tool and the same args, as `${CLAUDE_PLUGIN_ROOT}/resources/without-workflow-tool.md` describes, and tell me once that you're doing so. The steps, prompts, and result are the same.
 
 ## Step 4: Close the loop
 
@@ -98,7 +97,7 @@ When the workflow returns:
    ```
    Mention any `unverified` findings, lost review lenses, or `consistency.lost` so I know coverage was partial.
 3. **Open questions:** if `review.openQuestions` is non-empty, ask me with AskUserQuestion (up to 4 per call; put the reviewer's suggested fix first when it is a sensible default). Each item has a `source`: `review` (a reviewer's question), `revise` (a fix that would have changed behaviour a criterion governs, so it was not applied) or `consistency` (a contradiction the consistency check found after the revision). For `revise` and `consistency` items, show the criterion or property in `conflictsWith` next to the question and offer the item's `options`; don't pick one yourself. Applying my answer may mean changing the criterion, the design, or both: keep requirements, design, test plan and tasks consistent. Then apply my answers to the spec files, keeping requirements, design, and tasks consistent. Record each answer under a new "Decisions" entry in PLAN.md (if it exists) and in the "Needs Your Decision" table of `review.md`.
-4. Finish with: "Spec ready. Use `/spec:implement [task-number]` to start, or `/spec:implement [feature-name]` to run the whole spec (`/spawn-worktree specs/[feature-name]` to steer it yourself). Tasks are only Done when `ck gate` passes."
+4. Finish with: "Spec ready. Use `/spec:implement [task-number]` to start, or `/spec:implement [feature-name]` to run the whole spec (`/spec:spawn-worktree specs/[feature-name]` to steer it yourself). Tasks are only Done when `ck gate` passes."
 
 ---
 

@@ -17,6 +17,12 @@ Claude Kiro `ck` provides:
 ## Repository Structure
 
 ```
+├── plugin/                      # The `spec` Claude Code plugin: the one source of the
+│   ├── .claude-plugin/          #   skills (/spec:*), workflows, agents, hooks, output style
+│   ├── skills/ workflows/ agents/ resources/ hooks/ output-styles/ bin/ck
+├── .claude-plugin/marketplace.json  # This repo as the `claude-kiro` marketplace
+├── src/claude_kiro/             # The ck CLI (wheels carry plugin/ as package data)
+├── .claude/                     # This repo's own vendored copy (`ck vendor`; a test checks it matches plugin/)
 ├── VISION.md                    # Project vision and goals
 ├── synthesis/                   # Implementation guides
 │   ├── kiro-to-claude-mapping.md
@@ -32,49 +38,54 @@ Claude Kiro `ck` provides:
 
 ## Quick Start
 
+claude-kiro has two parts: the `ck` CLI (gates, plans, worktrees, hooks), and the `spec` Claude Code plugin (the `/spec:*` commands, the workflows, the agent types and the hooks), which this repository also publishes as the `claude-kiro` plugin marketplace.
+
 ```bash
-# Install Claude Kiro globally (this fork; PyPI only has the upstream 0.1.0)
+# 1. Install the ck CLI (this fork; PyPI only has the upstream 0.1.0)
 uv tool install --force "git+https://github.com/kutlayhanli/claude-kiro"
 
-# Set up global config (once per machine)
+# 2. Once per machine: install the spec plugin at user scope (and ~/.claude/CLAUDE.md)
 ck setup
 
-# Initialize your project
+# 3. In each project
 cd your-project
-ck init
-
-# Verify setup
+ck init          # enables spec@claude-kiro in .claude/settings.json, writes specs/ck.json
 ck doctor
 ```
 
-That's it! Your project is now configured for spec-driven development.
+`ck setup` runs `claude plugin marketplace add kutlayhanli/claude-kiro` and `claude plugin install spec@claude-kiro --scope user` (`ck setup --dry-run` prints them). Inside Claude Code the same is:
+
+```
+/plugin install spec --marketplace kutlayhanli/claude-kiro
+```
+
+Projects keep only their own choices in the repository: `.claude/settings.json` (the plugin enabled, plus the marketplace so teammates are offered it), `specs/ck.json` (verify commands, agent models), `.claude/ck-manifest.json` (ck version and mode) and `.claude/CLAUDE.md`. The commands themselves come from the plugin, so every project runs the version installed on the machine, and nothing drifts.
+
+**Cloud sessions** (Claude Code on the web) don't load plugins. For a repository used there, vendor the plugin instead:
+
+```bash
+ck init --vendor     # new project; or `ck vendor` in an existing one
+```
+
+This copies the commands to `.claude/commands/spec/` (still `/spec:plan`, `/spec:create`, `/spec:review`, `/spec:implement`, `/spec:spawn-worktree`), the workflows to `.claude/workflows/`, the agent types (with this project's models) to `.claude/agents/ck-*.md`, and the hooks to `.claude/settings.local.json`, and switches the plugin off for that project so a machine that has it doesn't see each command twice. Commit the copies; re-run `ck vendor` (or `ck upgrade`) after updating ck. `ck upgrade --plugin` goes back to the plugin.
 
 ### Updating an existing setup
 
-From ck 0.5 on, one command updates everything. Run it from a project directory:
+One command updates everything. Run it from a project directory:
 
 ```bash
 cd your-project
-ck update            # reinstall ck from master, add missing ~/.claude files, ck upgrade this project
-git add .claude/commands .claude/workflows .claude/ck-manifest.json specs
+ck update            # reinstall ck, update the plugin (ck setup), ck upgrade this project
+git status && git add -A .claude specs
 git commit -m "Upgrade claude-kiro"
 ```
 
-Then run `ck upgrade` in each other project, and restart Claude Code sessions. `ck update --ref <branch|tag|commit>` installs something other than `master`; `ck update --dry-run` prints the steps; `ck setup --diff` shows global files that changed but weren't overwritten.
+Then run `ck upgrade` in each other project set up by ck 0.8 or earlier, and restart Claude Code sessions. `ck update --ref <branch|tag|commit>` installs something other than `master`; `ck update --dry-run` prints the steps; `ck setup --diff` shows how `~/.claude/CLAUDE.md` differs from this version.
 
-**Coming from 0.4 or older** (no `ck update` yet), do it once by hand:
-
-```bash
-uv tool install --force --reinstall "git+https://github.com/kutlayhanli/claude-kiro"
-ck setup --diff        # global files (~/.claude) that changed; never overwritten without --force
-cd your-project
-ck upgrade --dry-run   # shows what would change, writes nothing
-ck upgrade
-```
+**Coming from 0.8 or older:** projects carry copies of the commands in `.claude/`. `ck upgrade` moves them to the plugin: it removes every copy ck wrote that nobody edited (checked against the hashes in `.claude/ck-manifest.json`), lists the edited ones it keeps, removes the generated `.claude/agents/ck-*.md` and ck's hooks in `.claude/settings.local.json`, and enables the plugin. Commit the removals. See [UPGRADING.md](UPGRADING.md#08--09).
 
 - Don't update `ck` while a `/spec:implement` workflow is running in some project: its agents call `ck`.
 - `ck upgrade` never touches `.claude/CLAUDE.md` or your spec content, and it refuses to let an older `ck` downgrade files written by a newer one.
-- Other clones of the same repo: after `git pull`, run `ck upgrade` once in each. Hooks live in `.claude/settings.local.json`, which is local to each clone.
 - Avoid `ck setup --force` if you've customized `~/.claude/CLAUDE.md`: it overwrites the file.
 - Preferences set with `ck agents set` (without `--project`) live in `~/.config/claude-kiro/config.json` on each machine; set them again on a new machine.
 
@@ -82,11 +93,11 @@ Details, version-by-version changes, and rollback are in [UPGRADING.md](UPGRADIN
 
 ## Installation
 
-> **Already using claude-kiro?** See [Updating an existing setup](#updating-an-existing-setup): reinstall once per machine, then run `ck upgrade` in each repository.
+> **Already using claude-kiro?** See [Updating an existing setup](#updating-an-existing-setup): `ck update` once per machine, then `ck upgrade` in each repository.
 
 ### Install Claude Kiro (Global Tool)
 
-The `claude-kiro` package on PyPI is the upstream 0.1.0, which lacks everything described here (specs in `specs/`, the workflows, `ck gate`, `ck worktree`, and the rest). Install this fork from GitHub:
+The `claude-kiro` package on PyPI is the upstream 0.1.0, which lacks everything described here (specs in `specs/`, the workflows, `ck gate`, `ck worktree`, the plugin, and the rest). Install this fork from GitHub:
 
 ```bash
 # Install (later, `ck update` updates it)
@@ -96,16 +107,12 @@ uv tool install --force "git+https://github.com/kutlayhanli/claude-kiro"
 git clone https://github.com/kutlayhanli/claude-kiro.git
 cd claude-kiro
 uv tool install --force . --editable
+ck setup --source "$PWD"     # install the plugin from this clone instead of GitHub
 ```
 
-Check it: `ck --help` should list `agents`, `gate`, `lint`, `plan`, `update`, `upgrade`, `waves`, and `worktree`.
+Check it: `ck --help` should list `agents`, `gate`, `lint`, `plan`, `update`, `upgrade`, `vendor`, `waves`, and `worktree`.
 
-This installs the `ck` command globally, which provides:
-- `ck setup` - Install global config to ~/.claude/ (once per machine)
-- `ck init` - Set up a project for spec-driven development
-- `ck doctor` - Verify your setup is working
-- `ck hook` - Manage Claude Code hook integration
-- `ck --hook` - Hook runner for Claude Code (hidden command)
+The plugin needs the CLI: its `bin/ck` runs the installed `ck` (and explains how to install it when it's missing; hooks then do nothing). To try a plugin change without installing it: `claude --plugin-dir ./plugin`.
 
 ### Initialize Your Project
 
@@ -115,12 +122,13 @@ ck init
 ```
 
 This creates:
-- `.claude/output-styles/spec-driven.md` - Enforces structured responses
-- `.claude/commands/spec/` - Slash commands for specs
-- `.claude/workflows/spec-create.js` - Workflow behind `/spec:create` and `/spec:review`
+- `.claude/settings.json` - `enabledPlugins: {"spec@claude-kiro": true}` and the `claude-kiro` marketplace (other settings are kept)
+- `specs/ck.json` - Verify commands (detected), guard settings, per-project agent models
 - `specs/` - Where specs are written (project root, outside `.claude/`, so writes need no approval)
-- `.claude/settings.local.json` - Hook configuration
 - `.claude/CLAUDE.md` - Project context template
+- `.claude/ck-manifest.json` - The ck version and mode (plugin or vendor)
+
+With `--vendor`, it also writes the copies described under [Quick Start](#quick-start).
 
 ### What the Hooks Do
 
@@ -139,7 +147,7 @@ The test plan has a required **Properties** section. Every universally quantifie
 
 ## How It Works
 
-1. **Initialize:** `ck init` sets up your project with all necessary files
+1. **Initialize:** `ck setup` once per machine installs the `spec` plugin; `ck init` enables it in your project
 2. **Plan:** `/spec:plan "feature"` - Discuss interactively, decide one question at a time, record decisions in `specs/<name>/PLAN.md`
 3. **Create specs:** `/spec:create <name>` - A workflow writes requirements, then design and an integration-first test plan in parallel, then test and impl task tracks in parallel, then adversarially reviews and revises them. A fix that would change behaviour a criterion governs comes back to you as a decision, and a consistency check diffs the revision against a pre-revision snapshot to catch contradictions the fixes introduced
 4. **Implement:** `/spec:implement task` - Test-track tasks write integration tests first; impl-track tasks make them pass. Done only when `ck gate` passes
@@ -148,17 +156,18 @@ The test plan has a required **Properties** section. Every universally quantifie
    - Each task starts as soon as its own dependencies merge, in its own worktree, with a retry when a gate fails.
    - Finished tasks land in batches (`ck worktree land`): a `git merge-tree` precheck, one `ck gate --task` run for the whole batch, and bisection when the batch is red, so only the culprit goes to the fixer and the target stays green. One landing at a time; the batch size halves after a red batch and grows after a green one. A full gate runs every N merges and at the end.
    - The plan is re-read from tasks.md after every task, so relinks apply without a restart.
-   - It reports wall-clock time per task and per wave group (a display label; nothing waits for a wave). By default tasks merge into an `integrate/<spec>` branch that you fast-forward into main when you're happy, and a failed task doesn't stop tasks that don't depend on it. `/spawn-worktree` runs the same dependency-driven schedule with you approving the launch and merges, or an ad-hoc batch
-6. **No Workflow tool?** Some accounts block it. `/spec:create`, `/spec:review`, `/spec:implement` and `/spawn-worktree` then run the same steps with the Agent tool and a task list (`.claude/workflows/without-workflow-tool.md`): parallel agents in worktrees, merges one at a time, the same gates and reviewer. Models and efforts come from the `ck-*` agent types. Force it with `--no-workflow`.
+   - It reports wall-clock time per task and per wave group (a display label; nothing waits for a wave). By default tasks merge into an `integrate/<spec>` branch that you fast-forward into main when you're happy, and a failed task doesn't stop tasks that don't depend on it. `/spec:spawn-worktree` runs the same dependency-driven schedule with you approving the launch and merges, or an ad-hoc batch
+6. **No Workflow tool?** Some accounts block it. `/spec:create`, `/spec:review`, `/spec:implement` and `/spec:spawn-worktree` then run the same steps with the Agent tool and a task list (`plugin/resources/without-workflow-tool.md`): parallel agents in worktrees, merges one at a time, the same gates and reviewer. Agents use the plugin's types (`spec:implementer`, `spec:test-writer`, `spec:fixer`, `spec:resolver`, `spec:reviewer`) with each role's model and effort from `ck agents` passed on every call (vendored projects: the `ck-*` types). Force it with `--no-workflow`.
 7. **Track progress:** TodoWrite tracks implementation automatically
 8. **Stay aligned:** Hooks provide context and maintain spec-driven discipline
 
 ## CLI Commands Reference
 
 ### Main Commands
-- `ck setup [--force]` - Install global config to ~/.claude/ (once per machine)
-- `ck init [--force] [--allow-workflow | --no-allow-workflow]` - Initialize a project with spec-driven setup. It asks whether to allow the Workflow tool in `.claude/settings.json`, so unattended runs (cloud sessions, `claude -p`) never stall on a permission prompt before a spec workflow launches. Run `ck init --allow-workflow` in an existing project to add just that rule
-- `ck doctor [--unattended]` - Check your Claude Kiro setup health. `--unattended` instead checks this machine for unattended runs: bubblewrap/socat (the sandbox needs both; prints the apt command), blanket `Bash` allow rules in your settings, readable credential files (existence only), sandbox settings, workspace trust, with recommendations; it always exits 0
+- `ck setup [--dry-run] [--source owner/repo|URL|path] [--force] [--diff]` - Once per machine: install (or update) the `spec@claude-kiro` plugin at user scope via `claude plugin`, and write `~/.claude/CLAUDE.md` if missing
+- `ck init [--vendor] [--force] [--allow-workflow | --no-allow-workflow]` - Initialize a project: enable the plugin in `.claude/settings.json` and write `specs/ck.json`; `--vendor` copies the plugin into `.claude/` instead (for cloud sessions). It asks whether to allow the Workflow tool in `.claude/settings.json`, so unattended runs (cloud sessions, `claude -p`) never stall on a permission prompt before a spec workflow launches. Run `ck init --allow-workflow` in an existing project to add just that rule
+- `ck vendor [--dry-run]` - Copy (or refresh) the plugin's commands, workflows, agent types and hooks into `.claude/`, for cloud sessions that don't load plugins; switches the plugin off for the project
+- `ck doctor [--unattended]` - Check your Claude Kiro setup health: the project's mode (plugin, vendored, or legacy copies), whether the plugin is installed on this machine (`claude plugin list`, read-only) and matches the ck version, files, hooks, verify commands. `--unattended` instead checks this machine for unattended runs: bubblewrap/socat (the sandbox needs both; prints the apt command), blanket `Bash` allow rules in your settings, readable credential files (existence only), sandbox settings, workspace trust, with recommendations; it always exits 0
 - `ck migrate [--dry-run]` - Move specs from `.claude/specs/` to `specs/` (tracked files keep their history)
 - `ck gate <spec> [--task N]` - Run the verification gate; exits 1 on failure
   When it passes the full `verify` suite on a clean tree (no uncommitted or untracked files), it stamps the tree hash in `<git-common-dir>/ck-verified/<tree>.json`, so a merge script (e.g. the safe-merge skill) can skip re-running the same suite on the same tree.
@@ -173,21 +182,21 @@ The test plan has a required **Properties** section. Every universally quantifie
 - `ck agents [--json] [--override role.key=value]` - Show the model and effort each workflow role uses and where each value comes from. Defaults: implementer Sonnet at medium effort (the test writer follows it), reviewer Opus at high effort (reviews every task's diff against the spec before it merges), fixer Opus at medium effort, orchestrator Sonnet at low effort (plan, merge, gate steps), resolver Opus at high effort (merge conflicts), and `/spec:plan` / `/spec:create` ask to switch if the session is below Opus at medium effort
 - `ck agents set <role.key> <value> [--project]` - Save a preference globally (`~/.config/claude-kiro/config.json`) or for this project (`specs/ck.json`), e.g. `ck agents set implementer.model haiku`, `ck agents set orchestrator.model haiku`, `ck agents set reviewer.enabled false`, `ck agents set planning.ask false`, `ck agents set implementer.escalate sonnet,opus` (when a task still fails after its retries or review rounds, try it once more on each bigger model in turn; off by default), `ck agents set run.max_concurrent 8` (how many tasks may have an implementing agent at work at once; unlimited by default, and tasks in review or waiting to merge don't count); `default` removes a setting.
   Risk routing: a task tagged `**Risk:** safety (reason)` in tasks.md (`/spec:create` tags tasks that send messages, move money, touch auth or credentials, delete, or have other irreversible effects), or touching a `risk_paths` file, starts at `implementer.risky_model` (unset: the top of `escalate`) and is always reviewed at `reviewer.risky_model`/`reviewer.risky_effort` (Opus, high). Escalation only reacts to failures the gate detects, and safety bugs usually pass the tests. That lets `reviewer.model` be cheaper for normal tasks. `ck agents set implementer.complexity_routing true` starts **Complexity:** High tasks at the first `escalate` model. A tiered setup: `ck agents set implementer.model haiku; ck agents set implementer.escalate sonnet,opus; ck agents set reviewer.model sonnet; ck agents set reviewer.risky_model opus`. The workflow report lists each task's `riskTag`, `startModel`, `reviewModel`, and the reviewer model behind each verdict
-- `ck agents sync [--override role.key=value]` - Write the agent types `ck-implementer`, `ck-test-writer`, `ck-fixer`, `ck-resolver` and `ck-reviewer` to `.claude/agents/`, carrying each role's model and effort. They are used when the Workflow tool is unavailable. `ck init`, `ck upgrade` and `ck agents set` keep them current
+- `ck agents sync [--override role.key=value]` - Vendored projects: write the agent types `ck-implementer`, `ck-test-writer`, `ck-fixer`, `ck-resolver` and `ck-reviewer` to `.claude/agents/`, carrying each role's model and effort (generated from the plugin's agents). `ck vendor`, `ck upgrade` and `ck agents set` keep them current. With the plugin they aren't needed: the skills pass model and effort per Agent call
 - `ck agents check --model <id> [--effort <level>]` - Exit 0 if a session meets the planning minimum (used by `/spec:plan` and `/spec:create`)
-- `ck upgrade [--dry-run] [--no-migrate] [--allow-downgrade]` - Update a project set up by an older ck (see [UPGRADING.md](UPGRADING.md)). It records a version stamp in `.claude/ck-manifest.json` and refuses to let an older ck downgrade newer files
-- `ck setup --diff` - Show how your global `~/.claude` files differ from this version, without writing
+- `ck upgrade [--dry-run] [--vendor | --plugin] [--no-migrate] [--allow-downgrade]` - Update a project set up by an older ck (see [UPGRADING.md](UPGRADING.md)). Projects with ck 0.8 copies move to the plugin (unedited copies removed, edited ones listed); vendored projects get fresh copies. It records the version and mode in `.claude/ck-manifest.json` and refuses to let an older ck downgrade newer files
+- `ck setup --diff` - Show how `~/.claude/CLAUDE.md` differs from this version, without writing
 - `ck hook list` - Show available hooks
 - `ck hook status` - Display configured hooks
 - `ck hook test <name>` - Test a hook with sample data
 - `ck hook config` - Generate settings.json configuration
 
-### Claude Code Slash Commands (Created by `ck init`)
+### Claude Code Slash Commands (from the `spec` plugin)
 - `/spec:plan <feature>` - Discuss and decide the approach interactively (writes PLAN.md)
 - `/spec:create <name>` - Write the spec as a workflow, ending in adversarial review
 - `/spec:implement <spec | task> [--model M] [--effort E] [--review-model M] [--no-review]` - Implement a task or a whole spec (Done is enforced by `ck gate`; models per role from `ck agents`)
 - `/spec:review <spec>` - Adversarially review an existing spec, apply surviving fixes, and check the revision for contradictions with the criteria
-- `/spawn-worktree <spec-or-tasks>` - Run tasks in parallel with git worktree isolation
+- `/spec:spawn-worktree <spec-or-tasks>` - Run tasks in parallel with git worktree isolation
 
 ## Benchmarking model configurations
 

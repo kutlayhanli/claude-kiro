@@ -16,8 +16,9 @@ def _run(cmd, cwd=None) -> int:
 
 
 def _is_ck_project(path: Path) -> bool:
-    claude = path / ".claude"
-    return (claude / "ck-manifest.json").exists() or (claude / "commands" / "spec").is_dir()
+    from ..plugin import mode
+
+    return (path / ".claude" / "ck-manifest.json").exists() or mode(path) is not None
 
 
 @click.command()
@@ -30,9 +31,10 @@ def update(ref, source, project, dry_run):
 
     \b
     1. Reinstall ck with uv from SOURCE (at --ref, if given)
-    2. `ck setup`: add any missing global files to ~/.claude (never overwrites;
-       review changes to existing ones with `ck setup --diff`)
+    2. `ck setup`: install or update the spec plugin, and add ~/.claude/CLAUDE.md
+       if missing (never overwrites; review changes with `ck setup --diff`)
     3. `ck upgrade` in the current directory, if it is a claude-kiro project
+       (a project with copies from ck 0.8 or earlier moves to the plugin)
 
     Wait until any running /spec:implement workflow has finished: its agents call ck.
     """
@@ -57,13 +59,13 @@ def update(ref, source, project, dry_run):
 
     ck = shutil.which("ck") or "ck"  # the freshly installed one
     _run([ck, "setup"])
-    click.echo("  Changed global files are not overwritten. Review them with: ck setup --diff")
+    click.echo("  A changed ~/.claude/CLAUDE.md is not overwritten. Review it with: ck setup --diff")
 
     if upgrade_here:
         if _run([ck, "upgrade"], cwd=here) != 0:
             click.echo("❌ ck upgrade failed in this project; see above.")
             sys.exit(1)
-        click.echo("  Commit the refreshed files: .claude/commands .claude/workflows .claude/ck-manifest.json specs/ck.json")
+        click.echo("  Commit what changed: git status && git add -A .claude specs")
     elif project:
-        click.echo("  Not a claude-kiro project here; run `ck upgrade` in each project to refresh its commands.")
-    click.echo("✓ Updated. Restart open Claude Code sessions so they load the new commands.")
+        click.echo("  Not a claude-kiro project here; run `ck upgrade` in each project set up by ck 0.8 or earlier.")
+    click.echo("✓ Updated. Restart open Claude Code sessions so they load the new plugin version.")

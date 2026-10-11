@@ -18,8 +18,7 @@ Use this after the spec or the code has drifted, after hand edits, or for specs 
 
 1. Resolve the spec directory: `specs/$ARGUMENTS/`. If it only exists under `.claude/specs/`, tell me to run `ck migrate` first and stop. If `$ARGUMENTS` is empty, list the specs in `specs/` and ask which one.
 2. Confirm `requirements.md`, `design.md`, and `tasks.md` all exist. If one is missing, say so and suggest `/spec:create` instead.
-3. Check that `.claude/workflows/spec-create.js` exists; if not, tell me to run `ck init` and stop.
-4. Call the **Workflow** tool with `scriptPath` set to the absolute path of `.claude/workflows/spec-create.js` and `args`:
+3. Call the **Workflow** tool with `name: "spec:spec-create"` (the workflow this plugin ships) and `args` as below. If no workflow by that name is found (a project with vendored copies), use `scriptPath` set to the absolute path of `.claude/workflows/spec-create.js` instead; if that file is missing too, tell me to run `ck setup` (installs the plugin) and stop.
    ```json
    {
      "mode": "review",
@@ -33,6 +32,6 @@ Use this after the spec or the code has drifted, after hand edits, or for specs 
      "date": "[today, YYYY-MM-DD]"
    }
    ```
-5. When it returns, report: result, how many findings were fixed, refuted, or need my decision, what the consistency check fixed or raised (`consistency`), and any partial coverage. Ask me the open questions (`review.openQuestions`, every `source`: review, revise, consistency; show `conflictsWith` and offer the `options` for the last two) with AskUserQuestion, apply my answers consistently across the spec files, and record them in `review.md` (and PLAN.md if it exists).
+4. When it returns, report: result, how many findings were fixed, refuted, or need my decision, what the consistency check fixed or raised (`consistency`), and any partial coverage. Ask me the open questions (`review.openQuestions`, every `source`: review, revise, consistency; show `conflictsWith` and offer the `options` for the last two) with AskUserQuestion, apply my answers consistently across the spec files, and record them in `review.md` (and PLAN.md if it exists).
 
 The full record is in `specs/[spec-name]/review.md`.

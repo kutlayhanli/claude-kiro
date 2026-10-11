@@ -301,7 +301,7 @@ def test_init_installs_hooks_and_keeps_foreign_ones(tmp_path):
     old = os.getcwd()
     os.chdir(tmp_path)
     try:
-        result = CliRunner().invoke(cli, ["init"])
+        result = CliRunner().invoke(cli, ["init", "--vendor"])  # the plugin brings its own hooks
     finally:
         os.chdir(old)
     assert result.exit_code == 0, result.output

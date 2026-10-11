@@ -28,12 +28,12 @@ Models: `sonnet`, `opus`, `haiku`, `fable` (each means the newest model of that 
 
 How each mode applies them:
 - **Whole spec:** pass the `roles` object from `ck agents --json` as `agents` in the workflow args (step 6).
-- **One task:** you can't change your own model mid-session. If the implementer (or the test_writer, for a test-track task) is `inherit` for both model and effort, implement the task yourself as usual. Otherwise launch the Workflow tool with an inline script that runs one `agent()` with that role's `{ model, effort }` (omit any that are `inherit`) and a prompt to implement task N of the spec in the current checkout, following `.claude/commands/spec/implement.md` from "Implementation Guidelines" on. If the reviewer is enabled and the task's gate passed, the same script then runs a reviewer `agent()` with the reviewer's `{ model, effort }`: it reads the task's changes (`git diff` against where the task started) and the spec, does not edit, and returns approve or blocking findings; on findings, one implementer `agent()` revises them (up to the reviewer's `rounds`) and the reviewer looks again. Apply risk routing the same way: if `ck plan <spec> --json` lists the task as `safety` in `risk` (or complexity routing applies), use the starting model described above for the implementer `agent()`, and the reviewer's `risky_model`/`risky_effort` for the review. Relay the implementation Output and the review verdict to me. Without the Workflow tool, use the Agent tool with the `ck-*` agent types instead (see `.claude/workflows/without-workflow-tool.md`).
+- **One task:** you can't change your own model mid-session. If the implementer (or the test_writer, for a test-track task) is `inherit` for both model and effort, implement the task yourself as usual. Otherwise launch the Workflow tool with an inline script that runs one `agent()` with that role's `{ model, effort }` (omit any that are `inherit`) and a prompt to implement task N of the spec in the current checkout, following `.claude/commands/spec/implement.md` from "Implementation Guidelines" on. If the reviewer is enabled and the task's gate passed, the same script then runs a reviewer `agent()` with the reviewer's `{ model, effort }`: it reads the task's changes (`git diff` against where the task started) and the spec, does not edit, and returns approve or blocking findings; on findings, one implementer `agent()` revises them (up to the reviewer's `rounds`) and the reviewer looks again. Apply risk routing the same way: if `ck plan <spec> --json` lists the task as `safety` in `risk` (or complexity routing applies), use the starting model described above for the implementer `agent()`, and the reviewer's `risky_model`/`risky_effort` for the review. Relay the implementation Output and the review verdict to me. Without the Workflow tool, use the Agent tool with the `ck-implementer` / `ck-test-writer` / `ck-reviewer` agent types instead, passing each role's `model` and `effort` on the call (see `.claude/workflows/without-workflow-tool.md`).
 
 ## Whole Spec: The Workflow
 
 1. **Resolve the spec** in `specs/`. If it only exists in `.claude/specs/`, tell me to run `ck migrate` and stop.
-2. **Check the setup.** If `.claude/workflows/spec-implement.js` or `.claude/workflows/spec-implement-brief.md` is missing, tell me to run `ck upgrade` and stop. Read `specs/ck.json`; if `"verify"` is empty, tell me, since the gate needs it.
+2. **Check the setup.** Run `ck --version`; if `ck` is missing, show me its install instructions and stop. Read `specs/ck.json`; if `"verify"` is empty, tell me, since the gate needs it.
 3. **Lint the plan:** `ck lint <spec>`.
    - **A dependency cycle or verify-order cycle:** don't launch. Show me the cycle and the suggested relink (for a verify-order cycle: make the task a foundation task with a smoke Verify, and have the test task verify the later task that its tests need). Offer to apply the relink in tasks.md; if I agree, apply it, re-run `ck lint`, and continue. A spec bug like this would otherwise halt the run hours in.
    - **Dependencies without a stated reason:** list them. Each one serializes the run. Ask whether to drop the ones with no code, data, test, or shared-file reason before launching.
@@ -42,10 +42,11 @@ How each mode applies them:
 5. **Choose the merge target:**
    - **Default: an integration branch.** Run `ck worktree integration <spec>`. It creates or reuses `.claude/worktrees/<spec>-integration` on branch `integrate/<spec>`, branched from the main checkout's current branch. Then set `into` = `integrate/<spec>` and `targetDir` = `<main checkout>/.claude/worktrees/<spec>-integration`. Task worktrees branch from it and every task merges into it, so the main branch is never touched mid-run. I fast-forward main at the end.
    - **If I asked to merge directly:** set `into` = the main checkout's current branch and `targetDir` = the main checkout. The main checkout must have no uncommitted changes to tracked files; if it has some, stop and tell me.
-6. **Launch.** Without the Workflow tool: run `ck agents sync` (with the same `--override`s), follow `.claude/workflows/without-workflow-tool.md` with the values below, tell me it's running and that progress is in the task list, and report as in step 9 when it finishes. Otherwise launch the Workflow tool (a fresh run, not `resumeFromRunId`) with `scriptPath` set to the absolute path of `.claude/workflows/spec-implement.js` and `args` as a JSON object:
+6. **Launch.** Without the Workflow tool: follow `.claude/workflows/without-workflow-tool.md` with the values below, tell me it's running and that progress is in the task list, and report as in step 9 when it finishes. Otherwise launch the Workflow tool (a fresh run, not `resumeFromRunId`) with `name: "spec:spec-implement"` (the workflow this plugin ships) and `args` as a JSON object. If no workflow by that name is found (a project with vendored copies), use `scriptPath` set to the absolute path of `.claude/workflows/spec-implement.js` instead, same args.
    ```json
    {
      "spec": "<spec>",
+     "brief": ".claude/workflows/spec-implement-brief.md",
      "root": "<absolute main checkout>",
      "into": "<target branch>",
      "targetDir": "<absolute checkout that has the target branch>",
@@ -149,7 +150,7 @@ If `ck gate` reports that no verify commands are configured, tell me, and sugges
 
 ## Parallel Safety
 
-When running as a subagent via `/spawn-worktree`:
+When running as a subagent via `/spec:spawn-worktree`:
 - You have your own copy of tasks.md in your worktree. Only update YOUR task's section.
 - Run `ck gate` in your worktree before marking Done; hooks may not be active there.
 - An impl task's verifying tests come from test tasks in your Dependencies and are already merged into your branch. If they're missing, stop and report it.
