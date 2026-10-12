@@ -1,0 +1,5 @@
+verified-tree: 3648acb85465d09a9adfb56d60a6d72530fd20b5
+checks: passed (full: uv run pytest -q; 46s)
+pushed-to: origin/feat/unattended-escalation
+by: safe-merge (DESKTOP-PU96OS3) branch fix/stop-hook-relief
+at: 2026-10-12T12:12:02-05:00
