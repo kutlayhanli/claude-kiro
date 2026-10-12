@@ -51,7 +51,7 @@ def repo(tmp_path: Path) -> Path:
     git(root, "init", "-q", "-b", "main")
     git(root, "config", "user.email", "t@example.com")
     git(root, "config", "user.name", "Test")
-    (root / ".gitignore").write_text(".venv/\n.claude/worktrees/\n")
+    (root / ".gitignore").write_text(".venv/\n.ck/worktrees/\n")
     (root / "shared.txt").write_text("base\n")
     (root / "specs/demo").mkdir(parents=True)
     (root / "specs/demo/tasks.md").write_text(TASKS)
@@ -61,7 +61,7 @@ def repo(tmp_path: Path) -> Path:
 
 
 def wt(root: Path, n: str) -> Path:
-    return root / ".claude/worktrees" / f"demo-task-{n}"
+    return root / ".ck/worktrees" / f"demo-task-{n}"
 
 
 def commit_in(path: Path, name: str, content: str, msg: str):
@@ -236,4 +236,54 @@ def test_land_into_integration_branch(repo):
     assert result.exit_code == 0, result.output
     assert by["1"]["state"] == "MERGED"
     assert not (repo / "one.txt").exists()
-    assert (repo / ".claude/worktrees/demo-integration/one.txt").exists()
+    assert (repo / ".ck/worktrees/demo-integration/one.txt").exists()
+
+
+# --- protected paths: files Claude Code, git or the shell run on their own ---------
+
+
+@pytest.mark.parametrize("protected", [".claude/settings.json", ".claude/hooks/x.sh", ".mcp.json", ".githooks/pre-commit",
+                                       ".husky/pre-push", "specs/ck.json", "sub/.claude/agents/a.md"])
+def test_a_branch_touching_a_protected_path_is_never_landed(repo, protected):
+    ck(repo, "worktree", "create", "demo", "1", "3")
+    commit_in(wt(repo, "1"), "one.txt", "1\n", "task 1")
+    target = wt(repo, "3") / protected
+    target.parent.mkdir(parents=True, exist_ok=True)
+    commit_in(wt(repo, "3"), protected, "{}\n", "task 3 plants a file")
+    before = head(repo)
+
+    result, data, by = land(repo, "1", "3", "--gate")
+    assert result.exit_code == 3, result.output
+    assert by["3"]["state"] == "PROTECTED"
+    assert by["3"]["files"] == [protected]
+    assert "human" in by["3"]["detail"] and "allow_paths" in by["3"]["detail"]
+    assert by["1"]["state"] == "MERGED"  # the rest of the batch still lands
+    assert git(repo, "rev-list", "--count", f"{before}..HEAD").strip() == "2"  # task 1's commit and its merge
+    assert not (repo / protected).exists()
+    assert wt(repo, "3").exists() and "feat/demo-task-3" in git(repo, "branch")  # kept for the human
+
+
+def test_land_allow_paths_in_the_target_lets_a_spec_edit_protected_files(repo):
+    (repo / "specs/ck.json").write_text(json.dumps({"land": {"allow_paths": [".claude/commands/**"]}}))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "opt in")
+    ck(repo, "worktree", "create", "demo", "1", "3")
+    (wt(repo, "1") / ".claude/commands").mkdir(parents=True)
+    commit_in(wt(repo, "1"), ".claude/commands/x.md", "x\n", "task 1 edits a command")
+    (wt(repo, "3") / ".claude").mkdir()
+    commit_in(wt(repo, "3"), ".claude/settings.json", "{}\n", "task 3 edits settings")
+
+    result, data, by = land(repo, "1", "3")
+    assert by["1"]["state"] == "MERGED", result.output
+    assert by["3"]["state"] == "PROTECTED" and by["3"]["files"] == [".claude/settings.json"]
+
+
+def test_a_branch_cannot_opt_itself_in(repo):
+    """allow_paths is read from the target checkout, so a task branch editing specs/ck.json gains nothing."""
+    ck(repo, "worktree", "create", "demo", "1")
+    (wt(repo, "1") / ".claude").mkdir()
+    (wt(repo, "1") / "specs/ck.json").write_text(json.dumps({"land": {"allow_paths": ["**"]}}))
+    commit_in(wt(repo, "1"), ".claude/settings.json", "{}\n", "task 1")
+    result, data, by = land(repo, "1")
+    assert by["1"]["state"] == "PROTECTED"
+    assert sorted(by["1"]["files"]) == [".claude/settings.json", "specs/ck.json"]

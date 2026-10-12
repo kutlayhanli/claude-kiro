@@ -57,9 +57,9 @@ Run multiple implementation tasks concurrently, each in its own git worktree wit
 ck worktree create <spec> <N> <M> ... --install
 ```
 
-This creates `.claude/worktrees/<spec>-task-<N>` on branch `feat/<spec>-task-<N>` and installs dependencies. An existing worktree is reused. A worktree that is claimed by another agent, or has uncommitted changes, is reported **BUSY** and left alone: don't spawn an agent into it.
+This creates `<worktree dir>/<spec>-task-<N>` on branch (the directory is `worktreeDir` in `ck plan <spec> --json`: `.ck/worktrees` unless `specs/ck.json` sets `worktree_dir`; not `.claude/`, which Claude Code's Bash sandbox keeps read-only) `feat/<spec>-task-<N>` and installs dependencies. An existing worktree is reused. A worktree that is claimed by another agent, or has uncommitted changes, is reported **BUSY** and left alone: don't spawn an agent into it.
 
-**Ad-hoc tasks (no spec):** `command git worktree add .claude/worktrees/<feature>-<n> -b feat/<feature>-<n>`.
+**Ad-hoc tasks (no spec):** `command git worktree add .ck/worktrees/<feature>-<n> -b feat/<feature>-<n>`.
 
 Run git as `command git` (a shell hook may rewrite plain `git`). Verify with `ck worktree status <spec>` (or `command git worktree list`). **If a worktree fails to create, or is BUSY, don't spawn into it.** At the first launch, abort the whole run and report: don't proceed with partial isolation. Later, report it and leave that task (and its dependents) unstarted.
 
@@ -70,7 +70,7 @@ For each task, spawn an agent with `run_in_background: true`:
 ```json
 {
   "description": "implement <feature>: <task-summary>",
-  "prompt": "Your task: Task <N> of spec <name>.\nWorktree: <absolute main checkout>/.claude/worktrees/<name>-task-<N> (branch feat/<name>-task-<N>). Target branch for the final merge: <current branch>.\nRead your operating brief at ${CLAUDE_PLUGIN_ROOT}/resources/spec-implement-brief.md and follow it exactly: claim the worktree with `ck worktree claim <name> <N>`, implement per your track, get `ck gate <name> --task <N>` passing, merge the target into your branch before finishing, release the worktree.\nReport: status, gatePassed, summary, commits, gate output tail, blocker, deviations, wrong tests, files outside your task.",
+  "prompt": "Your task: Task <N> of spec <name>.\nWorktree: <worktreeDir from ck plan>/<name>-task-<N> (branch feat/<name>-task-<N>). Target branch for the final merge: <current branch>.\nRead your operating brief at ${CLAUDE_PLUGIN_ROOT}/resources/spec-implement-brief.md and follow it exactly: claim the worktree with `ck worktree claim <name> <N>`, implement per your track, get `ck gate <name> --task <N>` passing, merge the target into your branch before finishing, release the worktree.\nReport: status, gatePassed, summary, commits, gate output tail, blocker, deviations, wrong tests, files outside your task.",
   "subagent_type": "general-purpose",
   "run_in_background": true
 }
@@ -104,7 +104,7 @@ Don't wait for the others. Handle each agent's report as it arrives:
 
 If a merge reports **CONFLICT**:
 - The merge is already aborted. Nothing is half-merged on the current branch.
-- Stop starting new tasks, report which task and files conflicted, and let me decide. To resolve: run `command git -C .claude/worktrees/<spec>-task-<N> merge <current branch>` **inside the task worktree**, fix the conflicts there (keep both sides' tests), commit, then run `ck worktree merge <spec> <N>` again. Never resolve in the main checkout.
+- Stop starting new tasks, report which task and files conflicted, and let me decide. To resolve: run `command git -C <worktree dir>/<spec>-task-<N> merge <current branch>` **inside the task worktree**, fix the conflicts there (keep both sides' tests), commit, then run `ck worktree merge <spec> <N>` again. Never resolve in the main checkout.
 
 If a task gate is **red**: stop starting new tasks, set that task back to In Progress in tasks.md, report the gate output, and ask me whether to fix it here or re-run the task. Agents already running may finish, but don't merge anything onto a red branch.
 
@@ -146,10 +146,10 @@ If something goes wrong, these commands clean up manually:
 git worktree list
 
 # Remove a specific worktree
-git worktree remove worktrees/<name>
+git worktree remove .ck/worktrees/<name>
 
 # Force-remove if worktree has changes
-git worktree remove --force worktrees/<name>
+git worktree remove --force .ck/worktrees/<name>
 
 # Delete a branch
 git branch -D feat/<name>
@@ -166,9 +166,9 @@ User: /spec:spawn-worktree specs/auth-system
 Claude: Task 1 (test infrastructure) is Done. Ready now, longest chain first:
 
 Plan:
-  Task 2 [test] login tests        -> .claude/worktrees/auth-system-task-2
-  Task 4 [impl] user model         -> .claude/worktrees/auth-system-task-4
-  Task 3 [test] session tests      -> .claude/worktrees/auth-system-task-3
+  Task 2 [test] login tests        -> .ck/worktrees/auth-system-task-2
+  Task 4 [impl] user model         -> .ck/worktrees/auth-system-task-4
+  Task 3 [test] session tests      -> .ck/worktrees/auth-system-task-3
 
 Critical path: 2 -> 5 -> 7 (3 of 6 open tasks). Waiting: 5 (needs 2, 4),
 6 (needs 3), 7 (needs 5). Implementer sonnet/medium, reviewer off.

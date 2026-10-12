@@ -7,10 +7,10 @@ import { runWorkflow, sleep } from './load_workflow.mjs'
 const here = path.dirname(fileURLToPath(import.meta.url))
 const SCRIPT = path.join(here, '../../plugin/workflows/spec-implement.js')
 
-const baseArgs = { spec: 'demo', root: '/repo', into: 'integrate/demo', targetDir: '/repo/.claude/worktrees/demo-integration' }
+const baseArgs = { spec: 'demo', root: '/repo', into: 'integrate/demo', targetDir: '/repo/.ck/worktrees/demo-integration' }
 
 // A fake project: `ck plan` semantics over deps/done, task durations, failures, timestamps.
-function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null }) {
+function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [] }) {
   let rechecksLeftRed = recheckRed
   // RED landings left per task: checkRed tasks are red on their first landing, redLands sets a count.
   const redLeft = { ...Object.fromEntries(checkRed.map(n => [n, 1])), ...redLands }
@@ -68,6 +68,7 @@ function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFir
       const out = []
       const landing = []
       for (const n of tasks) {
+        if (protectedTasks.includes(n)) { out.push({ task: n, state: 'PROTECTED', detail: 'a human must merge it', files: ['.claude/settings.json'] }); continue }
         if (conflicts.includes(n) && !state.resolved.has(n)) { out.push({ task: n, state: 'CONFLICT', files: ['specs/demo/tasks.md'] }); continue }
         const mate = pairConflicts.find(([a, b]) => b === n && landing.includes(a))
         if (mate) { out.push({ task: n, state: 'DEFERRED', detail: `conflicts with Task ${mate[0]} in this batch`, files: ['x.py'] }); continue }
@@ -193,7 +194,7 @@ await test('per-landing check: a task red on landing stays off the target, gets 
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: baseArgs })
   assert.ok(p.state.events.includes('fix 1 (Task 1 red on landing)'))
   assert.match(p.state.prompts['fix 1 (Task 1 red on landing)'], /red: task 1/)
-  assert.match(p.state.prompts['fix 1 (Task 1 red on landing)'], /Work only in the task worktree \/repo\/\.claude\/worktrees\/demo-task-1/)
+  assert.match(p.state.prompts['fix 1 (Task 1 red on landing)'], /Work only in the task worktree \/repo\/\.ck\/worktrees\/demo-task-1/)
   assert.deepEqual(p.state.landings, [['1'], ['1'], ['2']])
   assert.deepEqual(result.merged.sort(), ['1', '2'])
   assert.equal(result.tasks.find(t => t.task === '1').fixedAfterMerge, true)
@@ -301,6 +302,8 @@ await test('every gate-running prompt tells the agent to wait for the real exit 
   for (const l of ['task 1', 'task 1 retry 1', 'land 1', 'fix 1 (Task 1 red on landing)', 'final gate']) {
     assert.ok(p.state.prompts[l], `no prompt for ${l}`)
     assert.match(p.state.prompts[l], /A slow gate is not a failed gate/, l)
+    assert.match(p.state.prompts[l], /The log name must be new: put the task and the output of "date \+%s%N" in it/, l)
+    assert.match(p.state.prompts[l], /do not return while your background command is still running/, l)
   }
   assert.doesNotMatch(p.state.prompts['plan 1'], /slow gate/)
 })
@@ -441,7 +444,7 @@ await test('escalation: a red full gate the fixer could not repair gets a fix on
 await test('handoff: agents leave a note on failure and every retry or revision reads it first', async () => {
   const p = project({ deps: { 1: [] }, failUntil: { 1: 2 }, reviews: { 1: ['changes', 'approve'] } })
   await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxRetries: 1, agents: HAIKU(['sonnet']) } })
-  const note = '/repo/.claude/worktrees/demo-task-1.handoff.md'
+  const note = '/repo/.ck/worktrees/demo-task-1.handoff.md'
   assert.match(p.state.prompts['task 1'], new RegExp(`write a handoff note to ${note}`))
   for (const l of ['task 1 retry 1', 'task 1 retry 2 (sonnet)', 'task 1 revise 1']) {
     assert.match(p.state.prompts[l], new RegExp(`read ${note}`), l)
@@ -496,6 +499,27 @@ await test('resolver: a conflict goes to the resolver, then the task lands again
   assert.match(p.state.prompts['resolve 2'], /specs\/demo\/tasks\.md/)
   assert.deepEqual(result.merged.sort(), ['1', '2'])
   assert.ok(!p.state.events.includes('resolve 1'), 'no resolver without a conflict')
+})
+
+await test('gate logs go under $TMPDIR: /tmp itself is read-only in the sandbox', async () => {
+  const p = project({ deps: { 1: [] } })
+  await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })
+  for (const label of ['task 1 [impl]', 'land 1'].filter(l => p.state.prompts[l])) {
+    assert.ok(p.state.prompts[label].includes('${TMPDIR:-/tmp}/ck-gate-'), label)
+    assert.ok(!/> \/tmp\/ck-gate-/.test(p.state.prompts[label]), label)
+  }
+  assert.ok(p.state.prompts['land 1'])
+})
+
+await test('a PROTECTED landing fails the task as needing a human: no resolver, no fixer, no retry', async () => {
+  const p = project({ deps: { 1: [], 2: [], 3: ['2'] }, protectedTasks: ['2'] })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })
+  assert.deepEqual(result.merged, ['1'])
+  const f = result.failed.find(x => x.task === '2')
+  assert.ok(f && /needs a human/.test(f.reason) && /\.claude\/settings\.json/.test(f.reason), JSON.stringify(result.failed))
+  assert.ok(!p.state.events.some(e => /^(resolve|fix) /.test(e)))
+  assert.equal(p.state.landings.filter(l => l.includes('2')).length, 1)
+  assert.ok(!p.state.events.includes('task 3'), 'its dependents never start')
 })
 
 // --- risk and complexity routing ----------------------------------------------
@@ -687,4 +711,21 @@ await test('the brief path comes from args.brief (plugin), with the vendored pat
   const rel = project({ deps: { 1: [] } })
   await runWorkflow(SCRIPT, { agent: rel.agent, args: { ...baseArgs, brief: '.claude/workflows/spec-implement-brief.md' } })
   assert.ok(rel.state.prompts['task 1'].includes('/repo/.claude/workflows/spec-implement-brief.md'), 'relative brief resolves against root')
+})
+
+await test('task worktrees and handoff notes live in args.worktreeDir (default <root>/.ck/worktrees), never under .claude/', async () => {
+  const p = project({ deps: { 1: [] }, failUntil: { 1: 1 } })
+  await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxRetries: 1 } })
+  assert.ok(p.state.prompts['task 1'].includes('Worktree: /repo/.ck/worktrees/demo-task-1 (branch feat/demo-task-1)'))
+  assert.ok(p.state.prompts['task 1'].includes('/repo/.ck/worktrees/demo-task-1.handoff.md'))
+  for (const prompt of Object.values(p.state.prompts)) assert.ok(!prompt.includes('.claude/worktrees'), prompt.slice(0, 200))
+
+  const abs = project({ deps: { 1: [] } })
+  await runWorkflow(SCRIPT, { agent: abs.agent, args: { ...baseArgs, worktreeDir: '/elsewhere/wt/' } })
+  assert.ok(abs.state.prompts['task 1'].includes('Worktree: /elsewhere/wt/demo-task-1 '))
+  assert.ok(abs.state.prompts['task 1'].includes('/elsewhere/wt/demo-task-1.handoff.md'))
+
+  const rel = project({ deps: { 1: [] } })
+  await runWorkflow(SCRIPT, { agent: rel.agent, args: { ...baseArgs, worktreeDir: './.claude/worktrees' } })
+  assert.ok(rel.state.prompts['task 1'].includes('Worktree: /repo/.claude/worktrees/demo-task-1 '), 'a legacy dir from ck plan is honoured')
 })

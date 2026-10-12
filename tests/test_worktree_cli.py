@@ -28,7 +28,7 @@ def repo(tmp_path: Path) -> Path:
     git(root, "init", "-q", "-b", "main")
     git(root, "config", "user.email", "t@example.com")
     git(root, "config", "user.name", "Test")
-    (root / ".gitignore").write_text(".venv/\n.claude/worktrees/\n")
+    (root / ".gitignore").write_text(".venv/\n.ck/worktrees/\n")
     (root / "shared.txt").write_text("base\n")
     (root / "specs/demo").mkdir(parents=True)
     (root / "specs/demo/tasks.md").write_text("### Task 1: a\n**Status:** Not Started\n")
@@ -38,7 +38,7 @@ def repo(tmp_path: Path) -> Path:
 
 
 def wt(root: Path, n: str) -> Path:
-    return root / ".claude/worktrees" / f"demo-task-{n}"
+    return root / ".ck/worktrees" / f"demo-task-{n}"
 
 
 def commit_in(path: Path, name: str, content: str, msg: str):
@@ -50,7 +50,7 @@ def commit_in(path: Path, name: str, content: str, msg: str):
 def test_create_is_idempotent_and_reports_busy(repo):
     first = ck(repo, "worktree", "create", "demo", "1", "2")
     assert first.exit_code == 0, first.output
-    assert "CREATED 1 .claude/worktrees/demo-task-1 (feat/demo-task-1) - from main" in first.output
+    assert "CREATED 1 .ck/worktrees/demo-task-1 (feat/demo-task-1) - from main" in first.output
     assert git(wt(repo, "2"), "branch", "--show-current").strip() == "feat/demo-task-2"
 
     again = ck(repo, "worktree", "create", "demo", "1")
@@ -150,7 +150,7 @@ def test_merge_into_integration_branch_leaves_main_untouched(repo):
     result = ck(repo, "worktree", "merge", "demo", "1", "--into", "integrate/demo")
     assert result.exit_code == 0, result.output
     assert not (repo / "one.txt").exists()
-    assert (repo / ".claude/worktrees/demo-integration/one.txt").exists()
+    assert (repo / ".ck/worktrees/demo-integration/one.txt").exists()
     # the user fast-forwards main when ready
     git(repo, "merge", "--ff-only", "integrate/demo")
     assert (repo / "one.txt").exists()
@@ -163,3 +163,69 @@ def test_status_lists_claims_and_progress(repo):
     out = ck(repo, "worktree", "status", "demo").output
     assert "EXISTS 1" in out and "1 ahead of main" in out
     assert "BUSY 2" in out and "claimed: agent-b" in out
+
+
+# --- Where worktrees live -------------------------------------------------------
+
+
+def test_default_worktree_dir_is_outside_dot_claude_and_plan_reports_it(repo):
+    """Claude Code's Bash sandbox keeps .claude/ read-only, so task worktrees go to .ck/worktrees."""
+    out = ck(repo, "worktree", "create", "demo", "1", "--json")
+    assert out.exit_code == 0, out.output
+    assert json.loads(out.output)[0]["path"] == ".ck/worktrees/demo-task-1"
+    assert (repo / ".ck/worktrees/demo-task-1/shared.txt").exists()
+    assert not (repo / ".claude/worktrees").exists()
+    plan = json.loads(ck(repo, "plan", "demo", "--json").output)
+    assert plan["worktreeDir"] == str(repo / ".ck/worktrees")
+
+
+def test_worktree_dir_comes_from_ck_json(repo, tmp_path):
+    (repo / "specs/ck.json").write_text(json.dumps({"worktree_dir": "build/wt"}))
+    out = ck(repo, "worktree", "create", "demo", "1")
+    assert "CREATED 1 build/wt/demo-task-1" in out.output, out.output
+    assert json.loads(ck(repo, "plan", "demo", "--json").output)["worktreeDir"] == str(repo / "build/wt")
+
+    outside = tmp_path / "elsewhere"
+    (repo / "specs/ck.json").write_text(json.dumps({"worktree_dir": str(outside)}))
+    out = ck(repo, "worktree", "create", "demo", "2", "--json")
+    assert json.loads(out.output)[0]["path"] == str(outside / "demo-task-2")
+    commit_in(outside / "demo-task-2", "two.txt", "2\n", "task 2")
+    merged = ck(repo, "worktree", "merge", "demo", "2")
+    assert merged.exit_code == 0 and "MERGED 2" in merged.output, merged.output
+    assert (repo / "two.txt").exists() and not (outside / "demo-task-2").exists()
+
+
+def test_in_flight_worktrees_in_the_legacy_dir_keep_working(repo):
+    """A spec whose worktrees ck made in .claude/worktrees (older ck) keeps using them until they are gone."""
+    legacy = repo / ".claude/worktrees/demo-task-1"
+    git(repo, "worktree", "add", "-q", "-b", "feat/demo-task-1", str(legacy))
+    assert json.loads(ck(repo, "plan", "demo", "--json").output)["worktreeDir"] == str(repo / ".claude/worktrees")
+    assert "EXISTS 1 .claude/worktrees/demo-task-1" in ck(repo, "worktree", "create", "demo", "1").output
+    assert "CLAIMED 1" in ck(repo, "worktree", "claim", "demo", "1").output
+    assert "demo-task-1" in ck(repo, "worktree", "status", "demo").output
+    ck(repo, "worktree", "release", "demo", "1")
+    commit_in(legacy, "one.txt", "1\n", "task 1")
+    landed = ck(repo, "worktree", "land", "demo", "1", "--json")
+    assert landed.exit_code == 0, landed.output
+    assert json.loads(landed.output)["tasks"][0]["state"] == "MERGED"
+    assert not legacy.exists()
+    # Once the spec has none left there, new worktrees go to the configured dir.
+    assert "CREATED 2 .ck/worktrees/demo-task-2" in ck(repo, "worktree", "create", "demo", "2").output
+
+
+def test_status_finds_worktrees_in_both_dirs(repo):
+    git(repo, "worktree", "add", "-q", "-b", "feat/demo-task-1", str(repo / ".claude/worktrees/demo-task-1"))
+    git(repo, "worktree", "add", "-q", "-b", "feat/demo-task-2", str(repo / ".ck/worktrees/demo-task-2"))
+    out = ck(repo, "worktree", "status", "demo")
+    assert ".claude/worktrees/demo-task-1" in out.output and ".ck/worktrees/demo-task-2" in out.output
+
+
+def test_install_detection_ignores_empty_sandbox_stubs(tmp_path):
+    """A sandboxed session leaves empty read-only package.json / package-lock.json stubs in the project root."""
+    from claude_kiro.config import install_command, load_config
+
+    (tmp_path / "package-lock.json").write_text("")
+    (tmp_path / "package.json").write_text("")
+    assert install_command(load_config(tmp_path), tmp_path) is None
+    (tmp_path / "uv.lock").write_text("version = 1\n")
+    assert install_command(load_config(tmp_path), tmp_path) == "uv sync --frozen -q"

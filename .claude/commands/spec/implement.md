@@ -40,7 +40,7 @@ How each mode applies them:
    - **The critical path:** report it, with the number of open tasks. It is the floor on wall-clock time however many agents run.
 4. **Plan.** Run `ck plan <spec> --json` and show me a short summary: the tasks remaining, how many are already Done (skipped), how many can start right away, and the critical-path length.
 5. **Choose the merge target:**
-   - **Default: an integration branch.** Run `ck worktree integration <spec>`. It creates or reuses `.claude/worktrees/<spec>-integration` on branch `integrate/<spec>`, branched from the main checkout's current branch. Then set `into` = `integrate/<spec>` and `targetDir` = `<main checkout>/.claude/worktrees/<spec>-integration`. Task worktrees branch from it and every task merges into it, so the main branch is never touched mid-run. I fast-forward main at the end.
+   - **Default: an integration branch.** Run `ck worktree integration <spec>`. It creates or reuses `<worktree dir>/<spec>-integration` on branch `integrate/<spec>`, branched from the main checkout's current branch, and prints its path. Then set `into` = `integrate/<spec>` and `targetDir` = the absolute path of that worktree (`<worktreeDir from ck plan>/<spec>-integration`). Task worktrees branch from it and every task merges into it, so the main branch is never touched mid-run. I fast-forward main at the end.
    - **If I asked to merge directly:** set `into` = the main checkout's current branch and `targetDir` = the main checkout. The main checkout must have no uncommitted changes to tracked files; if it has some, stop and tell me.
 6. **Launch.** Without the Workflow tool: follow `.claude/workflows/without-workflow-tool.md` with the values below, tell me it's running and that progress is in the task list, and report as in step 9 when it finishes. Otherwise launch the Workflow tool (a fresh run, not `resumeFromRunId`) with `name: "spec:spec-implement"` (the workflow this plugin ships) and `args` as a JSON object. If no workflow by that name is found (a project with vendored copies), use `scriptPath` set to the absolute path of `.claude/workflows/spec-implement.js` instead, same args.
    ```json
@@ -48,6 +48,7 @@ How each mode applies them:
      "spec": "<spec>",
      "brief": ".claude/workflows/spec-implement-brief.md",
      "root": "<absolute main checkout>",
+     "worktreeDir": "<worktreeDir from ck plan>",
      "into": "<target branch>",
      "targetDir": "<absolute checkout that has the target branch>",
      "wave": "<wave from ck plan>",
@@ -63,6 +64,7 @@ How each mode applies them:
      "agents": "<the roles object from ck agents --json>"
    }
    ```
+   - **worktreeDir:** copy it from `ck plan` as is. It is where `ck worktree` puts this spec's task worktrees (`specs/ck.json` `worktree_dir`, default `.ck/worktrees`; outside `.claude/`, which Claude Code's Bash sandbox keeps read-only).
    - **agents:** see Agents above. Report the roles you passed (implementer, test_writer, reviewer) and the concurrency cap when you tell me it's running.
    - **risk / complexity:** copy them from `ck plan` as they are. Tell me how many tasks are safety (and which), since they run on the strong model and the risky reviewer. If `ck lint` warned about a task touching a risk path without `**Risk:** safety`, mention it: it is routed as safety anyway, but the tag belongs in tasks.md.
    - **onFailure:** by default a failed task doesn't stop the run. Tasks that don't depend on it keep starting, its dependents never start and are reported, and a red target branch always halts. Use `"onFailure": "halt"` if I asked to stop at the first failure.
@@ -82,7 +84,7 @@ How each mode applies them:
    - if it halted or refused, the reason.
    
    Then give me the next step: fix the blockers (or answer the wrong-test questions), then run `/spec:implement <spec>` again. That is a fresh run: Done tasks are skipped and worktrees and the integration branch are reused. Don't use `resumeFromRunId`, because its cached planning steps would be stale.
-10. **Landing the integration branch:** once I'm happy (ideally once every task is Done and `ck gate <spec>` passes in the integration worktree), tell me the command to land it: `git merge --ff-only integrate/<spec>` from the main checkout. If main moved in the meantime, use `git merge integrate/<spec>` instead. Afterwards: `git worktree remove .claude/worktrees/<spec>-integration && git branch -d integrate/<spec>`. Don't run these yourself unless I ask.
+10. **Landing the integration branch:** once I'm happy (ideally once every task is Done and `ck gate <spec>` passes in the integration worktree), tell me the command to land it: `git merge --ff-only integrate/<spec>` from the main checkout. If main moved in the meantime, use `git merge integrate/<spec>` instead. Afterwards: `git worktree remove <worktree dir>/<spec>-integration && git branch -d integrate/<spec>`. Don't run these yourself unless I ask.
 
 The rest of this file is the single-task guide, which every task agent in the workflow also follows (through `.claude/workflows/spec-implement-brief.md`).
 

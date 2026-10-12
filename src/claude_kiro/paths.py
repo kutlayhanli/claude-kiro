@@ -45,8 +45,14 @@ IMPLEMENT_BRIEF = ".claude/workflows/spec-implement-brief.md"
 # How the spec commands run when the Workflow tool is unavailable (Agent tool + task list).
 NO_WORKFLOW_GUIDE = ".claude/workflows/without-workflow-tool.md"
 
-# Where `ck worktree` puts task worktrees (relative to the main checkout).
-WORKTREES_DIR = ".claude/worktrees"
+# Where `ck worktree` puts task worktrees by default (relative to the main checkout;
+# specs/ck.json "worktree_dir" overrides it). Not under .claude/: Claude Code's Bash
+# sandbox keeps the whole .claude/ directory read-only, so agents could not create,
+# commit in, or test inside worktrees there. A ck-owned hidden directory keeps them out
+# of the way and clear of the user's own worktrees/ or .worktrees/.
+WORKTREES_DIR = ".ck/worktrees"
+# Where older ck versions put task worktrees. Existing ones there are still found.
+LEGACY_WORKTREES_DIR = ".claude/worktrees"
 
 # Repo hygiene and scaffolding: editing these is never feature work, so the
 # spec-context hook stays silent about them. File-name globs, plus top-level dirs.
@@ -61,7 +67,7 @@ SCAFFOLD_FILES = [
     "README*", "LICENSE*", "CHANGELOG*", "CONTRIBUTING*", "UPGRADING*", "SECURITY*", "CODE_OF_CONDUCT*",
     "CODEOWNERS", "CLAUDE.md", "AGENTS.md",
 ]
-SCAFFOLD_DIRS = {".claude", ".github", ".vscode", ".idea", ".devcontainer", "worktrees"}
+SCAFFOLD_DIRS = {".claude", ".ck", ".github", ".vscode", ".idea", ".devcontainer", "worktrees"}
 
 
 def is_scaffold_path(rel_path: str, extra_patterns: Optional[List[str]] = None) -> bool:

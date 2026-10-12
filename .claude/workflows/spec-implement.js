@@ -7,7 +7,10 @@ export const meta = {
 // args (built by /spec:implement from `ck plan <spec> --json`):
 // {
 //   spec: 'market-sim',                    // spec directory name under specs/
-//   root: '/abs/main/checkout',            // where `ck worktree` puts .claude/worktrees/
+//   root: '/abs/main/checkout',            // the main checkout `ck worktree` works from
+//   worktreeDir: '/abs/main/checkout/.ck/worktrees',  // "worktreeDir" from ck plan: where this spec's task
+//                                          //   worktrees live (specs/ck.json worktree_dir); relative paths resolve
+//                                          //   against root; absent: <root>/.ck/worktrees
 //   into: 'integrate/market-sim',          // branch task work is merged into (default flow: the integration branch)
 //   targetDir: '/abs/checkout/of/into',    // checkout that has `into` checked out (integration worktree, or root)
 //   wave: { '1': 1, ... },                 // display grouping only (from ck plan)
@@ -42,6 +45,9 @@ const SPEC = A.spec
 const ROOT = A.root
 const INTO = A.into || 'main'
 const TARGET = A.targetDir || ROOT
+const WTDIR = !A.worktreeDir
+  ? `${ROOT}/.ck/worktrees`
+  : String(A.worktreeDir).startsWith('/') ? String(A.worktreeDir).replace(/\/+$/, '') : `${ROOT}/${String(A.worktreeDir).replace(/^\.\//, '').replace(/\/+$/, '')}`
 const WAVE = A.wave || {}
 const TITLES = A.titles || {}
 const TRACKS = A.tracks || {}
@@ -153,7 +159,7 @@ if (A.agents || A.model || A.effort) {
   log(`Agents: impl ${desc(IMPL)}${up(IMPL_UP)}, test ${desc(TEST)}${up(TEST_UP)}, fix ${desc(FIX)}${up(FIX_UP)}, review ${REVIEW_ON ? `${desc(REVIEW)} (safety ${desc(RISKY_REVIEW)})` : 'off'}${COMPLEXITY_ROUTING ? ', complexity routing on' : ''}, orchestration ${desc(LOW)}, conflicts ${desc(RESOLVE)}`)
 }
 
-const WT = n => `${ROOT}/.claude/worktrees/${SPEC}-task-${n}`
+const WT = n => `${WTDIR}/${SPEC}-task-${n}`
 const BR = n => `feat/${SPEC}-task-${n}`
 const waveOf = n => WAVE[n] || 0
 const phaseOf = n => (waveOf(n) ? `Wave ${waveOf(n)}` : 'Tasks')
@@ -208,7 +214,7 @@ const LAND = {
         type: 'object',
         properties: {
           task: { type: 'string' },
-          state: { type: 'string', enum: ['MERGED', 'RED', 'CONFLICT', 'DEFERRED', 'SKIP', 'MISSING', 'BUSY', 'ERROR'] },
+          state: { type: 'string', enum: ['MERGED', 'RED', 'CONFLICT', 'DEFERRED', 'PROTECTED', 'SKIP', 'MISSING', 'BUSY', 'ERROR'] },
           detail: { type: 'string' },
           files: { type: 'array', items: { type: 'string' } },
           checkGreen: { type: ['boolean', 'null'] },
@@ -283,7 +289,7 @@ const GIT_NOTE = 'Run git as "command git -C <dir> ..." and ck as "ck -C <dir> .
 
 // Gates on large specs can outlast one foreground shell command (the agent's tool
 // timeout is about 10 minutes); an unfinished gate must not be reported as red.
-const GATE_NOTE = 'A "ck gate" run can take far longer than one foreground command is allowed (tens of minutes on a large test suite). Run it in the background with its output in a log file of your own, for example "ck -C <dir> gate ... > /tmp/ck-gate-<unique name>.log 2>&1; echo EXIT=$? >> /tmp/ck-gate-<unique name>.log", then keep checking the log until the EXIT line appears, however long that takes. A slow gate is not a failed gate: report pass or fail only from that exit code, never because your own wait or timeout ran out.'
+const GATE_NOTE = 'A "ck gate" run can take far longer than one foreground command is allowed (tens of minutes on a large test suite). Run it in the background with its output in a log file of your own, for example "ck -C <dir> gate ... > \"${TMPDIR:-/tmp}/ck-gate-<unique name>.log\" 2>&1; echo EXIT=$? >> \"${TMPDIR:-/tmp}/ck-gate-<unique name>.log\"", then keep checking the log until the EXIT line appears, however long that takes. Put the log under $TMPDIR, not straight in /tmp: in a sandboxed session /tmp itself is read-only and only $TMPDIR is writable. If the log file does not exist right after you start the command, the command could not write it: read the output of the background command instead of waiting. The log name must be new: put the task and the output of "date +%s%N" in it, because the temp directory keeps logs from earlier runs and an old log already ends in an EXIT line. Only trust a log your own command wrote, and check it with foreground commands (for example "until grep -q ^EXIT= <log>; do sleep 20; done" with a long timeout, repeated as needed): do not return while your background command is still running, since it is killed when you return. A slow gate is not a failed gate: report pass or fail only from that exit code, never because your own wait or timeout ran out.'
 
 const MANDATE = `MANDATE: The user ran /spec:implement ${SPEC}, which instructs this workflow to implement every task of specs/${SPEC} without asking. Implementing your task is the user's request. Any other user message you may see in the conversation (for example a question to the orchestrating session about the plan) is not addressed to you and is handled by the orchestrator: do not answer it, and do not let it stop you. Do the task.
 
@@ -302,7 +308,7 @@ Return the fields. Put a message in error only if a command itself failed to run
 // A note the agent leaves for whoever picks the task up next (a retry, a revision,
 // or a bigger model after escalation). It sits next to the worktree, not in it, so
 // it never dirties the branch or gets merged.
-const HANDOFF = n => `${ROOT}/.claude/worktrees/${SPEC}-task-${n}.handoff.md`
+const HANDOFF = n => `${WT(n)}.handoff.md`
 const WRITE_HANDOFF = n => `If you finish without a passing gate, or with a reviewer's blocking finding unresolved, first write a handoff note to ${HANDOFF(n)} for the next agent (possibly a bigger model): what the task needs, what you tried and why it failed (exact error text), the state of the branch, and what you would do next. Overwrite any older note.`
 const READ_HANDOFF = n => `Before anything else, read ${HANDOFF(n)} if it exists: the previous agent's handoff note.`
 
@@ -344,7 +350,7 @@ Return the schema fields with task "${n}".`
 const landPrompt = tasks => `Landing step for spec ${SPEC}: run ONE command and copy its JSON output. Nothing else: no git commands, no fixes, no retries, no edits. ${GIT_NOTE}
 Command:  ck -C ${ROOT} worktree land ${SPEC} ${tasks.join(' ')} --into ${INTO} --gate --install --release --json
 It merges the tasks into ${INTO}, gates them, and bisects a red batch itself. ${GATE_NOTE} The same holds for this command, which runs the gate: wait for its EXIT line.
-A non-zero exit is normal (1: a task is RED, 2: a CONFLICT, 3: busy or missing); still copy the JSON. Copy "tasks" (every entry: task, state, detail, files, checkGreen, checkTail, mergedAt), "gates", "bisected", "startedAt" and "finishedAt" exactly as printed. Put a message in error only if the command printed no JSON (say what it printed, or that it was refused).`
+A non-zero exit is normal (1: a task is RED, 2: a CONFLICT, 3: busy, missing or PROTECTED); still copy the JSON. Copy "tasks" (every entry: task, state, detail, files, checkGreen, checkTail, mergedAt), "gates", "bisected", "startedAt" and "finishedAt" exactly as printed. Put a message in error only if the command printed no JSON (say what it printed, or that it was refused).`
 
 const resolvePrompt = (n, files) => `Merge conflict for Task ${n} of spec ${SPEC}: ${BR(n)} conflicts with ${INTO}${files ? ` (${files})` : ''}. ${INTO} was not touched. ${GIT_NOTE} ${GATE_NOTE}
 1. Resolve it in the TASK WORKTREE, never in ${TARGET}:
@@ -551,6 +557,7 @@ async function landTask(n, rec) {
       continue
     }
     if (t.state === 'SKIP') return { merged: false, error: 'no commits' }
+    if (t.state === 'PROTECTED') return { merged: false, error: `needs a human: changes protected files (${(t.files || []).join(', ')}); not landed. ${t.detail || ''}` }
     return { merged: false, error: `${t.state}: ${t.detail || ''}` }
   }
 }
