@@ -5,12 +5,14 @@ Asks me (or denies, per specs/ck.json "guard") before Claude:
   skip/xfail/only markers to one, unless an In Progress test-track task owns it
   or the file is new on this branch;
 - deletes, moves, or rewrites test files through Bash;
-- edits a spec's requirements.md while its implementation is under way.
+- changes or removes existing text in a spec's requirements.md while its
+  implementation is under way (adding new requirements passes).
 
 Everything else passes through untouched. The gate repeats the test check at
 completion time, so anything this misses is still caught before Done.
 """
 
+import difflib
 import os
 import re
 import shlex
@@ -65,6 +67,18 @@ def _implementation_started(spec_dir: Path) -> bool:
     return any(t.in_progress or t.done for t in tasks)
 
 
+def _only_adds(old: str, new: str) -> bool:
+    """Whether new keeps every non-blank line of old, unchanged and in order.
+
+    Inserting a requirement cannot bend an existing one to fit the code;
+    rewording or deleting one can.
+    """
+    old_lines = [line.rstrip() for line in old.splitlines() if line.strip()]
+    new_lines = [line.rstrip() for line in new.splitlines() if line.strip()]
+    ops = difflib.SequenceMatcher(None, old_lines, new_lines, autojunk=False).get_opcodes()
+    return all(tag in ("equal", "insert") for tag, *_ in ops)
+
+
 def _old_and_new(tool_name: str, tool_input: dict, path: Path) -> Optional[tuple]:
     if tool_name == "Edit":
         return tool_input.get("old_string", ""), tool_input.get("new_string", "")
@@ -91,11 +105,14 @@ def _check_file_edit(tool_name: str, tool_input: dict, project_dir: Path, config
         mode = guard_mode(config, "requirements")
         spec_dir = path.parent
         if mode and spec_dir.parent in spec_roots(project_dir) and _implementation_started(spec_dir):
+            texts = _old_and_new(tool_name, tool_input, path)
+            if texts is not None and _only_adds(*texts):
+                return None
             return _decision(
                 mode,
                 f"{rel} is the contract for a spec whose implementation has started. Changing "
-                "requirements to match the code hides failures. If a requirement is wrong, stop "
-                "and raise it with me; approve this edit only if I asked for the change.",
+                "requirements to match the code hides failures (adding new ones is fine). If a requirement "
+                "is wrong, stop and raise it with me; approve this edit only if I asked for the change.",
             )
         return None
 

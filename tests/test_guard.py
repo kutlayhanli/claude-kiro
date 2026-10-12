@@ -98,6 +98,28 @@ def test_requirements_frozen_once_implementation_starts(project, session):
     assert decision(guard(project, session, "Edit", file_path=path, old_string="x", new_string="y")) == "ask"
 
 
+REQ_OLD = "- 1.1 WHEN asked THE SYSTEM SHALL subtract.\n  (Decided 2026-10-12.)\n\n### Story 2\n"
+
+
+def test_adding_requirements_after_implementation_starts_passes(project, session):
+    write_tasks(project, t2="In Progress")
+    path = project / "specs/calc/requirements.md"
+    added = REQ_OLD.replace("\n\n### Story 2", "\n- 1.2 WHEN asked THE SYSTEM SHALL\n  multiply.\n\n### Story 2")
+    assert guard(project, session, "Edit", file_path=str(path), old_string=REQ_OLD, new_string=added) is None
+    current = path.read_text()
+    assert guard(project, session, "Write", file_path=str(path), content=current + "- 1.3 SHALL divide.\n") is None
+
+
+def test_rewording_or_removing_a_requirement_still_asks(project, session):
+    write_tasks(project, t2="In Progress")
+    path = str(project / "specs/calc/requirements.md")
+    reworded = REQ_OLD.replace("subtract", "subtract or return 0")
+    assert decision(guard(project, session, "Edit", file_path=path, old_string=REQ_OLD, new_string=reworded)) == "ask"
+    removed = REQ_OLD.replace("  (Decided 2026-10-12.)\n", "")
+    assert decision(guard(project, session, "Edit", file_path=path, old_string=REQ_OLD, new_string=removed)) == "ask"
+    assert decision(guard(project, session, "Write", file_path=path, content="# Feature: Calc\n- 1.1 anything\n")) == "ask"
+
+
 def test_bash_deleting_tests_asks(project, session):
     assert decision(guard(project, session, "Bash", command="rm tests/test_calc.py")) == "ask"
     assert decision(guard(project, session, "Bash", command="cd . && rm -rf tests")) == "ask"

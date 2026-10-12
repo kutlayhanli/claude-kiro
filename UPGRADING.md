@@ -16,6 +16,7 @@
 
 - New `done-verify` PostToolUse hook (Edit, Write, MultiEdit, Bash): when a task's **Status:** becomes Done, it runs `ck gate <spec> --task N` for that task, once, and reports a failure to Claude. A Bash command that only checks out, rebases or merges committed `tasks.md` content is not a claim and runs nothing.
 - `stop-verify` (Stop) runs no tests and never blocks: it lists tasks still marked Done whose gate failed, or that no gate ran for. Its timeout drops from 600 to 30 seconds.
+- The requirements guard asks only when an edit changes or removes existing text in `requirements.md`. Adding a requirement to a spec under implementation no longer prompts, even in auto mode.
 - The SubagentStop hook is gone: a subagent's Done claims are gated by `done-verify` when it makes them, and `/spec:implement` gates each task again before merging.
 
 ```bash
