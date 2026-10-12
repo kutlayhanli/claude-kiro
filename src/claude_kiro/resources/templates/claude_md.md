@@ -36,7 +36,7 @@ This project follows spec-driven development:
 # Implement a spec task
 /spec:implement [task-number]
 
-# Check a task is really done (also enforced by a Stop hook)
+# Check a task is really done (also runs automatically when a task is marked Done)
 ck gate [spec-name] --task [N]
 
 # Run tasks in parallel with worktree isolation

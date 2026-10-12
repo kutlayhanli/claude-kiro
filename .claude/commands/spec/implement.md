@@ -95,7 +95,7 @@ Every task in `tasks.md` has a **Track**:
 - **test**: write the tests from `test-plan.md`. They are the oracle for the impl tasks listed under **Verifies:**.
 - **impl**: write the code that makes the tests listed under **Verified by:** pass.
 
-"Done" is checked by a machine, not by you. `ck gate` (and a Stop hook that runs it automatically) runs the task's verification. A task marked Done that fails the gate blocks you from finishing.
+"Done" is checked by a machine, not by you. `ck gate` runs the task's verification, and marking a task Done in tasks.md runs it automatically: a failure comes straight back to you. Fix it, or set the task back to In Progress.
 
 ## Before Starting
 

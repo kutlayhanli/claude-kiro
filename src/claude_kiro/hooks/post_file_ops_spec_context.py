@@ -40,7 +40,7 @@ Before proceeding:
 
 Your responsibilities:
 - As you complete acceptance criteria, update the checkboxes in tasks.md to [x]
-- Mark the task `**Status:** Done` only after `ck gate {spec_name} --task {task_num}` passes; a Stop hook enforces this
+- Mark the task `**Status:** Done` only after `ck gate {spec_name} --task {task_num}` passes; marking it Done runs that gate
 - Never delete, skip, or weaken existing tests or edit requirements.md to get a pass; if a test looks wrong, tell me
 
 Ensure your changes align with the spec requirements and design.
@@ -127,7 +127,7 @@ def hook(input_data: dict) -> dict | None:
     session_tracker = SessionTracker(session_id, cache_manager)
 
     # Spec files get no context message, but tasks.md edits are recorded so the
-    # Stop hook can verify tasks marked Done in this session.
+    # Stop hook can warn about tasks marked Done in this session.
     if is_spec_path(file_path, Path(cwd)):
         path = Path(file_path) if os.path.isabs(file_path) else Path(cwd) / file_path
         if path.name == "tasks.md":

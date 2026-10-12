@@ -1,6 +1,6 @@
 {
   "name": "spec",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "claude-kiro spec-driven development: /spec:plan, /spec:create, /spec:review, /spec:implement and /spec:spawn-worktree, with gate-checked multi-agent workflows. Needs the `ck` CLI (uv tool install claude-kiro).",
   "author": { "name": "Kutlay Hanli" },
   "homepage": "https://github.com/kutlayhanli/claude-kiro",

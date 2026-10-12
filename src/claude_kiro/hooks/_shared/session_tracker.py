@@ -205,6 +205,17 @@ class SessionTracker:
         """Persist changes made through gate_state()."""
         self._save_cache()
 
+    def save_gate(self):
+        """Persist only gate_state(), over a fresh read of the cache.
+
+        PostToolUse hooks run in parallel; a whole-cache save from one would
+        drop what another (e.g. post-file-ops) wrote in the meantime.
+        """
+        gate = self.gate_state()
+        self._load_cache()
+        self._cache["gate"] = gate
+        self._save_cache()
+
     @property
     def session_start(self) -> float:
         return self._cache.get("session_start", time.time())

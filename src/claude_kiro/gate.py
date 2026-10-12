@@ -18,7 +18,7 @@ expected to fail until the implementation lands. For them the gate requires
 the test files to exist and contain test cases, and only requires their Verify
 commands to pass once every task they verify is Done.
 
-Used by `ck gate` and by the Stop/SubagentStop hook.
+Used by `ck gate` and by the done-verify hook when a task is marked Done.
 """
 
 import os

@@ -10,16 +10,15 @@
       {
         "matcher": "Edit|Write|MultiEdit",
         "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/ck\" --hook post-file-ops --plugin-hook", "timeout": 10 }]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|Bash",
+        "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/ck\" --hook done-verify --plugin-hook", "timeout": 600 }]
       }
     ],
     "Stop": [
       {
-        "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/ck\" --hook stop-verify --plugin-hook", "timeout": 600 }]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/ck\" --hook stop-verify --plugin-hook", "timeout": 600 }]
+        "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/ck\" --hook stop-verify --plugin-hook", "timeout": 30 }]
       }
     ]
   }

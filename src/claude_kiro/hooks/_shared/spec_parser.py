@@ -297,7 +297,11 @@ def parse_tasks(task_file_path: Path) -> List[SpecTask]:
         content = Path(task_file_path).read_text(encoding="utf-8")
     except (OSError, IOError):
         return []
+    return parse_tasks_text(content)
 
+
+def parse_tasks_text(content: str) -> List[SpecTask]:
+    """Parse tasks.md content (e.g. a version read from git)."""
     tasks = []
     for match in re.finditer(r"^### Task ?(\d+): (.+?)(?=^### Task ?\d|^## |\Z)", content, re.DOTALL | re.MULTILINE):
         block = match.group(0)

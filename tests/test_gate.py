@@ -1,7 +1,11 @@
-"""Verification gate (`ck gate`) and the Stop hook, against a real git project and real pytest runs."""
+"""Verification gate (`ck gate`), the Done gate hook and the Stop warning, against a real git project and real pytest runs."""
 
 import json
+import os
+import time
 from pathlib import Path
+
+import pytest
 
 from click.testing import CliRunner
 
@@ -240,7 +244,80 @@ def test_older_task_format_is_understood(tmp_path):
     assert (second.num, second.done, second.acceptance) == ("2", False, [(False, "done")])
 
 
-# --- Stop hook ---------------------------------------------------------------
+# --- Done gate (PostToolUse) and Stop warning ------------------------------
+
+
+def edit_tasks(project: Path, session: str, tool: str = "Edit"):
+    """What Claude Code sends the done-verify hook after a tool call."""
+    tool_input = {"file_path": str(project / "specs/calc/tasks.md")} if tool != "Bash" else {"command": "sed -i ..."}
+    return execute_hook(
+        "done-verify", {"session_id": session, "cwd": str(project), "tool_name": tool, "tool_input": tool_input}
+    )
+
+
+def bump_tasks_mtime(project: Path) -> None:
+    """What a Bash rewrite (or a fresh checkout) does: tasks.md newer than the session start."""
+    future = time.time() + 5
+    os.utime(project / "specs" / "calc" / "tasks.md", (future, future))
+
+
+def test_done_gate_is_silent_when_no_task_becomes_done(project, session):
+    write_tasks(project, t1="In Progress")
+    assert edit_tasks(project, session) is None
+
+
+def test_done_claim_that_fails_gate_goes_back_to_claude(project, session):
+    write_subtract_tests(project)
+    write_tasks(project, t1="Done", t2="Done", a1="x", a2="x")
+    result = edit_tasks(project, session)
+    assert result["decision"] == "block"
+    assert "FAIL" in result["reason"] and "In Progress" in result["reason"]
+
+
+def test_done_claim_is_gated_once(project, session):
+    write_subtract_tests(project)
+    implement_subtract(project)
+    write_tasks(project, t1="Done", t2="Done", a1="x", a2="x")
+    first = edit_tasks(project, session)
+    assert "Verification gate passed for calc: Task 1, 2" in first["systemMessage"]
+    assert edit_tasks(project, session) is None  # same claims: nothing re-runs
+    assert stop(project, session) is None
+
+
+def test_failed_claim_is_gated_again_on_the_next_tasks_edit(project, session):
+    write_subtract_tests(project)
+    write_tasks(project, t1="Done", t2="Done", a1="x", a2="x")
+    assert edit_tasks(project, session)["decision"] == "block"
+    implement_subtract(project)
+    assert "Verification gate passed" in edit_tasks(project, session)["systemMessage"]
+    assert stop(project, session) is None
+
+
+def test_only_the_newly_done_task_is_gated(project, session):
+    write_subtract_tests(project)
+    write_tasks(project, t1="Done", a1="x")
+    assert "Task 1" in edit_tasks(project, session)["systemMessage"]
+    implement_subtract(project)
+    write_tasks(project, t1="Done", t2="Done", a1="x", a2="x")
+    message = edit_tasks(project, session)["systemMessage"]
+    assert "calc: Task 2" in message and "Task 1, 2" not in message
+
+
+def test_bash_rewrite_marking_done_is_gated(project, session):
+    write_subtract_tests(project)
+    write_tasks(project, t1="Done", t2="Done", a1="x", a2="x")
+    bump_tasks_mtime(project)
+    assert edit_tasks(project, session, tool="Bash")["decision"] == "block"
+    assert edit_tasks(project, session, tool="Bash") is None  # mtime unchanged: not looked at again
+
+
+def test_bash_checkout_of_committed_done_tasks_is_not_a_claim(project, session):
+    write_tasks(project, t1="Done", t2="Done", a1="x", a2="x")
+    git(project, "add", "-A")
+    git(project, "commit", "-qm", "done elsewhere")
+    bump_tasks_mtime(project)  # what a checkout, rebase or fresh worktree does
+    assert edit_tasks(project, session, tool="Bash") is None
+    assert stop(project, session) is None
 
 
 def test_stop_is_silent_when_nothing_is_marked_done(project, session):
@@ -248,44 +325,34 @@ def test_stop_is_silent_when_nothing_is_marked_done(project, session):
     assert stop(project, session) is None
 
 
-def test_stop_blocks_done_claim_that_fails_gate(project, session):
+def test_stop_warns_about_a_failed_claim_without_running_tests(project, session, monkeypatch):
     write_subtract_tests(project)
-    write_tasks(project, t1="Done", t2="Done", a1="x", a2="x")  # claims Done, no subtract()
+    write_tasks(project, t1="Done", t2="Done", a1="x", a2="x")
+    edit_tasks(project, session)
+
+    import claude_kiro.gate as gate
+
+    monkeypatch.setattr(gate, "run_gate", lambda *a, **k: pytest.fail("the Stop hook must not run the gate"))
+    result = stop(project, session)
+    assert "decision" not in result
+    assert "Task 1, 2 failed the gate" in result["systemMessage"]
+    assert "ck gate calc --task 1 --task 2" in result["systemMessage"]
+
+
+def test_stop_warns_about_done_tasks_no_gate_ran_for(project, session):
+    write_tasks(project, t1="Done", a1="x")  # e.g. written by a script the PostToolUse hook does not see
     mark_tasks_edited(project, session)
     result = stop(project, session)
-    assert result["decision"] == "block"
-    assert "set the task's **Status:** back to In Progress" in result["reason"]
+    assert "decision" not in result and "Task 1 not gated yet" in result["systemMessage"]
 
 
-def test_stop_allows_after_status_reverted(project, session):
+def test_stop_is_silent_after_status_reverted(project, session):
     write_subtract_tests(project)
     write_tasks(project, t1="Done", t2="Done", a1="x", a2="x")
-    mark_tasks_edited(project, session)
-    assert stop(project, session)["decision"] == "block"
-    write_tasks(project, t1="Done", t2="In Progress", a1="x")
-    result = stop(project, session)
-    assert result is None or "decision" not in result  # Task 1 (tests, may be red) still passes
-
-
-def test_stop_passes_then_skips_reverification(project, session):
-    write_subtract_tests(project)
-    implement_subtract(project)
-    write_tasks(project, t1="Done", t2="Done", a1="x", a2="x")
-    mark_tasks_edited(project, session)
-    first = stop(project, session)
-    assert "Verification gate passed" in first["systemMessage"]
-    assert stop(project, session) is None  # nothing changed: not re-run
-
-
-def test_stop_gives_up_after_repeated_identical_failures(project, session):
-    write_subtract_tests(project)
-    write_tasks(project, t1="Done", t2="Done", a1="x", a2="x")
-    mark_tasks_edited(project, session)
-    for _ in range(3):
-        assert stop(project, session)["decision"] == "block"
-    final = stop(project, session)
-    assert "decision" not in final
-    assert "still failing" in final["systemMessage"]
+    assert edit_tasks(project, session)["decision"] == "block"
+    write_tasks(project, t1="In Progress", t2="Not Started", a1="x", a2=" ")
+    assert edit_tasks(project, session) is None
+    assert stop(project, session) is None
 
 
 def test_init_installs_hooks_and_keeps_foreign_ones(tmp_path):
@@ -310,7 +377,19 @@ def test_init_installs_hooks_and_keeps_foreign_ones(tmp_path):
     assert foreign in hooks["PreToolUse"]
     commands = {e: [h["command"] for g in gs for h in g["hooks"]] for e, gs in hooks.items()}
     assert "ck --hook pre-tool-guard" in commands["PreToolUse"]
-    assert commands["PostToolUse"] == ["ck --hook post-file-ops"]  # old ms-timeout entry replaced
+    assert commands["PostToolUse"] == ["ck --hook post-file-ops", "ck --hook done-verify"]  # old ms-timeout entry replaced
     assert hooks["PostToolUse"][0]["hooks"][0]["timeout"] == 10
-    assert "ck --hook stop-verify" in commands["Stop"] and "ck --hook stop-verify" in commands["SubagentStop"]
+    assert commands["Stop"] == ["ck --hook stop-verify"] and hooks["Stop"][0]["hooks"][0]["timeout"] == 30
+    assert "SubagentStop" not in hooks
     assert json.loads((tmp_path / "specs/ck.json").read_text())["verify"] == ["pytest -q"]
+
+
+def test_install_drops_ck_hooks_older_versions_installed():
+    from claude_kiro.cli.runner import install_hook_settings
+
+    foreign = {"hooks": [{"type": "command", "command": "notify-me"}]}
+    old_gate = {"hooks": [{"type": "command", "command": "ck --hook stop-verify", "timeout": 600}]}
+    hooks = install_hook_settings({"hooks": {"SubagentStop": [old_gate, foreign], "Stop": [old_gate]}})["hooks"]
+    assert hooks["SubagentStop"] == [foreign]
+    assert hooks["Stop"] == [{"hooks": [{"type": "command", "command": "ck --hook stop-verify", "timeout": 30}]}]
+    assert install_hook_settings({"hooks": {"SubagentStop": [old_gate]}})["hooks"].get("SubagentStop") is None

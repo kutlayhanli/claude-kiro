@@ -87,8 +87,11 @@ def test_upgrade_refreshes_managed_files_and_keeps_project_files(old_project):
     pre = [h["command"] for g in settings["hooks"]["PreToolUse"] for h in g["hooks"]]
     assert "my-linter" in pre and "ck --hook pre-tool-guard" in pre
     post = [h for g in settings["hooks"]["PostToolUse"] for h in g["hooks"]]
-    assert post == [{"type": "command", "command": "ck --hook post-file-ops", "timeout": 10}]
-    assert "Stop" in settings["hooks"] and "SubagentStop" in settings["hooks"]
+    assert post == [
+        {"type": "command", "command": "ck --hook post-file-ops", "timeout": 10},
+        {"type": "command", "command": "ck --hook done-verify", "timeout": 600},
+    ]
+    assert "Stop" in settings["hooks"] and "SubagentStop" not in settings["hooks"]
 
     # config created with detected verify command
     assert json.loads((old_project / "specs/ck.json").read_text())["verify"] == ["uv run pytest -q"]

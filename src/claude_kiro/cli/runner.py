@@ -10,13 +10,15 @@ class HookRegistry:
     _hooks: Dict[str, str] = {
         "post-file-ops": "claude_kiro.hooks.post_file_ops_spec_context:hook",
         "pre-tool-guard": "claude_kiro.hooks.pre_tool_guard:hook",
+        "done-verify": "claude_kiro.hooks.done_verify:hook",
         "stop-verify": "claude_kiro.hooks.stop_verify:hook",
     }
 
     descriptions: Dict[str, str] = {
         "post-file-ops": "Injects spec task context after file edits; records tasks.md edits",
         "pre-tool-guard": "Asks before tests are weakened/deleted or requirements edited mid-implementation",
-        "stop-verify": "Blocks stopping while a task marked Done fails the verification gate",
+        "done-verify": "Runs the task's verification gate when it is marked Done; reports a failure to Claude",
+        "stop-verify": "Warns at the end of a turn about Done tasks that never passed the gate (runs no tests)",
     }
 
     def get_hook(self, name: str) -> Optional[str]:
@@ -44,17 +46,39 @@ class HookRegistry:
 HOOK_SETTINGS: List[Dict[str, Any]] = [
     {"event": "PreToolUse", "matcher": "Edit|Write|MultiEdit|Bash", "hook": "pre-tool-guard", "timeout": 30},
     {"event": "PostToolUse", "matcher": "Edit|Write|MultiEdit", "hook": "post-file-ops", "timeout": 10},
-    {"event": "Stop", "matcher": None, "hook": "stop-verify", "timeout": 600},
-    {"event": "SubagentStop", "matcher": None, "hook": "stop-verify", "timeout": 600},
+    {"event": "PostToolUse", "matcher": "Edit|Write|MultiEdit|Bash", "hook": "done-verify", "timeout": 600},
+    {"event": "Stop", "matcher": None, "hook": "stop-verify", "timeout": 30},
 ]
 
 
 def install_hook_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     """Add Claude Kiro hooks to a settings dict, replacing older ck entries only.
 
-    Hooks from other tools are left untouched.
+    ck entries an older version installed that are no longer wanted (e.g. the
+    SubagentStop gate) are removed. Hooks from other tools are left untouched.
     """
     hooks = settings.setdefault("hooks", {})
+    wanted = {(spec["event"], f"ck --hook {spec['hook']}") for spec in HOOK_SETTINGS}
+    for event in list(hooks):
+        groups = hooks[event] if isinstance(hooks[event], list) else []
+        kept_groups = []
+        for group in groups:
+            entries = group.get("hooks", []) if isinstance(group, dict) else []
+            kept = [
+                h
+                for h in entries
+                if not (
+                    isinstance(h, dict)
+                    and str(h.get("command", "")).startswith("ck --hook ")
+                    and (event, h["command"]) not in wanted
+                )
+            ]
+            if kept or not entries:
+                kept_groups.append({**group, "hooks": kept} if isinstance(group, dict) else group)
+        if kept_groups:
+            hooks[event] = kept_groups
+        else:
+            del hooks[event]
     for spec in HOOK_SETTINGS:
         command = f"ck --hook {spec['hook']}"
         groups = [
