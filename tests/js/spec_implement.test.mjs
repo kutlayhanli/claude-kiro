@@ -10,7 +10,7 @@ const SCRIPT = path.join(here, '../../plugin/workflows/spec-implement.js')
 const baseArgs = { spec: 'demo', root: '/repo', into: 'integrate/demo', targetDir: '/repo/.ck/worktrees/demo-integration' }
 
 // A fake project: `ck plan` semantics over deps/done, task durations, failures, timestamps.
-function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null }) {
+function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [] }) {
   let rechecksLeftRed = recheckRed
   // RED landings left per task: checkRed tasks are red on their first landing, redLands sets a count.
   const redLeft = { ...Object.fromEntries(checkRed.map(n => [n, 1])), ...redLands }
@@ -68,6 +68,7 @@ function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFir
       const out = []
       const landing = []
       for (const n of tasks) {
+        if (protectedTasks.includes(n)) { out.push({ task: n, state: 'PROTECTED', detail: 'a human must merge it', files: ['.claude/settings.json'] }); continue }
         if (conflicts.includes(n) && !state.resolved.has(n)) { out.push({ task: n, state: 'CONFLICT', files: ['specs/demo/tasks.md'] }); continue }
         const mate = pairConflicts.find(([a, b]) => b === n && landing.includes(a))
         if (mate) { out.push({ task: n, state: 'DEFERRED', detail: `conflicts with Task ${mate[0]} in this batch`, files: ['x.py'] }); continue }
@@ -498,6 +499,17 @@ await test('resolver: a conflict goes to the resolver, then the task lands again
   assert.match(p.state.prompts['resolve 2'], /specs\/demo\/tasks\.md/)
   assert.deepEqual(result.merged.sort(), ['1', '2'])
   assert.ok(!p.state.events.includes('resolve 1'), 'no resolver without a conflict')
+})
+
+await test('a PROTECTED landing fails the task as needing a human: no resolver, no fixer, no retry', async () => {
+  const p = project({ deps: { 1: [], 2: [], 3: ['2'] }, protectedTasks: ['2'] })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })
+  assert.deepEqual(result.merged, ['1'])
+  const f = result.failed.find(x => x.task === '2')
+  assert.ok(f && /needs a human/.test(f.reason) && /\.claude\/settings\.json/.test(f.reason), JSON.stringify(result.failed))
+  assert.ok(!p.state.events.some(e => /^(resolve|fix) /.test(e)))
+  assert.equal(p.state.landings.filter(l => l.includes('2')).length, 1)
+  assert.ok(!p.state.events.includes('task 3'), 'its dependents never start')
 })
 
 // --- risk and complexity routing ----------------------------------------------

@@ -53,6 +53,7 @@ You are the scheduler that `<plugin-root>/workflows/spec-implement.js` would be.
    - DEFERRED: it conflicts only with an earlier task of this batch; put it first in the next landing.
    - CONFLICT: start `spec:resolver` with `resolvePrompt` (resolve in the task worktree, keep both sides' tests, gate passes there; it does not merge). Then queue the task to land again.
    - RED: the task makes the target's gate fail; it was not merged and the target stays green. Start `spec:fixer` with `landFixPrompt` (fix in the task worktree), then queue it to land again. Red again and the fixer has an `escalate` list: one more `spec:fixer` per model, with the Agent call's `model` set to it. Still red: the task fails (its dependents never start).
+   - PROTECTED: the branch changes files Claude Code, git or the shell run on their own (`.claude/**`, `.mcp.json`, git hook directories, `specs/ck.json`); it was not merged. The task fails as needing a human (list the files); don't merge it yourself.
    - SKIP: the task made no commits; it fails. MISSING, BUSY or ERROR: it fails with the detail.
    - Every `fullGateEvery` merges (after the landing that crosses each multiple), run the full `ck gate <spec>` in `targetDir` the same way. Red: start `spec:fixer` with the fix prompt, re-run the gate, escalate as above; still red: stop launching, let running agents finish without landing them, and report. A red target branch always halts.
 5. **After every merge or failure,** go back to step 2. Re-planning re-reads tasks.md, so fixes we commit to the target mid-run take effect.

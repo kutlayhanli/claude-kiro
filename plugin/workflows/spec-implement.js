@@ -214,7 +214,7 @@ const LAND = {
         type: 'object',
         properties: {
           task: { type: 'string' },
-          state: { type: 'string', enum: ['MERGED', 'RED', 'CONFLICT', 'DEFERRED', 'SKIP', 'MISSING', 'BUSY', 'ERROR'] },
+          state: { type: 'string', enum: ['MERGED', 'RED', 'CONFLICT', 'DEFERRED', 'PROTECTED', 'SKIP', 'MISSING', 'BUSY', 'ERROR'] },
           detail: { type: 'string' },
           files: { type: 'array', items: { type: 'string' } },
           checkGreen: { type: ['boolean', 'null'] },
@@ -350,7 +350,7 @@ Return the schema fields with task "${n}".`
 const landPrompt = tasks => `Landing step for spec ${SPEC}: run ONE command and copy its JSON output. Nothing else: no git commands, no fixes, no retries, no edits. ${GIT_NOTE}
 Command:  ck -C ${ROOT} worktree land ${SPEC} ${tasks.join(' ')} --into ${INTO} --gate --install --release --json
 It merges the tasks into ${INTO}, gates them, and bisects a red batch itself. ${GATE_NOTE} The same holds for this command, which runs the gate: wait for its EXIT line.
-A non-zero exit is normal (1: a task is RED, 2: a CONFLICT, 3: busy or missing); still copy the JSON. Copy "tasks" (every entry: task, state, detail, files, checkGreen, checkTail, mergedAt), "gates", "bisected", "startedAt" and "finishedAt" exactly as printed. Put a message in error only if the command printed no JSON (say what it printed, or that it was refused).`
+A non-zero exit is normal (1: a task is RED, 2: a CONFLICT, 3: busy, missing or PROTECTED); still copy the JSON. Copy "tasks" (every entry: task, state, detail, files, checkGreen, checkTail, mergedAt), "gates", "bisected", "startedAt" and "finishedAt" exactly as printed. Put a message in error only if the command printed no JSON (say what it printed, or that it was refused).`
 
 const resolvePrompt = (n, files) => `Merge conflict for Task ${n} of spec ${SPEC}: ${BR(n)} conflicts with ${INTO}${files ? ` (${files})` : ''}. ${INTO} was not touched. ${GIT_NOTE} ${GATE_NOTE}
 1. Resolve it in the TASK WORKTREE, never in ${TARGET}:
@@ -557,6 +557,7 @@ async function landTask(n, rec) {
       continue
     }
     if (t.state === 'SKIP') return { merged: false, error: 'no commits' }
+    if (t.state === 'PROTECTED') return { merged: false, error: `needs a human: changes protected files (${(t.files || []).join(', ')}); not landed. ${t.detail || ''}` }
     return { merged: false, error: `${t.state}: ${t.detail || ''}` }
   }
 }

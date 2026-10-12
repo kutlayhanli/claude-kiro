@@ -19,6 +19,7 @@ import datetime
 import os
 import subprocess
 from dataclasses import asdict, dataclass, field
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Callable, Dict, Iterator, List, Optional, Tuple
 
@@ -300,7 +301,7 @@ def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, ke
 @dataclass
 class Landed:
     task: str
-    state: str  # MERGED RED CONFLICT DEFERRED SKIP MISSING BUSY ERROR
+    state: str  # MERGED RED CONFLICT DEFERRED PROTECTED SKIP MISSING BUSY ERROR
     detail: str = ""
     branch: str = ""
     files: List[str] = field(default_factory=list)
@@ -368,6 +369,38 @@ def land_lock(root: Path, into: str) -> Iterator[Path]:
         path.unlink(missing_ok=True)
 
 
+# Files Claude Code, git or the shell run or load on their own. A task branch that changes
+# one is never landed by `ck worktree land`: an unattended agent could plant a hook, an MCP
+# server or a permission rule that later runs outside the sandbox. A human merges it, or the
+# spec opts in with "land": {"allow_paths": [...]} in specs/ck.json (read from the target).
+PROTECTED_PATHS = (
+    ".claude/**", "**/.claude/**", ".mcp.json", "**/.mcp.json",
+    ".githooks/**", ".husky/**", ".git-hooks/**", ".pre-commit-config.yaml", ".envrc",
+    "specs/ck.json",
+)
+
+
+def _glob(path: str, pattern: str) -> bool:
+    """Glob on a repo-relative path (`*` crosses `/`); a leading "**/" also matches at the root."""
+    pattern = pattern.removeprefix("./")
+    return fnmatchcase(path, pattern) or (pattern.startswith("**/") and fnmatchcase(path, pattern[3:]))
+
+
+def protected_changes(root: Path, base: str, branch: str, allow: Optional[List[str]] = None) -> List[str]:
+    """Files the branch changes since it forked from `base` that match PROTECTED_PATHS and no `allow` glob."""
+    out = git(root, "diff", "--name-only", "--no-renames", f"{base}...{branch}", check=False).stdout.split("\n")
+    allow = [a for a in (allow or []) if isinstance(a, str) and a]
+    return [f for f in (line.strip() for line in out) if f
+            and any(_glob(f, p) for p in PROTECTED_PATHS) and not any(_glob(f, a) for a in allow)]
+
+
+def land_allow_paths(root: Path) -> List[str]:
+    """specs/ck.json "land": {"allow_paths": [...]} of the checkout `root` (never a task branch's copy)."""
+    land_cfg = load_config(root).get("land")
+    allow = land_cfg.get("allow_paths") if isinstance(land_cfg, dict) else None
+    return [a for a in allow if isinstance(a, str)] if isinstance(allow, list) else []
+
+
 def merge_tree(root: Path, ours: str, theirs: str) -> Tuple[bool, str, List[str]]:
     """In-memory merge (`git merge-tree --write-tree`): (clean, tree, conflicted files). Touches no checkout."""
     proc = git(root, "merge-tree", "--write-tree", "--name-only", "--no-messages", ours, theirs, check=False)
@@ -394,7 +427,9 @@ def land(
 
     1. Precheck with `git merge-tree` (no checkout touched): a branch that conflicts with
        the target is CONFLICT; one that conflicts only with an earlier branch of this batch
-       is DEFERRED to the next batch.
+       is DEFERRED to the next batch. A branch that changes a PROTECTED_PATHS file
+       (not allowed by specs/ck.json "land.allow_paths") is PROTECTED: never merged,
+       it needs a human.
     2. Merge the clean branches into the target checkout (--no-ff, longest dependency
        chain first), refresh dependencies (`install`), and gate them together.
     3. Red with more than one task: reset the target to the commit before the batch and
@@ -439,6 +474,21 @@ def land(
                     results[num] = Landed(num, "ERROR", "task worktree has uncommitted changes", branch)
                     continue
             candidates.append(num)
+
+        # Protected files first: such a branch never reaches the target, whatever else holds.
+        allow = land_allow_paths(target)
+        for num in list(candidates):
+            touched = protected_changes(root, base, task_branch(spec, num), allow)
+            if touched:
+                candidates.remove(num)
+                results[num] = Landed(
+                    num,
+                    "PROTECTED",
+                    "changes files Claude Code, git or the shell run on their own; not landed, a human must "
+                    "review and merge it (or list the paths in specs/ck.json \"land\": {\"allow_paths\": [...]})",
+                    task_branch(spec, num),
+                    touched,
+                )
 
         # Precheck: each branch against the target, then the batch in order, in memory.
         clean: List[str] = []

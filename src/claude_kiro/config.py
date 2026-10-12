@@ -46,6 +46,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # A task whose **Files:** match one is treated as **Risk:** safety (stronger
     # starting model, risky reviewer) even without the tag; `ck lint` warns.
     "risk_paths": [],
+    # `ck worktree land` refuses a task branch that changes files Claude Code or git
+    # run on their own (.claude/**, .mcp.json, git hook directories, specs/ck.json):
+    # an unattended agent could otherwise plant a hook or a permission rule that runs
+    # outside the sandbox. List globs here for a spec that legitimately edits them.
+    "land": {"allow_paths": []},
     # Extra glob patterns the spec-context hook never comments on.
     "context_ignore": [],
     # How test files are recognized. A path is a test file if any directory

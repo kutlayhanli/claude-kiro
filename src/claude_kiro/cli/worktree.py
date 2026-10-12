@@ -336,7 +336,10 @@ def land_cmd(spec, tasks, into, do_gate, do_install, release_claims, keep, as_js
     and, with --gate, are gated together. A red batch is bisected by halving:
     the target is reset to its pre-batch commit and the halves re-landed until the
     culprits are found. Culprits are RED and stay off the target (branch kept).
-    Exit codes: 0 ok, 1 a task RED, 2 a CONFLICT, 3 busy/missing/failed.
+    A branch that changes .claude/**, .mcp.json, git hook directories or
+    specs/ck.json is PROTECTED and never merged (a human reviews it), unless
+    specs/ck.json "land": {"allow_paths": [...]} lists the paths.
+    Exit codes: 0 ok, 1 a task RED, 2 a CONFLICT, 3 busy/missing/protected/failed.
     """
     root = _root()
     name = _spec_name(spec)
@@ -369,7 +372,7 @@ def land_cmd(spec, tasks, into, do_gate, do_install, release_claims, keep, as_js
         if gates:
             click.echo(f"{len(gates)} gate run(s){' (bisected)' if result['bisected'] else ''}")
     states = {t["state"] for t in result["tasks"]}
-    if states & {"BUSY", "ERROR", "MISSING"}:
+    if states & {"BUSY", "ERROR", "MISSING", "PROTECTED"}:
         sys.exit(3)
     if "CONFLICT" in states:
         sys.exit(2)

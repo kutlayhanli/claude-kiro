@@ -36,11 +36,12 @@ def test_dry_run_prints_an_unattended_headless_command(tmp_path):
     argv = plan["argv"]
     assert argv[:2] == ["claude", "-p"]
     assert argv[2] == "/spec:implement demo all"
-    for flag in (["--permission-mode", "default"], ["--permission-prompts", "none"], ["--model", "sonnet"], ["--effort", "low"]):
+    for flag in (["--permission-mode", "auto"], ["--permission-prompts", "none"], ["--model", "sonnet"], ["--effort", "low"]):
         i = argv.index(flag[0])
         assert argv[i + 1] == flag[1]
     allowed = argv[argv.index("--allowedTools") + 1].split(",")
-    assert "Workflow" in allowed and "Bash(ck *)" in allowed
+    assert "Workflow" in allowed
+    assert not any(r.startswith("Bash") for r in allowed)  # sandboxed Bash is auto-allowed; no command allow list
     assert plan["env"]["CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"] == "0"
     assert plan["cwd"] == str(root)
     assert plan["log"].startswith(str(root / ".claude" / "ck-runs" / "demo-"))
@@ -99,6 +100,12 @@ def sandbox_tools(monkeypatch, present):
     monkeypatch.setattr(shutil, "which", which)
 
 
+@pytest.fixture(autouse=True)
+def _sandbox_tools_present(monkeypatch):
+    """Tests don't depend on this machine's bwrap/socat; a test that needs them missing says so."""
+    sandbox_tools(monkeypatch, present=True)
+
+
 def plan_of(root, *args):
     out = ck(root, "run", "demo", "--dry-run", "--json", *args)
     assert out.exit_code == 0, out.output
@@ -110,7 +117,7 @@ def flag(argv, name):
 
 
 def test_dry_run_caps_budget_and_turns(tmp_path, fake_home, monkeypatch):
-    sandbox_tools(monkeypatch, present={"bwrap"})
+    sandbox_tools(monkeypatch, present=True)
     root = repo(tmp_path)
     argv = plan_of(root)["argv"]
     assert flag(argv, "--max-budget-usd") == "40"
@@ -120,64 +127,70 @@ def test_dry_run_caps_budget_and_turns(tmp_path, fake_home, monkeypatch):
     assert flag(argv, "--max-turns") == "50"
 
 
-def test_dry_run_denies_dangerous_commands_and_credential_reads(tmp_path, fake_home, monkeypatch):
-    sandbox_tools(monkeypatch, present={"bwrap"})
+def test_dry_run_denies_destructive_git_and_credential_files(tmp_path, fake_home, monkeypatch):
+    sandbox_tools(monkeypatch, present=True)
     root = repo(tmp_path)
     plan = plan_of(root)
     denied = flag(plan["argv"], "--disallowedTools").split(",")
     for rule in (
-        "Bash(git push *)", "Bash(git -C * push *)", "Bash(git reset --hard *)", "Bash(git -C * reset --hard *)",
-        "Bash(git clean *)", "Bash(git worktree remove --force *)", "Bash(git -c *)", "Bash(git -C * -c *)",
-        "Bash(curl *)", "Bash(wget *)", "Bash(ssh *)", "Bash(scp *)", "Bash(rsync *)", "Bash(nc *)",
-        "Read(~/.ssh/**)", "Edit(~/.ssh/**)", "Read(~/.aws/**)", "Read(~/.config/gcloud/**)", "Read(**/.env)",
-        "Edit(**/.claude/settings*.json)", "WebFetch",
+        "Bash(git push *)", "Bash(git push)", "Bash(git -C * push *)", "Bash(git reset --hard *)", "Bash(git -C * reset --hard *)",
+        "Bash(git clean *)", "Bash(git -C * clean *)", "Bash(git worktree remove --force *)", "Bash(git -C * worktree remove -f *)",
+        "Read(~/.ssh/**)", "Edit(~/.ssh/**)", "Read(~/.aws/**)", "Read(~/.config/gcloud/**)", "Read(~/.config/gh/**)",
+        "Read(~/.netrc)", "Read(**/.env)", "Read(**/.env.*)", "Edit(**/.claude/settings*.json)", "WebFetch",
     ):
         assert rule in denied, rule
-    assert plan["env"]["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"] == "1"
-    assert plan["env"]["CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"] == "0"
+    # The network allowlist and credential removal cover these now; no command-text rules.
+    assert not any(r.startswith(("Bash(curl", "Bash(wget", "Bash(ssh", "Bash(git -c")) for r in denied)
+    assert plan["env"] == {"CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0"}
 
 
-def test_git_allow_rules_are_narrow(tmp_path, fake_home, monkeypatch):
-    sandbox_tools(monkeypatch, present={"bwrap"})
-    root = repo(tmp_path)
-    allowed = flag(plan_of(root)["argv"], "--allowedTools").split(",")
-    assert "Bash(git *)" not in allowed and "Bash(command git *)" not in allowed
-    for rule in ("Bash(git -C * merge *)", "Bash(git -C * commit *)", "Bash(git -C * status *)", "Bash(git -C * log *)",
-                 "Bash(git -C * diff *)", "Bash(git -C * add *)", "Bash(git status *)", "Bash(git log *)", "Bash(git diff *)"):
-        assert rule in allowed, rule
-    assert not any("push" in r or "reset" in r or "clean" in r for r in allowed)
-
-
-def test_isolation_auto_runs_unsandboxed_with_a_warning_when_socat_is_missing(tmp_path, fake_home, monkeypatch):
-    sandbox_tools(monkeypatch, present={"bwrap"})
+def test_the_env_scrub_is_never_set_and_is_removed_from_the_child_env(tmp_path, fake_home, monkeypatch):
+    """CLAUDE_CODE_SUBPROCESS_ENV_SCRUB makes .git/worktrees read-only and forces default mode."""
+    sandbox_tools(monkeypatch, present=True)
+    monkeypatch.setenv("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB", "1")
     root = repo(tmp_path)
     plan = plan_of(root)
-    assert plan["isolation"] == "none"
-    assert "--settings" not in plan["argv"]
-    assert any("socat" in w and "UNSANDBOXED" in w for w in plan["warnings"])
-    assert plan["env"]["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"] == "1"
+    assert "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB" not in plan["env"]
+    assert plan["unset"] == ["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"]
 
 
-@pytest.mark.parametrize("isolation", ["auto", "none", "sandbox"])
-def test_refuses_without_bubblewrap_instead_of_dropping_the_env_scrub(tmp_path, fake_home, monkeypatch, isolation):
-    """Claude Code won't start with CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 unless bwrap exists; ck keeps the scrub and says so."""
-    sandbox_tools(monkeypatch, present={"socat"})
+def test_no_git_or_ck_allow_rules(tmp_path, fake_home, monkeypatch):
+    sandbox_tools(monkeypatch, present=True)
     root = repo(tmp_path)
-    out = ck(root, "run", "demo", "--dry-run", "--json", "--isolation", isolation)
+    allowed = flag(plan_of(root)["argv"], "--allowedTools").split(",")
+    assert allowed[:9] == ["Workflow", "Agent", "Read", "Glob", "Grep", "TodoWrite", "TaskCreate", "TaskUpdate", "SendMessage"]
+    assert allowed[9:] == [f"Edit(/{root.resolve()}/**)"]
+
+
+@pytest.mark.parametrize("present", [False, {"bwrap"}, {"socat"}])
+def test_refuses_without_the_sandbox_tools(tmp_path, fake_home, monkeypatch, present):
+    sandbox_tools(monkeypatch, present=present)
+    root = repo(tmp_path)
+    out = ck(root, "run", "demo", "--dry-run", "--json")
     assert out.exit_code == 2, out.output
-    assert "bubblewrap" in out.output and "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB" in out.output
-    assert "apt-get install bubblewrap" in out.output
+    assert "apt-get install bubblewrap socat" in out.output and "--unsandboxed" in out.output
 
 
-def test_permission_mode_is_default_with_an_explicit_allow_list(tmp_path, fake_home, monkeypatch):
-    """The env scrub forces default mode, so everything the run needs is allowed by name; edits only inside the project."""
+def test_unsandboxed_is_explicit_and_loud(tmp_path, fake_home, monkeypatch):
+    sandbox_tools(monkeypatch, present=False)
+    (fake_home / ".ssh").mkdir()
+    monkeypatch.setenv("CK_TEST_TOKEN", "x")
+    root = repo(tmp_path)
+    plan = plan_of(root, "--unsandboxed")
+    assert plan["isolation"] == "none" and "--settings" not in plan["argv"]
+    assert flag(plan["argv"], "--permission-mode") == "auto"
+    assert any("UNSANDBOXED" in w for w in plan["warnings"])
+    assert any("~/.ssh" in w for w in plan["warnings"])
+    assert any("environment variable" in w for w in plan["warnings"])
+    assert not any("CK_TEST_TOKEN" in w for w in plan["warnings"])  # counts, never names in warnings
+
+
+def test_permission_mode_is_auto_and_edits_stay_in_the_project(tmp_path, fake_home, monkeypatch):
     sandbox_tools(monkeypatch, present=True)
     root = repo(tmp_path)
     argv = plan_of(root)["argv"]
-    assert flag(argv, "--permission-mode") == "default"
+    assert flag(argv, "--permission-mode") == "auto"
     allowed = flag(argv, "--allowedTools").split(",")
-    for tool in ("Read", "Glob", "Grep", "Workflow", "Agent", "TodoWrite", "TaskCreate", "TaskUpdate", "SendMessage", "Bash(ck *)"):
-        assert tool in allowed, tool
     assert f"Edit(/{root.resolve()}/**)" in allowed
     assert not any(r in ("Edit", "Write", "Bash", "Bash(*)") for r in allowed)
 
@@ -200,7 +213,7 @@ def test_worktree_dir_under_dot_claude_is_warned_about(tmp_path, fake_home, monk
     assert any("read-only" in w and "worktree_dir" in w for w in plan_of(root)["warnings"])
 
 
-def test_isolation_auto_enables_a_strict_sandbox_when_bwrap_and_socat_exist(tmp_path, fake_home, monkeypatch):
+def test_a_strict_sandbox_is_always_on(tmp_path, fake_home, monkeypatch):
     sandbox_tools(monkeypatch, present=True)
     root = repo(tmp_path)
     plan = plan_of(root)
@@ -217,21 +230,22 @@ def test_isolation_auto_enables_a_strict_sandbox_when_bwrap_and_socat_exist(tmp_
     assert plan["settings"] == settings
 
 
-def test_isolation_sandbox_refuses_when_socat_is_missing(tmp_path, fake_home, monkeypatch):
-    sandbox_tools(monkeypatch, present={"bwrap"})
-    root = repo(tmp_path)
-    out = ck(root, "run", "demo", "--dry-run", "--json", "--isolation", "sandbox")
-    assert out.exit_code == 2
-    assert "bwrap" in out.output and "socat" in out.output
-
-
-def test_isolation_none_is_explicit_and_warns_about_credential_dirs(tmp_path, fake_home, monkeypatch):
+def test_sandbox_hides_credential_files_and_credential_shaped_env_vars(tmp_path, fake_home, monkeypatch):
     sandbox_tools(monkeypatch, present=True)
-    (fake_home / ".ssh").mkdir()
+    for name in ("CK_PROBE_TOKEN", "MY_API_KEY", "DB_PASSWORD", "AWS_REGION", "GITHUB_TOKEN", "GH_HOST", "SENTRY_DSN"):
+        monkeypatch.setenv(name, "dummy")
+    monkeypatch.setenv("CK_HARMLESS", "1")
     root = repo(tmp_path)
-    plan = plan_of(root, "--isolation", "none")
-    assert plan["isolation"] == "none" and "--settings" not in plan["argv"]
-    assert any("~/.ssh" in w for w in plan["warnings"])
+    creds = plan_of(root)["settings"]["sandbox"]["credentials"]
+    files = {f["path"]: f["mode"] for f in creds["files"]}
+    for path in ("~/.ssh", "~/.aws", "~/.config/gcloud", "~/.config/gh", "~/.azure", "~/.kube", "~/.docker/config.json",
+                 "~/.netrc", "~/.git-credentials", "~/.npmrc", "~/.pypirc"):
+        assert files[path] == "deny", path
+    names = {e["name"]: e["mode"] for e in creds["envVars"]}
+    for name in ("CK_PROBE_TOKEN", "MY_API_KEY", "DB_PASSWORD", "AWS_REGION", "GITHUB_TOKEN", "GH_HOST", "SENTRY_DSN"):
+        assert names.get(name) == "deny", name
+    assert "CK_HARMLESS" not in names and "PATH" not in names and "HOME" not in names
+    assert "dummy" not in json.dumps(creds)  # names only, never values
 
 
 def test_allowed_domains_come_from_ck_agents(tmp_path, fake_home, monkeypatch):
@@ -252,23 +266,37 @@ def test_untrusted_workspace_is_warned_about(tmp_path, fake_home, monkeypatch):
     assert not any("trust" in w.lower() for w in plan_of(root)["warnings"])
 
 
-def test_a_real_launch_records_the_isolation_warning_in_the_log(tmp_path, fake_home, monkeypatch):
-    sandbox_tools(monkeypatch, present={"bwrap"})
+def fake_claude(tmp_path, monkeypatch):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     fake = bin_dir / "claude"
-    fake.write_text("#!/bin/sh\necho fake-claude \"$@\"\n")
+    fake.write_text("#!/bin/sh\necho fake-claude \"$@\"\necho scrub=${CLAUDE_CODE_SUBPROCESS_ENV_SCRUB:-unset}\n")
     fake.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+
+
+def test_a_real_launch_logs_the_sandbox_and_drops_the_scrub(tmp_path, fake_home, monkeypatch):
+    sandbox_tools(monkeypatch, present=True)
+    fake_claude(tmp_path, monkeypatch)
+    monkeypatch.setenv("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB", "1")
     root = repo(tmp_path)
     out = ck(root, "run", "demo")
     assert out.exit_code == 0, out.output
+    assert "sandbox on" in out.output and "permission mode auto" in out.output
+    text = next((root / ".claude" / "ck-runs").glob("demo-*.log")).read_text()
+    assert "isolation: sandbox" in text and "fake-claude" in text and "--max-budget-usd" in text
+    assert "scrub=unset" in text
+
+
+def test_a_real_unsandboxed_launch_records_the_warning_in_the_log(tmp_path, fake_home, monkeypatch):
+    sandbox_tools(monkeypatch, present=False)
+    fake_claude(tmp_path, monkeypatch)
+    root = repo(tmp_path)
+    out = ck(root, "run", "demo", "--unsandboxed")
+    assert out.exit_code == 0, out.output
     assert "UNSANDBOXED" in out.output
-    logs = list((root / ".claude" / "ck-runs").glob("demo-*.log"))
-    assert len(logs) == 1
-    text = logs[0].read_text()
+    text = next((root / ".claude" / "ck-runs").glob("demo-*.log")).read_text()
     assert "UNSANDBOXED" in text and "isolation: none" in text
-    assert "fake-claude" in text and "--max-budget-usd" in text
 
 
 def test_doctor_unattended_reports_sandbox_tools_and_risky_settings(tmp_path, fake_home, monkeypatch):
@@ -276,26 +304,30 @@ def test_doctor_unattended_reports_sandbox_tools_and_risky_settings(tmp_path, fa
     (fake_home / ".ssh").mkdir()
     (fake_home / ".claude").mkdir()
     (fake_home / ".claude" / "settings.json").write_text(json.dumps({"permissions": {"allow": ["Bash", "Read"]}}))
+    monkeypatch.setenv("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB", "1")
     root = repo(tmp_path)
     out = ck(root, "doctor", "--unattended")
     assert out.exit_code == 0, out.output
     assert "bwrap" in out.output and "socat" in out.output
     assert "apt-get install bubblewrap socat" in out.output
+    assert "refuse" in out.output and "--unsandboxed" in out.output
     assert "~/.ssh" in out.output
     assert "Bash" in out.output and "settings.json" in out.output
     assert "Recommendations" in out.output
-    assert "refuse" in out.output and "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB" in out.output
-    assert "Permission mode: default" in out.output
+    assert "Permission mode: auto" in out.output
+    assert "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB" in out.output and "removes it" in out.output
     assert ".ck/worktrees" in out.output
 
 
 def test_doctor_unattended_is_quiet_when_sandbox_tools_exist(tmp_path, fake_home, monkeypatch):
     sandbox_tools(monkeypatch, present=True)
+    monkeypatch.delenv("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB", raising=False)
     root = repo(tmp_path)
     out = ck(root, "doctor", "--unattended")
     assert out.exit_code == 0, out.output
-    assert "apt-get install" not in out.output
-    assert "sandbox" in out.output.lower()
+    assert "apt-get install" not in out.output and "refuse" not in out.output
+    assert "will sandbox every shell command" in out.output
+    assert "ENV_SCRUB" not in out.output
 
 
 def test_a_trusted_parent_directory_counts_as_trusted(tmp_path, fake_home, monkeypatch):
@@ -303,6 +335,8 @@ def test_a_trusted_parent_directory_counts_as_trusted(tmp_path, fake_home, monke
     root = repo(tmp_path)
     (fake_home / ".claude.json").write_text(json.dumps({"projects": {str(tmp_path): {"hasTrustDialogAccepted": True}}}))
     assert not any("trust" in w.lower() for w in plan_of(root)["warnings"])
+
+
 def test_bench_passthrough_output_format_session_id_and_log(tmp_path):
     """`ck bench` launches `ck run` with a JSON result, a known session id and a known log path."""
     root = repo(tmp_path)
