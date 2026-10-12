@@ -507,6 +507,8 @@ await test('gate logs go under $TMPDIR: /tmp itself is read-only in the sandbox'
   for (const label of ['task 1 [impl]', 'land 1'].filter(l => p.state.prompts[l])) {
     assert.ok(p.state.prompts[label].includes('${TMPDIR:-/tmp}/ck-gate-'), label)
     assert.ok(!/> \/tmp\/ck-gate-/.test(p.state.prompts[label]), label)
+    // `cmd &` / nohup die with the sandboxed command; only the Bash tool's background option survives
+    assert.match(p.state.prompts[label], /run_in_background/, label)
   }
   assert.ok(p.state.prompts['land 1'])
 })
