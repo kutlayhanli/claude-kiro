@@ -5,6 +5,7 @@ Real temporary git repositories; the gate runs each task's **Verify:** line in t
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -287,3 +288,36 @@ def test_a_branch_cannot_opt_itself_in(repo):
     result, data, by = land(repo, "1")
     assert by["1"]["state"] == "PROTECTED"
     assert sorted(by["1"]["files"]) == [".claude/settings.json", "specs/ck.json"]
+
+
+@pytest.mark.parametrize("command", ["land", "merge"])
+def test_a_failed_cleanup_after_the_merge_keeps_the_task_merged(repo, monkeypatch, command):
+    # A sandboxed run saw `git worktree remove` fail with "Device or resource busy" after
+    # the merge; reporting the task as failed then blocked its dependents for good.
+    from claude_kiro import worktrees as wtmod
+
+    real = wtmod.git
+
+    def flaky(cwd, *args, check=True):
+        if args[:2] == ("worktree", "remove"):
+            proc = subprocess.CompletedProcess(["git", *args], 255, "",
+                                               "error: failed to delete '.ck/worktrees/demo-task-1': Device or resource busy")
+            if check:
+                raise wtmod.WorktreeError(proc.stderr)
+            return proc
+        return real(cwd, *args, check=check)
+
+    monkeypatch.setattr(wtmod, "git", flaky)
+    ck(repo, "worktree", "create", "demo", "1")
+    commit_in(wt(repo, "1"), "one.txt", "1\n", "task 1")
+
+    if command == "land":
+        result, _, by = land(repo, "1")
+        state, detail = by["1"]["state"], by["1"]["detail"]
+    else:
+        result = ck(repo, "worktree", "merge", "demo", "1")
+        state, detail = ("MERGED" if "MERGED" in result.output else result.output), result.output
+    assert result.exit_code == 0, result.output
+    assert state == "MERGED"
+    assert "Device or resource busy" in detail and "the merge stands" in detail
+    assert (repo / "one.txt").exists()

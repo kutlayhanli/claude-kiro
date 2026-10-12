@@ -60,6 +60,28 @@ def git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProces
     return proc
 
 
+def _cleanup_merged(root: Path, target: Path, path: Path, branch: str) -> str:
+    """Remove a merged task's worktree and branch; best effort, the merge already happened.
+
+    Returns "" or a note for the task's detail. A failure here must not turn a merged
+    task into a failed one: its dependents would never start. (Seen in a sandboxed run:
+    `git worktree remove` failing with "Device or resource busy".)
+    """
+    problems = []
+    if path.exists():
+        # Clean apart from ignored files (.venv, node_modules), checked before merging;
+        # --force lets git drop those.
+        rm = git(root, "worktree", "remove", "--force", str(path), check=False)
+        if rm.returncode != 0:
+            problems.append(f"worktree not removed ({(rm.stderr or rm.stdout).strip()})")
+    if not problems:
+        # -d (not -D) from the target checkout: git confirms the branch is merged into `into`.
+        br = git(target, "branch", "-d", branch, check=False)
+        if br.returncode != 0:
+            problems.append(f"branch not deleted ({(br.stderr or br.stdout).strip()})")
+    return "; cleanup: " + "; ".join(problems) + " (the merge stands; remove it later with git worktree remove + git branch -d)" if problems else ""
+
+
 def main_root(start: Path) -> Path:
     """The main checkout of the repository containing `start` (not a linked worktree)."""
     common = git(start, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
@@ -287,14 +309,8 @@ def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, ke
                 )
             )
             break
-        if not keep:
-            if path.exists():
-                # Clean apart from ignored files (.venv, node_modules), checked above;
-                # --force lets git drop those.
-                git(root, "worktree", "remove", "--force", str(path))
-            # -d (not -D) from the target checkout: git confirms the branch is merged into `into`.
-            git(target, "branch", "-d", branch)
-        outcomes.append(Outcome(num, "MERGED", f"{ahead} commit(s) into {into}", rel, branch))
+        note = "" if keep else _cleanup_merged(root, target, path, branch)
+        outcomes.append(Outcome(num, "MERGED", f"{ahead} commit(s) into {into}{note}", rel, branch))
     return outcomes
 
 
@@ -589,10 +605,7 @@ def land(
             for num, outcome in results.items():
                 if outcome.state != "MERGED":
                     continue
-                path = task_path(root, spec, num)
-                if path.exists():
-                    git(root, "worktree", "remove", "--force", str(path))
-                git(target, "branch", "-d", task_branch(spec, num))
+                outcome.detail += _cleanup_merged(root, target, task_path(root, spec, num), task_branch(spec, num))
 
         return {
             "into": into,
