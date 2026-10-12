@@ -301,6 +301,8 @@ await test('every gate-running prompt tells the agent to wait for the real exit 
   for (const l of ['task 1', 'task 1 retry 1', 'land 1', 'fix 1 (Task 1 red on landing)', 'final gate']) {
     assert.ok(p.state.prompts[l], `no prompt for ${l}`)
     assert.match(p.state.prompts[l], /A slow gate is not a failed gate/, l)
+    assert.match(p.state.prompts[l], /The log name must be new: put the task and the output of "date \+%s%N" in it/, l)
+    assert.match(p.state.prompts[l], /do not return while your background command is still running/, l)
   }
   assert.doesNotMatch(p.state.prompts['plan 1'], /slow gate/)
 })

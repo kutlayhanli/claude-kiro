@@ -394,6 +394,10 @@ def doctor_unattended(project: Path) -> None:
     if missing:
         recs.append(f"Install the sandbox tools: {APT_INSTALL} (Ubuntu 24.04+: also allow bubblewrap user namespaces "
                     "in AppArmor, see https://code.claude.com/docs/en/sandboxing)")
+    click.echo("⚠ Known issue (Claude Code 2.1.296, Linux/WSL2): with CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 every shell "
+               "command sees <repo>/.git/worktrees/ as read-only, sandbox or not, so agents cannot create task worktrees "
+               "or commit in them (\"could not create directory of '.git/worktrees/...': Read-only file system\"). "
+               "A `ck run` stops at its first planning step until this is resolved")
     click.echo(f"ℹ️  Permission mode: {PERMISSION_MODE}, forced by the env scrub; `ck run` allows {', '.join(SESSION_TOOLS)}, "
                "edits inside the project, and ck/git commands explicitly; sandboxed Bash is auto-allowed; "
                "everything else is denied (no prompts)")
