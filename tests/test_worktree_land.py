@@ -51,7 +51,7 @@ def repo(tmp_path: Path) -> Path:
     git(root, "init", "-q", "-b", "main")
     git(root, "config", "user.email", "t@example.com")
     git(root, "config", "user.name", "Test")
-    (root / ".gitignore").write_text(".venv/\n.claude/worktrees/\n")
+    (root / ".gitignore").write_text(".venv/\n.ck/worktrees/\n")
     (root / "shared.txt").write_text("base\n")
     (root / "specs/demo").mkdir(parents=True)
     (root / "specs/demo/tasks.md").write_text(TASKS)
@@ -61,7 +61,7 @@ def repo(tmp_path: Path) -> Path:
 
 
 def wt(root: Path, n: str) -> Path:
-    return root / ".claude/worktrees" / f"demo-task-{n}"
+    return root / ".ck/worktrees" / f"demo-task-{n}"
 
 
 def commit_in(path: Path, name: str, content: str, msg: str):
@@ -236,4 +236,4 @@ def test_land_into_integration_branch(repo):
     assert result.exit_code == 0, result.output
     assert by["1"]["state"] == "MERGED"
     assert not (repo / "one.txt").exists()
-    assert (repo / ".claude/worktrees/demo-integration/one.txt").exists()
+    assert (repo / ".ck/worktrees/demo-integration/one.txt").exists()

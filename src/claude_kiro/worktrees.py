@@ -1,7 +1,9 @@
 """Task worktrees for parallel spec implementation (`ck worktree ...`).
 
-Every task gets `.claude/worktrees/<spec>-task-<N>` on branch
-`feat/<spec>-task-<N>`, created from a base branch. A task agent claims its
+Every task gets `<worktree_dir>/<spec>-task-<N>` on branch `feat/<spec>-task-<N>`,
+created from a base branch. worktree_dir comes from specs/ck.json (default
+.ck/worktrees); a spec whose worktrees still sit in .claude/worktrees (older ck)
+keeps using them until they are gone. A task agent claims its
 worktree (git's own `git worktree lock`) while it runs, so a second agent or a
 setup step can see it is busy. Merges go into whichever checkout has the
 target branch, one task at a time, and stop at the first conflict. `land`
@@ -20,7 +22,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterator, List, Optional, Tuple
 
-from claude_kiro.paths import WORKTREES_DIR
+from claude_kiro.config import load_config
+from claude_kiro.paths import LEGACY_WORKTREES_DIR, WORKTREES_DIR
 
 
 class WorktreeError(Exception):
@@ -63,8 +66,40 @@ def main_root(start: Path) -> Path:
     return common_path.parent if common_path.name == ".git" else common_path
 
 
+def _has_spec(directory: Path, spec: str) -> bool:
+    return directory.is_dir() and (
+        any(directory.glob(f"{spec}-task-*")) or (directory / f"{spec}-integration").exists()
+    )
+
+
+def configured_dir(root: Path) -> Path:
+    """specs/ck.json "worktree_dir" (default .ck/worktrees) as an absolute path."""
+    raw = load_config(root).get("worktree_dir") or WORKTREES_DIR
+    path = Path(os.path.expanduser(str(raw)))
+    return path if path.is_absolute() else root / path
+
+
+def worktrees_dir(root: Path, spec: Optional[str] = None) -> Path:
+    """Where SPEC's worktrees live: the configured directory, unless the spec's worktrees
+    are still in the legacy .claude/worktrees and none are in the configured one yet
+    (an in-flight run keeps one location)."""
+    configured = configured_dir(root)
+    legacy = root / LEGACY_WORKTREES_DIR
+    if spec and configured != legacy and not _has_spec(configured, spec) and _has_spec(legacy, spec):
+        return legacy
+    return configured
+
+
+def rel_path(root: Path, path: Path) -> str:
+    """`path` relative to the main checkout when it is inside it, else absolute."""
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
+
+
 def task_path(root: Path, spec: str, num: str) -> Path:
-    return root / WORKTREES_DIR / f"{spec}-task-{num}"
+    return worktrees_dir(root, spec) / f"{spec}-task-{num}"
 
 
 def task_branch(spec: str, num: str) -> str:
@@ -72,7 +107,7 @@ def task_branch(spec: str, num: str) -> str:
 
 
 def integration_path(root: Path, spec: str) -> Path:
-    return root / WORKTREES_DIR / f"{spec}-integration"
+    return worktrees_dir(root, spec) / f"{spec}-integration"
 
 
 def integration_branch(spec: str) -> str:
@@ -138,7 +173,7 @@ def create(
     outcomes = []
     for num in nums:
         path, branch = task_path(root, spec, num), task_branch(spec, num)
-        rel = str(path.relative_to(root))
+        rel = rel_path(root, path)
         if path.exists():
             reason = lock_reason(root, path)
             dirty = dirty_files(path)
@@ -170,7 +205,7 @@ def create_integration(root: Path, spec: str, base: Optional[str] = None) -> Out
     """Worktree on integrate/<spec> that task merges go into instead of the base branch."""
     base = base or current_branch(root)
     path, branch = integration_path(root, spec), integration_branch(spec)
-    rel = str(path.relative_to(root))
+    rel = rel_path(root, path)
     if path.exists():
         return Outcome("integration", "EXISTS", "reused", rel, branch)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -183,7 +218,7 @@ def create_integration(root: Path, spec: str, base: Optional[str] = None) -> Out
 
 def claim(root: Path, spec: str, num: str, owner: str, takeover: bool = False) -> Outcome:
     path, branch = task_path(root, spec, num), task_branch(spec, num)
-    rel = str(path.relative_to(root))
+    rel = rel_path(root, path)
     if not path.exists():
         return Outcome(num, "MISSING", "no worktree; run `ck worktree create` first", rel, branch)
     reason = lock_reason(root, path)
@@ -197,7 +232,7 @@ def claim(root: Path, spec: str, num: str, owner: str, takeover: bool = False) -
 
 def release(root: Path, spec: str, num: str) -> Outcome:
     path, branch = task_path(root, spec, num), task_branch(spec, num)
-    rel = str(path.relative_to(root))
+    rel = rel_path(root, path)
     if path.exists() and lock_reason(root, path):
         git(root, "worktree", "unlock", str(path))
     return Outcome(num, "RELEASED", "", rel, branch)
@@ -220,7 +255,7 @@ def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, ke
     outcomes = []
     for num in nums:
         path, branch = task_path(root, spec, num), task_branch(spec, num)
-        rel = str(path.relative_to(root))
+        rel = rel_path(root, path)
         if not branch_exists(root, branch):
             outcomes.append(Outcome(num, "MISSING", "no branch", rel, branch))
             continue
@@ -526,7 +561,8 @@ def status(root: Path, spec: str) -> List[Outcome]:
     base = current_branch(root)
     outcomes = []
     prefix = f"{spec}-task-"
-    for path in sorted((root / WORKTREES_DIR).glob(f"{prefix}*"), key=lambda p: int(p.name[len(prefix):] or 0) if p.name[len(prefix):].isdigit() else 0):
+    paths = [p for d in dict.fromkeys((configured_dir(root), root / LEGACY_WORKTREES_DIR)) for p in d.glob(f"{prefix}*") if p.is_dir()]
+    for path in sorted(paths, key=lambda p: int(p.name[len(prefix):] or 0) if p.name[len(prefix):].isdigit() else 0):
         num = path.name[len(prefix):]
         branch = task_branch(spec, num)
         bits = []
@@ -539,5 +575,5 @@ def status(root: Path, spec: str) -> List[Outcome]:
         if branch_exists(root, branch):
             ahead = git(root, "rev-list", "--count", f"{base}..{branch}").stdout.strip()
             bits.append(f"{ahead} ahead of {base}")
-        outcomes.append(Outcome(num, "BUSY" if reason else "EXISTS", ", ".join(bits), str(path.relative_to(root)), branch))
+        outcomes.append(Outcome(num, "BUSY" if reason else "EXISTS", ", ".join(bits), rel_path(root, path), branch))
     return outcomes

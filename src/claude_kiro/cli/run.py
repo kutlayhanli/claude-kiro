@@ -1,10 +1,15 @@
 """`ck run`: start a whole-spec /spec:implement run headless and unattended.
 
 A spec run takes hours; it should not stall on a permission prompt. This starts
-`claude -p` in the main checkout with auto permissions and no prompts (anything
-that would have asked is denied and shows up in the run's report), allows the
-Workflow launch and the ck/git commands the agents run, and keeps the process
-open until the workflow finishes. Run it from the main checkout, not from a
+`claude -p` in the main checkout in the default permission mode with no prompts:
+everything the run needs is allowed explicitly (the Workflow launch, subagents,
+file reads, edits inside the project, the ck/git commands agents type; sandboxed
+Bash is auto-allowed), and anything else is denied and shows up in the run's
+report. Default mode is not a choice: the environment scrub below makes Claude
+Code force any other --permission-mode back to default ("Permission mode forced
+to default - CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is set"), so ck asks for default
+and declares the allow list itself. It keeps the process open until the
+workflow finishes. Run it from the main checkout, not from a
 worktree: worktree-isolated sessions refuse commands they cannot prove stay
 inside that worktree, and the workflow makes its own task worktrees anyway.
 
@@ -41,8 +46,8 @@ from .worktree import _spec_dir
 # git subcommands agents type. The brief mandates `command git -C <worktree> <sub> ...`
 # (`command` is stripped before rule matching, so `git -C * <sub> *` covers it). ck runs
 # its own git (worktree create/merge, gate) as a subprocess of `Bash(ck *)`, so only
-# agent-typed git needs a rule here. Anything not listed still runs if auto mode's
-# classifier approves it; it just doesn't skip the classifier any more, as `Bash(git *)` did.
+# agent-typed git needs a rule here. In the default permission mode `ck run` uses, an
+# unsandboxed Bash command that no rule allows is denied (sandboxed ones are auto-allowed).
 GIT_AGENT_SUBCOMMANDS = (
     "status", "diff", "log", "show", "add", "commit", "merge", "rev-parse", "ls-files",
     "rm", "mv", "restore", "branch", "grep", "blame", "check-ignore",
@@ -51,8 +56,15 @@ GIT_AGENT_SUBCOMMANDS = (
 # Read-only git without -C (the orchestrating session looks around the main checkout).
 GIT_READ_ONLY = ("status", "diff", "log", "show", "rev-parse", "ls-files", "branch --show-current", "worktree list")
 
+# Tools the orchestrating session, the workflow's agents and the /spec:implement skill use
+# (its allowed-tools). Read-only tools are allowed everywhere: the brief and the workflow
+# live in the plugin directory, outside the project; deny rules keep credentials out.
+# Edits are allowed only inside the project (see file_rules); an Edit rule covers Write and
+# NotebookEdit too (Claude Code matches every file-editing tool against Edit rules).
+SESSION_TOOLS = ("Read", "Glob", "Grep", "Workflow", "Agent", "TodoWrite", "TaskCreate", "TaskUpdate", "SendMessage")
+
 ALLOWED_TOOLS = (
-    ["Workflow", "Bash(ck *)"]
+    list(SESSION_TOOLS) + ["Bash(ck *)"]
     + [f"Bash(git -C * {sub} *)" for sub in GIT_AGENT_SUBCOMMANDS]
     + [f"Bash(git -C * {sub})" for sub in GIT_AGENT_SUBCOMMANDS]
     + [f"Bash(git {sub} *)" for sub in GIT_READ_ONLY]
@@ -82,8 +94,12 @@ ENV = {
     # Keep the process open until the background workflow finishes.
     "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0",
     # Strip credential-shaped variables (API keys, tokens) from Bash, hook and MCP subprocesses.
+    # Side effects (Claude Code 2.1.29x): Claude Code refuses to start without bubblewrap
+    # ("bubblewrap is required for subprocess env scrubbing"), and forces the permission
+    # mode to default, hence PERMISSION_MODE and the explicit allow list.
     "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "1",
 }
+PERMISSION_MODE = "default"
 
 DEFAULT_BUDGET_USD = 40.0
 DEFAULT_MAX_TURNS = 400
@@ -101,7 +117,21 @@ SANDBOX_HOME_READABLE = ("~/.local", "~/.cache", "~/.config/claude-kiro", "~/.co
 SANDBOX_HOME_WRITABLE = ("~/.cache", "~/.npm")
 
 
-def sandbox_settings(project: Path, allowed_domains: List[str]) -> Dict[str, Any]:
+def file_rules(project: Path, worktree_dir: Optional[Path] = None) -> List[str]:
+    """Edit allow rules: the project, plus the task worktree directory if it lies outside it.
+
+    `//` marks an absolute path in a permission rule (a single `/` is relative to the
+    settings source). Covers Edit, Write and NotebookEdit.
+    """
+    dirs = [project.resolve()]
+    if worktree_dir is not None:
+        wd = worktree_dir.resolve()
+        if not wd.is_relative_to(dirs[0]):
+            dirs.append(wd)
+    return [f"Edit(/{d}/**)" for d in dirs]
+
+
+def sandbox_settings(project: Path, allowed_domains: List[str], worktree_dir: Optional[Path] = None) -> Dict[str, Any]:
     """`--settings` JSON for an unattended run: the Bash sandbox on, no way around it.
 
     Key names follow https://code.claude.com/docs/en/sandboxing and the sandbox rows of
@@ -109,6 +139,9 @@ def sandbox_settings(project: Path, allowed_domains: List[str]) -> Dict[str, Any
     a relative path in --settings would not resolve against the project.
     """
     project = project.resolve()
+    extra = []
+    if worktree_dir is not None and not worktree_dir.resolve().is_relative_to(project):
+        extra = [str(worktree_dir.resolve())]  # the project itself is writable by default
     return {
         "sandbox": {
             "enabled": True,
@@ -117,8 +150,8 @@ def sandbox_settings(project: Path, allowed_domains: List[str]) -> Dict[str, Any
             "autoAllowBashIfSandboxed": True,
             "filesystem": {
                 "denyRead": ["~/"],
-                "allowRead": [str(project), str(project / ".claude" / "worktrees"), *SANDBOX_HOME_READABLE],
-                "allowWrite": list(SANDBOX_HOME_WRITABLE),
+                "allowRead": [str(project), *extra, *SANDBOX_HOME_READABLE],
+                "allowWrite": [*extra, *SANDBOX_HOME_WRITABLE],
             },
             "network": {
                 "allowedDomains": list(allowed_domains),
@@ -162,9 +195,20 @@ def trust_warning(project: Path) -> Optional[str]:
             "settings.local.json (ck hooks, allow rules) there. Open `claude` in it once and accept the trust dialog.")
 
 
+SCRUB_NEEDS_BWRAP = ("`ck run` sets CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 (credential-shaped environment variables are "
+                     "stripped from every command the agents run), and Claude Code refuses to start with it unless "
+                     "bubblewrap is installed. ck won't drop that protection to get going: install bubblewrap "
+                     f"({APT_INSTALL}).")
+
+
 def choose_isolation(requested: str) -> Tuple[str, List[str], Optional[str]]:
-    """(isolation, warnings, refusal). auto picks sandbox when bwrap and socat are on PATH."""
+    """(isolation, warnings, refusal). auto picks sandbox when bwrap and socat are on PATH.
+
+    Without bwrap there is no run at all, whatever the isolation: the env scrub needs it.
+    """
     missing = missing_sandbox_tools()
+    if "bwrap" in missing:
+        return "none", [], f"bubblewrap (bwrap) not found on PATH. {SCRUB_NEEDS_BWRAP}"
     if requested == "sandbox" and missing:
         return "none", [], (f"--isolation sandbox needs {' and '.join(SANDBOX_TOOLS)} on PATH; missing: "
                             f"{', '.join(missing)}. Install them ({APT_INSTALL}) or pass --isolation none.")
@@ -230,6 +274,15 @@ def run(spec: str, extra: tuple, model: str, effort: str, budget: float, max_tur
     if refusal:
         click.echo(f"❌ {refusal}")
         sys.exit(2)
+    try:
+        from ..worktrees import WorktreeError, main_root, worktrees_dir
+        wt_dir: Optional[Path] = worktrees_dir(main_root(cwd), name)
+    except WorktreeError:
+        wt_dir = None
+    if wt_dir is not None and (wt_dir.resolve() / "x").is_relative_to(cwd.resolve() / ".claude"):
+        warnings.append(f"Task worktrees go to {wt_dir}, under .claude/, which Claude Code's Bash sandbox keeps "
+                        "read-only: agents cannot commit or test there. Set \"worktree_dir\" in specs/ck.json "
+                        "(default .ck/worktrees) once this spec's old worktrees are landed or removed.")
     settings = None
     if chosen == "sandbox":
         try:
@@ -237,7 +290,7 @@ def run(spec: str, extra: tuple, model: str, effort: str, budget: float, max_tur
         except ag.AgentConfigError as e:
             click.echo(f"❌ {e}")
             sys.exit(2)
-        settings = sandbox_settings(cwd, domains)
+        settings = sandbox_settings(cwd, domains, wt_dir)
     else:
         creds = readable_credentials()
         if creds:
@@ -250,9 +303,9 @@ def run(spec: str, extra: tuple, model: str, effort: str, budget: float, max_tur
     prompt = " ".join([f"/spec:implement {name} all", *extra])
     argv = [
         "claude", "-p", prompt,
-        "--permission-mode", "auto",
+        "--permission-mode", PERMISSION_MODE,
         "--permission-prompts", "none",
-        "--allowedTools", ",".join(ALLOWED_TOOLS),
+        "--allowedTools", ",".join(ALLOWED_TOOLS + file_rules(cwd, wt_dir)),
         "--disallowedTools", ",".join(DISALLOWED_TOOLS),
         "--max-budget-usd", _number(budget),
         "--max-turns", str(max_turns),
@@ -288,10 +341,12 @@ def run(spec: str, extra: tuple, model: str, effort: str, budget: float, max_tur
         click.echo(f"⚠ {w}")
     log.parent.mkdir(parents=True, exist_ok=True)
     click.echo(f"Running {name} unattended (orchestrator session {model}/{effort}, isolation {chosen}, "
+               f"permission mode {PERMISSION_MODE} with an explicit allow list, "
                f"budget ${_number(budget)}, max {max_turns} turns); log: {log}")
     with log.open("w") as out, (err.open("w") if err else open(os.devnull, "w")) as errf:
         header = errf if err else out  # keep a JSON log pure; the header goes with stderr then
-        header.write(f"ck run {name}: isolation: {chosen}, budget ${_number(budget)}, max turns {max_turns}\n")
+        header.write(f"ck run {name}: isolation: {chosen}, permission mode: {PERMISSION_MODE} (explicit allow list; "
+                     f"the env scrub forces default), budget ${_number(budget)}, max turns {max_turns}\n")
         for w in warnings:
             header.write(f"WARNING: {w}\n")
         header.write(f"argv: {json.dumps(argv)}\n\n")
@@ -328,13 +383,35 @@ def doctor_unattended(project: Path) -> None:
     missing = missing_sandbox_tools()
     for tool in SANDBOX_TOOLS:
         click.echo(f"{'❌' if tool in missing else '✓'} {tool} {'not found' if tool in missing else 'found: ' + str(shutil.which(tool))}")
-    if missing:
-        click.echo("  Claude Code's Bash sandbox needs bubblewrap (bwrap) and socat on Linux/WSL2; without them "
-                   "`ck run` runs unsandboxed.")
-        recs.append(f"Install the sandbox tools: {APT_INSTALL} (Ubuntu 24.04+: also allow bubblewrap user namespaces "
-                    "in AppArmor, see https://code.claude.com/docs/en/sandboxing)")
+    if "bwrap" in missing:
+        click.echo("❌ `ck run` will refuse to start: it sets CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1, and Claude Code "
+                   "won't start with the env scrub unless bubblewrap is installed")
+    elif missing:
+        click.echo("  Claude Code's Bash sandbox needs bubblewrap (bwrap) and socat on Linux/WSL2; without socat "
+                   "`ck run` runs unsandboxed (isolation auto → none).")
     else:
         click.echo("✓ `ck run` will sandbox Bash (isolation auto → sandbox)")
+    if missing:
+        recs.append(f"Install the sandbox tools: {APT_INSTALL} (Ubuntu 24.04+: also allow bubblewrap user namespaces "
+                    "in AppArmor, see https://code.claude.com/docs/en/sandboxing)")
+    click.echo(f"ℹ️  Permission mode: {PERMISSION_MODE}, forced by the env scrub; `ck run` allows {', '.join(SESSION_TOOLS)}, "
+               "edits inside the project, and ck/git commands explicitly; sandboxed Bash is auto-allowed; "
+               "everything else is denied (no prompts)")
+    try:
+        from ..worktrees import WorktreeError, configured_dir, main_root
+        wt_dir = configured_dir(main_root(project))
+        under_claude = (wt_dir.resolve() / "x").is_relative_to(project.resolve() / ".claude")
+        click.echo(f"{'⚠' if under_claude else '✓'} Task worktrees go to {wt_dir}"
+                   + (" (under .claude/, which the Bash sandbox keeps read-only)" if under_claude else ""))
+        if under_claude:
+            recs.append('Move task worktrees out of .claude/: set "worktree_dir" in specs/ck.json (default .ck/worktrees)')
+        legacy = sorted(p.name for p in (main_root(project) / ".claude" / "worktrees").glob("*") if p.is_dir())
+        if legacy:
+            click.echo(f"⚠ Worktrees left in .claude/worktrees ({', '.join(legacy[:5])}{'...' if len(legacy) > 5 else ''}): "
+                       "a spec that still has some there keeps using that directory, where sandboxed agents cannot write")
+            recs.append("Land or remove the worktrees in .claude/worktrees (`ck worktree status <spec>`) before a sandboxed `ck run`")
+    except WorktreeError:
+        pass
 
     user_settings = Path.home() / ".claude" / "settings.json"
     for f in (user_settings, project / ".claude" / "settings.json", project / ".claude" / "settings.local.json"):

@@ -262,3 +262,29 @@ def test_upgrade_installs_the_no_workflow_guide_and_agent_types(old_project):
     assert "model: sonnet" in impl and "effort: medium" in impl
     assert "effort: high" in (old_project / ".claude/agents/ck-reviewer.md").read_text()
     assert "Already up to date" in run(old_project, "upgrade").output
+
+
+def test_init_and_upgrade_ignore_the_task_worktree_dir(tmp_path):
+    """Task worktrees (.ck/worktrees) are nested checkouts; git must not see them as untracked files."""
+    root = tmp_path / "fresh"
+    root.mkdir()
+    git(root, "init", "-q")
+    (root / ".gitignore").write_text("node_modules/")
+    out = run(root, "init", "--no-allow-workflow")
+    assert out.exit_code == 0, out.output
+    assert ".gitignore (/.ck/worktrees/" in out.output
+    assert (root / ".gitignore").read_text().splitlines()[0] == "node_modules/"
+    assert "/.ck/worktrees/" in (root / ".gitignore").read_text().splitlines()
+    git(root, "check-ignore", "-q", ".ck/worktrees/demo-task-1")  # raises if not ignored
+
+    # Already ignored: upgrade leaves .gitignore alone.
+    before = (root / ".gitignore").read_text()
+    run(root, "upgrade")
+    assert (root / ".gitignore").read_text() == before
+
+    # A project that set its own worktree_dir gets that one ignored by upgrade.
+    (root / "specs/ck.json").write_text(json.dumps({"worktree_dir": "wt"}))
+    dry = run(root, "upgrade", "--dry-run")
+    assert "/wt/" in dry.output and (root / ".gitignore").read_text() == before
+    run(root, "upgrade")
+    assert "/wt/" in (root / ".gitignore").read_text().splitlines()

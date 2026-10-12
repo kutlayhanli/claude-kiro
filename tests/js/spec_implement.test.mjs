@@ -7,7 +7,7 @@ import { runWorkflow, sleep } from './load_workflow.mjs'
 const here = path.dirname(fileURLToPath(import.meta.url))
 const SCRIPT = path.join(here, '../../plugin/workflows/spec-implement.js')
 
-const baseArgs = { spec: 'demo', root: '/repo', into: 'integrate/demo', targetDir: '/repo/.claude/worktrees/demo-integration' }
+const baseArgs = { spec: 'demo', root: '/repo', into: 'integrate/demo', targetDir: '/repo/.ck/worktrees/demo-integration' }
 
 // A fake project: `ck plan` semantics over deps/done, task durations, failures, timestamps.
 function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null }) {
@@ -193,7 +193,7 @@ await test('per-landing check: a task red on landing stays off the target, gets 
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: baseArgs })
   assert.ok(p.state.events.includes('fix 1 (Task 1 red on landing)'))
   assert.match(p.state.prompts['fix 1 (Task 1 red on landing)'], /red: task 1/)
-  assert.match(p.state.prompts['fix 1 (Task 1 red on landing)'], /Work only in the task worktree \/repo\/\.claude\/worktrees\/demo-task-1/)
+  assert.match(p.state.prompts['fix 1 (Task 1 red on landing)'], /Work only in the task worktree \/repo\/\.ck\/worktrees\/demo-task-1/)
   assert.deepEqual(p.state.landings, [['1'], ['1'], ['2']])
   assert.deepEqual(result.merged.sort(), ['1', '2'])
   assert.equal(result.tasks.find(t => t.task === '1').fixedAfterMerge, true)
@@ -441,7 +441,7 @@ await test('escalation: a red full gate the fixer could not repair gets a fix on
 await test('handoff: agents leave a note on failure and every retry or revision reads it first', async () => {
   const p = project({ deps: { 1: [] }, failUntil: { 1: 2 }, reviews: { 1: ['changes', 'approve'] } })
   await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxRetries: 1, agents: HAIKU(['sonnet']) } })
-  const note = '/repo/.claude/worktrees/demo-task-1.handoff.md'
+  const note = '/repo/.ck/worktrees/demo-task-1.handoff.md'
   assert.match(p.state.prompts['task 1'], new RegExp(`write a handoff note to ${note}`))
   for (const l of ['task 1 retry 1', 'task 1 retry 2 (sonnet)', 'task 1 revise 1']) {
     assert.match(p.state.prompts[l], new RegExp(`read ${note}`), l)
@@ -687,4 +687,21 @@ await test('the brief path comes from args.brief (plugin), with the vendored pat
   const rel = project({ deps: { 1: [] } })
   await runWorkflow(SCRIPT, { agent: rel.agent, args: { ...baseArgs, brief: '.claude/workflows/spec-implement-brief.md' } })
   assert.ok(rel.state.prompts['task 1'].includes('/repo/.claude/workflows/spec-implement-brief.md'), 'relative brief resolves against root')
+})
+
+await test('task worktrees and handoff notes live in args.worktreeDir (default <root>/.ck/worktrees), never under .claude/', async () => {
+  const p = project({ deps: { 1: [] }, failUntil: { 1: 1 } })
+  await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxRetries: 1 } })
+  assert.ok(p.state.prompts['task 1'].includes('Worktree: /repo/.ck/worktrees/demo-task-1 (branch feat/demo-task-1)'))
+  assert.ok(p.state.prompts['task 1'].includes('/repo/.ck/worktrees/demo-task-1.handoff.md'))
+  for (const prompt of Object.values(p.state.prompts)) assert.ok(!prompt.includes('.claude/worktrees'), prompt.slice(0, 200))
+
+  const abs = project({ deps: { 1: [] } })
+  await runWorkflow(SCRIPT, { agent: abs.agent, args: { ...baseArgs, worktreeDir: '/elsewhere/wt/' } })
+  assert.ok(abs.state.prompts['task 1'].includes('Worktree: /elsewhere/wt/demo-task-1 '))
+  assert.ok(abs.state.prompts['task 1'].includes('/elsewhere/wt/demo-task-1.handoff.md'))
+
+  const rel = project({ deps: { 1: [] } })
+  await runWorkflow(SCRIPT, { agent: rel.agent, args: { ...baseArgs, worktreeDir: './.claude/worktrees' } })
+  assert.ok(rel.state.prompts['task 1'].includes('Worktree: /repo/.claude/worktrees/demo-task-1 '), 'a legacy dir from ck plan is honoured')
 })

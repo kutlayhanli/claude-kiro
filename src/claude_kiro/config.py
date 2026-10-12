@@ -34,6 +34,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "properties": "warn",
     # Seconds allowed per verify command.
     "verify_timeout": 540,
+    # Where `ck worktree` creates task and integration worktrees, relative to the
+    # main checkout (or absolute). Keep it out of .claude/: Claude Code's Bash
+    # sandbox makes .claude/ read-only. Add it to .gitignore (`ck init` does).
+    "worktree_dir": ".ck/worktrees",
     # Dependency install step for fresh worktrees (`ck worktree create --install`).
     # null = detected from lockfiles.
     "install": None,
@@ -89,12 +93,21 @@ def load_config(project_dir: Path) -> Dict[str, Any]:
     return config
 
 
+def _present(path: Path) -> bool:
+    """A real file, not the empty read-only stub Claude Code's sandbox leaves at
+    package.json, package-lock.json, yarn.lock... while a sandboxed session runs."""
+    try:
+        return path.is_file() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
 def detect_verify_commands(project_dir: Path) -> List[str]:
     """Best-guess test command for a new project's specs/ck.json."""
     if (project_dir / "pyproject.toml").exists() or (project_dir / "pytest.ini").exists():
         return ["uv run pytest -q"] if (project_dir / "uv.lock").exists() else ["pytest -q"]
     package_json = project_dir / "package.json"
-    if package_json.exists():
+    if _present(package_json):
         try:
             scripts = json.loads(package_json.read_text()).get("scripts", {})
         except (OSError, json.JSONDecodeError):
@@ -125,13 +138,13 @@ def install_command(config: Dict[str, Any], project_dir: Path) -> Optional[str]:
     configured = config.get("install")
     if configured is not None:
         return configured or None
-    if (project_dir / "uv.lock").exists():
+    if _present(project_dir / "uv.lock"):
         return "uv sync --frozen -q"
-    if (project_dir / "package-lock.json").exists():
+    if _present(project_dir / "package-lock.json"):
         return "npm ci --silent"
-    if (project_dir / "pnpm-lock.yaml").exists():
+    if _present(project_dir / "pnpm-lock.yaml"):
         return "pnpm install --frozen-lockfile"
-    if (project_dir / "yarn.lock").exists():
+    if _present(project_dir / "yarn.lock"):
         return "yarn install --frozen-lockfile"
     return None
 

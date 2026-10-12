@@ -112,7 +112,16 @@ def _plan(project_dir: Path, spec: str, exclude: set) -> dict:
         "chain": chain,
         "ready": ready,
         "remaining": [n for n in plan["deps"] if n not in done],
+        # Absolute directory of this spec's task worktrees (spec-implement's worktreeDir arg).
+        "worktreeDir": _worktree_dir(project_dir, spec_dir.name),
     }
+
+
+def _worktree_dir(project_dir: Path, spec: str):
+    try:
+        return str(wt.worktrees_dir(wt.main_root(project_dir), spec))
+    except wt.WorktreeError:  # not a git checkout: no worktrees to place
+        return None
 
 
 def _chain_lengths(deps: dict, done: set) -> dict:
@@ -191,7 +200,9 @@ def worktree():
     """Create, claim, merge, and inspect per-task git worktrees.
 
     \b
-    Layout: .claude/worktrees/<spec>-task-<N> on branch feat/<spec>-task-<N>.
+    Layout: <worktree_dir>/<spec>-task-<N> on branch feat/<spec>-task-<N>;
+    worktree_dir is set in specs/ck.json (default .ck/worktrees). Worktrees made by
+    older ck in .claude/worktrees are still found.
     Exit codes: 0 ok, 2 merge conflict, 3 something busy/missing/failed.
     """
 

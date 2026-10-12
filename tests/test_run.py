@@ -36,7 +36,7 @@ def test_dry_run_prints_an_unattended_headless_command(tmp_path):
     argv = plan["argv"]
     assert argv[:2] == ["claude", "-p"]
     assert argv[2] == "/spec:implement demo all"
-    for flag in (["--permission-mode", "auto"], ["--permission-prompts", "none"], ["--model", "sonnet"], ["--effort", "low"]):
+    for flag in (["--permission-mode", "default"], ["--permission-prompts", "none"], ["--model", "sonnet"], ["--effort", "low"]):
         i = argv.index(flag[0])
         assert argv[i + 1] == flag[1]
     allowed = argv[argv.index("--allowedTools") + 1].split(",")
@@ -56,7 +56,7 @@ def test_extra_arguments_reach_spec_implement_and_session_model_is_settable(tmp_
 
 def test_refuses_inside_a_linked_worktree(tmp_path):
     root = repo(tmp_path)
-    wt = root / ".claude" / "worktrees" / "demo-task-1"
+    wt = root / ".ck" / "worktrees" / "demo-task-1"
     subprocess.run(["git", "-C", str(root), "worktree", "add", "-q", "-b", "t1", str(wt)], check=True)
     out = ck(wt, "run", "demo", "--dry-run")
     assert out.exit_code == 2
@@ -87,10 +87,13 @@ def fake_home(tmp_path, monkeypatch):
     return home
 
 
-def sandbox_tools(monkeypatch, present: bool):
+def sandbox_tools(monkeypatch, present):
+    """present: True (both tools), False (neither), or the set of tools that exist."""
+    have = {"bwrap", "socat"} if present is True else set() if present is False else set(present)
+
     def which(name, *a, **k):
         if name in ("bwrap", "socat"):
-            return f"/usr/bin/{name}" if present else None
+            return f"/usr/bin/{name}" if name in have else None
         return REAL_WHICH(name, *a, **k)
 
     monkeypatch.setattr(shutil, "which", which)
@@ -107,7 +110,7 @@ def flag(argv, name):
 
 
 def test_dry_run_caps_budget_and_turns(tmp_path, fake_home, monkeypatch):
-    sandbox_tools(monkeypatch, present=False)
+    sandbox_tools(monkeypatch, present={"bwrap"})
     root = repo(tmp_path)
     argv = plan_of(root)["argv"]
     assert flag(argv, "--max-budget-usd") == "40"
@@ -118,7 +121,7 @@ def test_dry_run_caps_budget_and_turns(tmp_path, fake_home, monkeypatch):
 
 
 def test_dry_run_denies_dangerous_commands_and_credential_reads(tmp_path, fake_home, monkeypatch):
-    sandbox_tools(monkeypatch, present=False)
+    sandbox_tools(monkeypatch, present={"bwrap"})
     root = repo(tmp_path)
     plan = plan_of(root)
     denied = flag(plan["argv"], "--disallowedTools").split(",")
@@ -135,7 +138,7 @@ def test_dry_run_denies_dangerous_commands_and_credential_reads(tmp_path, fake_h
 
 
 def test_git_allow_rules_are_narrow(tmp_path, fake_home, monkeypatch):
-    sandbox_tools(monkeypatch, present=False)
+    sandbox_tools(monkeypatch, present={"bwrap"})
     root = repo(tmp_path)
     allowed = flag(plan_of(root)["argv"], "--allowedTools").split(",")
     assert "Bash(git *)" not in allowed and "Bash(command git *)" not in allowed
@@ -145,13 +148,56 @@ def test_git_allow_rules_are_narrow(tmp_path, fake_home, monkeypatch):
     assert not any("push" in r or "reset" in r or "clean" in r for r in allowed)
 
 
-def test_isolation_auto_runs_unsandboxed_with_a_warning_when_bwrap_is_missing(tmp_path, fake_home, monkeypatch):
-    sandbox_tools(monkeypatch, present=False)
+def test_isolation_auto_runs_unsandboxed_with_a_warning_when_socat_is_missing(tmp_path, fake_home, monkeypatch):
+    sandbox_tools(monkeypatch, present={"bwrap"})
     root = repo(tmp_path)
     plan = plan_of(root)
     assert plan["isolation"] == "none"
     assert "--settings" not in plan["argv"]
-    assert any("bwrap" in w or "bubblewrap" in w for w in plan["warnings"])
+    assert any("socat" in w and "UNSANDBOXED" in w for w in plan["warnings"])
+    assert plan["env"]["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"] == "1"
+
+
+@pytest.mark.parametrize("isolation", ["auto", "none", "sandbox"])
+def test_refuses_without_bubblewrap_instead_of_dropping_the_env_scrub(tmp_path, fake_home, monkeypatch, isolation):
+    """Claude Code won't start with CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 unless bwrap exists; ck keeps the scrub and says so."""
+    sandbox_tools(monkeypatch, present={"socat"})
+    root = repo(tmp_path)
+    out = ck(root, "run", "demo", "--dry-run", "--json", "--isolation", isolation)
+    assert out.exit_code == 2, out.output
+    assert "bubblewrap" in out.output and "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB" in out.output
+    assert "apt-get install bubblewrap" in out.output
+
+
+def test_permission_mode_is_default_with_an_explicit_allow_list(tmp_path, fake_home, monkeypatch):
+    """The env scrub forces default mode, so everything the run needs is allowed by name; edits only inside the project."""
+    sandbox_tools(monkeypatch, present=True)
+    root = repo(tmp_path)
+    argv = plan_of(root)["argv"]
+    assert flag(argv, "--permission-mode") == "default"
+    allowed = flag(argv, "--allowedTools").split(",")
+    for tool in ("Read", "Glob", "Grep", "Workflow", "Agent", "TodoWrite", "TaskCreate", "TaskUpdate", "SendMessage", "Bash(ck *)"):
+        assert tool in allowed, tool
+    assert f"Edit(/{root.resolve()}/**)" in allowed
+    assert not any(r in ("Edit", "Write", "Bash", "Bash(*)") for r in allowed)
+
+
+def test_worktree_dir_outside_the_project_is_writable_in_the_sandbox_and_editable(tmp_path, fake_home, monkeypatch):
+    sandbox_tools(monkeypatch, present=True)
+    root = repo(tmp_path)
+    outside = tmp_path / "wts"
+    (root / "specs" / "ck.json").write_text(json.dumps({"worktree_dir": str(outside)}))
+    plan = plan_of(root)
+    fs = plan["settings"]["sandbox"]["filesystem"]
+    assert str(outside.resolve()) in fs["allowWrite"] and str(outside.resolve()) in fs["allowRead"]
+    assert f"Edit(/{outside.resolve()}/**)" in flag(plan["argv"], "--allowedTools").split(",")
+
+
+def test_worktree_dir_under_dot_claude_is_warned_about(tmp_path, fake_home, monkeypatch):
+    sandbox_tools(monkeypatch, present=True)
+    root = repo(tmp_path)
+    (root / "specs" / "ck.json").write_text(json.dumps({"worktree_dir": ".claude/worktrees"}))
+    assert any("read-only" in w and "worktree_dir" in w for w in plan_of(root)["warnings"])
 
 
 def test_isolation_auto_enables_a_strict_sandbox_when_bwrap_and_socat_exist(tmp_path, fake_home, monkeypatch):
@@ -165,14 +211,14 @@ def test_isolation_auto_enables_a_strict_sandbox_when_bwrap_and_socat_exist(tmp_
     assert sb["allowUnsandboxedCommands"] is False and sb["autoAllowBashIfSandboxed"] is True
     assert "~/" in sb["filesystem"]["denyRead"]
     assert str(root) in sb["filesystem"]["allowRead"]
-    assert str(root / ".claude" / "worktrees") in sb["filesystem"]["allowRead"]
+    assert not any(".claude" in p for p in sb["filesystem"]["allowRead"] + sb["filesystem"]["allowWrite"])
     assert "pypi.org" in sb["network"]["allowedDomains"] and "registry.npmjs.org" in sb["network"]["allowedDomains"]
     assert sb["network"]["strictAllowlist"] is True
     assert plan["settings"] == settings
 
 
-def test_isolation_sandbox_refuses_when_bwrap_or_socat_is_missing(tmp_path, fake_home, monkeypatch):
-    sandbox_tools(monkeypatch, present=False)
+def test_isolation_sandbox_refuses_when_socat_is_missing(tmp_path, fake_home, monkeypatch):
+    sandbox_tools(monkeypatch, present={"bwrap"})
     root = repo(tmp_path)
     out = ck(root, "run", "demo", "--dry-run", "--json", "--isolation", "sandbox")
     assert out.exit_code == 2
@@ -207,7 +253,7 @@ def test_untrusted_workspace_is_warned_about(tmp_path, fake_home, monkeypatch):
 
 
 def test_a_real_launch_records_the_isolation_warning_in_the_log(tmp_path, fake_home, monkeypatch):
-    sandbox_tools(monkeypatch, present=False)
+    sandbox_tools(monkeypatch, present={"bwrap"})
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     fake = bin_dir / "claude"
@@ -238,6 +284,9 @@ def test_doctor_unattended_reports_sandbox_tools_and_risky_settings(tmp_path, fa
     assert "~/.ssh" in out.output
     assert "Bash" in out.output and "settings.json" in out.output
     assert "Recommendations" in out.output
+    assert "refuse" in out.output and "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB" in out.output
+    assert "Permission mode: default" in out.output
+    assert ".ck/worktrees" in out.output
 
 
 def test_doctor_unattended_is_quiet_when_sandbox_tools_exist(tmp_path, fake_home, monkeypatch):

@@ -254,6 +254,40 @@ def _edit_shared_settings(project_dir: Path, change, dry_run: bool = False) -> s
     return "changed"
 
 
+def _ensure_gitignore(project_dir: Path, dry_run: bool = False) -> Optional[str]:
+    """Ignore the task worktree directory (specs/ck.json "worktree_dir") in .gitignore.
+
+    Returns the entry added, or None when it is already ignored (by any ignore file
+    git reads), lies outside the project, or this is not a git checkout.
+    """
+    import subprocess
+
+    raw = str(load_config(project_dir).get("worktree_dir") or "").strip()
+    if not raw or Path(os.path.expanduser(raw)).is_absolute():
+        return None
+    rel = raw.strip("/").removeprefix("./")
+    if not rel or rel == ".." or rel.startswith("../"):
+        return None
+    probe = subprocess.run(
+        ["git", "-C", str(project_dir), "check-ignore", "-q", "--no-index", f"{rel}/ck-probe"],
+        capture_output=True,
+    )
+    if probe.returncode == 0:  # already ignored
+        return None
+    if probe.returncode != 1:  # 128: not a git checkout
+        return None
+    entry = f"/{rel}/"
+    if not dry_run:
+        path = project_dir / ".gitignore"
+        text = path.read_text() if path.exists() else ""
+        if text and not text.endswith("\n"):
+            text += "\n"
+        gap = "\n" if text else ""
+        text += f"{gap}# Task worktrees made by `ck worktree` (specs/ck.json worktree_dir)\n{entry}\n"
+        path.write_text(text)
+    return entry
+
+
 def _remove_ck_hooks(project_dir: Path, dry_run: bool = False) -> bool:
     """Drop ck's hooks from .claude/settings.local.json (the plugin brings them). Returns True if any were there."""
     path = project_dir / ".claude" / "settings.local.json"
@@ -485,6 +519,10 @@ def init(force: bool, allow_workflow: Optional[bool], vendor: bool):
         created.append(CONFIG_FILE)
     else:
         skipped.append(CONFIG_FILE)
+
+    ignored = _ensure_gitignore(project_dir)
+    if ignored:
+        created.append(f".gitignore ({ignored}: task worktrees)")
 
     rule = _offer_workflow_rule(project_dir, allow_workflow)
     if rule == "added":
@@ -899,6 +937,7 @@ def upgrade(dry_run: bool, no_migrate: bool, allow_downgrade: bool, to_vendor: b
     --plugin switches it to the plugin, --vendor vendors a legacy project.
     In every mode:
     - creates specs/ck.json (verify commands, guard settings) if missing
+    - adds the task worktree directory (.ck/worktrees) to .gitignore
     - moves specs from .claude/specs/ to specs/ (unless --no-migrate)
 
     Never touches .claude/CLAUDE.md or the content of your specs. Records the
@@ -950,6 +989,10 @@ def upgrade(dry_run: bool, no_migrate: bool, allow_downgrade: bool, to_vendor: b
     patched = _patch_precommit(project_dir, dry_run=dry_run)
     if patched:
         changes.append(("updated", f".pre-commit-config.yaml (ruff limited to Python in {patched} hook(s))"))
+
+    ignored = _ensure_gitignore(project_dir, dry_run=dry_run)
+    if ignored:
+        changes.append(("updated", f".gitignore ({ignored}: task worktrees)"))
 
     moved, skipped = ([], []) if no_migrate else _migrate_specs(project_dir, dry_run)
     for name in moved:

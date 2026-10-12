@@ -7,7 +7,10 @@ export const meta = {
 // args (built by /spec:implement from `ck plan <spec> --json`):
 // {
 //   spec: 'market-sim',                    // spec directory name under specs/
-//   root: '/abs/main/checkout',            // where `ck worktree` puts .claude/worktrees/
+//   root: '/abs/main/checkout',            // the main checkout `ck worktree` works from
+//   worktreeDir: '/abs/main/checkout/.ck/worktrees',  // "worktreeDir" from ck plan: where this spec's task
+//                                          //   worktrees live (specs/ck.json worktree_dir); relative paths resolve
+//                                          //   against root; absent: <root>/.ck/worktrees
 //   into: 'integrate/market-sim',          // branch task work is merged into (default flow: the integration branch)
 //   targetDir: '/abs/checkout/of/into',    // checkout that has `into` checked out (integration worktree, or root)
 //   wave: { '1': 1, ... },                 // display grouping only (from ck plan)
@@ -42,6 +45,9 @@ const SPEC = A.spec
 const ROOT = A.root
 const INTO = A.into || 'main'
 const TARGET = A.targetDir || ROOT
+const WTDIR = !A.worktreeDir
+  ? `${ROOT}/.ck/worktrees`
+  : String(A.worktreeDir).startsWith('/') ? String(A.worktreeDir).replace(/\/+$/, '') : `${ROOT}/${String(A.worktreeDir).replace(/^\.\//, '').replace(/\/+$/, '')}`
 const WAVE = A.wave || {}
 const TITLES = A.titles || {}
 const TRACKS = A.tracks || {}
@@ -153,7 +159,7 @@ if (A.agents || A.model || A.effort) {
   log(`Agents: impl ${desc(IMPL)}${up(IMPL_UP)}, test ${desc(TEST)}${up(TEST_UP)}, fix ${desc(FIX)}${up(FIX_UP)}, review ${REVIEW_ON ? `${desc(REVIEW)} (safety ${desc(RISKY_REVIEW)})` : 'off'}${COMPLEXITY_ROUTING ? ', complexity routing on' : ''}, orchestration ${desc(LOW)}, conflicts ${desc(RESOLVE)}`)
 }
 
-const WT = n => `${ROOT}/.claude/worktrees/${SPEC}-task-${n}`
+const WT = n => `${WTDIR}/${SPEC}-task-${n}`
 const BR = n => `feat/${SPEC}-task-${n}`
 const waveOf = n => WAVE[n] || 0
 const phaseOf = n => (waveOf(n) ? `Wave ${waveOf(n)}` : 'Tasks')
@@ -302,7 +308,7 @@ Return the fields. Put a message in error only if a command itself failed to run
 // A note the agent leaves for whoever picks the task up next (a retry, a revision,
 // or a bigger model after escalation). It sits next to the worktree, not in it, so
 // it never dirties the branch or gets merged.
-const HANDOFF = n => `${ROOT}/.claude/worktrees/${SPEC}-task-${n}.handoff.md`
+const HANDOFF = n => `${WT(n)}.handoff.md`
 const WRITE_HANDOFF = n => `If you finish without a passing gate, or with a reviewer's blocking finding unresolved, first write a handoff note to ${HANDOFF(n)} for the next agent (possibly a bigger model): what the task needs, what you tried and why it failed (exact error text), the state of the branch, and what you would do next. Overwrite any older note.`
 const READ_HANDOFF = n => `Before anything else, read ${HANDOFF(n)} if it exists: the previous agent's handoff note.`
 
