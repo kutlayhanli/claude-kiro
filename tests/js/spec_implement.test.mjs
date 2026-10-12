@@ -501,6 +501,16 @@ await test('resolver: a conflict goes to the resolver, then the task lands again
   assert.ok(!p.state.events.includes('resolve 1'), 'no resolver without a conflict')
 })
 
+await test('gate logs go under $TMPDIR: /tmp itself is read-only in the sandbox', async () => {
+  const p = project({ deps: { 1: [] } })
+  await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })
+  for (const label of ['task 1 [impl]', 'land 1'].filter(l => p.state.prompts[l])) {
+    assert.ok(p.state.prompts[label].includes('${TMPDIR:-/tmp}/ck-gate-'), label)
+    assert.ok(!/> \/tmp\/ck-gate-/.test(p.state.prompts[label]), label)
+  }
+  assert.ok(p.state.prompts['land 1'])
+})
+
 await test('a PROTECTED landing fails the task as needing a human: no resolver, no fixer, no retry', async () => {
   const p = project({ deps: { 1: [], 2: [], 3: ['2'] }, protectedTasks: ['2'] })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })
