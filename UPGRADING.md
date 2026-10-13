@@ -1,6 +1,7 @@
 # Upgrading
 
-- **From 0.9.0 to 0.9.1:** see the next section.
+- **From 0.9.1:** see [Unreleased](#unreleased-after-091).
+- **From 0.9.0 to 0.9.1:** see [0.9.0 → 0.9.1](#090--091).
 - **From 0.8 to 0.9:** see [0.8 → 0.9](#08--09), then the 0.9.1 notes.
 - **From 0.7 to 0.8:** see [0.7 → 0.8](#07--08), then the 0.9 notes.
 - **From 0.6 to 0.7:** see [0.6 → 0.7](#06--07), then the 0.8 and 0.9 notes.
@@ -9,6 +10,21 @@
 - **From 0.3 to 0.4:** see [0.3 → 0.4](#03--04).
 - **From 0.2:** apply the 0.3 notes below as well; the steps are the same.
 - **From 0.1:** skip to [Upgrading to 0.2](#upgrading-to-02), then come back for the 0.3 and 0.4 notes (same commands).
+
+## Unreleased (after 0.9.1)
+
+From the sandboxed sihman benchmarks (`notes/handoff-2026-10-12-ck-next.md`). No new setup steps: `ck update`, then `ck upgrade` in vendored projects.
+
+- **`ck update` no longer upgrades the project in the current directory by itself.** Pass `--project`, or answer yes at the prompt in a terminal; without a terminal it skips and prints the command. It prints a line before `ck setup` installs and enables the spec plugin at user scope (which edits `~/.claude/settings.json`).
+- **Claims and the landing lock no longer trust process IDs**, which mean nothing across sandboxed commands. The landing lock is an `flock`, dropped when its holder exits. A task claim records an owner token and a time, and goes stale after `claim_stale_minutes` (default 60, in `specs/ck.json`) with no claim, `ck gate` run or commit. `ck worktree create` and `claim` take over a stale claim and keep its commits. Old pid claims are judged by the same age rule.
+- **`done-verify` gates task worktrees.** Workflow subagents edit their task worktree's `tasks.md` while Claude Code reports the session's directory, so the hook never gated them before. It now gates in the worktree the file belongs to. A task gate's pass is stamped by tree, and `ck gate --task` on the same tree with the same checks reuses it (`--no-reuse` forces a run). Whole-spec and landing gates never reuse.
+- **`stop-verify`** warns about this tree's specs as before. For a subagent's task worktree, which shares the session id, it reports only gates that ran and failed, naming the worktree, instead of every Done task in it.
+- **`ck worktree report <spec> --json`**: merged, done, failed, blocked and unstarted tasks from merge commits and `tasks.md` on the target branch. `/spec:implement` builds its final report from it, never from agent claims. A run where nothing left can start now ends as `outcome: "blocked"` with the tasks it waits on, not "planning step failed".
+- **Contract checks for test tasks.** `ck lint <spec> --contracts [--task N] [--base REF] [--strict] [--json]` flags string keys and status values in test files that design.md never names (warns by default; `contracts_ignore` in `specs/ck.json` lists keys to skip). The reviewer of a test-track task checks every field and status value against design.md's models and API tables. `ck agents set reviewer.cross_test on` adds one read-only agent per wave of test tasks that compares the merged test files with each other.
+- **`ck cost [--session ID | --run wf_…] [--json]`**: real spend from transcripts. `ck run` prints it when the run ends. `ck agents set run.budget_usd N` sets a project's budget, and `run.budget_per_task_usd` scales it with the tasks not yet Done.
+- **`ck doctor --unattended`** warns about PreToolUse hooks that can answer `permissionDecision: allow` (they bypass `--disallowedTools`) and about the sandbox proxy's start-up race.
+- **Landing a task that edits protected `.claude/` paths** fails before merging when the sandbox makes them read-only, naming the paths. Land such tasks attended, outside the sandbox.
+- Vendored projects go straight to `.claude/workflows/<name>.js` instead of trying the plugin first.
 
 ## 0.9.0 → 0.9.1
 

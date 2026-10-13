@@ -289,7 +289,7 @@ const minutes = (a, b) => {
   return Number.isFinite(d) && d >= 0 ? Math.round(d * 10) / 10 : null
 }
 
-const GIT_NOTE = 'Run git as "command git -C <dir> ..." and ck as "ck -C <dir> ..." with absolute directories, never "cd <dir> && ...": permission checks cannot verify compound commands, so they stall unattended runs. Keep each shell command a single simple command. (The "command" prefix stops a shell hook from rewriting plain git.) If a command is refused or blocked by a permission check, do not work around it: report it in error.'
+const GIT_NOTE = 'Run git as "command git -C <dir> ..." and ck as "ck -C <dir> ..." with absolute directories, never "cd <dir> && ...": permission checks cannot verify compound commands, so they stall unattended runs. Keep each shell command a single simple command. (The "command" prefix stops a shell hook from rewriting plain git.) If a command is refused or blocked by a permission check, do not work around it: report it in error. If a network command (for example "uv sync" or "npm install") fails at once with "Failed to connect to localhost port 3128", the sandbox proxy was still starting: retry it once.'
 
 // Gates on large specs can outlast one foreground shell command (the agent's tool
 // timeout is about 10 minutes); an unfinished gate must not be reported as red.
@@ -357,7 +357,7 @@ Report each disagreement with both files and lines and the design text. It is "b
 const revisePrompt = (n, review, round) => `${MANDATE}Revise Task ${n} of spec ${SPEC} (review round ${round}). The task's gate passed, but the reviewer found blocking problems:
 ${trim(review && review.findings, FINDINGS_LIMIT)}
 ${READ_HANDOFF(n)} ${WRITE_HANDOFF(n)}
-Worktree: ${WT(n)} (branch ${BR(n)}). Run "${NOW}" for startedAt. Claim with "ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover", fix each blocking finding without weakening any test or editing requirements.md, get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" passing again, merge ${INTO} into your branch, re-run the gate, and release the worktree. If a finding is wrong (it contradicts the spec), do not change the code for it: say why in deviations. Run "${NOW}" for finishedAt.
+Worktree: ${WT(n)} (branch ${BR(n)}). Run "${NOW}" for startedAt. Claim with "ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover", fix each blocking finding without weakening any test or editing requirements.md or existing test-plan.md rows, get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" passing again, merge ${INTO} into your branch, re-run the gate, and release the worktree. If a finding is wrong (it contradicts the spec), do not change the code for it: say why in deviations. Run "${NOW}" for finishedAt.
 ${GIT_NOTE}
 ${GATE_NOTE}
 Return the schema fields with task "${n}".`
@@ -380,7 +380,7 @@ Return resolved, conflicts (the files and how you resolved them), and error if i
 
 const landFixPrompt = (k, n, tail) => `${MANDATE}Task ${n} of spec ${SPEC} passed its own gate, but landing it on ${INTO} turns the gate red, so it was NOT merged (${INTO} stays green without it). Failure: ${trim(tail, 4000)}
 ${READ_HANDOFF(n)} ${WRITE_HANDOFF(n)}
-Fix it without weakening any test and without editing requirements.md. ${GIT_NOTE} ${GATE_NOTE}
+Fix it without weakening any test and without editing requirements.md or existing test-plan.md rows. ${GIT_NOTE} ${GATE_NOTE}
 1. Work only in the task worktree ${WT(n)} (branch ${BR(n)}). Claim it: ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover
 2. Bring in the target: command git -C ${WT(n)} merge ${INTO}  (resolve any conflict keeping both sides' tests).
 3. Reproduce the failing check in the worktree, fix the code (or a clearly broken fixture or harness), commit with a message starting "fix:", and get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" passing.
@@ -398,7 +398,7 @@ Do not modify anything. Return green=true only if "ck -C ${TARGET} gate ${SPEC}"
 const recheckPrompt = n => `Re-check for spec ${SPEC}. In ${TARGET} (branch ${INTO}): refresh dependencies if needed (e.g. "uv sync -q --directory ${TARGET}"), then run "ck -C ${TARGET} gate ${SPEC}${n ? ` --task ${n}` : ''}". ${GATE_NOTE} Do not modify anything. Return green=true only if it exited 0; otherwise put the failing part in failing.`
 
 const fixPrompt = (k, what, failure) => `${INTO} is red (${what}) for spec ${SPEC}. Failure: ${trim(failure, 4000)}
-Fix it without weakening any test and without editing requirements.md. ${GIT_NOTE} ${GATE_NOTE}
+Fix it without weakening any test and without editing requirements.md or existing test-plan.md rows. ${GIT_NOTE} ${GATE_NOTE}
 1. Run: ck -C ${ROOT} worktree create ${SPEC} fix${k} --install --base ${INTO}   (worktree ${WT(`fix${k}`)}). Work only there.
 2. Diagnose with the failing check, fix the code (or a clearly broken fixture or harness), and confirm the failing check passes in the fix worktree.
 3. Commit with a message starting "fix:", then run: ck -C ${ROOT} worktree merge ${SPEC} fix${k} --into ${INTO}
