@@ -380,6 +380,91 @@ def _user_sandbox(settings_file: Path) -> Dict[str, Any]:
     return sb if isinstance(sb, dict) else {}
 
 
+# A hook script that mentions permissionDecision and a quoted "allow" can approve a tool call
+# itself; an approval from a PreToolUse hook skips --disallowedTools (only the sandbox remains).
+_PATH_TOKEN = re.compile(r"""[^\s'"=;|&()<>`]+""")
+_HOOK_SCAN_DEPTH = 3  # the configured command, a wrapper it runs, the script the wrapper runs
+_HOOK_SCAN_MAX_BYTES = 1_000_000
+
+
+def _can_allow(text: str) -> bool:
+    return "permissionDecision" in text and bool(re.search(r"""["']allow["']|permissionDecision["']?\s*[:=]\s*["']?allow""", text))
+
+
+def _referenced_files(text: str, project: Path, home: Path) -> List[Path]:
+    """Existing files under HOME or the project that a command or script names (~, $HOME, $CLAUDE_PROJECT_DIR expanded)."""
+    found = []
+    for token in _PATH_TOKEN.findall(text):
+        for var, value in (("${HOME}", home), ("$HOME", home), ("${CLAUDE_PROJECT_DIR}", project), ("$CLAUDE_PROJECT_DIR", project)):
+            token = token.replace(var, str(value))
+        if token.startswith("~/"):
+            token = str(home / token[2:])
+        if "/" not in token or "$" in token:
+            continue
+        path = Path(token) if token.startswith("/") else project / token
+        try:
+            resolved = path.resolve()
+            if not resolved.is_file() or resolved.stat().st_size > _HOOK_SCAN_MAX_BYTES:
+                continue
+        except OSError:
+            continue
+        if resolved.is_relative_to(home.resolve()) or resolved.is_relative_to(project.resolve()):
+            found.append(path)
+    return found
+
+
+def allowing_hooks(settings_file: Path, project: Path, home: Optional[Path] = None) -> List[Dict[str, str]]:
+    """PreToolUse hooks in `settings_file` whose command, or a script it runs, can answer permissionDecision: allow.
+
+    A heuristic (grep for permissionDecision plus a quoted allow), following script paths
+    the command names, up to a wrapper's wrapper. Returns {"command", "matcher", "via"}.
+    """
+    home = home or Path.home()
+    try:
+        data = json.loads(settings_file.read_text())
+    except (OSError, json.JSONDecodeError):
+        return []
+    entries = ((data.get("hooks") or {}).get("PreToolUse") if isinstance(data, dict) else None) or []
+    out = []
+    for entry in entries if isinstance(entries, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        for hook in entry.get("hooks") or []:
+            command = hook.get("command") if isinstance(hook, dict) else None
+            if not isinstance(command, str) or not command:
+                continue
+            via = command if _can_allow(command) else None
+            frontier, seen = [command], set()
+            for _ in range(_HOOK_SCAN_DEPTH):
+                if via:
+                    break
+                nxt = []
+                for text in frontier:
+                    for path in _referenced_files(text, project, home):
+                        if path.resolve() in seen:
+                            continue
+                        seen.add(path.resolve())
+                        try:
+                            body = path.read_text(errors="ignore")
+                        except OSError:
+                            continue
+                        if _can_allow(body):
+                            via = str(path)
+                            break
+                        nxt.append(body)
+                    if via:
+                        break
+                frontier = nxt
+            if via:
+                out.append({"command": command, "matcher": str(entry.get("matcher", "*")), "via": via})
+    return out
+
+
+PROXY_RACE_NOTE = ("Sandboxed commands reach the network through a local proxy that starts with each command: one that "
+                   "connects in its first ~0.3 s can fail with `Failed to connect to localhost port 3128` (or another proxy "
+                   "connect error). It is transient: retry the command, or start it with `sleep 1 && ...`")
+
+
 def doctor_unattended(project: Path) -> None:
     """Report what an unattended `ck run` would be exposed to on this machine. Warnings never fail."""
     click.echo("🔍 Checking this machine for unattended runs (`ck run`)...\n")
@@ -395,6 +480,7 @@ def doctor_unattended(project: Path) -> None:
     else:
         click.echo("✓ `ck run` will sandbox every shell command: home directory hidden apart from toolchains, "
                    "credential files and credential-shaped environment variables removed, network limited")
+        click.echo(f"ℹ️  {PROXY_RACE_NOTE}")
     names = credential_env_names(os.environ)
     click.echo(f"ℹ️  Credential-shaped environment variables a sandboxed command won't see: {len(names)} "
                "(names only via `ck run --dry-run --json`)")
@@ -424,6 +510,20 @@ def doctor_unattended(project: Path) -> None:
         if _blanket_bash(f):
             click.echo(f"⚠ {f} allows every Bash command (blanket `Bash` / `Bash(*)` allow rule)")
             recs.append(f"Remove the blanket Bash allow rule from {f}: it lets any command skip the auto-mode classifier")
+    allowing = [(f, h) for f in (user_settings, project / ".claude" / "settings.json", project / ".claude" / "settings.local.json")
+                for h in allowing_hooks(f, project)]
+    for f, h in allowing:
+        via = "" if h["via"] == h["command"] else f" (via {h['via']})"
+        click.echo(f"⚠ PreToolUse hook in {f} (matcher {h['matcher']}): `{h['command']}`{via} can return "
+                   "permissionDecision: allow, which approves the call before --disallowedTools deny rules apply; "
+                   "only the sandbox then stops e.g. a `git push`")
+    if allowing:
+        recs.append("Remove PreToolUse hooks that answer `allow` from the settings an unattended run loads (or make them "
+                    "leave permissionDecision out so the normal rules decide): "
+                    + ", ".join(sorted({h["via"] for _, h in allowing})))
+    else:
+        click.echo("✓ No PreToolUse hook in user or project settings answers permissionDecision: allow "
+                   "(plugin hooks not checked)")
 
     creds = readable_credentials()
     if creds:

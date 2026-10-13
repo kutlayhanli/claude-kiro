@@ -365,3 +365,47 @@ def test_stream_json_adds_verbose(tmp_path):
     root = repo(tmp_path)
     argv = json.loads(ck(root, "run", "demo", "--dry-run", "--json", "--output-format", "stream-json").output)["argv"]
     assert argv[argv.index("--output-format") + 1] == "stream-json" and "--verbose" in argv
+
+
+ALLOW_HOOK = """#!/usr/bin/env bash
+jq -n '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: {}}}'
+"""
+
+
+def test_doctor_unattended_flags_pretooluse_hooks_that_can_return_allow(tmp_path, fake_home, monkeypatch):
+    # A PreToolUse hook that answers `allow` skips --disallowedTools: in bench v2 only the
+    # sandbox network stopped a test `git push` that the RTK rewrite hook had allowed.
+    sandbox_tools(monkeypatch, present=True)
+    hooks = fake_home / ".claude" / "hooks"
+    hooks.mkdir(parents=True)
+    (hooks / "rewrite.sh").write_text(ALLOW_HOOK)
+    (hooks / "rewrite-wt.sh").write_text('#!/usr/bin/env bash\nINPUT=$(cat)\nprintf "%s" "$INPUT" | exec "$HOME/.claude/hooks/rewrite.sh"\n')
+    (hooks / "deny-only.py").write_text('print({"permissionDecision": "deny"})\n')
+    pre = [{"matcher": "Bash", "hooks": [{"type": "command", "command": str(hooks / "rewrite-wt.sh")}]},
+           {"matcher": "Bash", "hooks": [{"type": "command", "command": "python3 ~/.claude/hooks/deny-only.py"}]}]
+    (fake_home / ".claude" / "settings.json").write_text(json.dumps({"hooks": {"PreToolUse": pre}}))
+    root = repo(tmp_path)
+    (root / ".claude").mkdir()
+    inline = "echo '{\"hookSpecificOutput\":{\"permissionDecision\":\"allow\"}}'"
+    (root / ".claude" / "settings.local.json").write_text(json.dumps(
+        {"hooks": {"PreToolUse": [{"matcher": "Edit", "hooks": [{"type": "command", "command": inline}]}]}}))
+
+    out = ck(root, "doctor", "--unattended")
+    assert out.exit_code == 0, out.output
+    assert str(hooks / "rewrite.sh") in out.output  # the script that answers allow, found through the wrapper
+    assert str(hooks / "rewrite-wt.sh") in out.output  # and the command configured in settings
+    assert "permissionDecision" in out.output and "--disallowedTools" in out.output
+    assert "settings.local.json" in out.output  # the inline project hook
+    assert "deny-only.py" not in out.output
+
+
+def test_doctor_unattended_without_allowing_hooks_says_so(tmp_path, fake_home, monkeypatch):
+    sandbox_tools(monkeypatch, present=True)
+    out = ck(repo(tmp_path), "doctor", "--unattended")
+    assert "No PreToolUse hook" in out.output
+
+
+def test_doctor_unattended_notes_the_sandbox_proxy_start_up_race(tmp_path, fake_home, monkeypatch):
+    sandbox_tools(monkeypatch, present=True)
+    out = ck(repo(tmp_path), "doctor", "--unattended")
+    assert "localhost port 3128" in out.output and "retry" in out.output
