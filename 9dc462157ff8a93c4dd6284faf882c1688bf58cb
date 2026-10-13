@@ -1,0 +1,5 @@
+verified-tree: f8e03b3f370800266fa19d9a06d4691d88123b97
+checks: passed (full: uv run pytest -q; 61s)
+pushed-to: origin/master
+by: safe-merge (DESKTOP-PU96OS3) branch release/0.10.0
+at: 2026-10-12T21:49:54-05:00
