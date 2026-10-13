@@ -302,7 +302,7 @@ const planPrompt = (exclude, slots) => `Mechanical planning step for spec ${SPEC
    Copy into your answer: "done", "remaining", "cycles", and for "verifyCycles" only each entry's task and message.
 2. Take the first ${Number.isFinite(slots) ? slots : 'all'} task(s) of its "ready" list. If there are none, skip this step. Otherwise run:
      ck -C ${ROOT} worktree create ${SPEC} <those task numbers> --install --base ${INTO} --json
-   Entries with state CREATED or EXISTS go in your "ready" field. BUSY or ERROR entries go in "busy" with their detail; do not touch those worktrees.
+   Entries with state CREATED or EXISTS go in your "ready" field. BUSY or ERROR entries go in "busy" with their detail; do not touch those worktrees. (ck has already released claims that went stale, so a BUSY claim belongs to a live agent; never judge one by the process ID it names.)
 Return the fields. Put a message in error only if a command itself failed to run.`
 
 // A note the agent leaves for whoever picks the task up next (a retry, a revision,

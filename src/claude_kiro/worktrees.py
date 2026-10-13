@@ -5,7 +5,9 @@ created from a base branch. worktree_dir comes from specs/ck.json (default
 .ck/worktrees); a spec whose worktrees still sit in .claude/worktrees (older ck)
 keeps using them until they are gone. A task agent claims its
 worktree (git's own `git worktree lock`) while it runs, so a second agent or a
-setup step can see it is busy. Merges go into whichever checkout has the
+setup step can see it is busy. A claim holds while it shows activity (its lock,
+a gate run, a commit) within claim_stale_minutes; process IDs are never consulted,
+since every sandboxed command has its own PID namespace. Merges go into whichever checkout has the
 target branch, one task at a time, and stop at the first conflict. `land`
 merges a batch instead: a `git merge-tree` precheck (no checkout touched),
 one gate for the batch, and bisection by halving when the batch is red.
@@ -17,7 +19,9 @@ shell aliases and command-rewriting hooks don't interfere.
 import contextlib
 import datetime
 import os
+import secrets
 import subprocess
+import time
 from dataclasses import asdict, dataclass, field
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -180,6 +184,46 @@ def lock_reason(root: Path, path: Path) -> Optional[str]:
     return None
 
 
+CLAIM_STALE_MINUTES = 60
+
+
+def _lock_file(path: Path) -> Optional[Path]:
+    proc = git(path, "rev-parse", "--path-format=absolute", "--git-dir", check=False)
+    return Path(proc.stdout.strip()) / "locked" if proc.returncode == 0 else None
+
+
+def claim_age(path: Path) -> float:
+    """Seconds since the claim on `path` last showed activity: the lock file's mtime
+    (set when claimed, refreshed by heartbeat()) or the branch tip's commit time,
+    whichever is newer. Works for claims of any format, including ck 0.9's "pid N" ones."""
+    times = []
+    lock = _lock_file(path)
+    with contextlib.suppress(OSError):
+        if lock:
+            times.append(lock.stat().st_mtime)
+    with contextlib.suppress(ValueError):
+        times.append(float(git(path, "log", "-1", "--format=%ct", check=False).stdout.strip()))
+    return time.time() - max(times) if times else float("inf")
+
+
+def stale_claim(root: Path, path: Path) -> Optional[str]:
+    """The lock reason when the claim on `path` is stale (no activity for
+    claim_stale_minutes from specs/ck.json), else None."""
+    reason = lock_reason(root, path)
+    if not reason:
+        return None
+    minutes = load_config(root).get("claim_stale_minutes", CLAIM_STALE_MINUTES)
+    return reason if claim_age(path) > float(minutes) * 60 else None
+
+
+def heartbeat(path: Path) -> None:
+    """Mark a claimed worktree as still in use (best effort; `ck gate` calls it)."""
+    lock = _lock_file(path)
+    with contextlib.suppress(OSError):
+        if lock and lock.exists():
+            os.utime(lock)
+
+
 def create(
     root: Path,
     spec: str,
@@ -199,6 +243,10 @@ def create(
         rel = rel_path(root, path)
         if path.exists():
             reason = lock_reason(root, path)
+            stale = stale_claim(root, path) if reason else None
+            if stale:  # its agent is gone; its commits stay on the branch for the next one
+                git(root, "worktree", "unlock", str(path))
+                reason = None
             dirty = dirty_files(path)
             if reason:
                 outcomes.append(Outcome(num, "BUSY", f"claimed: {reason}", rel, branch))
@@ -206,7 +254,7 @@ def create(
             if dirty and not reuse_dirty:
                 outcomes.append(Outcome(num, "BUSY", f"{len(dirty)} uncommitted change(s); commit or clean, or pass --reuse-dirty", rel, branch))
                 continue
-            outcome = Outcome(num, "EXISTS", "reused", rel, branch)
+            outcome = Outcome(num, "EXISTS", f"reused; released stale claim: {stale}" if stale else "reused", rel, branch)
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
             if branch_exists(root, branch):
@@ -245,12 +293,15 @@ def claim(root: Path, spec: str, num: str, owner: str, takeover: bool = False) -
     if not path.exists():
         return Outcome(num, "MISSING", "no worktree; run `ck worktree create` first", rel, branch)
     reason = lock_reason(root, path)
-    if reason and not takeover:
+    stale = stale_claim(root, path) if reason else None
+    if reason and not takeover and not stale:
         return Outcome(num, "BUSY", f"claimed: {reason}", rel, branch)
     if reason:
         git(root, "worktree", "unlock", str(path))
+    owner = f"{owner} (claim {secrets.token_hex(4)} at {_now()})"
     git(root, "worktree", "lock", "--reason", owner, str(path))
-    return Outcome(num, "CLAIMED", owner + (" (took over)" if reason else ""), rel, branch)
+    took = f" (took over stale claim: {stale})" if stale else " (took over)" if reason else ""
+    return Outcome(num, "CLAIMED", owner + took, rel, branch)
 
 
 def release(root: Path, spec: str, num: str) -> Outcome:
@@ -288,7 +339,9 @@ def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, ke
             continue
         if path.exists():
             reason = lock_reason(root, path)
-            if reason:
+            if reason and stale_claim(root, path):
+                git(root, "worktree", "unlock", str(path))
+            elif reason:
                 outcomes.append(Outcome(num, "BUSY", f"claimed: {reason}; release it first", rel, branch))
                 continue
             if dirty_files(path):
@@ -348,41 +401,29 @@ def _common_dir(root: Path) -> Path:
     return Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
 
 
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
 @contextlib.contextmanager
 def land_lock(root: Path, into: str) -> Iterator[Path]:
-    """One landing per target branch at a time: it may reset the target to its pre-batch commit."""
+    """One landing per target branch at a time: it may reset the target to its pre-batch commit.
+
+    An flock on the lock file, which the kernel drops when the holder exits, however it
+    dies. Not a recorded PID: each sandboxed command has its own PID namespace, so a PID
+    from another command can't be checked. The file stays; only the flock counts.
+    """
+    import fcntl
+
     path = _common_dir(root) / f"ck-land-{into.replace('/', '-')}.lock"
-    for _ in range(2):
+    with open(path, "a+") as f:
         try:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            try:
-                pid = int(path.read_text().strip() or 0)
-            except (OSError, ValueError):
-                pid = 0
-            if pid and _pid_alive(pid):
-                raise WorktreeError(f"another process (pid {pid}) is already landing into {into}; lock {path}")
-            path.unlink(missing_ok=True)  # stale: its process is gone
-            continue
-        with os.fdopen(fd, "w") as f:
-            f.write(str(os.getpid()))
-        break
-    else:
-        raise WorktreeError(f"could not take the landing lock {path}")
-    try:
-        yield path
-    finally:
-        path.unlink(missing_ok=True)
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise WorktreeError(f"another process is already landing into {into}; lock {path}") from None
+        f.truncate(0)
+        f.write(f"landing since {_now()}\n")  # for a human reading it; nothing parses it
+        f.flush()
+        try:
+            yield path
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 # Files Claude Code, git or the shell run or load on their own. A task branch that changes
@@ -481,7 +522,7 @@ def land(
                 continue
             if path.exists():
                 reason = lock_reason(root, path)
-                if reason and release_claims:
+                if reason and (release_claims or stale_claim(root, path)):
                     git(root, "worktree", "unlock", str(path))
                 elif reason:
                     results[num] = Landed(num, "BUSY", f"claimed: {reason}; release it first", branch)
