@@ -75,6 +75,11 @@ def test_inherit_and_booleans(home):
     r = roles(home)["roles"]
     assert r["implementer"]["model"] == "inherit"
     assert r["reviewer"]["enabled"] is False and r["reviewer"]["rounds"] == 2
+    # The cross-test consistency step after a wave of test tasks: optional, off by default.
+    assert r["reviewer"]["cross_test"] is False
+    ck(home, "agents", "set", "reviewer.cross_test", "on")
+    assert roles(home)["roles"]["reviewer"]["cross_test"] is True
+    assert ck(home, "agents", "set", "reviewer.cross_test", "maybe").exit_code != 0
 
 
 @pytest.mark.parametrize(

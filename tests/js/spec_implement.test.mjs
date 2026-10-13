@@ -96,6 +96,7 @@ function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFir
       const verdict = (reviews[n] || [])[state.reviewCount[n] - 1] || 'approve'
       return { verdict, findings: verdict === 'changes' ? [{ severity: 'blocking', issue: reviewIssue || 'contradicts design.md' }] : [], summary: verdict }
     }
+    if (l.startsWith('cross-test')) return { verdict: 'changes', findings: [{ severity: 'blocking', file: 'tests/test_b.py', issue: 'reads "state" where tests/test_a.py and design.md say "status"' }], summary: 'one drift' }
     if (l.startsWith('fix')) return { green: true }
     if (l.startsWith('re-check')) return { green: rechecksLeftRed-- <= 0 }
     if (l.startsWith('full gate')) return { green: !fullRed }
@@ -730,4 +731,58 @@ await test('task worktrees and handoff notes live in args.worktreeDir (default <
   const rel = project({ deps: { 1: [] } })
   await runWorkflow(SCRIPT, { agent: rel.agent, args: { ...baseArgs, worktreeDir: './.claude/worktrees' } })
   assert.ok(rel.state.prompts['task 1'].includes('Worktree: /repo/.claude/worktrees/demo-task-1 '), 'a legacy dir from ck plan is honoured')
+})
+
+await test('reviewer: a test-track task gets the contract check against design.md, an impl task does not', async () => {
+  const p = project({ deps: { 1: [], 2: ['1'] } })
+  await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, tracks: { 1: 'test', 2: 'impl' }, agents: ROLES } })
+  const testReview = p.state.prompts['review 1']
+  assert.match(testReview, /ck -C \/repo\/\.ck\/worktrees\/demo-task-1 lint demo --contracts --task 1/)
+  assert.match(testReview, /list every request field, response field and status value the new tests use/)
+  assert.match(testReview, /Data Models and API tables/)
+  assert.match(testReview, /is a blocking finding/)
+  assert.doesNotMatch(p.state.prompts['review 2'], /--contracts/)
+})
+
+await test('cross-test consistency: off by default', async () => {
+  const p = project({ deps: { 1: [], 2: [], 3: ['1', '2'] } })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, wave: { 1: 1, 2: 1, 3: 2 }, tracks: { 1: 'test', 2: 'test', 3: 'impl' }, agents: ROLES } })
+  assert.ok(!p.state.events.some(e => e.startsWith('cross-test')))
+  assert.deepEqual(result.crossTests, [])
+})
+
+await test('cross-test consistency: reviewer.cross_test runs one check once a wave of test tasks has merged, starting with ck lint --contracts', async () => {
+  const p = project({ deps: { 1: [], 2: [], 3: ['1', '2'], 4: ['3'], 5: ['3'] }, durations: { 1: 5, 2: 30 } })
+  const agents = { ...ROLES, reviewer: { ...ROLES.reviewer, cross_test: true } }
+  const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, wave: { 1: 1, 2: 1, 3: 2, 4: 3, 5: 3 }, tracks: { 1: 'test', 2: 'test', 3: 'impl', 4: 'test', 5: 'test' }, agents } })
+  const checks = p.state.events.filter(e => e.startsWith('cross-test'))
+  assert.deepEqual(checks, ['cross-test wave 1', 'cross-test wave 3'])
+  assert.ok(idx(p.state, 'cross-test wave 1') > idx(p.state, landOf(p.state, '2', true)), 'runs after the last test task of the wave merged')
+  const prompt = p.state.prompts['cross-test wave 1']
+  assert.match(prompt, /ck -C \/repo\/\.ck\/worktrees\/demo-integration lint demo --contracts --json/)
+  assert.match(prompt, /Tasks 1, 2/)
+  assert.match(prompt, /cannot both be satisfied by one implementation/)
+  assert.equal(p.state.opts['cross-test wave 1'].model, 'opus')
+  assert.equal(result.crossTests.length, 2)
+  assert.deepEqual(result.crossTests[0].tasks, ['1', '2'])
+  assert.equal(result.crossTests[0].verdict, 'changes')
+  assert.match(result.crossTests[0].findings[0].issue, /"state"/)
+  assert.ok(logs.some(l => /cross-test consistency \(wave 1\): 1 blocking/.test(l)), logs.join('\n'))
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3', '4', '5'], 'report only: drift findings do not stop the run')
+})
+
+await test('cross-test consistency: a wave with a failed test task is still checked, for the ones that merged', async () => {
+  const p = project({ deps: { 1: [], 2: [] }, failUntil: { 2: 9 } })
+  const agents = { ...ROLES, reviewer: { ...ROLES.reviewer, cross_test: true } }
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxRetries: 0, wave: { 1: 1, 2: 1 }, tracks: { 1: 'test', 2: 'test' }, agents } })
+  assert.deepEqual(p.state.events.filter(e => e.startsWith('cross-test')), ['cross-test wave 1'])
+  assert.deepEqual(result.crossTests[0].tasks, ['1'])
+})
+
+await test('cross-test consistency: a spec with a single test task has nothing to compare and is skipped', async () => {
+  const p = project({ deps: { 1: [], 2: ['1'] } })
+  const agents = { ...ROLES, reviewer: { ...ROLES.reviewer, cross_test: true } }
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, wave: { 1: 1, 2: 2 }, tracks: { 1: 'test', 2: 'impl' }, agents } })
+  assert.ok(!p.state.events.some(e => e.startsWith('cross-test')))
+  assert.deepEqual(result.crossTests, [])
 })
