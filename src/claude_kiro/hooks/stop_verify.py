@@ -14,7 +14,7 @@ from typing import Dict, List, Optional
 from claude_kiro.hooks._shared import claims as cl
 from claude_kiro.hooks._shared.cache_manager import CacheManager
 from claude_kiro.hooks._shared.session_tracker import SessionTracker
-from claude_kiro.paths import spec_roots
+from claude_kiro.paths import is_spec_path, spec_roots
 
 
 def _unverified(project_dir: Path, tracker: SessionTracker) -> Dict[Path, List[str]]:
@@ -31,6 +31,10 @@ def _unverified(project_dir: Path, tracker: SessionTracker) -> Dict[Path, List[s
             mtime = cl.mtime(tasks_md)
             if mtime is not None and mtime >= tracker.session_start:
                 spec_dirs.add(tasks_md.parent)
+
+    # Subagents share the session id but work in their own worktrees, so the cache
+    # also holds their spec dirs. Only this tree's specs are mine to warn about.
+    spec_dirs = {d for d in spec_dirs if is_spec_path(str(d / "tasks.md"), project_dir)}
 
     found: Dict[Path, List[str]] = {}
     for spec_dir in spec_dirs:

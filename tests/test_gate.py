@@ -346,6 +346,19 @@ def test_stop_warns_about_done_tasks_no_gate_ran_for(project, session):
     assert "decision" not in result and "Task 1 not gated yet" in result["systemMessage"]
 
 
+def test_stop_ignores_done_tasks_in_a_sibling_worktree(project, session, tmp_path):
+    # A subagent shares my session id but works in its own worktree, so its tasks.md
+    # lands in the same session cache. That worktree's Done tasks are not this tree's.
+    sibling = tmp_path / "task-worktree"
+    git(project, "worktree", "add", "-q", "-b", "task-1", str(sibling))
+    write_tasks(sibling, t1="Done", a1="x")
+    mark_tasks_edited(sibling, session)
+
+    assert stop(project, session) is None
+    result = stop(sibling, session)  # the subagent's own stop still warns
+    assert "Task 1 not gated yet" in result["systemMessage"]
+
+
 def test_stop_is_silent_after_status_reverted(project, session):
     write_subtract_tests(project)
     write_tasks(project, t1="Done", t2="Done", a1="x", a2="x")
