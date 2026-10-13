@@ -529,6 +529,16 @@ await test('gate logs go under $TMPDIR: /tmp itself is read-only in the sandbox'
   assert.ok(p.state.prompts['land 1'])
 })
 
+await test('the final gate starts ck gate in the background and waits for its EXIT line (worked in bench v2)', async () => {
+  const p = project({ deps: { 1: [] } })
+  await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })
+  const prompt = p.state.prompts['final gate']
+  assert.ok(prompt, 'a final gate ran')
+  assert.match(prompt, /ck -C \S+ gate demo\b/)
+  assert.match(prompt, /run_in_background/)
+  assert.ok(prompt.includes('${TMPDIR:-/tmp}/ck-gate-') && prompt.includes('^EXIT='))
+})
+
 await test('a PROTECTED landing fails the task as needing a human: no resolver, no fixer, no retry', async () => {
   const p = project({ deps: { 1: [], 2: [], 3: ['2'] }, protectedTasks: ['2'] })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })

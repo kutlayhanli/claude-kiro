@@ -131,3 +131,33 @@ def import_cmd(output: str, spec: str, config_name: str, rep: int, out: str, tra
     click.echo(f"✓ {path}: merged {len(r['report']['merged'])}, failed {len(r['report']['failed'])}, "
                + (f"~${cost:.2f} ({r['cost']['basis']})" if cost is not None else "cost unknown")
                + (" — fail-closed" if r["fail_closed"] else ""))
+
+
+@click.command()
+@click.option("--session", "session_id", default=None, help="Session id (default: the newest session started in this directory)")
+@click.option("--run", "run_id", default=None, help="Workflow run id (wf_...): count only that run's agents")
+@click.option("--json", "as_json", is_flag=True, help="Print the numbers as JSON")
+def cost(session_id: str, run_id: str, as_json: bool):
+    """Real spend of a session or workflow run, from its transcripts.
+
+    \b
+    Reports Claude Code's own running total (when the session had a budget,
+    e.g. under `ck run`) and the transcripts' token usage priced at list
+    prices. The workflow's progress counts are not spend: they report each
+    agent's final context size and run 7-14x low on a whole-spec run.
+    Transcripts live under $CLAUDE_CONFIG_DIR (default ~/.claude), which a
+    sandboxed shell command cannot read; run this outside the sandbox.
+    """
+    home = b.claude_home()
+    if run_id and not session_id:
+        session_id = b.find_run_session(home, run_id)
+    if not session_id:
+        session_id = b.latest_session(home, Path.cwd())
+    if not session_id:
+        click.echo(f"❌ No transcripts found for {'run ' + run_id if run_id else 'a session in ' + str(Path.cwd())} under {home}")
+        sys.exit(1)
+    s = b.session_spend(home, session_id, run_id)
+    if not s["transcripts"]:
+        click.echo(f"❌ No transcripts found for session {session_id}{' run ' + run_id if run_id else ''} under {home}")
+        sys.exit(1)
+    click.echo(json.dumps(s, indent=2) if as_json else "\n".join(b.spend_lines(s)))

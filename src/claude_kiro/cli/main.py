@@ -21,7 +21,7 @@ from .agents import agents
 from .update import update
 from .hooks import hook
 from .run import run
-from .bench import bench
+from .bench import bench, cost
 from .worktree import lint, plan, waves, worktree
 from .runner import HOOK_SETTINGS, configured_hooks, execute_hook, install_hook_settings
 
@@ -1058,12 +1058,17 @@ def upgrade(dry_run: bool, no_migrate: bool, allow_downgrade: bool, to_vendor: b
 @cli.command()
 @click.argument("spec")
 @click.option("--task", "-t", "tasks", multiple=True, help="Task number to verify (repeatable). Default: every Done task.")
-def gate(spec: str, tasks: tuple):
+@click.option("--no-reuse", is_flag=True, help="With --task: run the commands even if this exact tree already passed them")
+def gate(spec: str, tasks: tuple, no_reuse: bool):
     """Run the verification gate for SPEC (a name in specs/ or a path).
 
     Checks acceptance boxes, runs the verify commands from specs/ck.json and the
     tasks' **Verify:** lines, and checks no existing test was deleted or
     weakened on this branch. Exits 1 if anything fails.
+
+    A --task gate whose working tree already passed the same commands (an
+    earlier --task gate, or the done-verify hook when the task was marked Done)
+    reuses that pass instead of running them again; the other checks still run.
     """
     from ..gate import run_gate
 
@@ -1081,7 +1086,8 @@ def gate(spec: str, tasks: tuple):
     from ..worktrees import heartbeat
 
     heartbeat(project_dir)  # a gate run in a claimed task worktree keeps the claim fresh
-    result = run_gate(project_dir, candidate, [t.removeprefix("Task ").strip() for t in tasks] or None)
+    result = run_gate(project_dir, candidate, [t.removeprefix("Task ").strip() for t in tasks] or None,
+                      reuse=bool(tasks) and not no_reuse)
     if not result.tasks and not result.checks:
         click.echo("ℹ️  No Done tasks to verify. Pass --task N to verify a specific task.")
         return
@@ -1122,6 +1128,7 @@ cli.add_command(agents)
 cli.add_command(update)
 cli.add_command(run)
 cli.add_command(bench)
+cli.add_command(cost)
 
 
 if __name__ == "__main__":

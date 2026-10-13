@@ -281,8 +281,16 @@ def run_gate(
     spec_dir: Path,
     task_nums: Optional[List[str]] = None,
     config: Optional[Dict[str, Any]] = None,
+    reuse: bool = False,
+    stamp_by: str = "ck gate",
 ) -> GateResult:
-    """Verify the given tasks (default: every Done task in the spec)."""
+    """Verify the given tasks (default: every Done task in the spec).
+
+    A task-scoped gate that passes stamps the working tree it checked (see verified.py). With
+    `reuse`, a task-scoped gate whose tree already passed the same commands skips running them;
+    acceptance, test-file, property and tamper checks always run. Whole-spec gates never reuse,
+    and callers that gate merged trees (landing) leave `reuse` off.
+    """
     config = config or load_config(project_dir)
     tasks = {t.num: t for t in parse_tasks(spec_dir / "tasks.md")}
     if task_nums is None:
@@ -409,15 +417,32 @@ def run_gate(
     clean = verified.clean_tree(project_dir) if full_suite and all(c in commands for c in full_suite) else None
     started = time.monotonic()
     collect = collect_command(config)
-    if collect:
-        check = _run(collect, project_dir, timeout)
-        check.name = f"Test collection succeeds (`{collect}`)"
-        if not check.ok:
-            check.detail += "\n(a test file that cannot be imported breaks the suite for every task; import project modules inside test bodies)"
-        result.checks.append(check)
-    for command in dict.fromkeys(commands):  # dedupe, keep order
-        if command != collect:
-            result.checks.append(_run(command, project_dir, timeout))
+    to_run = ([collect] if collect else []) + [c for c in dict.fromkeys(commands) if c != collect]  # dedupe, keep order
+    # A task gate's pass is stamped by the working tree it checked, so the next task gate on the
+    # same tree (the agent's own `ck gate --task` right after the done-verify hook's) can skip the run.
+    task_tree = verified.worktree_tree(project_dir) if task_scoped and to_run else None
+    reused = verified.lookup_stamp(project_dir, task_tree, [to_run], scope="task") if reuse and task_tree else None
+    if reused:
+        result.checks.append(
+            Check(
+                f"Checks reused: this tree passed the same {len(to_run)} command(s)",
+                True,
+                f"tree {task_tree[:12]} passed them at {reused.get('at', '?')} ({reused.get('by', '?')}, "
+                f"{reused.get('duration_s', '?')}s); nothing changed since. `ck gate --no-reuse` runs them again.",
+                warning=True,
+            )
+        )
+        for command in to_run:
+            name = f"Test collection succeeds (`{command}`)" if command == collect else f"`{command}`"
+            result.checks.append(Check(name, True))
+    else:
+        for command in to_run:
+            check = _run(command, project_dir, timeout)
+            if command == collect:
+                check.name = f"Test collection succeeds (`{collect}`)"
+                if not check.ok:
+                    check.detail += "\n(a test file that cannot be imported breaks the suite for every task; import project modules inside test bodies)"
+            result.checks.append(check)
 
     result.checks.extend(
         _properties_checks(project_dir, spec_dir, tasks, selected, task_nums is None, assumed_done, config)
@@ -427,4 +452,6 @@ def run_gate(
     result.checks.append(_tamper(project_dir, config, owned))
     if clean and result.ok and verified.tracked_unchanged(project_dir, clean):
         verified.write_stamp(project_dir, clean, full_suite, "ck gate", int(time.monotonic() - started))
+    if task_tree and not reused and result.ok and verified.worktree_tree(project_dir) == task_tree:
+        verified.write_stamp(project_dir, task_tree, to_run, stamp_by, int(time.monotonic() - started), scope="task")
     return result

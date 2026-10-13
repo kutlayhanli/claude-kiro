@@ -94,8 +94,40 @@ CREDENTIAL_ENV = re.compile(
 # Names that match the pattern but hold no secret, and that tools need inside the sandbox.
 CREDENTIAL_ENV_KEEP = frozenset({"KEYTIMEOUT"})
 
+# Kept at $40: in bench v2 (62-task spec, Haiku implementer with escalation, Sonnet/Opus review) the
+# run spent $36.10 by Claude Code's count, about $1.34 per merged task, and stopped on blocked tasks,
+# not on the cap. A spec with many tasks left needs more: set run.budget_usd, or run.budget_per_task_usd
+# (about 1.5 for that mix) to scale the cap with the tasks not Done.
 DEFAULT_BUDGET_USD = 40.0
 DEFAULT_MAX_TURNS = 400
+
+
+def run_budget(run_role: Mapping[str, Any], spec_dir: Path) -> float:
+    """The spend cap: run.budget_usd, else run.budget_per_task_usd x tasks not Done, else the default."""
+    if run_role.get("budget_usd"):
+        return float(run_role["budget_usd"])
+    per_task = run_role.get("budget_per_task_usd")
+    if per_task:
+        from ..hooks._shared.spec_parser import parse_tasks
+
+        left = sum(1 for t in parse_tasks(spec_dir / "tasks.md") if not t.done)
+        return round(float(per_task) * max(left, 1), 2)
+    return DEFAULT_BUDGET_USD
+
+
+def spend_report(cwd: Path, session_id: Optional[str], started: float) -> List[str]:
+    """`ck cost` for the session `ck run` just ran: found by id, else the newest session started in cwd."""
+    from .. import bench
+
+    try:
+        home = bench.claude_home()
+        sid = session_id or bench.latest_session(home, cwd, since=started - 5)
+        if not sid:
+            return []
+        s = bench.session_spend(home, sid)
+        return bench.spend_lines(s) if s["transcripts"] else []
+    except Exception as e:  # a report must never fail the run
+        return [f"Spend: could not read the transcripts ({e})"]
 
 SANDBOX_TOOLS = ("bwrap", "socat")
 APT_INSTALL = "sudo apt-get install bubblewrap socat"
@@ -231,8 +263,10 @@ def _number(value: float) -> str:
 @click.argument("extra", nargs=-1, type=click.UNPROCESSED)
 @click.option("--model", default="sonnet", show_default=True, help="Model of the orchestrating session (it only launches and reports)")
 @click.option("--effort", default="low", show_default=True, help="Effort of the orchestrating session")
-@click.option("--budget", type=click.FloatRange(min=0, min_open=True), default=DEFAULT_BUDGET_USD, show_default=True,
-              help="Stop the run once estimated API spend (subagents included) reaches this many USD")
+@click.option("--budget", type=click.FloatRange(min=0, min_open=True), default=None,
+              help=f"Stop the run once estimated API spend (subagents included) reaches this many USD. Default: "
+                   f"run.budget_usd, else run.budget_per_task_usd x the tasks not Done, else {DEFAULT_BUDGET_USD:g} "
+                   "(set with `ck agents set run.budget_usd N`)")
 @click.option("--max-turns", type=click.IntRange(min=1), default=DEFAULT_MAX_TURNS, show_default=True,
               help="Stop after this many turns of the orchestrating session")
 @click.option("--unsandboxed", is_flag=True,
@@ -276,14 +310,16 @@ def run(spec: str, extra: tuple, model: str, effort: str, budget: float, max_tur
         warnings.append(f"Task worktrees go to {wt_dir}, under .claude/, which Claude Code's Bash sandbox keeps "
                         "read-only: agents cannot commit or test there. Set \"worktree_dir\" in specs/ck.json "
                         "(default .ck/worktrees) once this spec's old worktrees are landed or removed.")
+    try:
+        run_role = ag.resolve(cwd)["roles"]["run"]
+    except ag.AgentConfigError as e:
+        click.echo(f"❌ {e}")
+        sys.exit(2)
+    if budget is None:
+        budget = run_budget(run_role, _spec_dir(cwd, spec))
     settings = None
     if sandboxed:
-        try:
-            domains = ag.resolve(cwd)["roles"]["run"]["allowed_domains"]
-        except ag.AgentConfigError as e:
-            click.echo(f"❌ {e}")
-            sys.exit(2)
-        settings = sandbox_settings(cwd, domains, wt_dir)
+        settings = sandbox_settings(cwd, run_role["allowed_domains"], wt_dir)
     else:
         warnings.append(UNSANDBOXED_WARNING)
         creds = readable_credentials()
@@ -355,7 +391,14 @@ def run(spec: str, extra: tuple, model: str, effort: str, budget: float, max_tur
             header.write(f"WARNING: {w}\n")
         header.write(f"argv: {json.dumps(argv)}\n\n")
         header.flush()
+        started = time.time()
         code = subprocess.call(argv, cwd=cwd, env=child_env, stdout=out, stderr=errf if err else subprocess.STDOUT)
+        # Real spend, from the transcripts (outside the sandbox, which hides ~/.claude from the run).
+        spend = spend_report(cwd, session_id, started)
+        if spend:
+            header.write("\n" + "\n".join(spend) + "\n")
+    for line in spend:
+        click.echo(line)
     click.echo(f"{'✓' if code == 0 else '❌'} claude exited {code}; log: {log}")
     sys.exit(code)
 

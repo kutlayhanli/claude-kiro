@@ -245,6 +245,8 @@ def scan_transcript(path: Path) -> Dict[str, Any]:
     """Per-model token usage (one count per API request), AskUserQuestion calls and permission refusals."""
     requests: Dict[str, Tuple[str, Dict[str, int]]] = {}
     asked, denials = 0, []
+    budget_used: Optional[float] = None
+    budget_total: Optional[float] = None
     for i, line in enumerate(Path(path).read_text(errors="replace").splitlines()):
         try:
             d = json.loads(line)
@@ -252,6 +254,12 @@ def scan_transcript(path: Path) -> Dict[str, Any]:
             continue
         if not isinstance(d, dict):
             continue
+        att = d.get("attachment")
+        # Claude Code's own running spend total for the session (written when --max-budget-usd is set).
+        if isinstance(att, dict) and att.get("type") == "budget_usd" and isinstance(att.get("used"), (int, float)):
+            budget_used = max(budget_used or 0.0, float(att["used"]))
+            if isinstance(att.get("total"), (int, float)):
+                budget_total = float(att["total"])
         decision = (d.get("permissionDecision") or {}).get("decision") if isinstance(d.get("permissionDecision"), dict) else None
         if decision and decision not in ("accept", "allow"):
             denials.append(f"permission decision {decision!r}")
@@ -285,7 +293,8 @@ def scan_transcript(path: Path) -> Dict[str, Any]:
         acc = by_model.setdefault(model, dict.fromkeys(USAGE_KEYS, 0))
         for k in USAGE_KEYS:
             acc[k] += u[k]
-    return {"usage_by_model": by_model, "requests": len(requests), "asked": asked, "denials": denials}
+    return {"usage_by_model": by_model, "requests": len(requests), "asked": asked, "denials": denials,
+            "budget_used": budget_used, "budget_total": budget_total}
 
 
 def _price_by_model(by_model: Dict[str, Dict[str, int]], pricing: dict) -> Optional[float]:
@@ -296,6 +305,126 @@ def _price_by_model(by_model: Dict[str, Dict[str, int]], pricing: dict) -> Optio
             return None
         total += p
     return total
+
+
+# ---------------------------------------------------------------- spend of a session (ck cost)
+
+
+def find_run_session(home: Path, run_id: str) -> Optional[str]:
+    """The session id a workflow run belongs to (its agents' transcripts sit under the session)."""
+    for d in sorted(home.glob(f"projects/*/*/subagents/workflows/{run_id}")):
+        return d.parent.parent.parent.name
+    for f in sorted(home.glob(f"projects/*/*/workflows/{run_id}.json")):
+        return f.parent.parent.name
+    return None
+
+
+def _first_cwd(path: Path) -> Optional[str]:
+    try:
+        with open(path, errors="replace") as fh:
+            for _, line in zip(range(50), fh):
+                try:
+                    d = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(d, dict) and d.get("cwd"):
+                    return str(d["cwd"])
+    except OSError:
+        pass
+    return None
+
+
+def latest_session(home: Path, cwd: Path, since: Optional[float] = None) -> Optional[str]:
+    """The newest session transcript whose session ran in `cwd` (changed at or after `since`)."""
+    want = str(Path(cwd).resolve())
+    found = []
+    for f in home.glob("projects/*/*.jsonl"):
+        try:
+            mtime = f.stat().st_mtime
+        except OSError:
+            continue
+        if since is not None and mtime < since:
+            continue
+        c = _first_cwd(f)
+        if c and (c == str(cwd) or str(Path(c).resolve()) == want):
+            found.append((mtime, f.stem))
+    return max(found)[1] if found else None
+
+
+def session_spend(home: Path, session_id: str, run_id: Optional[str] = None, pricing: Optional[dict] = None) -> Dict[str, Any]:
+    """Spend of a session (or of one workflow run in it), from its transcripts.
+
+    claude_usd: Claude Code's own running total (budget_usd attachments; session-wide, present when
+    --max-budget-usd is set). priced_usd: every request's usage priced at PRICING (list prices).
+    workflow_tokens is what the workflows' progress reported; compare it with workflow_transcript_tokens.
+    """
+    pricing = pricing or {}
+    main = sorted(home.glob(f"projects/*/{session_id}.jsonl"))
+    sdirs = sorted(home.glob(f"projects/*/{session_id}"))
+    if run_id:
+        files = [f for d in sdirs for f in sorted(d.glob(f"subagents/workflows/{run_id}/agent-*.jsonl"))]
+        wf_files = [f for d in sdirs for f in d.glob(f"workflows/{run_id}.json")]
+    else:
+        files = main + [f for d in sdirs for f in sorted(d.glob("subagents/**/agent-*.jsonl"))]
+        wf_files = [f for d in sdirs for f in d.glob("workflows/*.json")]
+    by_model: Dict[str, Dict[str, int]] = {}
+    claude_usd: Optional[float] = None
+    budget: Optional[float] = None
+    wf_tx_tokens = 0
+    for f in files + ([] if not run_id else main):  # the session's own total, even for one run
+        s = scan_transcript(f)
+        if s["budget_used"] is not None:
+            claude_usd = max(claude_usd or 0.0, s["budget_used"])
+            budget = s["budget_total"] if s["budget_total"] is not None else budget
+        if f not in files:
+            continue
+        for model, u in s["usage_by_model"].items():
+            acc = by_model.setdefault(model, dict.fromkeys(USAGE_KEYS, 0))
+            for k in USAGE_KEYS:
+                acc[k] += u[k]
+        if "/subagents/workflows/" in f.as_posix():
+            wf_tx_tokens += sum(sum(u.values()) for u in s["usage_by_model"].values())
+    workflow_tokens = 0
+    for wf in wf_files:
+        try:
+            progress = json.loads(wf.read_text()).get("workflowProgress") or []
+        except (OSError, json.JSONDecodeError, AttributeError):
+            continue
+        workflow_tokens += sum(a.get("tokens") or 0 for a in progress if isinstance(a, dict) and a.get("type") == "workflow_agent")
+    models = {}
+    for model, u in by_model.items():
+        models[model] = {**u, "usd": price_usage(model, u, pricing)}
+    return {
+        "session_id": session_id,
+        "run_id": run_id,
+        "transcripts": len(files),
+        "claude_usd": claude_usd,
+        "budget_usd": budget,
+        "priced_usd": _price_by_model(by_model, pricing) if by_model else None,
+        "by_model": models,
+        "transcript_tokens": sum(sum(u.values()) for u in by_model.values()),
+        "workflow_tokens": workflow_tokens,
+        "workflow_transcript_tokens": wf_tx_tokens,
+        "pricing_date": PRICING_DATE,
+    }
+
+
+def spend_lines(s: Dict[str, Any]) -> List[str]:
+    """A short human report of session_spend()."""
+    what = f"workflow run {s['run_id']} (session {s['session_id']})" if s.get("run_id") else f"session {s['session_id']}"
+    lines = [f"Spend for {what}:"]
+    if s.get("claude_usd") is not None:
+        cap = f" of the ${s['budget_usd']:.2f} budget" if s.get("budget_usd") else ""
+        scope = " (whole session)" if s.get("run_id") else ""
+        lines.append(f"  ${s['claude_usd']:.2f}{cap}: Claude Code's own count{scope}")
+    if s.get("priced_usd") is not None:
+        per = ", ".join(f"{m} ${u['usd']:.2f}" for m, u in sorted(s["by_model"].items()) if u.get("usd") is not None)
+        lines.append(f"  ${s['priced_usd']:.2f} priced from {s['transcripts']} transcript(s) at {s['pricing_date']} list prices ({per})")
+    if s.get("workflow_tokens") and s.get("workflow_transcript_tokens"):
+        ratio = s["workflow_transcript_tokens"] / s["workflow_tokens"]
+        lines.append(f"  workflow agents used {s['workflow_transcript_tokens'] / 1e6:.1f}M tokens; the workflow's progress "
+                     f"counted {s['workflow_tokens'] / 1e6:.1f}M ({ratio:.0f}x low: it reports final context size, not usage)")
+    return lines
 
 
 def summarize_report(report: Optional[Dict[str, Any]]) -> Dict[str, Any]:

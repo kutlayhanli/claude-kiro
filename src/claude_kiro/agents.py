@@ -79,7 +79,10 @@ DEFAULTS: Dict[str, Dict[str, Any]] = {
     # suites or a tight usage budget.
     # allowed_domains: the only hosts shell commands may reach when `ck run` sandboxes
     # the session (package registries and GitHub). [] = no network at all.
-    "run": {"max_concurrent": None, "allowed_domains": list(DEFAULT_ALLOWED_DOMAINS)},
+    # budget_usd: `ck run`'s spend cap (null = $40, or budget_per_task_usd x the tasks not Done
+    # when that is set); `ck run --budget` overrides both for one run.
+    "run": {"max_concurrent": None, "allowed_domains": list(DEFAULT_ALLOWED_DOMAINS), "budget_usd": None,
+            "budget_per_task_usd": None},
 }
 
 ROLE_KEYS = {
@@ -90,7 +93,7 @@ ROLE_KEYS = {
     "fixer": {"model", "effort", "escalate"},
     "orchestrator": {"model", "effort"},
     "resolver": {"model", "effort"},
-    "run": {"max_concurrent", "allowed_domains"},
+    "run": {"max_concurrent", "allowed_domains", "budget_usd", "budget_per_task_usd"},
 }
 UNLIMITED = "unlimited"
 
@@ -170,6 +173,16 @@ def _coerce(role: str, key: str, value: Any) -> Any:
         if number < 1:
             raise AgentConfigError(f"{role}.max_concurrent must be a whole number of 1 or more, or {UNLIMITED}")
         return number
+    if key in ("budget_usd", "budget_per_task_usd"):
+        if value is None:
+            return None
+        try:
+            number = float(str(value).lstrip("$"))
+        except ValueError:
+            number = 0.0
+        if not 0 < number < float("inf"):
+            raise AgentConfigError(f"{role}.{key} must be a positive number of US dollars, or default")
+        return int(number) if number.is_integer() else number
     if key == "rounds":
         try:
             value = int(value)
