@@ -49,9 +49,9 @@ def test_dry_run_prints_the_plan_and_runs_nothing(tmp_path, calls):
     assert calls["cmds"] == []
 
 
-def test_in_a_project_reinstalls_then_sets_up_then_upgrades(tmp_path, calls):
+def test_in_a_project_reinstalls_then_sets_up_then_upgrades_with_project(tmp_path, calls):
     p = project(tmp_path)
-    out = run(p)
+    out = run(p, "--project")
     assert out.exit_code == 0, out.output
     cmds = [c for c, _ in calls["cmds"]]
     assert cmds[0] == ["uv", "tool", "install", "--force", "--reinstall", upd.DEFAULT_SOURCE]
@@ -65,6 +65,37 @@ def test_outside_a_project_skips_upgrade(tmp_path, calls):
     assert out.exit_code == 0
     assert [c[1] for c, _ in calls["cmds"]] == ["tool", "setup"]
     assert "run `ck upgrade` in each project" in out.output
+
+
+def test_without_project_flag_a_non_interactive_update_leaves_the_project_alone(tmp_path, calls):
+    # A stale checkout was silently switched to plugin mode by a plain `ck update`.
+    out = run(project(tmp_path))
+    assert out.exit_code == 0, out.output
+    assert all(c[1] != "upgrade" for c, _ in calls["cmds"])
+    assert "ck update --project" in out.output and "ck upgrade" in out.output
+
+
+def test_interactive_update_asks_before_upgrading_the_project(tmp_path, calls, monkeypatch):
+    monkeypatch.setattr(upd, "_interactive", lambda: True)
+    p = project(tmp_path)
+    old = os.getcwd()
+    os.chdir(p)
+    try:
+        no = CliRunner().invoke(cli, ["update"], input="n\n")
+        assert all(c[1] != "upgrade" for c, _ in calls["cmds"]), no.output
+        assert str(p) in no.output
+        yes = CliRunner().invoke(cli, ["update"], input="y\n")
+    finally:
+        os.chdir(old)
+    assert yes.exit_code == 0, yes.output
+    assert [c for c, _ in calls["cmds"]][-1] == ["/bin/ck", "upgrade"]
+
+
+def test_announces_the_user_scope_plugin_install_before_setup(tmp_path, calls):
+    out = run(tmp_path)
+    notice = out.output.index("~/.claude/settings.json")
+    assert "user scope" in out.output[:out.output.index("$ /bin/ck setup")]
+    assert notice < out.output.index("$ /bin/ck setup")
 
 
 def test_no_project_flag_skips_upgrade(tmp_path, calls):

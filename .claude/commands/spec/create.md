@@ -58,7 +58,7 @@ Also read `specs/ck.json`. If it is missing or has no `"verify"` commands, tell 
 ## Step 3: Launch the workflow
 
 1. Call the **Workflow** tool with:
-   - `name: "spec:spec-create"` (the workflow this plugin ships). If no workflow by that name is found (a project with vendored copies), use `scriptPath` set to the absolute path of `.claude/workflows/spec-create.js` instead; if that file is missing too, tell me to run `ck setup` (installs the plugin) and stop.
+   - The script, picked by the project's mode first: if `.claude/ck-manifest.json` records `"mode": "vendor"` (copies made by `ck vendor`; the plugin is off there), `scriptPath` set to the absolute path of `.claude/workflows/spec-create.js`, without trying the plugin's name. Otherwise `name: "spec:spec-create"` (the workflow this plugin ships); only if no workflow by that name is found, fall back to that `scriptPath`. If the file is missing too, tell me to run `ck setup` (installs the plugin) and stop.
    - `args` (a JSON object, not a string):
      ```json
      {

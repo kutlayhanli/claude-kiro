@@ -104,6 +104,12 @@ def test_skills_use_the_plugin_root_and_namespaced_workflows():
     for text in (implement, create, review):
         assert "${CLAUDE_PLUGIN_ROOT}/resources/without-workflow-tool.md" in text
         assert "scriptPath" in text  # fallback for vendored projects
+    # A vendored project has the plugin off: trying the plugin's workflow name first only fails.
+    # The skills read the recorded mode and go straight to the vendored script there.
+    for workflow, text in (("spec-implement", implement), ("spec-create", create), ("spec-create", review)):
+        assert '.claude/ck-manifest.json' in text and '"mode": "vendor"' in text, workflow
+        assert text.index('"mode": "vendor"') < text.index(f'name: "spec:{workflow}"'), workflow
+        assert f".claude/workflows/{workflow}.js" in text, workflow
     for name in SKILLS:
         text = (PLUGIN / "skills" / name / "SKILL.md").read_text()
         assert "ck-implementer" not in text and "ck-reviewer" not in text, name

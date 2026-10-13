@@ -299,6 +299,37 @@ def test_land_allow_paths_in_the_target_lets_a_spec_edit_protected_files(repo):
     assert by["3"]["state"] == "PROTECTED" and by["3"]["files"] == [".claude/settings.json"]
 
 
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root ignores directory permissions")
+def test_allowed_protected_paths_that_are_read_only_here_fail_fast_with_the_remedy(repo):
+    # Claude Code's Bash sandbox keeps the main checkout's .claude/ read-only even when
+    # land.allow_paths lets a spec edit it; git then dies mid-merge with "unable to unlink old".
+    (repo / "specs/ck.json").write_text(json.dumps({"land": {"allow_paths": [".claude/commands/**"]}}))
+    (repo / ".claude/commands").mkdir(parents=True)
+    (repo / ".claude/commands/x.md").write_text("old\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "opt in")
+    ck(repo, "worktree", "create", "demo", "1", "3")
+    commit_in(wt(repo, "1"), ".claude/commands/x.md", "new\n", "task 1 edits a command")
+    commit_in(wt(repo, "3"), "three.txt", "3\n", "task 3")
+    before = head(repo)
+    ro = repo / ".claude/commands"
+    ro.chmod(0o555)  # what the sandbox's read-only bind looks like to access(2)
+    try:
+        result, data, by = land(repo, "1", "3")
+    finally:
+        ro.chmod(0o755)
+    assert result.exit_code == 3, result.output
+    assert by["1"]["state"] == "PROTECTED"
+    assert by["1"]["files"] == [".claude/commands/x.md"]
+    detail = by["1"]["detail"]
+    assert "read-only" in detail and "sandbox" in detail and "attended" in detail
+    assert "ck worktree land demo 1" in detail
+    assert by["3"]["state"] == "MERGED"  # the rest of the batch still lands
+    assert (repo / ".claude/commands/x.md").read_text() == "old\n"
+    assert git(repo, "rev-list", "--count", f"{before}..HEAD").strip() == "2"
+    assert wt(repo, "1").exists()
+
+
 def test_a_branch_cannot_opt_itself_in(repo):
     """allow_paths is read from the target checkout, so a task branch editing specs/ck.json gains nothing."""
     ck(repo, "worktree", "create", "demo", "1")

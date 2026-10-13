@@ -3,9 +3,9 @@
   "mode": "vendor",
   "files": {
     ".claude/commands/spec/plan.md": "381d168777fa50dc",
-    ".claude/commands/spec/create.md": "ae67af92b3a37b56",
-    ".claude/commands/spec/implement.md": "605f23950d5e5073",
-    ".claude/commands/spec/review.md": "c94cc21a79073c34",
+    ".claude/commands/spec/create.md": "928a2fc464bedf1f",
+    ".claude/commands/spec/implement.md": "a0b169b076bac6b9",
+    ".claude/commands/spec/review.md": "1110d97803c05b52",
     ".claude/commands/spec/spawn-worktree.md": "ce3a8439e50978dc",
     ".claude/output-styles/spec-driven.md": "33e67716471353f0",
     ".claude/workflows/spec-create.js": "cc52a2bcb5ae12e4",
