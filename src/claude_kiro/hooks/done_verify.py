@@ -15,29 +15,21 @@ from claude_kiro.hooks._shared import claims as cl
 from claude_kiro.hooks._shared import git_utils
 from claude_kiro.hooks._shared.cache_manager import CacheManager
 from claude_kiro.hooks._shared.session_tracker import SessionTracker
-from claude_kiro.paths import is_spec_path, spec_roots
+from claude_kiro.paths import spec_roots
 
 FILE_TOOLS = {"Edit", "Write", "MultiEdit"}
 
 
 def _edited_tasks_md(cwd: Path, input_data: dict) -> Optional[Tuple[Path, Path]]:
-    """(tasks.md, the checkout it belongs to) for an edit of a spec's tasks.md.
-
-    Workflow subagents edit tasks.md in their task worktree while Claude Code reports the
-    session's cwd (the main checkout), so a tasks.md outside cwd is gated in its own checkout.
-    """
+    """(tasks.md, the checkout it belongs to) for an edit of a spec's tasks.md."""
     file_path = (input_data.get("tool_input") or {}).get("file_path", "")
     if not file_path:
         return None
     path = Path(file_path) if os.path.isabs(file_path) else cwd / file_path
     if path.name != "tasks.md":
         return None
-    if is_spec_path(str(path), cwd):
-        return path, cwd
-    top = (git_utils._git(path.parent, "rev-parse", "--show-toplevel") or "").strip() if path.parent.is_dir() else ""
-    if top and is_spec_path(str(path), Path(top)):
-        return path, Path(top)
-    return None
+    root = cl.checkout_of(path, cwd)
+    return (path, root) if root else None
 
 
 def _rewritten_by_bash(cwd: Path, seen: dict, session_start: float) -> List[Path]:

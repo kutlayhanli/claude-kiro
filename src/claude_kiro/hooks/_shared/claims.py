@@ -15,6 +15,22 @@ from typing import Dict, Optional, Set
 
 from claude_kiro.hooks._shared import git_utils
 from claude_kiro.hooks._shared.spec_parser import parse_tasks, parse_tasks_text
+from claude_kiro.paths import is_spec_path
+
+
+def checkout_of(path: Path, cwd: Path) -> Optional[Path]:
+    """The checkout a spec file belongs to: cwd, or a task worktree's own top level.
+
+    Workflow subagents edit tasks.md in their task worktree while Claude Code reports
+    the session's cwd (the main checkout), so cwd alone does not say where a spec lives.
+    """
+    if is_spec_path(str(path), cwd):
+        return cwd
+    parent = path.parent
+    top = (git_utils._git(parent, "rev-parse", "--show-toplevel") or "").strip() if parent.is_dir() else ""
+    if top and is_spec_path(str(path), Path(top)):
+        return Path(top)
+    return None
 
 
 def done_now(tasks_md: Path) -> Set[str]:

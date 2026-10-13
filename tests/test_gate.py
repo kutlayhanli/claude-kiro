@@ -359,6 +359,29 @@ def test_stop_ignores_done_tasks_in_a_sibling_worktree(project, session, tmp_pat
     assert "Task 1 not gated yet" in result["systemMessage"]
 
 
+def test_stop_warns_about_a_failed_gate_in_a_task_worktree(project, session, tmp_path):
+    # Workflow subagents edit their task worktree's tasks.md while Claude Code reports the
+    # session's cwd; done-verify gates the claim in that worktree, and a failure must not vanish.
+    sibling = tmp_path / "task-worktree"
+    git(project, "worktree", "add", "-q", "-b", "task-1", str(sibling))
+    write_subtract_tests(sibling)
+    write_tasks(sibling, t1="Done", t2="Done", a1="x", a2="x")
+    edited = execute_hook(
+        "done-verify",
+        {
+            "session_id": session,
+            "cwd": str(project),
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(sibling / "specs/calc/tasks.md")},
+        },
+    )
+    assert edited["decision"] == "block"
+
+    message = stop(project, session)["systemMessage"]
+    assert f"calc (worktree {sibling}): Task 1, 2 failed the gate" in message
+    assert f"ck -C {sibling} gate calc --task 1 --task 2" in message
+
+
 def test_stop_is_silent_after_status_reverted(project, session):
     write_subtract_tests(project)
     write_tasks(project, t1="Done", t2="Done", a1="x", a2="x")
