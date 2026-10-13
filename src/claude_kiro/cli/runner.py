@@ -16,7 +16,7 @@ class HookRegistry:
 
     descriptions: Dict[str, str] = {
         "post-file-ops": "Injects spec task context after file edits; records tasks.md edits",
-        "pre-tool-guard": "Asks before tests are weakened/deleted or requirements edited mid-implementation",
+        "pre-tool-guard": "Asks before tests are weakened/deleted or requirements/test plan edited mid-implementation",
         "done-verify": "Runs the task's verification gate when it is marked Done; reports a failure to Claude",
         "stop-verify": "Warns at the end of a turn about Done tasks that never passed the gate (runs no tests)",
     }

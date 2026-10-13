@@ -70,7 +70,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         ],
     },
     # Guard behavior: "ask" (prompt me), "deny" (block and tell Claude why), "off".
-    "guard": {"tests": "ask", "requirements": "ask"},
+    "guard": {"tests": "ask", "requirements": "ask", "test_plan": "ask"},
     # Git ref the tamper check diffs against. null = merge-base with origin/HEAD,
     # main, or master, whichever exists.
     "base": None,

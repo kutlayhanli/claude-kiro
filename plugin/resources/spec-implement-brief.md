@@ -41,7 +41,7 @@ Your task's dependencies are already merged into your branch. If something you d
 
 ## Hard rules
 
-- Never delete, skip, xfail, or weaken a test, and never edit `requirements.md`. A guard will stop you. If a test or the spec looks wrong, STOP and report it: quote the test, the requirement, and what you think is wrong.
+- Never delete, skip, xfail, or weaken a test, never edit `requirements.md`, and never reword or delete an existing `test-plan.md` row. A guard will stop you. If a test or the spec looks wrong, STOP and report it: quote the test, the requirement, and what you think is wrong.
 - Only edit the files your task block lists, plus your own task section in tasks.md. Don't touch other tasks' sections or the tasks.md header. If you must touch an unlisted file, keep the change minimal and report it, since parallel agents may edit nearby files.
 - If you deviate from design.md, document it in your task section and update design.md for that part only.
 - Never read or print secrets (`.env` values, tokens), and never open credential files or directories (`~/.ssh`, `~/.aws`, `~/.config/gcloud`, `.env`, `.netrc` and the like), not even to check that they exist.

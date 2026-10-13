@@ -137,7 +137,7 @@ The hooks provide spec context and enforce the definition of done:
 - **When editing new files:** Suggests creating a spec first
 - **Verification gate (PostToolUse hook):** The moment a task is marked Done in `tasks.md` (by an edit or a Bash command), runs `ck gate` for that task: acceptance boxes, the task's `**Verify:**` commands, the tests that verify it, and a check that no existing test was weakened. It runs once per claim; a failure is reported to Claude, who fixes it or moves the task back to In Progress. The whole-spec gate runs at merge.
 - **Done-claim warning (Stop hook):** At the end of a turn, lists tasks still marked Done that failed or skipped the gate. It runs no tests and never blocks, so finishing a turn stays instant.
-- **Test-tamper guard (PreToolUse hook):** Asks you before Claude removes tests or assertions, adds skip/xfail/only markers, drops a property from a `PROPERTIES` map or lowers its example count, deletes test files, or changes or removes existing text in `requirements.md` once implementation has started (adding new requirements passes). Set `"guard"` in `specs/ck.json` to `ask`, `deny`, or `off`.
+- **Test-tamper guard (PreToolUse hook):** Asks you before Claude removes tests or assertions, adds skip/xfail/only markers, drops a property from a `PROPERTIES` map or lowers its example count, deletes test files, or changes or removes existing text in `requirements.md` or `test-plan.md` once implementation has started (adding new requirements or test cases passes). Set each of `"guard"`'s `tests`, `requirements` and `test_plan` in `specs/ck.json` to `ask`, `deny`, or `off`.
 - **Smart caching:** Shows messages only once per file per session (no spam!)
 
 ### Testing model

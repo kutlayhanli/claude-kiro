@@ -381,7 +381,9 @@ def test_init_installs_hooks_and_keeps_foreign_ones(tmp_path):
     assert hooks["PostToolUse"][0]["hooks"][0]["timeout"] == 10
     assert commands["Stop"] == ["ck --hook stop-verify"] and hooks["Stop"][0]["hooks"][0]["timeout"] == 30
     assert "SubagentStop" not in hooks
-    assert json.loads((tmp_path / "specs/ck.json").read_text())["verify"] == ["pytest -q"]
+    ck_json = json.loads((tmp_path / "specs/ck.json").read_text())
+    assert ck_json["verify"] == ["pytest -q"]
+    assert ck_json["guard"] == {"tests": "ask", "requirements": "ask", "test_plan": "ask"}
 
 
 def test_install_drops_ck_hooks_older_versions_installed():
