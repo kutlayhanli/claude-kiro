@@ -162,3 +162,113 @@ def test_notes_in_reference_fields_are_not_references(tmp_path):
     write_spec(tmp_path, block(40, "x", vby="Task 39 (see also Task 69)", deps="None (foundation)") + block(39, "t", track="test"))
     task = {t.num: t for t in parse_tasks(tmp_path / "specs/sim/tasks.md")}["40"]
     assert task.verified_by == ["39"] and task.dependencies == []
+
+
+# --- ck lint --contracts: test keys vs design.md's data models ------------------
+# Bench v2 (ai-first-email-tool): two test files written in parallel used field
+# names the design never defined (command / intent_id / state), and review missed it.
+
+DESIGN = '''# Design: Sim
+
+## Data Models
+
+```python
+@dataclass
+class SendIntent:
+    intent_id: str
+    recipient: str
+    status: Literal["pending", "sent", "refused"]
+```
+
+## API
+
+| Method | Path | Request | Response |
+|--------|------|---------|----------|
+| POST | /send | `recipient`, `body` | `intent_id`, `status` |
+
+Error responses carry `error_code`. Prose words such as state or command don't count.
+'''
+
+
+def contract_spec(root: Path, test_body: str, *, name="tests/test_send.py") -> Path:
+    spec = write_spec(
+        root,
+        block(1, "Send tests", track="test", files=[name], verify=f"uv run pytest {name}", verifies="Task 2")
+        + block(2, "Send", files=["src/send.py"], vby="Task 1", deps="Task 1 (oracle)"),
+    )
+    (spec / "design.md").write_text(DESIGN)
+    (root / name).parent.mkdir(parents=True, exist_ok=True)
+    (root / name).write_text(test_body)
+    return spec
+
+
+def test_contracts_flags_a_key_the_design_does_not_define(tmp_path):
+    contract_spec(tmp_path, (
+        "def test_send(client):\n"
+        "    resp = client.post('/send', json={'recipient': 'a@b.c', 'body': 'hi'}).json()\n"
+        "    assert resp['intent_id']\n"
+        "    assert resp.get('state') == 'queued'\n"
+    ))
+    out = ck(tmp_path, "lint", "sim", "--contracts")
+    assert out.exit_code == 0, out.output  # warns by default
+    assert "tests/test_send.py:4" in out.output and "'state'" in out.output and "'queued'" in out.output
+    assert "'intent_id'" not in out.output and "'recipient'" not in out.output
+    data = json.loads(ck(tmp_path, "lint", "sim", "--contracts", "--json").output)
+    assert sorted((u["key"], u["kind"]) for u in data["unknown"]) == [("queued", "value"), ("state", "key")]
+    assert {u["file"] for u in data["unknown"]} == {"tests/test_send.py"}
+    assert data["checkedFiles"] == ["tests/test_send.py"]
+    # --strict turns the warning into a failure, for CI or a reviewer's first pass.
+    assert ck(tmp_path, "lint", "sim", "--contracts", "--strict").exit_code == 1
+
+
+def test_contracts_clean_when_every_key_is_in_the_design(tmp_path):
+    contract_spec(tmp_path, (
+        "def test_send(client):\n"
+        "    resp = client.post('/send', json={\"recipient\": 'a@b.c', \"body\": 'hi'}).json()\n"
+        "    assert resp[\"intent_id\"] and resp['status'] == 'pending'\n"
+        "    assert client.post('/send', json={}).json().get('error_code')\n"
+        "TC = {'test_send': 'TC-1'}  # a test-name map, not data\n"
+        "if __name__ == '__main__':\n"
+        "    pass\n"
+    ))
+    out = ck(tmp_path, "lint", "sim", "--contracts", "--strict")
+    assert out.exit_code == 0, out.output
+    assert "no unknown keys" in out.output
+    assert json.loads(ck(tmp_path, "lint", "sim", "--contracts", "--json").output)["unknown"] == []
+
+
+def test_contracts_suggests_the_close_design_name_and_honours_ignore(tmp_path):
+    contract_spec(tmp_path, "def test_x(r):\n    assert r['intentId'] and r['statuss'] and r['trace']\n")
+    data = json.loads(ck(tmp_path, "lint", "sim", "--contracts", "--json").output)
+    by_key = {u["key"]: u for u in data["unknown"]}
+    assert by_key["statuss"]["suggest"] == "status"
+    assert set(by_key) == {"statuss", "trace"}  # camelCase keys aren't checked: too noisy across languages
+    (tmp_path / "specs/ck.json").write_text(json.dumps({"contracts_ignore": ["trace"]}))
+    data = json.loads(ck(tmp_path, "lint", "sim", "--contracts", "--json").output)
+    assert [u["key"] for u in data["unknown"]] == ["statuss"]
+
+
+def test_contracts_task_filter_and_missing_design(tmp_path):
+    contract_spec(tmp_path, "def test_x(r):\n    assert r['nope']\n")
+    assert json.loads(ck(tmp_path, "lint", "sim", "--contracts", "--task", "2", "--json").output)["checkedFiles"] == []
+    assert json.loads(ck(tmp_path, "lint", "sim", "--contracts", "--task", "1", "--json").output)["unknown"][0]["key"] == "nope"
+    (tmp_path / "specs/sim/design.md").write_text("# Design\n\nNo models here, just prose about state.\n")
+    out = ck(tmp_path, "lint", "sim", "--contracts", "--strict")
+    assert out.exit_code == 0 and "skipped" in out.output
+
+
+def test_contracts_base_checks_changed_test_files(tmp_path):
+    import subprocess
+
+    def git(*a):
+        subprocess.run(["git", "-C", str(tmp_path), "-c", "user.email=a@b", "-c", "user.name=a", *a], check=True, capture_output=True)
+
+    contract_spec(tmp_path, "def test_x(r):\n    assert r['status']\n")
+    git("init", "-q")
+    git("commit", "-qm", "base", "--allow-empty")
+    git("add", "-A")
+    git("commit", "-qm", "tests")
+    (tmp_path / "tests/test_other.py").write_text("def test_y(r):\n    assert r['command']\n")  # new, uncommitted
+    data = json.loads(ck(tmp_path, "lint", "sim", "--contracts", "--base", "HEAD~1", "--json").output)
+    assert data["checkedFiles"] == ["tests/test_other.py", "tests/test_send.py"]
+    assert [(u["file"], u["key"]) for u in data["unknown"]] == [("tests/test_other.py", "command")]

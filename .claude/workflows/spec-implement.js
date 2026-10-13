@@ -93,6 +93,10 @@ const REVIEW_ON = !!A.agents && REVIEWER.enabled !== false
 const REVIEW = roleOpts('reviewer', REVIEWER, null)
 const EFFORT_RANK = e => EFFORTS.indexOf(e)
 const REVIEW_ROUNDS = Number.isInteger(REVIEWER.rounds) ? REVIEWER.rounds : 1
+// reviewer.cross_test: once every test-track task of a wave has finished, one read-only
+// agent (the risky reviewer's settings) compares the merged test files with each other
+// and with design.md. Report only: its findings go in the run's report.
+const CROSS_TEST = !!A.agents && REVIEWER.cross_test === true
 const ORCH = roleOpts('orchestrator', ROLES.orchestrator, null)
 const LOW = { effort: 'low', ...ORCH }
 const RESOLVE = roleOpts('resolver', ROLES.resolver, null)
@@ -329,13 +333,25 @@ ${GIT_NOTE}
 ${GATE_NOTE}
 Return the schema fields with task "${n}".`
 
+// Test-track tasks are the oracle every impl task must satisfy, and test writers
+// working in parallel drift from design.md's data models (bench v2: two test files
+// disagreed about command / intent_id / state, and review passed both).
+const CONTRACT_REVIEW = n => `4. This is a test-track task, so also check its contract with the design. First run "ck -C ${WT(n)} lint ${SPEC} --contracts --task ${n}": a heuristic first pass that lists string-literal keys and compared values the tests use but design.md never names. Then list every request field, response field and status value the new tests use (dict keys, subscripts, attribute names, compared strings, endpoint paths, error codes), and check each against design.md's Data Models and API tables: that the name exists, belongs to the model or endpoint the test reads it from, and has the type and allowed values the design gives. A name the design doesn't define, a field read from the wrong model, or a status value outside the design's set is a blocking finding: quote the test line and the design text. Put the list you checked, with each item's verdict, in summary.`
+
 const reviewPrompt = (n, r) => `Review Task ${n} of spec ${SPEC}${TITLES[n] ? ` ("${TITLES[n]}")` : ''} before it merges. You review; you do not edit, commit, or run the test suite.
 Worktree: ${WT(n)} (branch ${BR(n)}), to merge into ${INTO}. ${GIT_NOTE}
 1. Read the change: command git -C ${WT(n)} diff ${INTO}...${BR(n)}  (and its file list with --stat).
 2. Read Task ${n}'s block in ${WT(n)}/specs/${SPEC}/tasks.md, the requirements it covers in requirements.md, and the parts of design.md it implements (interfaces, file paths, error handling).
 3. The task's gate already passed, so do not re-check what the tests check. Look for what tests miss: behaviour that contradicts design.md or a requirement, a public interface that differs from design.md, missing error handling the design specifies, edits outside the task's files, weakened or skipped tests, and security problems.
-The implementer reported: ${trim(r && { summary: r.summary, deviations: r.deviations, outsideFiles: r.outsideFiles }, 2000)}
+${TRACKS[n] === 'test' ? `${CONTRACT_REVIEW(n)}\n` : ''}The implementer reported: ${trim(r && { summary: r.summary, deviations: r.deviations, outsideFiles: r.outsideFiles }, 2000)}
 Mark a finding "blocking" only if it should stop the merge; style and taste are "minor". verdict is "changes" only if there is at least one blocking finding.`
+
+const crossTestPrompt = tasks => `Cross-test consistency check for spec ${SPEC}: test-track Tasks ${tasks.join(', ')} have merged into ${INTO}. You review; you do not edit, commit, or run the test suite. ${GIT_NOTE}
+Test tasks written in parallel drift apart: two test files can each look right on their own and still disagree about the same request, response or record (field names, which model a field lives on, status values, error codes, units). Each implementation can then satisfy only one of them.
+1. First pass: run "ck -C ${TARGET} lint ${SPEC} --contracts --json" and read its "unknown" list (names the tests use that design.md never defines; a heuristic, so judge each one).
+2. In ${TARGET}, read the test files of Tasks ${tasks.join(', ')} (their **Files:** in specs/${SPEC}/tasks.md), the spec's other test files that exercise the same models or endpoints, and design.md's Data Models and API tables.
+3. For each model, endpoint and status set those tests touch, compare how every test file uses it, with each other and with design.md.
+Report each disagreement with both files and lines and the design text. It is "blocking" when two tests (or a test and design.md) cannot both be satisfied by one implementation; otherwise "minor". verdict is "changes" only if there is at least one blocking finding. In summary, list the models and endpoints you compared.`
 
 const revisePrompt = (n, review, round) => `${MANDATE}Revise Task ${n} of spec ${SPEC} (review round ${round}). The task's gate passed, but the reviewer found blocking problems:
 ${trim(review && review.findings, FINDINGS_LIMIT)}
@@ -415,6 +431,35 @@ let landingIdle = Promise.resolve()
 let batchWindow = MERGE_BATCH
 const landings = []
 const MAX_RESOLVES = 3
+// Cross-test consistency (reviewer.cross_test): one check per wave of test tasks,
+// started when its last test task finishes (or at the end, for a wave that never
+// finished). It runs beside the scheduler and never holds a slot or the landing.
+const crossTests = []
+const crossTestRuns = []
+const crossTestDone = new Set()
+let doneAtStart = new Set()
+const testTasksOf = w => Object.keys(TRACKS).filter(m => TRACKS[m] === 'test' && waveOf(m) === w && !doneAtStart.has(m))
+function maybeCrossTest(n, atEnd = false) {
+  if (!CROSS_TEST || TRACKS[n] !== 'test') return
+  const w = waveOf(n)
+  if (crossTestDone.has(w) || Object.values(TRACKS).filter(t => t === 'test').length < 2) return
+  const wave = testTasksOf(w)
+  if (!atEnd && !wave.every(m => records[m] && !running.has(m))) return
+  const merged = wave.filter(m => records[m] && records[m].ok)
+  if (!merged.length) return
+  crossTestDone.add(w)
+  crossTestRuns.push((async () => {
+    let r = null
+    try {
+      r = await agent(crossTestPrompt(merged), { label: `cross-test wave ${w}`, phase: phaseOf(merged[0]), schema: REVIEW_SCHEMA, ...RISKY_REVIEW })
+    } catch (e) {
+      r = null
+    }
+    const blocking = ((r && r.findings) || []).filter(f => f.severity === 'blocking')
+    crossTests.push({ wave: w, tasks: merged, verdict: r ? r.verdict : 'unchecked', findings: (r && r.findings) || [], summary: r && r.summary })
+    log(`cross-test consistency (wave ${w}): ${r ? `${blocking.length} blocking finding(s)${blocking.length ? `: ${trim(blocking.map(f => f.issue), 600)}` : ''}` : 'the check returned nothing'}`)
+  })())
+}
 
 async function plan() {
   refills++
@@ -693,6 +738,7 @@ if (current.cycles.length || current.verifyCycles.length) {
   }
 }
 const initiallyDone = current.done.length
+doneAtStart = new Set(current.done.map(String))
 log(`${current.remaining.length} task(s) remaining, ${initiallyDone} already Done; starting ${Math.min(current.ready.length, MAX_CONCURRENT)}`)
 launch(current)
 
@@ -712,6 +758,7 @@ while (running.size) {
   const { n, rec } = event
   running.delete(n)
   records[n] = rec
+  maybeCrossTest(n)
   if (!rec.ok) {
     failed.set(n, rec.reason)
     log(`Task ${n}: not merged (${rec.reason})`)
@@ -725,6 +772,8 @@ while (running.size) {
   launch(current)
 }
 await landingIdle
+for (const n of Object.keys(records)) maybeCrossTest(n, true)  // waves whose other test tasks never finished
+await Promise.all(crossTestRuns)
 
 // Final full gate on the target, unless it is already known to be red.
 let finalGate = null
@@ -802,5 +851,6 @@ return {
   landings,
   fullGates,
   finalGate,
+  crossTests,
   stats: { initiallyDone, merged: merged.length, failed: failed.size, notStarted: notStarted.length, planSteps: refills, fixes: fixCount, landings: landings.length, bisected: landings.filter(l => l.bisected).length },
 }

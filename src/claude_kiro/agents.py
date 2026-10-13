@@ -59,7 +59,10 @@ DEFAULTS: Dict[str, Dict[str, Any]] = {
     # risky_model/risky_effort review every **Risk:** safety task, whatever model/effort
     # say (never below them): a cheap reviewer approved send-path and price-tripwire
     # code with real safety bugs that an Opus reviewer caught.
-    "reviewer": {"model": "opus", "effort": "high", "enabled": True, "rounds": 1, "risky_model": "opus", "risky_effort": "high"},
+    # cross_test: true = once a wave of test-track tasks has merged, one read-only agent
+    # (at risky_model/risky_effort) checks the merged test files agree with each other
+    # and with design.md's data models, starting from `ck lint --contracts`. Report only.
+    "reviewer": {"model": "opus", "effort": "high", "enabled": True, "rounds": 1, "risky_model": "opus", "risky_effort": "high", "cross_test": False},
     # Repairs a red target branch: reads the failing gate, decides environment vs code, fixes.
     # Judgment-heavy and rare (about once a run). null = same as implementer.
     # escalate: null = the implementer's list (models not above the fixer's are skipped).
@@ -83,7 +86,7 @@ ROLE_KEYS = {
     "planning": {"min_model", "min_effort", "ask"},
     "implementer": {"model", "effort", "escalate", "risky_model", "complexity_routing"},
     "test_writer": {"model", "effort", "escalate"},
-    "reviewer": {"model", "effort", "enabled", "rounds", "risky_model", "risky_effort"},
+    "reviewer": {"model", "effort", "enabled", "rounds", "risky_model", "risky_effort", "cross_test"},
     "fixer": {"model", "effort", "escalate"},
     "orchestrator": {"model", "effort"},
     "resolver": {"model", "effort"},
@@ -133,7 +136,7 @@ def _coerce(role: str, key: str, value: Any) -> Any:
         value = []  # no network for sandboxed commands
     if isinstance(value, str) and value.lower() in ("null", "none", "default"):
         value = None
-    if key in ("ask", "enabled", "complexity_routing"):
+    if key in ("ask", "enabled", "complexity_routing", "cross_test"):
         if isinstance(value, str):
             if value.lower() not in ("true", "false", "yes", "no", "on", "off"):
                 raise AgentConfigError(f"{role}.{key} must be true or false")

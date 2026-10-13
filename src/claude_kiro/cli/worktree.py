@@ -153,11 +153,19 @@ def plan(spec: str, exclude: str, as_json: bool):
 @click.command()
 @click.argument("spec")
 @click.option("--json", "as_json", is_flag=True)
-def lint(spec: str, as_json: bool):
+@click.option("--contracts", is_flag=True, help="Instead: flag keys and status values the spec's test files use that design.md never names")
+@click.option("--task", "tasks", multiple=True, help="With --contracts: only these test tasks' files (repeatable)")
+@click.option("--base", help="With --contracts: check the test files changed since this git ref instead")
+@click.option("--strict", is_flag=True, help="With --contracts: exit 1 when anything is flagged (default: warn)")
+def lint(spec: str, as_json: bool, contracts: bool, tasks, base, strict: bool):
     """Check SPEC's task plan: dependency cycles, verify-order cycles, reasonless dependencies, untagged risk-path tasks, critical path.
 
     Exits 1 if there is a cycle (the plan can't be executed as written).
+    With --contracts, checks test files against design.md's data models instead (a heuristic: it warns unless --strict).
     """
+    if contracts:
+        _lint_contracts(spec, as_json, tasks, base, strict)
+        return
     result = _plan(Path.cwd(), spec, set())
     if as_json:
         click.echo(json.dumps({k: result[k] for k in ("cycles", "verifyCycles", "reasonless", "criticalPath", "waves", "riskUntagged")}, indent=2))
@@ -190,6 +198,36 @@ def lint(spec: str, as_json: bool):
             click.echo(f"  ℹ critical path ({len(path)} of {len(result['remaining'])} open tasks): {' -> '.join(path)}")
             click.echo(f"  ℹ ready now: {', '.join(result['ready']) or 'none'}")
     if result["cycles"] or result["verifyCycles"]:
+        sys.exit(1)
+
+
+def _lint_contracts(spec: str, as_json: bool, tasks, base, strict: bool) -> None:
+    from ..contracts import check_contracts
+
+    project_dir = Path.cwd()
+    spec_dir = _spec_dir(project_dir, spec)
+    try:
+        result = check_contracts(spec_dir, project_dir, tasks=tasks, base=base)
+    except ValueError as e:
+        click.echo(f"❌ {e}")
+        sys.exit(2)
+    if as_json:
+        click.echo(json.dumps(result, indent=2))
+    else:
+        click.echo(f"Contract lint for {spec_dir.name} ({len(result['checkedFiles'])} test file(s) against {result['designNames']} design.md names):")
+        if result["skipped"]:
+            click.echo(f"  ℹ skipped: {result['skipped']}")
+        elif not result["unknown"]:
+            click.echo("  ✓ no unknown keys or status values")
+        else:
+            for item in result["unknown"]:
+                what = "key" if item["kind"] == "key" else "compared value"
+                hint = f" (did you mean '{item['suggest']}'?)" if item["suggest"] else ""
+                click.echo(f"  ⚠ {item['file']}:{item['line']}: {what} '{item['key']}' is not in design.md{hint}")
+            click.echo("      A heuristic: each is a string literal the tests use that no design.md code block, table or")
+            click.echo("      backticked name defines. Fix the test or the design, or list deliberate ones in")
+            click.echo("      specs/ck.json \"contracts_ignore\".")
+    if strict and result["unknown"]:
         sys.exit(1)
 
 

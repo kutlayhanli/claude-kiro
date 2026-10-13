@@ -55,6 +55,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # an unattended agent could otherwise plant a hook or a permission rule that runs
     # outside the sandbox. List globs here for a spec that legitimately edits them.
     "land": {"allow_paths": []},
+    # Keys and values `ck lint --contracts` never flags in test files, though
+    # design.md doesn't name them (fixture or framework fields, e.g. ["csrf_token"]).
+    "contracts_ignore": [],
     # Extra glob patterns the spec-context hook never comments on.
     "context_ignore": [],
     # How test files are recognized. A path is a test file if any directory
