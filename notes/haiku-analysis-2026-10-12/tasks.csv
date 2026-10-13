@@ -1,0 +1,142 @@
+run,task,kind,first_model,first_gate,first_status,retries,revisions,review_rounds,review_models,first_verdict,final_verdict,escalations,models_used,merged,first_attempt_success,path_label,impl_cost,review_cost,impl_wall_s
+"bench-v2 (ck0.9.1, 10-12)",11,impl,haiku,True,done,0,1,2,sonnet,changes,approve,,haiku,True,False,False,0.2258,0.7059,488.743
+"bench-v2 (ck0.9.1, 10-12)",15,impl,opus,True,done,0,0,1,opus,approve,approve,,opus,True,True,False,0.8119,0.438,167.572
+"bench-v2 (ck0.9.1, 10-12)",1,test,haiku,True,done,0,1,2,sonnet,changes,approve,,haiku,True,False,False,0.7504,1.1156,1502.007
+"bench-v2 (ck0.9.1, 10-12)",6,impl,haiku,False,in_progress,1,0,1,sonnet,approve,approve,,haiku,True,False,False,0.2964,0.3532,485.175
+"bench-v2 (ck0.9.1, 10-12)",4,test,haiku,True,done,0,0,1,sonnet,approve,approve,,haiku,True,True,False,0.1747,0.3654,349.787
+"bench-v2 (ck0.9.1, 10-12)",3,impl,haiku,True,done,0,2,3,sonnet,changes,approve,task 3 revise 2 (sonnet),haiku/sonnet,True,False,False,0.6309,1.1117,640.53
+"bench-v2 (ck0.9.1, 10-12)",12,impl,haiku,True,done,0,0,1,sonnet,approve,approve,,haiku,True,True,False,0.0322,0.2887,208.908
+"bench-v2 (ck0.9.1, 10-12)",36,impl,haiku,True,done,0,0,1,sonnet,approve,approve,,haiku,True,True,False,0.0423,0.2231,740.361
+"bench-v2 (ck0.9.1, 10-12)",13,impl,opus,True,done,0,1,2,opus,changes,changes,,opus,False,False,False,2.2502,1.5427,522.245
+"bench-v2 (ck0.9.1, 10-12)",7,impl,haiku,True,done,0,0,1,sonnet,approve,approve,,haiku,True,True,False,0.0466,0.2384,354.216
+"bench-v2 (ck0.9.1, 10-12)",9,impl,haiku,True,done,0,0,1,sonnet,approve,approve,,haiku,True,True,False,0.0269,0.2489,259.287
+"bench-v2 (ck0.9.1, 10-12)",16,impl,haiku,True,done,0,1,2,sonnet,changes,approve,,haiku,True,False,False,0.3497,0.8061,523.004
+"bench-v2 (ck0.9.1, 10-12)",19,impl,haiku,True,done,0,1,2,sonnet,changes,approve,,haiku,True,False,False,0.187,0.8005,421.087
+"bench-v2 (ck0.9.1, 10-12)",8,impl,haiku,True,done,0,0,1,sonnet,approve,approve,,haiku,True,True,False,0.0887,0.2769,372.214
+"bench-v2 (ck0.9.1, 10-12)",10,impl,haiku,True,done,0,0,1,sonnet,approve,approve,,haiku,True,True,False,0.0536,0.2787,319.479
+"bench-v2 (ck0.9.1, 10-12)",5,impl,haiku,False,blocked,3,0,0,,,,task .ck/worktrees/ai-first-email-tool-task-5 retry 2 (sonnet);task .ck/worktrees/ai-first-email-tool-task-5 retry 3 (opus),haiku/opus/sonnet,False,False,True,0.6456,0,308.796
+"bench-v2 (ck0.9.1, 10-12)",17,impl,haiku,True,done,0,0,2,sonnet,approve,approve,,haiku,True,True,True,0.4174,0.8364,362.438
+"bench-v2 (ck0.9.1, 10-12)",26,test,haiku,True,done,0,2,3,sonnet,changes,approve,task 26 [test] revise 2 (sonnet),haiku/sonnet,True,False,False,0.5569,1.1519,349.519
+"bench-v2 (ck0.9.1, 10-12)",27,test,haiku,True,done,0,1,2,sonnet,changes,approve,,haiku,True,False,False,0.3653,0.7441,409.021
+"bench-v2 (ck0.9.1, 10-12)",28,test,haiku,True,done,0,1,2,sonnet,changes,approve,,haiku,True,False,False,0.2937,1.3709,340.997
+"bench-v2 (ck0.9.1, 10-12)",29,test,haiku,True,done,0,2,3,sonnet,changes,approve,task 29 [test] revise 2 (sonnet),haiku/sonnet,True,False,False,0.7295,1.8271,487.428
+"bench-v2 (ck0.9.1, 10-12)",30,test,haiku,True,done,0,2,3,sonnet,changes,approve,task 30 [test] revise 2 (sonnet),haiku/sonnet,True,False,False,0.9448,1.839,660.669
+"bench-v2 (ck0.9.1, 10-12)",2,impl,haiku,True,done,0,1,2,sonnet,changes,approve,,haiku,False,False,True,0.2816,0.585,408.927
+"bench-v2 (ck0.9.1, 10-12)",18,impl,haiku,True,done,0,0,1,sonnet,approve,approve,,haiku,False,True,True,0.3376,0.2809,217.638
+"bench-v2 (ck0.9.1, 10-12)",21,test,haiku,True,done,0,2,3,sonnet,changes,approve,task 21 [test] revise 2 (sonnet),haiku/sonnet,True,False,False,0.896,1.3346,734.322
+"bench-v2 (ck0.9.1, 10-12)",22,test,haiku,True,done,0,0,1,sonnet,approve,approve,,haiku,True,True,False,0.1656,0.3227,284.2
+"bench-v2 (ck0.9.1, 10-12)",23,test,haiku,True,done,0,0,1,sonnet,approve,approve,,haiku,True,True,False,0.3493,0.4523,419.774
+"bench-v2 (ck0.9.1, 10-12)",24,test,haiku,True,done,0,0,1,sonnet,approve,approve,,haiku,True,True,False,0.5457,0.5335,378.972
+"bench-v2 (ck0.9.1, 10-12)",25,test,haiku,True,done,0,1,2,sonnet,changes,approve,,haiku,True,False,False,0.3536,0.7001,374.688
+"bench-v2 (ck0.9.1, 10-12)",32,test,haiku,True,done,0,0,1,sonnet,approve,approve,,haiku,True,True,False,0.2401,0.2521,267.968
+"bench-v2 (ck0.9.1, 10-12)",60,impl,haiku,True,done,0,0,1,sonnet,approve,approve,,haiku,True,True,False,0.1455,0.2157,178.043
+"bench-final (ck0.9.0, 10-12)",11,impl,haiku,True,done,0,1,2,sonnet,changes,approve,,haiku,True,False,False,0.1593,0.6304,314.923
+"bench-final (ck0.9.0, 10-12)",15,impl,opus,True,done,0,0,1,opus,approve,approve,,opus,True,True,False,0.8128,0.5255,143.261
+"bench-final (ck0.9.0, 10-12)",1,test,haiku,True,done,0,1,2,sonnet,changes,approve,,haiku,True,False,False,0.7681,0.8913,658.509
+"bench-final (ck0.9.0, 10-12)",6,impl,haiku,False,blocked,3,0,0,,,,task 6 retry 2 (sonnet);task 6 retry 3 (opus),haiku/opus/sonnet,False,False,False,1.1888,0,527.322
+"bench-final (ck0.9.0, 10-12)",4,test,haiku,False,blocked,3,2,3,sonnet,changes,approve,task 4 [test] retry 2 (sonnet);task 4 [test] retry 3 (opus);task 4 [test] revise 2 (sonnet),haiku/opus/sonnet,True,False,False,1.3507,1.0045,530.183
+"bench-final (ck0.9.0, 10-12)",3,impl,haiku,False,in_progress,3,1,2,sonnet,changes,approve,task 3 retry 2 (sonnet);task 3 retry 3 (opus),haiku/opus/sonnet,True,False,False,2.2325,0.6618,1035.007
+"bench-final (ck0.9.0, 10-12)",12,impl,haiku,True,done,0,1,2,sonnet,changes,approve,,haiku,True,False,False,0.106,0.425,779.029
+"bench-final (ck0.9.0, 10-12)",36,impl,haiku,True,done,0,0,1,sonnet,approve,approve,,haiku,True,True,False,0.025,0.2364,71.797
+"bench-final (ck0.9.0, 10-12)",13,impl,opus,True,done,0,1,2,opus,changes,approve,,opus,True,False,False,2.3425,1.4066,374.997
+"bench-final (ck0.9.0, 10-12)",16,impl,haiku,True,done,0,0,1,sonnet,approve,approve,,haiku,True,True,False,0.393,0.5774,298.666
+"bench-final (ck0.9.0, 10-12)",19,impl,haiku,True,done,0,0,1,sonnet,approve,approve,,haiku,True,True,False,0.2374,0.3631,214.16
+"bench-final (ck0.9.0, 10-12)",26,test,haiku,True,done,0,1,2,sonnet,changes,approve,,haiku,False,False,False,0.288,0.6882,394.016
+"bench-final (ck0.9.0, 10-12)",27,test,haiku,True,done,0,1,2,sonnet,changes,approve,,haiku,False,False,False,0.3555,0.6389,891.129
+"bench-final (ck0.9.0, 10-12)",28,test,haiku,True,done,0,1,2,sonnet,changes,approve,,haiku,False,False,False,0.496,1.0423,424.183
+"bench-final (ck0.9.0, 10-12)",29,test,haiku,True,done,0,0,1,sonnet,approve,approve,,haiku,False,True,False,0.3676,0.3868,318.314
+"bench-final (ck0.9.0, 10-12)",30,impl,haiku,True,done,0,0,1,sonnet,approve,approve,,haiku,False,True,True,0.3767,0.4743,370.275
+"bench-final (ck0.9.0, 10-12)",14,impl,opus,True,done,0,0,1,opus,approve,approve,,opus,False,True,False,1.2558,0.6275,178.797
+"bench-final (ck0.9.0, 10-12)",2,test,haiku,True,done,0,1,2,sonnet,changes,approve,,haiku,False,False,False,0.4522,0.8894,480.695
+"bench-final (ck0.9.0, 10-12)",21,test,haiku,True,done,0,1,2,sonnet,changes,approve,,haiku,False,False,False,0.7397,0.8515,1716.816
+"bench-final (ck0.9.0, 10-12)",22,impl,haiku,True,done,0,0,1,sonnet,approve,approve,,haiku,False,True,True,0.2215,0.3388,283.157
+"bench-final (ck0.9.0, 10-12)",23,impl,haiku,True,done,0,3,4,sonnet,changes,changes,task .ck/worktrees/ai-first-email-tool-task-23 revise 2 (sonnet);task .ck/worktrees/ai-first-email-tool-task-23 revise 3 (opus),haiku/opus/sonnet,False,False,True,2.0256,1.4041,749.121
+"bench-final (ck0.9.0, 10-12)",24,impl,haiku,True,done,0,1,2,sonnet,changes,approve,,haiku,False,False,True,0.4026,1.2568,322.037
+"bench-final (ck0.9.0, 10-12)",25,test,haiku,True,done,0,1,2,sonnet,changes,approve,,haiku,False,False,False,0.3181,0.6887,364.179
+"bench-final (ck0.9.0, 10-12)",32,test,haiku,True,done,0,0,1,sonnet,approve,approve,,haiku,False,True,False,0.5242,0.3561,1363.787
+"bench-final (ck0.9.0, 10-12)",60,impl,haiku,False,blocked,3,0,0,,,,task 60 retry 2 (sonnet);task 60 retry 3 (opus),haiku/opus/sonnet,False,False,False,0.9537,0,310.999
+"bench-final (ck0.9.0, 10-12)",5,impl,haiku,False,blocked,3,0,0,,,,task 5 retry 2 (sonnet);task 5 retry 3 (opus),haiku/opus/sonnet,False,False,False,0.5864,0,188.638
+"bench-final (ck0.9.0, 10-12)",34,test,haiku,True,done,0,0,1,sonnet,approve,approve,,haiku,True,True,False,0.1977,0.3701,234.386
+escalation-pilot (10-10),11,impl,haiku,True,done,0,1,2,opus,changes,approve,,haiku,True,False,False,0.0887,1.5023,374.528
+escalation-pilot (10-10),6,impl,haiku,False,blocked,3,0,0,,,,task 6 retry 2 (sonnet);task 6 retry 3 (opus),haiku/opus/sonnet,False,False,False,1.3781,0,939.58
+escalation-pilot (10-10),1,test,haiku,True,done,0,3,4,opus,changes,changes,task 1 [test] revise 2 (sonnet);task 1 [test] revise 3 (opus),haiku/opus/sonnet,False,False,False,2.6126,4.7498,1403.26
+escalation-pilot (10-10),4,test,haiku,False,in_progress,3,3,4,opus,changes,changes,task 4 [test] retry 2 (sonnet);task 4 [test] retry 3 (opus);task 4 [test] revise 2 (sonnet);task 4 [test] revise 3 (opus),haiku/opus/sonnet,False,False,False,2.2336,2.8119,915.437
+escalation-pilot (10-10),15,impl,haiku,True,done,0,0,1,opus,approve,approve,,haiku,True,True,False,0.0587,0.3678,162.942
+escalation-pilot (10-10),3,impl,haiku,False,in_progress,3,2,3,opus,changes,approve,task 3 retry 2 (sonnet);task 3 retry 3 (opus);task 3 revise 2 (sonnet),haiku/opus/sonnet,True,False,False,1.6961,1.5593,1081.117
+escalation-pilot (10-10),12,impl,haiku,True,done,0,0,1,opus,approve,approve,,haiku,True,True,False,0.0452,0.3277,209.032
+escalation-pilot (10-10),36,impl,haiku,True,done,0,1,2,opus,changes,approve,,haiku,True,False,False,0.0558,0.801,244.267
+escalation-pilot (10-10),13,impl,haiku,True,done,0,3,4,opus,changes,changes,task 13 revise 2 (sonnet);task 13 revise 3 (opus),haiku/opus/sonnet,False,False,False,1.0921,2.7597,551.407
+escalation-pilot (10-10),16,impl,haiku,True,done,0,2,3,opus,changes,approve,task 16 revise 2 (sonnet),haiku/sonnet,True,False,False,0.6306,2.8656,545.469
+escalation-pilot (10-10),19,impl,haiku,True,done,0,0,1,opus,approve,approve,,haiku,True,True,False,0.2262,0.5143,223.56
+escalation-pilot (10-10),60,impl,haiku,True,done,0,0,1,opus,approve,approve,,haiku,True,True,False,0.0643,0.4617,185.125
+all-haiku (10-10),11,impl,haiku,True,done,0,0,1,haiku,approve,approve,,haiku,True,True,False,0.0712,0.0216,144.024
+all-haiku (10-10),1,test,haiku,True,done,0,1,2,haiku,changes,changes,,haiku,False,False,False,0.636,0.258,986.71
+all-haiku (10-10),6,impl,haiku,False,blocked,1,0,0,,,,,haiku,False,False,False,0.2213,0,309.221
+all-haiku (10-10),4,test,haiku,True,done,0,1,2,haiku,changes,changes,,haiku,False,False,False,0.1691,0.038,283.964
+all-haiku (10-10),15,impl,haiku,True,done,0,0,1,haiku,approve,approve,,haiku,True,True,False,0.0214,0.0105,60.664
+all-haiku (10-10),3,impl,haiku,True,done,0,0,1,haiku,approve,approve,,haiku,True,True,False,0.0326,0.0206,258.652
+all-haiku (10-10),12,impl,haiku,True,done,0,0,1,haiku,approve,approve,,haiku,True,True,False,0.019,0.0109,75.395
+all-haiku (10-10),36,impl,haiku,True,done,0,0,1,haiku,approve,approve,,haiku,True,True,False,0.0163,0.012,49.456
+all-haiku (10-10),13,impl,haiku,True,done,0,0,1,haiku,approve,approve,,haiku,True,True,False,0.1307,0.0214,196.346
+all-haiku (10-10),16,impl,haiku,True,done,0,0,1,haiku,approve,approve,,haiku,True,True,False,0.2595,0.0427,266.588
+all-haiku (10-10),19,impl,haiku,True,done,0,1,2,haiku,changes,approve,,haiku,True,False,False,0.2441,0.042,287.015
+all-haiku (10-10),14,impl,haiku,True,done,0,1,2,haiku,changes,changes,,haiku,False,False,False,0.0584,0.0257,213.967
+all-haiku (10-10),60,impl,haiku,True,done,0,1,2,haiku,changes,approve,,haiku,True,False,False,0.0898,0.0298,225.817
+baseline sonnet+opus (10-10..12),1,test,sonnet,False,blocked,1,1,3,opus,changes,approve,,sonnet,True,False,False,3.0094,3.153,1940.97
+baseline sonnet+opus (10-10..12),3,impl,sonnet,False,blocked,1,3,6,opus,changes,approve,,sonnet,True,False,False,1.9776,3.5439,1365.498
+baseline sonnet+opus (10-10..12),4,test,sonnet,False,blocked,1,3,5,opus,changes,approve,,sonnet,True,False,False,1.6321,2.8219,1235.97
+baseline sonnet+opus (10-10..12),6,impl,sonnet,True,blocked,1,0,1,opus,approve,approve,,sonnet,True,False,False,1.5653,0.7355,1515.471
+baseline sonnet+opus (10-10..12),11,impl,sonnet,False,blocked,1,0,1,opus,approve,approve,,sonnet,True,False,False,0.7683,0.5284,482.616
+baseline sonnet+opus (10-10..12),12,impl,sonnet,False,blocked,1,0,1,opus,approve,approve,,sonnet,True,False,False,0.655,0.42,417.532
+baseline sonnet+opus (10-10..12),15,impl,sonnet,False,blocked,1,0,1,opus,approve,approve,,sonnet,True,False,False,0.7173,0.31,458.123
+baseline sonnet+opus (10-10..12),36,impl,sonnet,False,blocked,1,0,1,opus,approve,approve,,sonnet,True,False,False,0.5449,0.3404,453.079
+baseline sonnet+opus (10-10..12),7,impl,sonnet,True,done,0,0,1,opus,approve,approve,,sonnet,True,True,False,0.3049,0.4327,591.917
+baseline sonnet+opus (10-10..12),8,impl,sonnet,True,done,0,0,1,opus,approve,approve,,sonnet,True,True,False,0.2875,0.4768,135.764
+baseline sonnet+opus (10-10..12),9,impl,sonnet,True,done,0,0,1,opus,approve,approve,,sonnet,True,True,False,0.2354,0.3502,61.603
+baseline sonnet+opus (10-10..12),13,impl,sonnet,True,done,0,2,4,opus,changes,approve,,sonnet,True,False,False,1.1932,2.2012,338.107
+baseline sonnet+opus (10-10..12),16,impl,sonnet,True,done,0,1,2,opus,changes,approve,,sonnet,True,False,False,0.9952,1.4071,199.435
+baseline sonnet+opus (10-10..12),19,impl,sonnet,True,done,0,0,1,opus,approve,approve,,sonnet,True,True,False,0.3504,0.5716,64.038
+baseline sonnet+opus (10-10..12),10,impl,sonnet,True,done,0,0,1,opus,approve,approve,,sonnet,True,True,False,0.2845,0.5318,121.344
+baseline sonnet+opus (10-10..12),17,impl,sonnet,True,done,0,0,1,opus,approve,approve,,sonnet,True,True,False,0.4594,0.7807,107.902
+baseline sonnet+opus (10-10..12),60,impl,sonnet,True,done,0,0,1,opus,approve,approve,,sonnet,True,True,False,0.3764,0.4891,77.658
+baseline sonnet+opus (10-10..12),18,impl,sonnet,True,done,0,1,3,opus,changes,approve,,sonnet,True,False,False,0.996,2.0658,202.766
+baseline sonnet+opus (10-10..12),26,test,sonnet,True,done,0,0,1,opus,approve,approve,,sonnet,True,True,False,0.4939,0.5708,122.903
+baseline sonnet+opus (10-10..12),27,test,sonnet,True,done,0,1,2,opus,changes,approve,,sonnet,True,False,False,0.915,1.4577,196.526
+baseline sonnet+opus (10-10..12),28,test,sonnet,True,done,0,1,2,opus,changes,approve,,sonnet,True,False,False,1.0534,1.9449,210.747
+baseline sonnet+opus (10-10..12),14,impl,sonnet,True,done,0,0,1,opus,approve,approve,,sonnet,True,True,False,0.2885,0.5345,57.779
+baseline sonnet+opus (10-10..12),29,test,sonnet,True,done,0,2,3,opus,changes,approve,,sonnet,True,False,False,1.4624,2.4303,510.208
+baseline sonnet+opus (10-10..12),30,test,sonnet,True,done,0,2,3,opus,changes,approve,,sonnet,True,False,False,1.327,2.2123,345.873
+baseline sonnet+opus (10-10..12),2,test,sonnet,True,done,0,0,1,opus,approve,approve,,sonnet,True,True,False,0.5438,0.6935,168.639
+baseline sonnet+opus (10-10..12),20,impl,sonnet,True,done,0,2,3,opus,changes,approve,,sonnet,True,False,False,1.3654,2.4873,310.056
+baseline sonnet+opus (10-10..12),21,test,sonnet,True,done,0,2,3,opus,changes,approve,,sonnet,True,False,False,1.5537,2.9508,375.383
+baseline sonnet+opus (10-10..12),22,test,sonnet,True,done,0,2,3,opus,changes,approve,,sonnet,True,False,False,1.1407,1.8019,474.938
+baseline sonnet+opus (10-10..12),23,test,sonnet,True,done,0,1,2,opus,changes,approve,,sonnet,True,False,False,1.6106,1.642,399.001
+baseline sonnet+opus (10-10..12),24,test,sonnet,True,done,0,0,1,opus,approve,approve,,sonnet,True,True,False,1.08,1.0049,547.626
+baseline sonnet+opus (10-10..12),25,test,sonnet,True,done,0,0,1,opus,approve,approve,,sonnet,True,True,False,0.5875,0.6061,137.894
+baseline sonnet+opus (10-10..12),31,test,sonnet,True,done,0,0,1,opus,approve,approve,,sonnet,True,True,False,0.3876,0.5687,96.737
+baseline sonnet+opus (10-10..12),32,test,sonnet,True,done,0,1,2,opus,changes,approve,,sonnet,True,False,False,1.0683,1.5022,362.318
+baseline sonnet+opus (10-10..12),37,test,sonnet,True,done,0,1,2,opus,changes,approve,,sonnet,True,False,False,0.7888,1.0941,256.991
+baseline sonnet+opus (10-10..12),40,test,sonnet,True,done,0,0,1,opus,approve,approve,,sonnet,True,True,False,0.6296,0.7696,227.447
+baseline sonnet+opus (10-10..12),41,test,sonnet,True,done,0,1,2,opus,changes,approve,,sonnet,True,False,False,0.8619,1.1958,299.337
+baseline sonnet+opus (10-10..12),42,test,sonnet,True,done,0,0,1,opus,approve,approve,,sonnet,True,True,False,0.4841,0.5172,98.394
+baseline sonnet+opus (10-10..12),44,test,sonnet,True,done,0,1,2,opus,changes,approve,,sonnet,True,False,False,0.8209,1.2454,166.618
+baseline sonnet+opus (10-10..12),47,test,sonnet,True,done,0,1,2,opus,changes,approve,,sonnet,True,False,False,2.0325,3.4102,417.717
+baseline sonnet+opus (10-10..12),61,test,sonnet,True,done,0,1,2,opus,changes,approve,,sonnet,True,False,False,0.6534,1.2171,393.823
+baseline sonnet+opus (10-10..12),34,test,sonnet,True,done,0,0,1,opus,approve,approve,,sonnet,True,True,False,0.4532,0.5874,141.478
+baseline sonnet+opus (10-10..12),33,impl,sonnet,False,in_progress,1,0,1,opus,approve,approve,,sonnet,True,False,False,8.7678,0.722,4949.355
+baseline sonnet+opus (10-10..12),50,test,sonnet,True,done,0,1,2,opus,changes,approve,,sonnet,True,False,False,0.5796,0.8655,114.997
+baseline sonnet+opus (10-10..12),52,test,sonnet,True,done,0,0,1,opus,approve,approve,,sonnet,True,True,False,0.2717,0.442,52.814
+baseline sonnet+opus (10-10..12),53,test,sonnet,True,done,0,1,2,opus,changes,approve,,sonnet,True,False,False,0.5372,0.947,155.214
+baseline sonnet+opus (10-10..12),55,test,sonnet,True,done,0,2,3,opus,changes,changes,,sonnet,False,False,False,1.2894,2.1904,378.618
+baseline sonnet+opus (10-10..12),58,test,sonnet,True,done,0,2,3,opus,changes,changes,,sonnet,False,False,False,0.9243,1.5865,332.153
+baseline sonnet+opus (10-10..12),48,test,sonnet,True,done,0,1,2,opus,changes,approve,,sonnet,True,False,False,0.9509,1.8994,223.554
+baseline sonnet+opus (10-10..12),62,test,sonnet,True,done,0,0,1,opus,approve,approve,,sonnet,True,True,False,0.2854,0.3965,73.137
+baseline sonnet+opus (10-10..12),38,impl,sonnet,True,done,0,1,2,opus,changes,approve,,sonnet,True,False,False,1.1195,1.5955,1182.81
+baseline sonnet+opus (10-10..12),46,impl,sonnet,True,done,0,2,4,opus,changes,approve,,sonnet,True,False,False,1.5265,2.6245,1621.823
+baseline sonnet+opus (10-10..12),35,impl,sonnet,True,done,0,1,2,opus,changes,approve,,sonnet,True,False,False,0.8426,1.4963,1035.47
+baseline sonnet+opus (10-10..12),39,impl,sonnet,True,done,0,0,1,opus,approve,approve,,sonnet,True,True,False,0.5119,0.6429,694.386
+baseline sonnet+opus (10-10..12),43,impl,sonnet,False,in_progress,1,0,1,opus,approve,approve,,sonnet,True,False,False,1.7009,0.6745,2028.149
+baseline sonnet+opus (10-10..12),54,impl,sonnet,True,done,0,1,2,opus,changes,approve,,sonnet,True,False,False,0.6692,1.131,931.994
+baseline sonnet+opus (10-10..12),45,impl,sonnet,True,done,0,0,1,opus,approve,approve,,sonnet,True,True,False,0.39,0.4127,336.562
+baseline sonnet+opus (10-10..12),51,impl,sonnet,True,done,0,3,5,opus,changes,approve,,sonnet,True,False,False,2.065,4.9581,2041.32
+baseline sonnet+opus (10-10..12),49,impl,sonnet,True,done,0,1,2,opus,changes,approve,,sonnet,True,False,False,1.4877,1.1784,1291.807
