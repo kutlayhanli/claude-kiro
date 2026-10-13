@@ -75,10 +75,12 @@ One command updates everything. Run it from a project directory:
 
 ```bash
 cd your-project
-ck update            # reinstall ck, update the plugin (ck setup), ck upgrade this project
+ck update --project  # reinstall ck, update the plugin (ck setup), ck upgrade this project
 git status && git add -A .claude specs
 git commit -m "Upgrade claude-kiro"
 ```
+
+`ck setup` installs and enables the `spec` plugin at user scope, which edits `~/.claude/settings.json`; `ck update` says so before it runs it. Without `--project`, `ck update` asks before upgrading the project in the current directory, and skips it when there is no terminal to ask in (it prints the command instead); `--no-project` never touches it.
 
 Then run `ck upgrade` in each other project set up by ck 0.8 or earlier, and restart Claude Code sessions. `ck update --ref <branch|tag|commit>` installs something other than `master`; `ck update --dry-run` prints the steps; `ck setup --diff` shows how `~/.claude/CLAUDE.md` differs from this version.
 
