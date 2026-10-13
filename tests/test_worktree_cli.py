@@ -84,6 +84,107 @@ def test_claim_blocks_second_owner_and_setup(repo):
     assert ck(repo, "worktree", "create", "demo", "1").exit_code == 0
 
 
+# --- Claim ownership: age, never process IDs ----------------------------------------
+# Under Claude Code's Bash sandbox every command runs in its own PID namespace, so a PID
+# recorded by one command means nothing to the next (bench v2 recorded "pid 2" for every
+# claim). A claim is held while it shows activity: its lock, a heartbeat, or a commit.
+
+HOURS = 3600
+
+
+def lock_file(path: Path) -> Path:
+    return Path(git(path, "rev-parse", "--path-format=absolute", "--git-dir").strip()) / "locked"
+
+
+def age_claim(path: Path, seconds: int):
+    """Make the claim and the branch tip look `seconds` old, as if the agent stopped then."""
+    import time
+
+    old = time.time() - seconds
+    os.utime(lock_file(path), (old, old))
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(old))
+    env = dict(os.environ, GIT_COMMITTER_DATE=stamp, GIT_AUTHOR_DATE=stamp)
+    import subprocess
+
+    subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "task 1: older work"], cwd=path, env=env, check=True)
+    os.utime(lock_file(path), (old, old))
+
+
+def legacy_claim(path: Path, pid: int, seconds_ago: int = 0):
+    """A claim as ck 0.9 wrote it: a PID and a local time in the lock reason."""
+    import time
+
+    when = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() - seconds_ago))
+    git(path, "worktree", "lock", "--reason", f"ck task agent on host pid {pid} at {when}", str(path))
+
+
+@pytest.mark.parametrize("pid", [2, os.getpid()])
+def test_a_live_but_foreign_pid_does_not_keep_a_stale_claim(repo, pid):
+    """Bench v2: Tasks 2 and 18 sat "claimed by a possibly-dead agent" (pid 2) with finished,
+    committed work. A recorded PID that happens to be alive proves nothing; the claim's age decides."""
+    ck(repo, "worktree", "create", "demo", "1")
+    commit_in(wt(repo, "1"), "one.txt", "1\n", "task 1: finished work")
+    legacy_claim(wt(repo, "1"), pid, seconds_ago=5 * HOURS)
+    age_claim(wt(repo, "1"), 5 * HOURS)
+    head = git(wt(repo, "1"), "rev-parse", "HEAD").strip()
+
+    setup = ck(repo, "worktree", "create", "demo", "1")
+    assert setup.exit_code == 0, setup.output
+    assert "EXISTS 1" in setup.output and "stale claim" in setup.output
+    claimed = ck(repo, "worktree", "claim", "demo", "1", "--owner", "agent-b")
+    assert claimed.exit_code == 0 and "CLAIMED 1" in claimed.output, claimed.output
+    # the finished work is still there for the new agent (and the landing) to use
+    assert git(wt(repo, "1"), "rev-parse", "HEAD").strip() == head
+    assert (wt(repo, "1") / "one.txt").read_text() == "1\n"
+
+
+def test_a_recent_claim_is_busy_whatever_pid_it_records(repo):
+    """A recycled or namespaced PID (pid 2 is a kernel thread on the host) is not read as dead either."""
+    ck(repo, "worktree", "create", "demo", "1")
+    legacy_claim(wt(repo, "1"), 999999999)  # no such process here, but the claim is fresh
+    busy = ck(repo, "worktree", "claim", "demo", "1", "--owner", "agent-b")
+    assert busy.exit_code == 3 and "BUSY 1" in busy.output
+    assert ck(repo, "worktree", "create", "demo", "1").exit_code == 3
+
+
+def test_claim_records_a_token_and_time_not_a_pid(repo):
+    ck(repo, "worktree", "create", "demo", "1")
+    out = ck(repo, "worktree", "claim", "demo", "1").output
+    assert "CLAIMED 1" in out and " pid " not in out
+    reason = (lock_file(wt(repo, "1"))).read_text()
+    assert " pid " not in reason
+    assert "claim " in reason and " at " in reason and reason.rstrip().endswith("Z)")
+    # two claims are told apart by their token
+    ck(repo, "worktree", "release", "demo", "1")
+    ck(repo, "worktree", "claim", "demo", "1")
+    assert lock_file(wt(repo, "1")).read_text() != reason
+
+
+def test_activity_keeps_a_claim_alive(repo):
+    """A commit or a gate run in the worktree is a heartbeat: an old claim with recent work stays held."""
+    ck(repo, "worktree", "create", "demo", "1")
+    ck(repo, "worktree", "claim", "demo", "1", "--owner", "agent-a")
+    age_claim(wt(repo, "1"), 5 * HOURS)
+    commit_in(wt(repo, "1"), "one.txt", "1\n", "task 1: fresh work")
+    assert "BUSY 1" in ck(repo, "worktree", "claim", "demo", "1", "--owner", "agent-b").output
+
+    age_claim(wt(repo, "1"), 5 * HOURS)
+    ck(wt(repo, "1"), "gate", "demo", "--task", "1")  # pass or fail, it is activity
+    assert "BUSY 1" in ck(repo, "worktree", "claim", "demo", "1", "--owner", "agent-b").output
+
+
+def test_claim_timeout_comes_from_ck_json(repo):
+    ck(repo, "worktree", "create", "demo", "1")
+    ck(repo, "worktree", "claim", "demo", "1", "--owner", "agent-a")
+    age_claim(wt(repo, "1"), 30 * 60)
+    assert "BUSY 1" in ck(repo, "worktree", "claim", "demo", "1", "--owner", "agent-b").output
+    (repo / "specs/ck.json").write_text(json.dumps({"claim_stale_minutes": 10}))
+    took = ck(repo, "worktree", "claim", "demo", "1", "--owner", "agent-b")
+    assert took.exit_code == 0 and "stale claim" in took.output and "agent-a" in took.output, took.output
+    status = ck(repo, "worktree", "status", "demo").output
+    assert "claimed: agent-b" in status
+
+
 def test_merge_removes_worktree_and_branch_and_skips_empty(repo):
     ck(repo, "worktree", "create", "demo", "1", "2")
     commit_in(wt(repo, "1"), "one.txt", "1\n", "task 1: work")

@@ -1078,6 +1078,9 @@ def gate(spec: str, tasks: tuple):
             sys.exit(2)
         candidate = matches[0]
 
+    from ..worktrees import heartbeat
+
+    heartbeat(project_dir)  # a gate run in a claimed task worktree keeps the claim fresh
     result = run_gate(project_dir, candidate, [t.removeprefix("Task ").strip() for t in tasks] or None)
     if not result.tasks and not result.checks:
         click.echo("ℹ️  No Done tasks to verify. Pass --task N to verify a specific task.")

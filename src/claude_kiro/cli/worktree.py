@@ -1,10 +1,8 @@
 """`ck worktree` and `ck waves`: the stable commands parallel task agents call."""
 
 import json
-import os
 import socket
 import sys
-import time
 from pathlib import Path
 
 import click
@@ -243,12 +241,16 @@ def integration_cmd(spec, base):
 @worktree.command("claim")
 @click.argument("spec")
 @click.argument("task")
-@click.option("--owner", default=None, help="Who holds the claim (default: host, pid, time)")
-@click.option("--takeover", is_flag=True, help="Take over a claim left by an agent that died")
+@click.option("--owner", default=None, help="Who holds the claim (default: ck task agent on <host>); a token and the time are appended")
+@click.option("--takeover", is_flag=True, help="Take over a claim left by an agent that is gone, however recent")
 def claim_cmd(spec, task, owner, takeover):
-    """Mark a task worktree as in use (git worktree lock). Fails with BUSY if already claimed."""
+    """Mark a task worktree as in use (git worktree lock). Fails with BUSY if already claimed.
+
+    A claim with no activity (claim, `ck gate` run, commit) for claim_stale_minutes
+    in specs/ck.json (default 60) is stale and taken over without --takeover.
+    """
     root = _root()
-    owner = owner or f"ck task agent on {socket.gethostname()} pid {os.getppid()} at {time.strftime('%Y-%m-%dT%H:%M:%S')}"
+    owner = owner or f"ck task agent on {socket.gethostname()}"
     _emit([wt.claim(root, _spec_name(spec), task, owner, takeover=takeover)], False)
 
 

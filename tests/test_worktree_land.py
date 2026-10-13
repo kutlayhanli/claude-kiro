@@ -6,6 +6,7 @@ Real temporary git repositories; the gate runs each task's **Verify:** line in t
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -221,12 +222,31 @@ def test_refuses_dirty_target_and_concurrent_landing(repo):
 
     common = Path(git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir").strip())
     lock = common / "ck-land-main.lock"
-    lock.write_text(str(os.getpid()))  # a live process holds it
-    busy = ck(repo, "worktree", "land", "demo", "1", "--gate")
-    assert busy.exit_code == 3 and "already landing" in busy.output
-    lock.write_text("999999999")  # a dead process: stale, taken over
+    # Another process holds the lock (flock): refused, whatever PID the file records.
+    holder = subprocess.Popen(
+        [sys.executable, "-c", HOLD_LOCK, str(lock)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
+    )
+    try:
+        assert holder.stdout.readline().strip() == "held"
+        busy = ck(repo, "worktree", "land", "demo", "1", "--gate")
+        assert busy.exit_code == 3 and "already landing" in busy.output
+    finally:
+        holder.communicate("")  # the holder exits; the kernel drops its lock
+    # A lock file left by a process that is gone does not block, even when the PID it
+    # records is alive now (PIDs are per sandbox namespace and get recycled).
+    lock.write_text(str(os.getpid()))
     assert ck(repo, "worktree", "land", "demo", "1", "--gate").exit_code == 0
-    assert not lock.exists()
+
+
+HOLD_LOCK = """
+import fcntl, sys
+f = open(sys.argv[1], "a+")
+fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+f.write("2")
+f.flush()
+print("held", flush=True)
+sys.stdin.read()
+"""
 
 
 def test_land_into_integration_branch(repo):

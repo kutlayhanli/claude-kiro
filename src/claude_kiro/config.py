@@ -38,6 +38,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # main checkout (or absolute). Keep it out of .claude/: Claude Code's Bash
     # sandbox makes .claude/ read-only. Add it to .gitignore (`ck init` does).
     "worktree_dir": ".ck/worktrees",
+    # Minutes a task worktree claim holds without activity (the claim itself, a
+    # `ck gate` run in it, a commit on its branch). After that it is stale: `ck
+    # worktree create` releases it and `claim` takes it over; commits stay put.
+    "claim_stale_minutes": 60,
     # Dependency install step for fresh worktrees (`ck worktree create --install`).
     # null = detected from lockfiles.
     "install": None,
