@@ -1,0 +1,5 @@
+verified-tree: 323d6f7ac1e5906ace57be300dfb57fce662f675
+checks: passed (full: uv run pytest -q; 57s)
+pushed-to: origin/master
+by: safe-merge (DESKTOP-PU96OS3) branch fix/stop-verify-sibling-worktrees
+at: 2026-10-12T21:26:51-05:00
