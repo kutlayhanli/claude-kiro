@@ -1,8 +1,8 @@
 # Upgrading
 
-- **From 0.9.1:** see [Unreleased](#unreleased-after-091).
+- **From 0.9.1 to 0.10:** see the next section.
 - **From 0.9.0 to 0.9.1:** see [0.9.0 → 0.9.1](#090--091).
-- **From 0.8 to 0.9:** see [0.8 → 0.9](#08--09), then the 0.9.1 notes.
+- **From 0.8 to 0.9:** see [0.8 → 0.9](#08--09), then the 0.9.1 and 0.10 notes.
 - **From 0.7 to 0.8:** see [0.7 → 0.8](#07--08), then the 0.9 notes.
 - **From 0.6 to 0.7:** see [0.6 → 0.7](#06--07), then the 0.8 and 0.9 notes.
 - **From 0.5 to 0.6:** see [0.5 → 0.6](#05--06), then the 0.7 notes.
@@ -11,7 +11,7 @@
 - **From 0.2:** apply the 0.3 notes below as well; the steps are the same.
 - **From 0.1:** skip to [Upgrading to 0.2](#upgrading-to-02), then come back for the 0.3 and 0.4 notes (same commands).
 
-## Unreleased (after 0.9.1)
+## 0.9.1 → 0.10
 
 From the sandboxed sihman benchmarks (`notes/handoff-2026-10-12-ck-next.md`). No new setup steps: `ck update`, then `ck upgrade` in vendored projects.
 
