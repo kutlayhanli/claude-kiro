@@ -77,7 +77,8 @@ How each mode applies them:
    - I can watch with `/workflows`.
 8. **Questions while it runs** are for you, the orchestrator. Task agents are told to ignore chat messages and stick to their task.
 9. **When it returns,** report:
-   - tasks merged, failed (with reasons and blockers), and not started (and why);
+   - tasks merged, failed (with reasons and blockers), and not started (and why). Take these lists from the result as they are: with `reportSource: "git"` they come from `ck worktree report` (merge commits on the target plus tasks.md there), not from agent claims, so a task is never both merged and failed. With `reportSource: "agents"` the git report was unavailable; say so, and suggest `ck worktree report <spec> --into <branch>` to check;
+   - the `outcome`: `complete`, `blocked` (nothing left could start; `reason` and `blockedOn` say which tasks everything waits on and why, which is a clean stop, not a failure), or `halted`;
    - tests agents believe are wrong, and files touched outside their task;
    - the timing: total wall-clock, minutes per wave group (dependency levels, a display label only), and the slowest tasks;
    - the landings: how many, their batch sizes and minutes, and which were bisected (and the culprits);
