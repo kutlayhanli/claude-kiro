@@ -120,6 +120,62 @@ def test_rewording_or_removing_a_requirement_still_asks(project, session):
     assert decision(guard(project, session, "Write", file_path=path, content="# Feature: Calc\n- 1.1 anything\n")) == "ask"
 
 
+TP_OLD = (
+    "| TC | Requirement | Check |\n"
+    "|---|---|---|\n"
+    "| TC-1 | 1.1 | add(1, 2) returns 3 |\n"
+    "| TC-2 | 1.1 | add(-1, 1) returns 0 |\n"
+)
+
+
+def write_test_plan(project):
+    path = project / "specs/calc/test-plan.md"
+    path.write_text("# Test Plan: Calc\n\n" + TP_OLD)
+    return path
+
+
+def test_test_plan_frozen_once_implementation_starts(project, session):
+    path = str(write_test_plan(project))
+    reworded = TP_OLD.replace("returns 3", "returns a number")
+    assert guard(project, session, "Edit", file_path=path, old_string=TP_OLD, new_string=reworded) is None
+    write_tasks(project, t2="In Progress")
+    result = guard(project, session, "Edit", file_path=path, old_string=TP_OLD, new_string=reworded)
+    assert decision(result) == "ask"
+    assert "test-plan.md" in result["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_adding_test_plan_rows_after_implementation_starts_passes(project, session):
+    write_tasks(project, t2="In Progress")
+    path = write_test_plan(project)
+    added = TP_OLD + "| TC-3 | 1.2 | add(0, 0) returns 0 |\n"
+    assert guard(project, session, "Edit", file_path=str(path), old_string=TP_OLD, new_string=added) is None
+    current = path.read_text()
+    assert guard(project, session, "Write", file_path=str(path), content=current + "\n## Notes\nNew section.\n") is None
+
+
+def test_rewording_or_deleting_a_test_plan_row_asks(project, session):
+    write_tasks(project, t2="In Progress")
+    path = str(write_test_plan(project))
+    reworded = TP_OLD.replace("add(-1, 1) returns 0", "add(-1, 1) does not raise")
+    assert decision(guard(project, session, "Edit", file_path=path, old_string=TP_OLD, new_string=reworded)) == "ask"
+    deleted = TP_OLD.replace("| TC-2 | 1.1 | add(-1, 1) returns 0 |\n", "")
+    assert decision(guard(project, session, "Edit", file_path=path, old_string=TP_OLD, new_string=deleted)) == "ask"
+    assert decision(guard(project, session, "Write", file_path=path, content="# Test Plan: Calc\n")) == "ask"
+
+
+def test_test_plan_guard_mode_deny_and_off(project, session):
+    write_tasks(project, t2="In Progress")
+    path = str(write_test_plan(project))
+    edit = dict(file_path=path, old_string=TP_OLD, new_string=TP_OLD.replace("returns 3", "returns 4"))
+    (project / "specs/ck.json").write_text(json.dumps({"guard": {"test_plan": "deny"}}))
+    assert decision(guard(project, session, "Edit", **edit)) == "deny"
+    (project / "specs/ck.json").write_text(json.dumps({"guard": {"test_plan": "off"}}))
+    assert guard(project, session, "Edit", **edit) is None
+    # Each guard has its own setting: switching off requirements leaves test_plan on.
+    (project / "specs/ck.json").write_text(json.dumps({"guard": {"requirements": "off"}}))
+    assert decision(guard(project, session, "Edit", **edit)) == "ask"
+
+
 def test_bash_deleting_tests_asks(project, session):
     assert decision(guard(project, session, "Bash", command="rm tests/test_calc.py")) == "ask"
     assert decision(guard(project, session, "Bash", command="cd . && rm -rf tests")) == "ask"

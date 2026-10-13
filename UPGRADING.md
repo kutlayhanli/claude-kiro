@@ -17,6 +17,7 @@
 - New `done-verify` PostToolUse hook (Edit, Write, MultiEdit, Bash): when a task's **Status:** becomes Done, it runs `ck gate <spec> --task N` for that task, once, and reports a failure to Claude. A Bash command that only checks out, rebases or merges committed `tasks.md` content is not a claim and runs nothing.
 - `stop-verify` (Stop) runs no tests and never blocks: it lists tasks still marked Done whose gate failed, or that no gate ran for. Its timeout drops from 600 to 30 seconds.
 - The requirements guard asks only when an edit changes or removes existing text in `requirements.md`. Adding a requirement to a spec under implementation no longer prompts, even in auto mode.
+- New `guard.test_plan` (default `"ask"`): `test-plan.md` gets the same rule as `requirements.md`. Once a spec's implementation has started, adding test cases passes, and rewording or deleting an existing row asks. In an unattended run nobody can answer, so the edit is refused and the agent reports it.
 - The SubagentStop hook is gone: a subagent's Done claims are gated by `done-verify` when it makes them, and `/spec:implement` gates each task again before merging.
 
 ```bash
@@ -334,12 +335,12 @@ All of these settings live in `specs/ck.json`:
 {
   "verify": ["uv run pytest -q"],
   "verify_timeout": 540,
-  "guard": { "tests": "ask", "requirements": "ask" },
+  "guard": { "tests": "ask", "requirements": "ask", "test_plan": "ask" },
   "base": null
 }
 ```
 
-- `guard.tests` and `guard.requirements` each take `"ask"` (prompt me), `"deny"` (block and tell Claude why), or `"off"`.
+- `guard.tests`, `guard.requirements` and `guard.test_plan` each take `"ask"` (prompt me), `"deny"` (block and tell Claude why), or `"off"`.
 - `base` is the git ref the tamper check compares against. Leave it `null` to use the merge-base with `origin/HEAD`, `main`, or `master`.
 - To list which files count as tests, add `"tests": {"dirs": [...], "files": [...]}`.
 - To disable the gate entirely, remove the `done-verify` (PostToolUse) and `stop-verify` (Stop) entries from `.claude/settings.local.json`.

@@ -1,12 +1,13 @@
-"""PreToolUse hook: guard tests and requirements against being bent to fit the code.
+"""PreToolUse hook: guard tests, requirements and test plans against being bent to fit the code.
 
 Asks me (or denies, per specs/ck.json "guard") before Claude:
 - removes test cases or assertions from an existing test file, or adds
   skip/xfail/only markers to one, unless an In Progress test-track task owns it
   or the file is new on this branch;
 - deletes, moves, or rewrites test files through Bash;
-- changes or removes existing text in a spec's requirements.md while its
-  implementation is under way (adding new requirements passes).
+- changes or removes existing text in a spec's requirements.md or
+  test-plan.md while its implementation is under way (adding new
+  requirements or test cases passes).
 
 Everything else passes through untouched. The gate repeats the test check at
 completion time, so anything this misses is still caught before Done.
@@ -30,6 +31,12 @@ from claude_kiro.paths import spec_roots
 DESTRUCTIVE_BASH = re.compile(r"(?:^|[\s;&|(])(rm|mv|git\s+rm|git\s+mv|truncate|unlink)\s")
 IN_PLACE_BASH = re.compile(r"(?:^|[\s;&|(])(sed|perl)\s+(?:-\w*\s+)*-i")
 REDIRECT = re.compile(r">\s*([^\s;&|]+)")
+
+# Spec files whose existing text is frozen once implementation starts: file name -> (guard key, noun).
+FROZEN_SPEC_FILES = {
+    "requirements.md": ("requirements", "requirement"),
+    "test-plan.md": ("test_plan", "test case"),
+}
 
 
 def _relative(path: str, project_dir: Path) -> Optional[str]:
@@ -70,7 +77,7 @@ def _implementation_started(spec_dir: Path) -> bool:
 def _only_adds(old: str, new: str) -> bool:
     """Whether new keeps every non-blank line of old, unchanged and in order.
 
-    Inserting a requirement cannot bend an existing one to fit the code;
+    Inserting a requirement or test case cannot bend an existing one to fit the code;
     rewording or deleting one can.
     """
     old_lines = [line.rstrip() for line in old.splitlines() if line.strip()]
@@ -100,9 +107,10 @@ def _check_file_edit(tool_name: str, tool_input: dict, project_dir: Path, config
         return None
     path = project_dir / rel
 
-    # requirements.md is frozen once implementation starts.
-    if path.name == "requirements.md":
-        mode = guard_mode(config, "requirements")
+    # requirements.md and test-plan.md are frozen once implementation starts.
+    if path.name in FROZEN_SPEC_FILES:
+        kind, what = FROZEN_SPEC_FILES[path.name]
+        mode = guard_mode(config, kind)
         spec_dir = path.parent
         if mode and spec_dir.parent in spec_roots(project_dir) and _implementation_started(spec_dir):
             texts = _old_and_new(tool_name, tool_input, path)
@@ -111,7 +119,7 @@ def _check_file_edit(tool_name: str, tool_input: dict, project_dir: Path, config
             return _decision(
                 mode,
                 f"{rel} is the contract for a spec whose implementation has started. Changing "
-                "requirements to match the code hides failures (adding new ones is fine). If a requirement "
+                f"{what}s to match the code hides failures (adding new ones is fine). If a {what} "
                 "is wrong, stop and raise it with me; approve this edit only if I asked for the change.",
             )
         return None
