@@ -18,7 +18,7 @@ Use this after the spec or the code has drifted, after hand edits, or for specs 
 
 1. Resolve the spec directory: `specs/$ARGUMENTS/`. If it only exists under `.claude/specs/`, tell me to run `ck migrate` first and stop. If `$ARGUMENTS` is empty, list the specs in `specs/` and ask which one.
 2. Confirm `requirements.md`, `design.md`, and `tasks.md` all exist. If one is missing, say so and suggest `/spec:create` instead.
-3. Call the **Workflow** tool with `name: "spec:spec-create"` (the workflow this plugin ships) and `args` as below. If no workflow by that name is found (a project with vendored copies), use `scriptPath` set to the absolute path of `.claude/workflows/spec-create.js` instead; if that file is missing too, tell me to run `ck setup` (installs the plugin) and stop.
+3. Call the **Workflow** tool with `args` as below, picking the script by the project's mode first: if `.claude/ck-manifest.json` records `"mode": "vendor"` (copies made by `ck vendor`; the plugin is off there), use `scriptPath` set to the absolute path of `.claude/workflows/spec-create.js` and don't try the plugin's name. Otherwise use `name: "spec:spec-create"` (the workflow this plugin ships); only if no workflow by that name is found, fall back to that `scriptPath`. If the file is missing too, tell me to run `ck setup` (installs the plugin) and stop.
    ```json
    {
      "mode": "review",
