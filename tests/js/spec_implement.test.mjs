@@ -10,11 +10,11 @@ const SCRIPT = path.join(here, '../../plugin/workflows/spec-implement.js')
 const baseArgs = { spec: 'demo', root: '/repo', into: 'integrate/demo', targetDir: '/repo/.ck/worktrees/demo-integration' }
 
 // A fake project: `ck plan` semantics over deps/done, task durations, failures, timestamps.
-function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [] }) {
+function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [], gitReport = null }) {
   let rechecksLeftRed = recheckRed
   // RED landings left per task: checkRed tasks are red on their first landing, redLands sets a count.
   const redLeft = { ...Object.fromEntries(checkRed.map(n => [n, 1])), ...redLands }
-  const state = { deps: { ...deps }, done: new Set(done), events: [], prompts: {}, opts: {}, reviewCount: {}, attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0, landings: [], resolved: new Set() }
+  const state = { deps: { ...deps }, done: new Set(done), merged: new Set(), events: [], prompts: {}, opts: {}, reviewCount: {}, attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0, landings: [], resolved: new Set() }
   let clock = Date.parse('2026-10-04T10:00:00Z')
   const stamp = () => new Date((clock += 60000)).toISOString().replace('.000', '')
   const ready = exclude =>
@@ -79,7 +79,7 @@ function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFir
       if (red.length && landing.length > 1) gates.push({ tasks: landing.slice(0, 1), green: true })
       for (const n of landing) {
         if (red.includes(n)) { redLeft[n]--; out.push({ task: n, state: 'RED', checkGreen: false, checkTail: `red: task ${n}` }) }
-        else { state.done.add(n); out.push({ task: n, state: 'MERGED', checkGreen: true, mergedAt: stamp() }) }
+        else { state.done.add(n); state.merged.add(n); out.push({ task: n, state: 'MERGED', checkGreen: true, mergedAt: stamp() }) }
       }
       return { tasks: out, gates, bisected: gates.length > 1, startedAt, finishedAt: stamp() }
     }
@@ -97,6 +97,21 @@ function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFir
       return { verdict, findings: verdict === 'changes' ? [{ severity: 'blocking', issue: reviewIssue || 'contradicts design.md' }] : [], summary: verdict }
     }
     if (l.startsWith('cross-test')) return { verdict: 'changes', findings: [{ severity: 'blocking', file: 'tests/test_b.py', issue: 'reads "state" where tests/test_a.py and design.md say "status"' }], summary: 'one drift' }
+    if (l === 'report') {
+      // `ck worktree report`: merge commits on the target plus tasks.md there, never agent claims.
+      const out = { head: 'f00d', merged: [], done: [], failed: [], blocked: [], unstarted: [] }
+      for (const n of Object.keys(state.deps)) {
+        if (state.merged.has(n)) out.merged.push({ task: n, commit: `m${n}`, mergedAt: '2026-10-04T11:00:00Z' })
+        else if (state.done.has(n)) out.done.push({ task: n })
+        else if (state.attempts[n]) out.failed.push({ task: n, branch: `feat/demo-task-${n}`, ahead: 1 })
+        else {
+          const on = state.deps[n].filter(d => !state.done.has(d))
+          if (on.length) out.blocked.push({ task: n, on })
+          else out.unstarted.push({ task: n })
+        }
+      }
+      return gitReport ? gitReport(out, state) : out
+    }
     if (l.startsWith('fix')) return { green: true }
     if (l.startsWith('re-check')) return { green: rechecksLeftRed-- <= 0 }
     if (l.startsWith('full gate')) return { green: !fullRed }
@@ -785,4 +800,125 @@ await test('cross-test consistency: a spec with a single test task has nothing t
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, wave: { 1: 1, 2: 2 }, tracks: { 1: 'test', 2: 'impl' }, agents } })
   assert.ok(!p.state.events.some(e => e.startsWith('cross-test')))
   assert.deepEqual(result.crossTests, [])
+})
+
+await test('the final report comes from git: a task git shows merged is never also failed', async () => {
+  // Bench v2: the landing agent said "MISSING: no branch" for Task 2 although git had merged it.
+  const p = project({ deps: { 1: [], 2: [], 3: ['2'] } })
+  const agent = async (prompt, opts) => {
+    if (opts.label === 'land 2') { p.state.done.add('2'); p.state.merged.add('2'); return { tasks: [{ task: '2', state: 'MISSING', detail: 'no branch' }] } }
+    return p.agent(prompt, opts)
+  }
+  const { result, logs } = await runWorkflow(SCRIPT, { agent, args: { ...baseArgs, mergeBatch: 1 } })
+  assert.ok(p.state.prompts.report.includes('ck -C /repo worktree report demo --into integrate/demo --json'))
+  assert.equal(result.reportSource, 'git')
+  assert.ok(result.merged.includes('2'), 'git says merged')
+  assert.ok(!result.failed.some(f => f.task === '2'), 'never both merged and failed')
+  assert.ok(logs.some(l => l.includes('git shows it merged')))
+  assert.equal(result.head, 'f00d')
+})
+
+await test('the final report counts what git merged even when the agents under-report', async () => {
+  // The 0.9.0 run's report said 11 merged while git had 19.
+  const p = project({ deps: { 1: [], 2: [] }, gitReport: out => ({ ...out, merged: [...out.merged, { task: '9' }] }) })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: baseArgs })
+  assert.deepEqual(result.merged.sort(), ['1', '2', '9'])
+  assert.equal(result.stats.merged, 3)
+})
+
+await test('git failures carry the agent reason; unlanded branches without one say so', async () => {
+  const p = project({ deps: { 1: [], 2: ['1'] }, failUntil: { 1: 99 }, gitReport: out => ({ ...out, failed: [...out.failed, { task: '7', branch: 'feat/demo-task-7', ahead: 2, claim: 'ck task agent pid 2' }] }) })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxRetries: 0 } })
+  const f1 = result.failed.find(f => f.task === '1')
+  assert.match(f1.reason, /gate not passed/)
+  assert.equal(f1.git.branch, 'feat/demo-task-1')
+  assert.match(result.failed.find(f => f.task === '7').reason, /2 commit\(s\) on feat\/demo-task-7 never landed; claimed: ck task agent pid 2/)
+})
+
+await test("without a usable git report the agents' results are used, still never merged and failed", async () => {
+  const p = project({ deps: { 1: [], 2: ['1'] }, failUntil: { 2: 99 }, gitReport: () => ({ error: 'refused' }) })
+  const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxRetries: 0 } })
+  assert.equal(result.reportSource, 'agents')
+  assert.deepEqual(result.merged, ['1'])
+  assert.deepEqual(result.failed.map(f => f.task), ['2'])
+  assert.ok(logs.some(l => l.includes('no usable git report')))
+})
+
+await test('all remaining tasks blocked behind a failed task is a clean stop that names the blocker', async () => {
+  const p = project({ deps: { 1: [], 2: [], 3: ['2'], 4: ['3'], 5: ['1'] }, failUntil: { 2: 99 } })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxRetries: 0 } })
+  assert.equal(result.halted, false)
+  assert.equal(result.outcome, 'blocked')
+  assert.deepEqual(result.merged.sort(), ['1', '5'])
+  assert.deepEqual(result.notStarted, ['3', '4'])
+  assert.deepEqual(result.blocked, [{ task: '3', on: ['2'] }, { task: '4', on: ['3'] }])
+  assert.deepEqual(result.blockedOn.map(b => [b.task, b.blocks]), [['2', ['3', '4']]])
+  assert.match(result.reason, /^blocked on: Task 2 \(gate not passed/)
+  assert.ok(!/planning/.test(result.reason))
+})
+
+await test('a finished spec is complete, with no reason', async () => {
+  const p = project({ deps: { 1: [], 2: ['1'] } })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: baseArgs })
+  assert.equal(result.outcome, 'complete')
+  assert.equal(result.reason, null)
+  assert.deepEqual(result.blocked, [])
+})
+
+await test('planning: a remark in "error" next to a valid plan is not a planning failure', async () => {
+  // Bench v2 plan 61 returned ready ["34"] plus a note in error, and the run halted with "planning step failed".
+  const p = project({ deps: { 1: [], 2: ['1'], 3: ['2'] } })
+  const agent = async (prompt, opts) => {
+    const r = await p.agent(prompt, opts)
+    return opts.label.startsWith('plan') ? { ...r, error: 'Note: "done" is copied as reported; the worktree was EXISTS (reused), not CREATED.' } : r
+  }
+  const { result, logs } = await runWorkflow(SCRIPT, { agent, args: baseArgs })
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3'])
+  assert.equal(result.outcome, 'complete')
+  assert.equal(result.stats.planFailures, 0)
+  assert.ok(logs.some(l => l.includes('left a note (not a failure)')))
+})
+
+await test('planning: worktree paths in "ready" are read as task numbers, so a task never runs twice', async () => {
+  // Bench v2: ready [".ck/worktrees/ai-first-email-tool-task-17"] launched Task 17 under a path, then again as "17".
+  const p = project({ deps: { 1: [], 2: ['1'] } })
+  const agent = async (prompt, opts) => {
+    const r = await p.agent(prompt, opts)
+    return opts.label.startsWith('plan') ? { ...r, ready: r.ready.map(n => `.ck/worktrees/demo-task-${n}`) } : r
+  }
+  const { result } = await runWorkflow(SCRIPT, { agent, args: baseArgs })
+  assert.ok(p.state.events.includes('task 1') && p.state.events.includes('task 2'))
+  assert.ok(!p.state.events.some(e => e.includes('.ck/worktrees')), 'no task launched under a path')
+  assert.equal(p.state.attempts['1'], 1)
+  assert.deepEqual(result.merged.sort(), ['1', '2'])
+})
+
+await test('planning: a failed plan step is retried once before it counts', async () => {
+  const p = project({ deps: { 1: [], 2: ['1'] } })
+  let nulls = 0
+  const agent = async (prompt, opts) => (opts.label === 'plan 2' && !nulls++ ? null : p.agent(prompt, opts))
+  const { result } = await runWorkflow(SCRIPT, { agent, args: baseArgs })
+  assert.ok(p.state.events.includes('plan 2 retry'))
+  assert.deepEqual(result.merged.sort(), ['1', '2'])
+  assert.equal(result.stats.planFailures, 1)
+  assert.equal(result.outcome, 'complete')
+})
+
+await test('planning: a plan step that keeps failing halts only if it left a ready task unstarted', async () => {
+  const failLater = pr => async (prompt, opts) => (opts.label.startsWith('plan') && opts.label !== 'plan 1' ? null : pr.agent(prompt, opts))
+  // Everything left is blocked behind failed Task 2: the failed plan step changed nothing.
+  const blockedRun = project({ deps: { 1: [], 2: [], 3: ['2'] }, failUntil: { 2: 99 }, durations: { 2: 30 } })
+  const a = await runWorkflow(SCRIPT, { agent: failLater(blockedRun), args: { ...baseArgs, maxRetries: 0 } })
+  assert.equal(a.result.halted, false)
+  assert.equal(a.result.outcome, 'blocked')
+  assert.match(a.result.reason, /^blocked on: Task 2 /)
+  assert.ok(a.logs.some(l => l.includes('every remaining task was blocked anyway')))
+
+  // Task 2 became ready after Task 1 merged, but no plan step could start it: a real halt.
+  const readyRun = project({ deps: { 1: [], 2: ['1'] } })
+  const b = await runWorkflow(SCRIPT, { agent: failLater(readyRun), args: baseArgs })
+  assert.equal(b.result.halted, true)
+  assert.equal(b.result.outcome, 'halted')
+  assert.equal(b.result.reason, 'planning step failed')
+  assert.deepEqual(b.result.notStarted, ['2'])
 })

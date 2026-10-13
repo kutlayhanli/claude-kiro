@@ -174,7 +174,7 @@ const PLAN = {
   type: 'object',
   properties: {
     done: { type: 'array', items: { type: 'string' }, description: '"done" from ck plan' },
-    ready: { type: 'array', items: { type: 'string' }, description: 'tasks whose worktree is CREATED or EXISTS (from ck worktree create)' },
+    ready: { type: 'array', items: { type: 'string' }, description: 'task numbers (the "task" field, e.g. "12", never a path) whose worktree is CREATED or EXISTS (from ck worktree create)' },
     busy: {
       type: 'array',
       items: { type: 'object', properties: { task: { type: 'string' }, detail: { type: 'string' } }, required: ['task', 'detail'] },
@@ -186,7 +186,7 @@ const PLAN = {
       items: { type: 'object', properties: { task: { type: 'string' }, message: { type: 'string' } }, required: ['task', 'message'] },
       description: '"verifyCycles" from ck plan: task and message only',
     },
-    error: { type: 'string' },
+    error: { type: 'string', description: 'only if a command failed to run; leave it out otherwise (no notes or remarks here)' },
   },
   required: ['done', 'ready', 'busy', 'remaining', 'cycles', 'verifyCycles'],
 }
@@ -307,7 +307,8 @@ const planPrompt = (exclude, slots) => `Mechanical planning step for spec ${SPEC
 2. Take the first ${Number.isFinite(slots) ? slots : 'all'} task(s) of its "ready" list. If there are none, skip this step. Otherwise run:
      ck -C ${ROOT} worktree create ${SPEC} <those task numbers> --install --base ${INTO} --json
    Entries with state CREATED or EXISTS go in your "ready" field. BUSY or ERROR entries go in "busy" with their detail; do not touch those worktrees. (ck has already released claims that went stale, so a BUSY claim belongs to a live agent; never judge one by the process ID it names.)
-Return the fields. Put a message in error only if a command itself failed to run.`
+   "ready" and "busy" hold task numbers (each entry's "task" field, e.g. "12"), never worktree paths.
+Return the fields. Put a message in error only if a command itself failed to run; no notes or remarks anywhere.`
 
 // A note the agent leaves for whoever picks the task up next (a retry, a revision,
 // or a bigger model after escalation). It sits next to the worktree, not in it, so
@@ -461,13 +462,48 @@ function maybeCrossTest(n, atEnd = false) {
   })())
 }
 
+// The Workflow API has no non-agent step, so `ck plan` runs in a cheap agent. Its answer is
+// checked, not trusted: bench v2 halted with "planning step failed" because a plan agent put a
+// remark in "error" next to a valid plan, and other plan agents returned worktree paths
+// (".ck/worktrees/<spec>-task-17") as "ready" entries, which launched Task 17 twice.
+const PLAN_FAILED = 'planning step failed'
+let planFailures = 0
+const taskId = v => {
+  const s = String(v == null ? '' : v).trim()
+  const m = s.match(/-task-([0-9A-Za-z_]+)\/?$/) || s.match(/^(?:task\s+)?([0-9A-Za-z_]+)$/i)
+  return m ? m[1] : s
+}
+const usablePlan = p => !!p && ['done', 'ready', 'busy', 'remaining', 'cycles', 'verifyCycles'].every(k => Array.isArray(p[k]))
+function normalizePlan(p) {
+  const remaining = p.remaining.map(taskId)
+  const known = n => !remaining.length || remaining.includes(n)
+  return {
+    ...p,
+    done: p.done.map(taskId),
+    remaining,
+    ready: [...new Set(p.ready.map(taskId))].filter(known),
+    busy: p.busy.map(b => ({ ...b, task: taskId(b && b.task) })).filter(b => known(b.task)),
+    verifyCycles: p.verifyCycles.map(v => ({ ...v, task: taskId(v && v.task) })),
+  }
+}
+
 async function plan() {
   refills++
   const exclude = [...running.keys(), ...failed.keys()]
   const slots = MAX_CONCURRENT - working.size
-  const p = await agent(planPrompt(exclude, slots), { label: `plan ${refills}`, phase: 'Plan', schema: PLAN, ...LOW })
-  if (!p || p.error) return null
-  return p
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const label = `plan ${refills}${attempt ? ' retry' : ''}`
+    let p = null
+    try { p = await agent(planPrompt(exclude, slots), { label, phase: 'Plan', schema: PLAN, ...LOW }) } catch (e) { p = { error: e && e.message } }
+    // An "error" next to a usable plan is a remark, not a failure; an empty plan with an error is a failure.
+    if (usablePlan(p) && !(p.error && !p.done.length && !p.remaining.length)) {
+      if (p.error) log(`${label}: the planning agent left a note (not a failure): ${trim(p.error, 300)}`)
+      return normalizePlan(p)
+    }
+    planFailures++
+    log(`${label}: no usable plan (${(p && p.error && trim(p.error, 300)) || 'no result'})${attempt ? '' : ', retrying'}`)
+  }
+  return null
 }
 
 // A task's implementing agent finished; wake the scheduler to fill the slot.
@@ -725,7 +761,7 @@ function applyLint(p) {
 
 phase('Plan')
 let current = await plan()
-if (!current) return { halted: true, refused: false, reason: 'planning step failed', into: INTO }
+if (!current) return { halted: true, refused: false, reason: PLAN_FAILED, into: INTO }
 if (current.cycles.length || current.verifyCycles.length) {
   log('Refusing to launch: the plan has a cycle. Fix tasks.md (see `ck lint`) and run again.')
   return {
@@ -737,6 +773,7 @@ if (current.cycles.length || current.verifyCycles.length) {
     into: INTO,
   }
 }
+const initialPlan = current
 const initiallyDone = current.done.length
 doneAtStart = new Set(current.done.map(String))
 log(`${current.remaining.length} task(s) remaining, ${initiallyDone} already Done; starting ${Math.min(current.ready.length, MAX_CONCURRENT)}`)
@@ -749,7 +786,7 @@ while (running.size) {
     slotFreed = false
     if (stopLaunching || working.size >= MAX_CONCURRENT) continue
     const next = await plan()
-    if (!next) { stopLaunching = true; stopReason = 'planning step failed'; continue }
+    if (!next) { stopLaunching = true; stopReason = stopReason || PLAN_FAILED; continue }
     current = next
     applyLint(current)
     launch(current)
@@ -766,7 +803,7 @@ while (running.size) {
   }
   if (stopLaunching) continue  // let running tasks finish and merge
   const next = await plan()
-  if (!next) { stopLaunching = true; stopReason = 'planning step failed'; continue }
+  if (!next) { stopLaunching = true; stopReason = stopReason || PLAN_FAILED; continue }
   current = next
   applyLint(current)
   launch(current)
@@ -826,19 +863,108 @@ for (const t of taskReport) {
 const phases = Object.values(spans).map(s => ({ ...s, minutes: minutes(s.start, s.end) }))
 const starts = taskReport.map(t => t.startedAt).filter(Boolean).sort((a, b) => Date.parse(a) - Date.parse(b))
 const ends = taskReport.map(t => t.mergedAt || t.finishedAt).filter(Boolean).sort((a, b) => Date.parse(a) - Date.parse(b))
-const merged = taskReport.filter(t => t.ok).map(t => t.task)
-const notStarted = (current.remaining || []).map(String).filter(n => !records[n] && !running.has(n))
+// What merged, failed, is blocked or never started comes from git (`ck worktree report`:
+// merge commits on INTO plus tasks.md there), not from agent claims: the 0.9.0 run reported
+// 11 merged while git had 19, and bench v2 listed Task 17 as merged and as "merge failed".
+// Agent results only annotate it (reasons). Without a usable git report, the agents' results
+// are used, deduplicated, and reportSource says so.
+const REPORT = {
+  type: 'object',
+  properties: {
+    head: { type: 'string' },
+    merged: { type: 'array', items: { type: 'object', properties: { task: { type: 'string' }, commit: { type: 'string' }, mergedAt: { type: 'string' } }, required: ['task'] } },
+    done: { type: 'array', items: { type: 'object', properties: { task: { type: 'string' } }, required: ['task'] } },
+    failed: { type: 'array', items: { type: 'object', properties: { task: { type: 'string' }, branch: { type: 'string' }, ahead: { type: 'number' }, claim: { type: 'string' } }, required: ['task'] } },
+    blocked: { type: 'array', items: { type: 'object', properties: { task: { type: 'string' }, on: { type: 'array', items: { type: 'string' } } }, required: ['task', 'on'] } },
+    unstarted: { type: 'array', items: { type: 'object', properties: { task: { type: 'string' } }, required: ['task'] } },
+    error: { type: 'string', description: 'only if the command printed no JSON (or was refused): what happened' },
+  },
+  required: ['merged', 'done', 'failed', 'blocked', 'unstarted'],
+}
+const reportPrompt = () => `Report step for spec ${SPEC}: run ONE command and copy its JSON output. Nothing else: no other commands, no edits. ${GIT_NOTE}
+Command:  ck -C ${ROOT} worktree report ${SPEC} --into ${INTO} --json
+Copy "head", "merged" (task, commit, mergedAt), "done", "failed" (task, branch, ahead, claim), "blocked" (task, on) and "unstarted" exactly as printed, every entry. Put a message in error only if the command printed no JSON (say what it printed, or that it was refused).`
+phase('Report')
+let gitReport = null
+try { gitReport = await agent(reportPrompt(), { label: 'report', phase: 'Report', schema: REPORT, ...LOW }) } catch (e) { gitReport = { error: e && e.message } }
+const GIT_LISTS = ['merged', 'done', 'failed', 'blocked', 'unstarted']
+const fromGit = !!gitReport && !gitReport.error && GIT_LISTS.every(k => Array.isArray(gitReport[k]))
+const ids = list => (list || []).map(e => taskId(e && typeof e === 'object' ? e.task : e))
+const byNum = (a, b) => (Number(a) - Number(b)) || String(a).localeCompare(String(b))
+const startDone = new Set((initialPlan.done || []).map(taskId))
+const agentFailed = new Map([...failed.entries()].map(([t, r]) => [taskId(t), r]))
+let merged, failedList, notStarted, blocked = [], readyLeft = null
+if (fromGit) {
+  const landed = new Set([...ids(gitReport.merged), ...ids(gitReport.done)])
+  merged = [...landed].filter(n => !startDone.has(n))
+  for (const [t, r] of agentFailed) {
+    if (!landed.has(t)) continue
+    log(`Task ${t}: an agent reported "${String(r).slice(0, 200)}", but git shows it merged; reporting it merged`)
+    agentFailed.delete(t)
+  }
+  const gitFailed = new Map((gitReport.failed || []).map(e => [taskId(e.task), e]))
+  const failedTasks = [...new Set([...agentFailed.keys(), ...gitFailed.keys()])].filter(n => !landed.has(n))
+  failedList = failedTasks.map(task => {
+    const g = gitFailed.get(task)
+    const reason = agentFailed.get(task) || `${g.ahead || 'some'} commit(s) on ${g.branch || BR(task)} never landed${g.claim ? `; claimed: ${g.claim}` : ''}`
+    return g ? { task, reason, git: { branch: g.branch, ahead: g.ahead, claim: g.claim } } : { task, reason }
+  })
+  const failedSet = new Set(failedTasks)
+  blocked = (gitReport.blocked || []).map(e => ({ task: taskId(e.task), on: ids(e.on) })).filter(b => !failedSet.has(b.task))
+  readyLeft = ids(gitReport.unstarted).filter(n => !failedSet.has(n))
+  notStarted = [...readyLeft, ...blocked.map(b => b.task)].sort(byNum)
+} else {
+  log(`Report: no usable git report (${(gitReport && gitReport.error && String(gitReport.error).slice(0, 300)) || 'no result'}); using the agents' results`)
+  merged = taskReport.filter(t => t.ok).map(t => t.task)
+  const mergedSet = new Set(merged)
+  failedList = [...agentFailed.entries()].filter(([t]) => !mergedSet.has(t)).map(([task, reason]) => ({ task, reason }))
+  const failedSet = new Set(failedList.map(f => f.task))
+  notStarted = (current.remaining || []).map(taskId).filter(n => !records[n] && !running.has(n) && !mergedSet.has(n) && !failedSet.has(n))
+}
+// Blocked: the tasks every blocked task ultimately waits on, with why each one is stuck.
+const onOf = new Map(blocked.map(b => [b.task, b.on]))
+const rootsOf = (n, seen = new Set()) => (seen.has(n) ? [] : (seen.add(n), (onOf.get(n) || []).flatMap(d => (onOf.has(d) ? rootsOf(d, seen) : [d]))))
+const roots = new Map()
+for (const b of blocked) for (const r of new Set(rootsOf(b.task))) roots.set(r, [...(roots.get(r) || []), b.task])
+const failedReason = new Map(failedList.map(f => [f.task, f.reason]))
+const why = t => failedReason.get(t) || (readyLeft && readyLeft.includes(t) ? 'ready but not started' : 'not Done on the target')
+const blockedOn = fromGit
+  ? [...roots.entries()].sort((a, b) => byNum(a[0], b[0])).map(([task, blocks]) => ({ task, reason: why(task), blocks: blocks.sort(byNum) }))
+  : failedList.map(f => ({ task: f.task, reason: f.reason, blocks: [] }))
+// Outcome: "complete" (nothing left), "blocked" (nothing left that can start: a clean stop with
+// what it waits on), or "halted" (a red target, a halt on failure, or a failed plan step that
+// left a ready task unstarted). A failed plan step with nothing ready left is not a halt.
+let outcome = 'complete'
+let reason = stopReason
+const planFailed = stopReason === PLAN_FAILED
+if (redTarget) outcome = 'halted'
+else if (stopReason && !planFailed && notStarted.length) outcome = 'halted'
+else if (planFailed && (!fromGit || readyLeft.length)) outcome = 'halted'
+else if (notStarted.length || failedList.length) {
+  outcome = 'blocked'
+  if (planFailed) log('A planning step failed, but every remaining task was blocked anyway: nothing was left to start')
+  const top = blockedOn.length ? blockedOn : failedList
+  reason = top.length
+    ? `blocked on: ${top.map(b => `Task ${b.task} (${String(b.reason).slice(0, 300)})`).join('; ')}`
+    : `not started: ${notStarted.map(n => `Task ${n}`).join(', ')}`
+} else if (planFailed) reason = null
+if (outcome === 'blocked') log(reason)
 
 return {
-  halted: redTarget || (!!stopReason && notStarted.length > 0),
-  reason: stopReason,
+  halted: outcome === 'halted',
+  outcome,
+  reason,
   into: INTO,
+  reportSource: fromGit ? 'git' : 'agents',
+  head: fromGit ? gitReport.head || null : null,
   taskAgents: { model: IMPL.model || 'inherited', effort: IMPL.effort || 'inherited' },
   agents: { implementer: desc(IMPL), test_writer: desc(TEST), fixer: desc(FIX), reviewer: REVIEW_ON ? desc(REVIEW) : 'off', reviewer_risky: REVIEW_ON ? desc(RISKY_REVIEW) : 'off', orchestrator: desc(LOW), resolver: desc(RESOLVE) },
   targetGreen: !redTarget,
   merged,
-  failed: [...failed.entries()].map(([task, reason]) => ({ task, reason })),
+  failed: failedList,
   notStarted,
+  blocked,
+  blockedOn,
   escalated: taskReport.filter(t => t.escalations.length).map(t => ({ task: t.task, models: t.escalations.map(e => e.model), ok: t.ok })),
   fixerEscalations,
   timing: {
@@ -852,5 +978,5 @@ return {
   fullGates,
   finalGate,
   crossTests,
-  stats: { initiallyDone, merged: merged.length, failed: failed.size, notStarted: notStarted.length, planSteps: refills, fixes: fixCount, landings: landings.length, bisected: landings.filter(l => l.bisected).length },
+  stats: { initiallyDone, merged: merged.length, failed: failedList.length, notStarted: notStarted.length, planSteps: refills, planFailures, fixes: fixCount, landings: landings.length, bisected: landings.filter(l => l.bisected).length },
 }

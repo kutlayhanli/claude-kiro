@@ -57,7 +57,7 @@ You are the scheduler that `<plugin-root>/workflows/spec-implement.js` would be.
    - SKIP: the task made no commits; it fails. MISSING, BUSY or ERROR: it fails with the detail.
    - Every `fullGateEvery` merges (after the landing that crosses each multiple), run the full `ck gate <spec>` in `targetDir` the same way. Red: start `spec:fixer` with the fix prompt, re-run the gate, escalate as above; still red: stop launching, let running agents finish without landing them, and report. A red target branch always halts.
 5. **After every merge or failure,** go back to step 2. Re-planning re-reads tasks.md, so fixes we commit to the target mid-run take effect.
-6. **Finish** when nothing is running, queued or ready: run the full `ck gate <spec>` once more, then report as the command says (merged, failed with reasons, not started and why, wrong tests, files outside tasks, timing from each report's `startedAt` and `finishedAt`).
+6. **Finish** when nothing is running, queued or ready: run the full `ck gate <spec>` once more, then `ck worktree report <spec> --into <into> --json` from the main checkout. Take merged, failed, blocked and not started from that git report, never from agent reports (a task git shows merged is merged, whatever an agent said); agents' reasons only annotate it. If every remaining task is blocked, that's a clean stop: say which tasks everything waits on and why. Then report as the command says (wrong tests, files outside tasks, timing from each report's `startedAt` and `finishedAt`).
 
 You orchestrate; you don't implement. Don't edit task code yourself, and don't merge a task whose gate or review didn't pass.
 
