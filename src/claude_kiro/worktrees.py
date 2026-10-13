@@ -410,6 +410,24 @@ def protected_changes(root: Path, base: str, branch: str, allow: Optional[List[s
             and any(_glob(f, p) for p in PROTECTED_PATHS) and not any(_glob(f, a) for a in allow)]
 
 
+def unwritable_protected(root: Path, base: str, branch: str, target: Path) -> List[str]:
+    """Protected files the branch changes (allowed or not) that `target` cannot write here.
+
+    Claude Code's Bash sandbox keeps the main checkout's .claude/ read-only even when
+    land.allow_paths opts a spec in; merging then dies with git's "unable to unlink old".
+    Writing, replacing or deleting a file needs its directory (or, for a new one, the
+    nearest existing parent) writable; access(2) reports a read-only bind mount as not.
+    """
+    out = []
+    for f in protected_changes(root, base, branch):
+        d = (target / f).parent
+        while not d.exists() and d != target:
+            d = d.parent
+        if not os.access(d, os.W_OK):
+            out.append(f)
+    return out
+
+
 def land_allow_paths(root: Path) -> List[str]:
     """specs/ck.json "land": {"allow_paths": [...]} of the checkout `root` (never a task branch's copy)."""
     land_cfg = load_config(root).get("land")
@@ -445,7 +463,8 @@ def land(
        the target is CONFLICT; one that conflicts only with an earlier branch of this batch
        is DEFERRED to the next batch. A branch that changes a PROTECTED_PATHS file
        (not allowed by specs/ck.json "land.allow_paths") is PROTECTED: never merged,
-       it needs a human.
+       it needs a human. So is one whose allowed protected files the target can't write
+       (a sandboxed landing): attended merge only, outside the sandbox.
     2. Merge the clean branches into the target checkout (--no-ff, longest dependency
        chain first), refresh dependencies (`install`), and gate them together.
     3. Red with more than one task: reset the target to the commit before the batch and
@@ -504,6 +523,20 @@ def land(
                     "review and merge it (or list the paths in specs/ck.json \"land\": {\"allow_paths\": [...]})",
                     task_branch(spec, num),
                     touched,
+                )
+                continue
+            # Allowed, but this checkout can't write them (a sandboxed landing): stop before git does.
+            readonly = unwritable_protected(root, base, task_branch(spec, num), target)
+            if readonly:
+                candidates.remove(num)
+                results[num] = Landed(
+                    num,
+                    "PROTECTED",
+                    "changes protected files that land.allow_paths allows but that are read-only here (Claude Code's "
+                    "Bash sandbox keeps the main checkout's .claude/ read-only); attended merge only: after the "
+                    f"operator reviews it, run `ck worktree land {spec} {num}` outside the sandbox",
+                    task_branch(spec, num),
+                    readonly,
                 )
 
         # Precheck: each branch against the target, then the batch in order, in memory.

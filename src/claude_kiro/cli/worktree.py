@@ -338,7 +338,9 @@ def land_cmd(spec, tasks, into, do_gate, do_install, release_claims, keep, as_js
     culprits are found. Culprits are RED and stay off the target (branch kept).
     A branch that changes .claude/**, .mcp.json, git hook directories or
     specs/ck.json is PROTECTED and never merged (a human reviews it), unless
-    specs/ck.json "land": {"allow_paths": [...]} lists the paths.
+    specs/ck.json "land": {"allow_paths": [...]} lists the paths. Allowed paths
+    the target can't write (Claude Code's Bash sandbox keeps the main checkout's
+    .claude/ read-only) are PROTECTED too: land those attended, outside the sandbox.
     Exit codes: 0 ok, 1 a task RED, 2 a CONFLICT, 3 busy/missing/protected/failed.
     """
     root = _root()
