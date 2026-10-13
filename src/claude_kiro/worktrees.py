@@ -17,6 +17,7 @@ shell aliases and command-rewriting hooks don't interfere.
 import contextlib
 import datetime
 import os
+import re
 import subprocess
 from dataclasses import asdict, dataclass, field
 from fnmatch import fnmatchcase
@@ -640,3 +641,72 @@ def status(root: Path, spec: str) -> List[Outcome]:
             bits.append(f"{ahead} ahead of {base}")
         outcomes.append(Outcome(num, "BUSY" if reason else "EXISTS", ", ".join(bits), rel_path(root, path), branch))
     return outcomes
+
+
+def report(root: Path, spec: str, into: Optional[str] = None) -> Dict:
+    """What a run actually achieved, from git: the source for an orchestrator's final report.
+
+    - merged: tasks with a merge commit made ON `into` (first-parent history) whose subject
+      names the task branch (`ck worktree land/merge` write "Merge feat/<spec>-task-N (task N)";
+      git's default "Merge branch 'feat/<spec>-task-N'" counts too). Merges of the target
+      into a task branch are not on the first-parent line and don't count.
+    - done: Done in tasks.md on `into` but with no merge commit (an earlier run, a direct commit).
+    - failed: not merged or Done, and the task branch has commits that are not on `into`.
+    - blocked: none of the above, and a dependency is not Done on `into` ("on" lists them).
+    - unstarted: the rest: ready to start, but nothing was committed for it.
+
+    Every task of tasks.md is in exactly one list. Agent results are not consulted.
+    """
+    from claude_kiro.hooks._shared.spec_parser import parse_tasks_text
+    from claude_kiro.paths import LEGACY_SPECS_DIR, SPECS_DIR
+
+    into = into or current_branch(root)
+    if not into or not branch_exists(root, into):
+        raise WorktreeError(f"branch {into or '(none)'} does not exist")
+    head = git(root, "rev-parse", into).stdout.strip()
+    content = None
+    for base_dir in (SPECS_DIR, LEGACY_SPECS_DIR):
+        shown = git(root, "show", f"{into}:{base_dir}/{spec}/tasks.md", check=False)
+        if shown.returncode == 0:
+            content = shown.stdout
+            break
+    if content is None:
+        raise WorktreeError(f"no {SPECS_DIR}/{spec}/tasks.md on {into}")
+    tasks = parse_tasks_text(content)
+    known = {t.num for t in tasks}
+    done = {t.num for t in tasks if t.done}
+
+    pattern = re.compile(rf"feat/{re.escape(spec)}-task-([0-9A-Za-z_]+)")
+    merges: Dict[str, Dict] = {}
+    log = git(root, "log", "--merges", "--first-parent", "--reverse", "--format=%H%x09%cI%x09%s", into).stdout
+    for line in log.splitlines():
+        sha, at, subject = (line.split("\t", 2) + ["", ""])[:3]
+        match = pattern.search(subject)
+        if match and match.group(1) in known and match.group(1) not in merges:
+            merges[match.group(1)] = {"commit": sha, "mergedAt": at, "subject": subject}
+
+    out: Dict[str, List[Dict]] = {"merged": [], "done": [], "failed": [], "blocked": [], "unstarted": []}
+    for task in tasks:
+        n = task.num
+        if n in merges:
+            out["merged"].append({"task": n, **merges[n], "done": n in done})
+            continue
+        if n in done:
+            out["done"].append({"task": n})
+            continue
+        branch = task_branch(spec, n)
+        ahead = int(git(root, "rev-list", "--count", f"{into}..{branch}").stdout.strip() or 0) if branch_exists(root, branch) else 0
+        if ahead:
+            path = task_path(root, spec, n)
+            entry = {"task": n, "branch": branch, "ahead": ahead}
+            claim = lock_reason(root, path) if path.exists() else None
+            if claim:
+                entry["claim"] = claim
+            out["failed"].append(entry)
+            continue
+        waiting = [d for d in task.dependencies if d not in done]
+        if waiting:
+            out["blocked"].append({"task": n, "on": waiting})
+        else:
+            out["unstarted"].append({"task": n})
+    return {"spec": spec, "into": into, "head": head, **out}

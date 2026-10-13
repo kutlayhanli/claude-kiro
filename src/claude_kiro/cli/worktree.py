@@ -390,3 +390,37 @@ def status_cmd(spec, as_json):
         click.echo("No task worktrees.")
         return
     _emit(outcomes, as_json, bad_states=())
+
+
+@worktree.command("report")
+@click.argument("spec")
+@click.option("--into", help="Target branch (default: the main checkout's branch)")
+@click.option("--json", "as_json", is_flag=True)
+def report_cmd(spec, into, as_json):
+    """What landed, from git: merged / done / failed / blocked / unstarted tasks of SPEC.
+
+    \b
+    merged:    a merge commit on the target names the task branch
+    done:      Done in tasks.md on the target, no merge commit (earlier run)
+    failed:    the task branch has commits that never landed
+    blocked:   a dependency is not Done on the target ("on")
+    unstarted: ready, but nothing was committed for it
+    Each task is in exactly one list. Agent claims are not consulted; an
+    orchestrator adds its agents' reasons to this as annotations.
+    """
+    try:
+        result = wt.report(_root(), _spec_name(spec), into=into)
+    except wt.WorktreeError as e:
+        if as_json:
+            click.echo(json.dumps({"error": str(e)}, indent=2))
+        else:
+            click.echo(f"❌ {e}")
+        sys.exit(3)
+    if as_json:
+        click.echo(json.dumps(result, indent=2))
+        return
+    click.echo(f"Report for {result['spec']} on {result['into']} ({result['head'][:10]}):")
+    for key in ("merged", "done", "failed", "blocked", "unstarted"):
+        items = result[key]
+        shown = ", ".join(f"{e['task']} (on {', '.join(e['on'])})" if key == "blocked" else e["task"] for e in items)
+        click.echo(f"  {key} {len(items)}{': ' + shown if shown else ''}")
