@@ -1058,12 +1058,17 @@ def upgrade(dry_run: bool, no_migrate: bool, allow_downgrade: bool, to_vendor: b
 @cli.command()
 @click.argument("spec")
 @click.option("--task", "-t", "tasks", multiple=True, help="Task number to verify (repeatable). Default: every Done task.")
-def gate(spec: str, tasks: tuple):
+@click.option("--no-reuse", is_flag=True, help="With --task: run the commands even if this exact tree already passed them")
+def gate(spec: str, tasks: tuple, no_reuse: bool):
     """Run the verification gate for SPEC (a name in specs/ or a path).
 
     Checks acceptance boxes, runs the verify commands from specs/ck.json and the
     tasks' **Verify:** lines, and checks no existing test was deleted or
     weakened on this branch. Exits 1 if anything fails.
+
+    A --task gate whose working tree already passed the same commands (an
+    earlier --task gate, or the done-verify hook when the task was marked Done)
+    reuses that pass instead of running them again; the other checks still run.
     """
     from ..gate import run_gate
 
@@ -1078,7 +1083,8 @@ def gate(spec: str, tasks: tuple):
             sys.exit(2)
         candidate = matches[0]
 
-    result = run_gate(project_dir, candidate, [t.removeprefix("Task ").strip() for t in tasks] or None)
+    result = run_gate(project_dir, candidate, [t.removeprefix("Task ").strip() for t in tasks] or None,
+                      reuse=bool(tasks) and not no_reuse)
     if not result.tasks and not result.checks:
         click.echo("ℹ️  No Done tasks to verify. Pass --task N to verify a specific task.")
         return

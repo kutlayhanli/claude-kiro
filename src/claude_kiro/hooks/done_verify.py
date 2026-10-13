@@ -9,7 +9,7 @@ later turns; the Stop hook only warns, and the full gate runs at merge.
 
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from claude_kiro.hooks._shared import claims as cl
 from claude_kiro.hooks._shared import git_utils
@@ -20,12 +20,24 @@ from claude_kiro.paths import is_spec_path, spec_roots
 FILE_TOOLS = {"Edit", "Write", "MultiEdit"}
 
 
-def _edited_tasks_md(cwd: Path, input_data: dict) -> Optional[Path]:
+def _edited_tasks_md(cwd: Path, input_data: dict) -> Optional[Tuple[Path, Path]]:
+    """(tasks.md, the checkout it belongs to) for an edit of a spec's tasks.md.
+
+    Workflow subagents edit tasks.md in their task worktree while Claude Code reports the
+    session's cwd (the main checkout), so a tasks.md outside cwd is gated in its own checkout.
+    """
     file_path = (input_data.get("tool_input") or {}).get("file_path", "")
     if not file_path:
         return None
     path = Path(file_path) if os.path.isabs(file_path) else cwd / file_path
-    return path if path.name == "tasks.md" and is_spec_path(str(path), cwd) else None
+    if path.name != "tasks.md":
+        return None
+    if is_spec_path(str(path), cwd):
+        return path, cwd
+    top = (git_utils._git(path.parent, "rev-parse", "--show-toplevel") or "").strip() if path.parent.is_dir() else ""
+    if top and is_spec_path(str(path), Path(top)):
+        return path, Path(top)
+    return None
 
 
 def _rewritten_by_bash(cwd: Path, seen: dict, session_start: float) -> List[Path]:
@@ -66,7 +78,7 @@ def hook(input_data: dict) -> Optional[dict]:
         targets = [edited] if edited else []
     else:
         before_scan = dict(seen)
-        targets = _rewritten_by_bash(cwd, seen, tracker.session_start)
+        targets = [(t, cwd) for t in _rewritten_by_bash(cwd, seen, tracker.session_start)]
         if not targets and seen != before_scan:
             tracker.save_gate()
     if not targets:
@@ -76,22 +88,22 @@ def hook(input_data: dict) -> Optional[dict]:
     from claude_kiro.config import load_config
     from claude_kiro.gate import run_gate
 
-    config = load_config(cwd)
     passes, failures, warnings = [], [], []
-    for tasks_md in targets:
+    for tasks_md, root in targets:
         now = cl.done_now(tasks_md)
         record = seen.get(str(tasks_md))
-        before = set(record["done"]) if record else cl.done_at_head(cwd, tasks_md)
+        before = set(record["done"]) if record else cl.done_at_head(root, tasks_md)
         if before is None:  # outside git with no earlier look: every Done task is a claim
             before = set()
         if tool == "Bash":
-            before |= cl.done_at_head(cwd, tasks_md) or set()
+            before |= cl.done_at_head(root, tasks_md) or set()
         new = cl.task_order(now - before)
 
         recorded = set(now)
         if new:
             spec_dir = tasks_md.parent
-            result = run_gate(cwd, spec_dir, new, config)
+            # Stamped by tree: the agent's own `ck gate --task` on the same tree reuses this pass.
+            result = run_gate(root, spec_dir, new, load_config(root), reuse=True, stamp_by="done-verify")
             for num in new:
                 cl.claims(state)[cl.claim_key(spec_dir, num)] = "pass" if result.ok else "fail"
             if result.ok:
