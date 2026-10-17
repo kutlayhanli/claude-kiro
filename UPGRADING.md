@@ -1,5 +1,6 @@
 # Upgrading
 
+- **From 0.10:** see [Unreleased](#unreleased).
 - **From 0.9.1 to 0.10:** see the next section.
 - **From 0.9.0 to 0.9.1:** see [0.9.0 → 0.9.1](#090--091).
 - **From 0.8 to 0.9:** see [0.8 → 0.9](#08--09), then the 0.9.1 and 0.10 notes.
@@ -10,6 +11,10 @@
 - **From 0.3 to 0.4:** see [0.3 → 0.4](#03--04).
 - **From 0.2:** apply the 0.3 notes below as well; the steps are the same.
 - **From 0.1:** skip to [Upgrading to 0.2](#upgrading-to-02), then come back for the 0.3 and 0.4 notes (same commands).
+
+## Unreleased
+
+- **Graph gate.** `/spec:create` and `/spec:review` end with a new phase. The lists stay the source of truth; the gate builds a traceability graph in addition to them and requires both to be complete and consistent. `ck graph <spec>` reads the declared links (design traceability table, test-plan Criterion/Requirement columns, `**Requirements:**`, `**Verified by:**`/`**Verifies:**`, `**Properties:**`, TC ids in test tasks, `**Dependencies:**`) and reports errors: a criterion with no design row, test case or property, impl task or test task; dangling ids; asymmetric Verified by / Verifies; a property not owned by exactly one test task. A blind agent infers the same links from `ck graph <spec> --blind` (the content with every declared link removed), `ck graph --diff` compares the two, and a reconciler (session model, high effort, at most 2 passes) fixes link drift and coverage gaps, keeps declared links the blind agent missed, and returns behaviour conflicts as decisions (`source: "graph"` in `review.openQuestions`, "found by the graph gate" in review.md). The gate writes `specs/<spec>/graph.json`; it is derived, records hashes of the lists it was built from, and `ck lint` warns (`graphStale`) once a list changes after it. A spec whose graph still has errors comes back "Needs work". The workflow result gains `graph: {passes, inferredLinks, fixed, kept, decisions, remainingErrors, lost}` and lists `graph.json` in `files`. Older specs without numbered criteria or a traceability table get those as errors; run `/spec:review` to bring them up to date. Run `ck upgrade` to get the new workflow and commands.
 
 ## 0.9.1 → 0.10
 

@@ -4,6 +4,7 @@ import json
 import socket
 import sys
 from pathlib import Path
+from typing import Optional
 
 import click
 
@@ -168,7 +169,7 @@ def lint(spec: str, as_json: bool, contracts: bool, tasks, base, strict: bool):
         return
     result = _plan(Path.cwd(), spec, set())
     if as_json:
-        click.echo(json.dumps({k: result[k] for k in ("cycles", "verifyCycles", "reasonless", "criticalPath", "waves", "riskUntagged")}, indent=2))
+        click.echo(json.dumps({k: result[k] for k in ("cycles", "verifyCycles", "reasonless", "criticalPath", "waves", "riskUntagged", "graphStale")}, indent=2))
     else:
         click.echo(f"Plan lint for {result['spec']}:")
         if result["cycles"]:
@@ -193,6 +194,8 @@ def lint(spec: str, as_json: bool, contracts: bool, tasks, base, strict: bool):
             click.echo(f"  ⚠ Task {item['task']} touches risk path {item['file']} but has no **Risk:** safety (matches {item['pattern']} in risk_paths)")
         if result["riskUntagged"]:
             click.echo("      It is routed as safety anyway. Add \"**Risk:** safety (one-line reason)\" so the spec says so.")
+        if result["graphStale"]:
+            click.echo(f"  ⚠ graph.json is stale: {', '.join(result['graphStale'])} changed since it was built. Run `ck graph {result['spec']} --write`, or /spec:review to rerun the Graph Gate.")
         path = result["criticalPath"]
         if path:
             click.echo(f"  ℹ critical path ({len(path)} of {len(result['remaining'])} open tasks): {' -> '.join(path)}")
@@ -228,6 +231,66 @@ def _lint_contracts(spec: str, as_json: bool, tasks, base, strict: bool) -> None
             click.echo("      backticked name defines. Fix the test or the design, or list deliberate ones in")
             click.echo("      specs/ck.json \"contracts_ignore\".")
     if strict and result["unknown"]:
+        sys.exit(1)
+
+
+@click.command()
+@click.argument("spec")
+@click.option("--json", "as_json", is_flag=True)
+@click.option("--write", is_flag=True, help="Also write specs/<spec>/graph.json (derived; never edit it by hand)")
+@click.option("--blind", is_flag=True, help="Instead: print the spec's content with every declared criterion link removed, for an agent to infer links from")
+@click.option("--diff", "inferred_path", type=click.Path(exists=True, dir_okay=False), help='Compare with an inferred graph: JSON {"edges": [{"from", "to", "evidence"}]}')
+def graph(spec: str, as_json: bool, write: bool, blind: bool, inferred_path: Optional[str]):
+    """Build SPEC's traceability graph from its lists and check it for completeness.
+
+    Links criteria to design elements, test cases, properties and tasks, and tasks to each other.
+    Exits 1 if anything is missing or dangling (a criterion nothing designs, tests or implements;
+    a reference to an id that doesn't exist; Verified by / Verifies out of step).
+    """
+    from ..graph import blind_dossier, build_graph, diff_graphs, write_graph
+
+    spec_dir = _spec_dir(Path.cwd(), spec)
+    if blind:
+        click.echo(blind_dossier(spec_dir), nl=False)
+        return
+    result = build_graph(spec_dir)
+    inferred = diff = None
+    if inferred_path:
+        try:
+            inferred = json.loads(Path(inferred_path).read_text())
+        except ValueError as e:
+            click.echo(f"❌ {inferred_path} is not valid JSON: {e}")
+            sys.exit(2)
+        diff = diff_graphs(result, inferred)
+    written = write_graph(spec_dir, result, inferred, diff) if write else None
+    errors = [i for i in result["issues"] if i["severity"] == "error"]
+    if as_json:
+        click.echo(json.dumps({"issues": result["issues"], "diff": diff, "nodes": len(result["nodes"]),
+                               "edges": len(result["edges"]), "written": str(written) if written else None}, indent=2))
+    else:
+        kinds: dict = {}
+        for node in result["nodes"]:
+            kinds[node["kind"]] = kinds.get(node["kind"], 0) + 1
+        click.echo(f"Graph for {spec_dir.name}: {', '.join(f'{n} {k}' for k, n in kinds.items())}; {len(result['edges'])} links")
+        if not result["issues"]:
+            click.echo("  ✓ complete: every criterion is designed, covered, implemented and tested; no dangling references")
+        for item in result["issues"]:
+            click.echo(f"  {'✗' if item['severity'] == 'error' else '⚠'} {item['message']}")
+        if diff:
+            click.echo(f"Against the inferred graph ({diff['counts']['inferred']} inferred, {diff['counts']['declared']} declared links):")
+            for e in diff["declaredOnly"]:
+                click.echo(f"  ⚠ declared, not supported by the content: {e['from']} -> {e['to']}")
+            for e in diff["inferredOnly"]:
+                click.echo(f"  ⚠ inferred, not declared: {e['from']} -> {e['to']}" + (f" ({e['evidence']})" if e.get("evidence") else ""))
+            for cid in diff["orphans"]:
+                click.echo(f"  ✗ linked in neither graph: {cid}")
+            for e in diff["unknown"]:
+                click.echo(f"  ⚠ inferred edge names an unknown node: {e['from']} -> {e['to']}")
+            if not any(diff[k] for k in ("declaredOnly", "inferredOnly", "orphans", "unknown")):
+                click.echo("  ✓ the two graphs agree")
+        if written:
+            click.echo(f"  ℹ wrote {written}")
+    if errors:
         sys.exit(1)
 
 

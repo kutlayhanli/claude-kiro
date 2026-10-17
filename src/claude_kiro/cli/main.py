@@ -22,7 +22,7 @@ from .update import update
 from .hooks import hook
 from .run import run
 from .bench import bench, cost
-from .worktree import lint, plan, waves, worktree
+from .worktree import graph, lint, plan, waves, worktree
 from .runner import HOOK_SETTINGS, configured_hooks, execute_hook, install_hook_settings
 
 
@@ -1124,6 +1124,7 @@ cli.add_command(worktree)
 cli.add_command(waves)
 cli.add_command(plan)
 cli.add_command(lint)
+cli.add_command(graph)
 cli.add_command(agents)
 cli.add_command(update)
 cli.add_command(run)

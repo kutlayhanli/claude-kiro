@@ -27,6 +27,9 @@ function stub(overrides = {}) {
     if (l === 'snapshot spec before revision') return { copied: ['requirements.md', 'design.md', 'test-plan.md', 'tasks.md'] }
     if (l.startsWith('consistency check')) return { contradictions: [] }
     if (l === 'remove pre-revision snapshot') return { removed: true }
+    if (l === 'graph gate: infer links blind') return { edges: [{ from: 'TC-1', to: '1.1', evidence: 'saves' }] }
+    if (l.startsWith('graph gate: reconcile')) return { findings: [], remainingErrors: [], written: true }
+    if (l === 'remove inferred graph scratch file') return { removed: true }
     throw new Error('unexpected ' + l)
   }
   return { agent, calls, prompts }
@@ -44,7 +47,7 @@ await test('create: authoring stages, 4 lenses, refuted/decision findings routed
   assert.deepEqual(result.review.fixed, ['R1'])
   assert.deepEqual(result.review.openQuestions.map(q => q.id), ['R2'])
   assert.equal(result.review.refutedCount, 1)
-  assert.equal(result.files.length, 5)
+  assert.deepEqual(result.files.slice(-2), ['/p/specs/f/review.md', '/p/specs/f/graph.json'])
 })
 
 await test('review mode skips authoring', async () => {
@@ -284,4 +287,99 @@ await test('verification lens and test plan: property conflicts and governing cr
   assert.match(v, /same outcome/i)
   assert.match(v, /both ids and the input/i)
   assert.match(s.prompts['write test-plan.md'], /governing criterion id/i)
+})
+
+// ---------------------------------------------------------------------------
+// Graph gate: a graph built in addition to the lists, checked against a blind one.
+// ---------------------------------------------------------------------------
+
+const gateFinding = (id, resolution, extra = {}) => ({ id, kind: 'missing-link', nodes: ['TC-4', '2.1'], description: 'd', resolution, ...extra })
+
+await test('graph gate runs last, in both modes, blind inference before reconciling; scratch file removed', async () => {
+  for (const mode of ['create', 'review']) {
+    const s = stub()
+    const { result } = await runWorkflow(SCRIPT, { agent: s.agent, args: args(mode) })
+    const at = l => s.calls.indexOf(l)
+    assert.ok(at('consistency check: pass 1') < at('graph gate: infer links blind'), mode)
+    assert.ok(at('graph gate: infer links blind') < at('graph gate: reconcile pass 1'), mode)
+    assert.ok(at('graph gate: reconcile pass 1') < at('remove inferred graph scratch file'), mode)
+    assert.equal(s.calls.at(-1), 'remove inferred graph scratch file', mode)
+    assert.deepEqual(result.graph, { passes: 1, inferredLinks: 1, fixed: [], kept: [], decisions: [], remainingErrors: [], lost: false })
+    assert.ok(result.files.includes('/p/specs/f/graph.json'), mode)
+  }
+})
+
+await test('graph gate runs even when the review had nothing to fix', async () => {
+  const s = stub({ 'review: fidelity': { findings: [] } })
+  const { result } = await runWorkflow(SCRIPT, { agent: s.agent, args: args('create') })
+  assert.ok(s.calls.includes('graph gate: infer links blind'))
+  assert.equal(result.graph.passes, 1)
+})
+
+await test('graph gate prompts: blind agent reads only the dossier; reconciler diffs, writes graph.json, records findings', async () => {
+  const s = stub()
+  await runWorkflow(SCRIPT, { agent: s.agent, args: args('create') })
+  const blind = s.prompts['graph gate: infer links blind']
+  assert.match(blind, /ck graph f --blind/)
+  assert.match(blind, /Read ONLY that output/)
+  assert.match(blind, /Do not open requirements\.md, design\.md, test-plan\.md, tasks\.md/)
+  assert.match(blind, /graph\.json/)
+  assert.match(blind, /"Story N"/)
+  assert.match(blind, /\/p\/specs\/f\/\.graph-inferred\.json/)
+  const rec = s.prompts['graph gate: reconcile pass 1']
+  assert.match(rec, /ck graph f --diff \/p\/specs\/f\/\.graph-inferred\.json --json/)
+  assert.match(rec, /ck graph f --write --diff/)
+  for (const key of ['declaredOnly', 'inferredOnly', 'orphans', 'unknown']) assert.ok(rec.includes(key), key)
+  assert.match(rec, /second opinion, not an oracle/)
+  assert.match(rec, /Never change a criterion's meaning/)
+  assert.match(rec, /found by the graph gate/)
+  assert.match(rec, /## Graph Gate/)
+})
+
+await test('graph gate: fixes with errors left trigger a second pass; decisions reach openQuestions', async () => {
+  const s = stub({
+    'review: fidelity': { findings: [] },
+    'graph gate: reconcile pass 1': { findings: [gateFinding('G1.1', 'fixed', { fix: 'added 2.1 to Task 2' }), gateFinding('G1.2', 'kept', { fix: 'blind agent missed it' }),
+      gateFinding('G1.3', 'decision', { kind: 'behaviour', question: 'Newest first or alphabetical?', options: ['newest first', 'alphabetical'], evidence: 'requirements.md:9 newest first' })],
+      remainingErrors: ['2.2 is tested by no test task'], written: true },
+    'graph gate: reconcile pass 2': { findings: [gateFinding('G2.1', 'fixed')], remainingErrors: [], written: true },
+  })
+  const { result } = await runWorkflow(SCRIPT, { agent: s.agent, args: args('create') })
+  assert.ok(!s.calls.includes('graph gate: reconcile pass 3'))
+  assert.equal(result.graph.passes, 2)
+  assert.deepEqual(result.graph.fixed.map(f => f.id), ['G1.1', 'G2.1'])
+  assert.deepEqual(result.graph.kept.map(f => f.id), ['G1.2'])
+  assert.deepEqual(result.graph.remainingErrors, [])
+  const q = result.review.openQuestions.find(x => x.id === 'G1.3')
+  assert.equal(q.source, 'graph')
+  assert.deepEqual(q.options, ['newest first', 'alphabetical'])
+  assert.match(q.conflictsWith, /newest first/)
+  assert.match(s.prompts['graph gate: reconcile pass 2'], /G1\.1/)
+})
+
+await test('graph gate: no fixes means no second pass even with errors left; errors left make the spec "Needs work"', async () => {
+  const s = stub({ ...onlyR1,
+    'revise spec + write review.md': { fixed: ['R1'], notFixed: [], escalated: [], result: 'Ready', schedule: 's' },
+    'graph gate: reconcile pass 1': { findings: [], remainingErrors: ['design.md is missing'], written: true } })
+  const { result } = await runWorkflow(SCRIPT, { agent: s.agent, args: args('create') })
+  assert.ok(!s.calls.includes('graph gate: reconcile pass 2'))
+  assert.equal(result.review.result, 'Needs work')
+  assert.deepEqual(result.graph.remainingErrors, ['design.md is missing'])
+})
+
+await test('graph gate: a dead blind agent skips reconciling, is reported, still cleans up', async () => {
+  const s = stub({ 'graph gate: infer links blind': null })
+  const { result, logs } = await runWorkflow(SCRIPT, { agent: s.agent, args: args('create') })
+  assert.ok(!s.calls.some(c => c.startsWith('graph gate: reconcile')))
+  assert.ok(s.calls.includes('remove inferred graph scratch file'))
+  assert.equal(result.graph.lost, true)
+  assert.ok(logs.some(l => /blind inference failed/.test(l)))
+})
+
+await test('graph gate: a dead reconciler is reported, not fatal', async () => {
+  const s = stub({ 'graph gate: reconcile pass 1': null })
+  const { result } = await runWorkflow(SCRIPT, { agent: s.agent, args: args('create') })
+  assert.equal(result.graph.lost, true)
+  assert.equal(result.graph.passes, 0)
+  assert.ok(result.review)
 })

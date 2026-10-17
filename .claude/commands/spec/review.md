@@ -8,7 +8,7 @@ Review the specification: $ARGUMENTS
 
 # Spec-Review: Adversarial Review of an Existing Spec
 
-Use this after the spec or the code has drifted, after hand edits, or for specs written before `/spec:create` reviewed its own output. It runs the review half of the `spec-create` workflow: four reviewers attack the spec (plan fidelity, codebase grounding, implementability, test adequacy), a separate skeptic tries to refute each finding, and the survivors are applied. A fix that would change behaviour a criterion or property governs comes back to me as a decision instead, and a consistency check then diffs the revised files against a pre-revision snapshot and checks the changes against the criteria and properties. On an older spec without `test-plan.md`, the test-adequacy lens flags it and the revision adds one.
+Use this after the spec or the code has drifted, after hand edits, or for specs written before `/spec:create` reviewed its own output. It runs the review half of the `spec-create` workflow: four reviewers attack the spec (plan fidelity, codebase grounding, implementability, test adequacy), a separate skeptic tries to refute each finding, and the survivors are applied. A fix that would change behaviour a criterion or property governs comes back to me as a decision instead, and a consistency check then diffs the revised files against a pre-revision snapshot and checks the changes against the criteria and properties. Last, the graph gate builds the traceability graph from the lists, checks it against one inferred blind from the content, fixes link drift and coverage gaps, and rewrites `graph.json`. On an older spec without `test-plan.md`, the test-adequacy lens flags it and the revision adds one.
 
 **Calling the Workflow tool here is intended.** Running `/spec:review` is my opt-in.
 
@@ -32,6 +32,6 @@ Use this after the spec or the code has drifted, after hand edits, or for specs 
      "date": "[today, YYYY-MM-DD]"
    }
    ```
-4. When it returns, report: result, how many findings were fixed, refuted, or need my decision, what the consistency check fixed or raised (`consistency`), and any partial coverage. Ask me the open questions (`review.openQuestions`, every `source`: review, revise, consistency; show `conflictsWith` and offer the `options` for the last two) with AskUserQuestion, apply my answers consistently across the spec files, and record them in `review.md` (and PLAN.md if it exists).
+4. When it returns, report: result, how many findings were fixed, refuted, or need my decision, what the consistency check fixed or raised (`consistency`), what the graph gate fixed, kept or raised and any errors it left (`graph`), and any partial coverage. Ask me the open questions (`review.openQuestions`, every `source`: review, revise, consistency, graph; show `conflictsWith` and offer the `options` for the last three) with AskUserQuestion, apply my answers consistently across the spec files, and record them in `review.md` (and PLAN.md if it exists).
 
 The full record is in `specs/[spec-name]/review.md`.

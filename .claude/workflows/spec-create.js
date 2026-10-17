@@ -10,6 +10,7 @@ export const meta = {
     { title: 'Adversarial Review', detail: '4 lenses, each finding challenged by a refuter' },
     { title: 'Revise', detail: 'snapshot the spec, apply confirmed fixes, write review.md' },
     { title: 'Consistency Check', detail: 'diff the revision against the snapshot and check it against the criteria and properties' },
+    { title: 'Graph Gate', detail: 'build the traceability graph from the lists, infer one blind from the content, reconcile the two' },
   ],
 }
 
@@ -34,6 +35,8 @@ const DES = `${DIR}/design.md`
 const TSK = `${DIR}/tasks.md`
 const TPL = `${DIR}/test-plan.md`
 const REVIEW = `${DIR}/review.md`
+const GRAPH = `${DIR}/graph.json`
+const INFERRED = `${DIR}/.graph-inferred.json`
 const DRAFT_IMPL = `${DIR}/.tasks-impl.draft.md`
 const DRAFT_TEST = `${DIR}/.tasks-test.draft.md`
 
@@ -781,6 +784,148 @@ Mechanical step. Run \`rm -rf ${SNAP}\` and nothing else. Return removed: true i
   log('No fixes to apply; skipping the snapshot and the consistency check.')
 }
 
+// ---------------------------------------------------------------------------
+// Graph Gate: the lists stay the source; the graph is a check built on them.
+// `ck graph` reads the declared links into a graph and checks completeness.
+// A blind agent, given only `ck graph --blind` (the content with every declared
+// link removed), infers which criteria each design element, case, property and
+// task serves. The reconciler works the completeness issues and the diff:
+// link drift it fixes, a declared link the blind agent missed it keeps,
+// behaviour conflicts become decisions. graph.json is derived: written here,
+// never edited, and `ck lint` warns once the lists change after it.
+// ---------------------------------------------------------------------------
+
+const INFERRED_EDGES = {
+  type: 'object',
+  properties: {
+    edges: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          from: { type: 'string', description: 'a source node id exactly as the dossier lists it: "D:<name>", "TC-n", "P-n", "Task N"' },
+          to: { type: 'string', description: 'a criterion id ("2.3"), or "Story N" when the content only supports the story as a whole' },
+          evidence: { type: 'string', description: 'a short quote from the source content that shows the link' },
+        },
+        required: ['from', 'to', 'evidence'],
+      },
+    },
+  },
+  required: ['edges'],
+}
+
+const GRAPH_FINDINGS = {
+  type: 'object',
+  properties: {
+    findings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'G<pass>.<n>, e.g. G1.3' },
+          kind: { type: 'string', enum: ['missing-link', 'wrong-link', 'coverage-gap', 'dangling', 'asymmetry', 'behaviour'] },
+          nodes: { type: 'array', items: { type: 'string' } },
+          description: { type: 'string' },
+          evidence: { type: 'string', description: 'file:line and a quote for each side' },
+          resolution: { type: 'string', enum: ['fixed', 'kept', 'decision'] },
+          fix: { type: 'string', description: 'the edit made (fixed), or why the declared link stands (kept)' },
+          question: { type: 'string', description: 'the decision to put to the user, when resolution is decision' },
+          options: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['id', 'kind', 'nodes', 'description', 'resolution'],
+      },
+    },
+    remainingErrors: { type: 'array', items: { type: 'string' }, description: 'the error lines `ck graph` still prints after your fixes' },
+    written: { type: 'boolean', description: 'true if graph.json was written' },
+  },
+  required: ['findings', 'remainingErrors', 'written'],
+}
+
+const MAX_GRAPH_PASSES = 2
+const graph = { passes: 0, inferred: 0, fixed: [], kept: [], decisions: [], remainingErrors: [], lost: false }
+
+phase('Graph Gate')
+const inferred = await agent(`
+You are building a traceability graph of a spec from its content alone. Another step builds the same graph from the links the spec declares (traceability table, criterion columns, **Requirements:** fields); comparing the two finds links that are wrong or missing. Your graph is only useful if it is independent, so you work blind.
+
+Run \`ck graph ${A.feature} --blind\` from ${ROOT}. Its output is the spec's content with every declared link removed (criterion references show as [ref]). Read ONLY that output. Do not open requirements.md, design.md, test-plan.md, tasks.md, review.md, ${GRAPH}, or anything under ${DIR}: they contain the declared links, and copying them defeats the check.
+
+For every link source in the dossier (each design element "D:<name>", test case "TC-n", property "P-n", and task "Task N"), decide which criteria its content shows it serves:
+- a design element: the criteria whose behaviour it provides,
+- a test case or property: the criteria whose behaviour it checks (a property's governing criterion is the one whose rule the property states),
+- an impl task: the criteria it implements; a test task: the criteria its tests check.
+Link to a single criterion ("2.3") when the content supports it, to "Story N" when the content only supports the story as a whole. Leave out a source with no behaviour of its own (pure test infrastructure, scaffolding) rather than guessing. Every edge needs evidence: a short quote from the source's content. Use node ids exactly as the dossier writes them.
+
+Write the edges as JSON, {"edges": [{"from", "to", "evidence"}, ...]}, to ${INFERRED}, then return the same edges.`, {
+  label: 'graph gate: infer links blind',
+  phase: 'Graph Gate',
+  effort: 'high',
+  schema: INFERRED_EDGES,
+})
+
+if (!inferred) {
+  log('Graph gate: the blind inference failed to return; the graph was not checked against the content.')
+  graph.lost = true
+} else {
+  graph.inferred = (inferred.edges || []).length
+  let lastFixed = []
+  for (let pass = 1; pass <= MAX_GRAPH_PASSES; pass++) {
+    const previous = pass > 1
+      ? `\nThis is pass ${pass}. Pass ${pass - 1} made these fixes; check them especially, since a fix can open a new gap:\n${JSON.stringify(lastFixed.map(f => ({ id: f.id, fix: f.fix })), null, 2)}\nDo not re-report findings already resolved.\n`
+      : ''
+    const reconciled = await agent(`
+You are the graph gate of a spec: the last check before it is handed over. The spec's lists (requirements, design traceability, test plan, tasks) are the source of truth. \`ck graph\` builds a graph from the links they declare and checks it for completeness; a blind agent has inferred a second graph from the content alone (${INFERRED}). You reconcile them so the lists are complete and consistent.
+
+${BRIEF}
+
+Spec files: ${SPEC_FILES}.
+${previous}
+1. Run \`ck graph ${A.feature} --diff ${INFERRED} --json\` from ${ROOT}. It reports:
+   - "issues": completeness problems in the declared graph (errors: a criterion with no design row, no test case or property, no impl task or no test task; a dangling id; Verified by / Verifies out of step; a property not owned by exactly one test task. Warnings: a test task whose cases cover a criterion its **Requirements:** omit; an impl task verified by a test task sharing no criterion).
+   - "diff.declaredOnly": links the spec declares that the content did not support: possibly a wrong link.
+   - "diff.inferredOnly": links the content supports that the spec never declares: possibly missing traceability.
+   - "diff.orphans": criteria linked in neither graph: a real gap.
+   - "diff.unknown": inferred edges naming ids that don't exist (the blind agent's error; ignore them).
+2. Judge each item against the spec files themselves. The blind graph is a second opinion, not an oracle: it can miss links and invent them.
+   - **Drift** (a missing or wrong link, a dangling id, an asymmetric Verified by / Verifies, a property with no or two owners, a test task's **Requirements:** missing a criterion its cases cover) where the right link is clear from the content: fix the lists directly. Resolution "fixed".
+   - **Coverage gap** (a criterion nothing tests, implements or designs): add what is missing, consistent with the rest of the spec: a design traceability row for the component that provides it, a test case (and its test task's **Requirements:** and TC id), or the criterion on the impl task that builds it. Follow the test plan's integration-first rules and the task format exactly. Resolution "fixed".
+   - **Declared link the content supports after all** (the blind agent missed it): keep it. Resolution "kept", with the reason in fix.
+   - **Behaviour conflict** (the content of a design element, case, property or task contradicts the criterion it is linked to, or covering a criterion would change what the system does, refuses, sends or stores): do NOT edit either side. Resolution "decision", with a question stating both behaviours and 2-3 options (one is "follow criterion N.M as written").
+   - Never change a criterion's meaning to match a link. Never delete a criterion. Ignore "diff.unknown".
+3. Run \`ck graph ${A.feature} --write --diff ${INFERRED}\` from ${ROOT}. This writes ${GRAPH} (derived; never edit it by hand). Put every error line it still prints in remainingErrors.
+4. Update ${REVIEW}: append each decision as a row to its "Needs Your Decision" table, with "found by the graph gate" in its Raised by column; if there is any decision, set its **Result:** line to "Ready after decisions" (leave "Needs work" as is). Append (or extend) a "## Graph Gate" section: pass ${pass}, the declared and inferred link counts, one line per finding (id, kind, nodes, fixed / kept / decision), and the remaining errors. If ${REVIEW} does not exist, create it with just those sections.
+
+Use ids G${pass}.1, G${pass}.2, ... Report every declaredOnly, inferredOnly and orphan item and every error issue as a finding. Return the structured result.`, {
+      label: `graph gate: reconcile pass ${pass}`,
+      phase: 'Graph Gate',
+      effort: 'high',
+      schema: GRAPH_FINDINGS,
+    })
+    if (!reconciled) {
+      log(`Graph gate pass ${pass} failed to return; the graph is not fully reconciled.`)
+      graph.lost = true
+      break
+    }
+    graph.passes = pass
+    const found = reconciled.findings || []
+    lastFixed = found.filter(f => f.resolution === 'fixed')
+    graph.fixed.push(...lastFixed)
+    graph.kept.push(...found.filter(f => f.resolution === 'kept'))
+    graph.decisions.push(...found.filter(f => f.resolution === 'decision'))
+    graph.remainingErrors = reconciled.remainingErrors || []
+    log(`Graph gate pass ${pass}: ${found.length} finding(s), ${lastFixed.length} fixed, ${found.length - lastFixed.length} kept or for your decision; ${graph.remainingErrors.length} error(s) remain.`)
+    if (!lastFixed.length || !graph.remainingErrors.length) break
+  }
+}
+
+await agent(`
+Mechanical step. Run \`rm -f ${INFERRED}\` and nothing else (${GRAPH} keeps the inferred edges). Return removed: true if ${INFERRED} no longer exists.`, {
+  label: 'remove inferred graph scratch file',
+  phase: 'Graph Gate',
+  effort: 'low',
+  schema: { type: 'object', properties: { removed: { type: 'boolean' } }, required: ['removed'] },
+})
+
 const byFindingId = Object.fromEntries(toFix.map(f => [f.id, f]))
 const openQuestions = [
   ...forUser.map(f => ({ id: f.id, source: 'review', file: f.file, location: f.location, question: f.question || f.problem, fix: f.fix })),
@@ -789,16 +934,19 @@ const openQuestions = [
     return { id: e.id, source: 'revise', file: f.file || null, location: f.location || null, question: e.question, options: e.options || [], conflictsWith: e.conflictsWith, fix: f.fix || null }
   }),
   ...consistency.decisions.map(c => ({ id: c.id, source: 'consistency', file: (c.changedSide || '').split(':')[0] || null, location: c.changedSide, question: c.question || c.description, options: c.options || [], conflictsWith: c.otherSide, fix: null })),
+  ...graph.decisions.map(g => ({ id: g.id, source: 'graph', file: null, location: (g.nodes || []).join(', '), question: g.question || g.description, options: g.options || [], conflictsWith: g.evidence || null, fix: null })),
 ]
 
 let result = revision ? revision.result : 'Needs work'
 if (result === 'Ready' && openQuestions.length) result = 'Ready after decisions'
+// The gate holds: a spec whose graph still has errors is not ready, whatever the review said.
+if (graph.remainingErrors.length) result = 'Needs work'
 
 return {
   mode: MODE,
   feature: A.feature,
   specDir: DIR,
-  files: MODE === 'create' ? [REQ, DES, TPL, TSK, REVIEW] : [REVIEW],
+  files: MODE === 'create' ? [REQ, DES, TPL, TSK, REVIEW, GRAPH] : [REVIEW, GRAPH],
   authored: MODE === 'create'
     ? Object.fromEntries(Object.entries(authored).map(([k, v]) => [k, { summary: v.summary, assumptions: v.assumptions, concerns: v.concerns }]))
     : null,
@@ -813,5 +961,14 @@ return {
     lensesLost,
   },
   consistency,
+  graph: {
+    passes: graph.passes,
+    inferredLinks: graph.inferred,
+    fixed: graph.fixed,
+    kept: graph.kept,
+    decisions: graph.decisions,
+    remainingErrors: graph.remainingErrors,
+    lost: graph.lost,
+  },
   schedule: revision ? revision.schedule : null,
 }

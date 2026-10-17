@@ -30,7 +30,8 @@ The minimum is configurable: `ck agents set planning.min_model <model>`, `ck age
 3. in parallel, writes an implementation track and a test track of tasks, then links them into `tasks.md`. Each impl task is **Verified by** test tasks that run first, and each task starts as soon as its own dependencies merge (no waves). Tasks that send messages, move money, touch auth or credentials, delete, or have another irreversible external effect get `**Risk:** safety (reason)`: `/spec:implement` starts them on the strong model and always has the risky reviewer check them,
 4. runs an **adversarial review**: four reviewers attack the spec (plan fidelity, codebase grounding, implementability, test adequacy), and a separate skeptic tries to refute each finding,
 5. applies the findings that survive, and writes `review.md`. A fix that would change behaviour a requirement criterion or property governs is not applied; it comes back to me as a decision ("raised while applying fixes"),
-6. runs a **consistency check** on what the revision changed: it diffs each file against a pre-revision snapshot and checks every changed passage against the criteria and the Properties section (and properties and test cases against each other on overlapping inputs). Wording and traceability drift it fixes itself (then checks once more); behaviour conflicts come back to me as decisions ("found by the consistency check").
+6. runs a **consistency check** on what the revision changed: it diffs each file against a pre-revision snapshot and checks every changed passage against the criteria and the Properties section (and properties and test cases against each other on overlapping inputs). Wording and traceability drift it fixes itself (then checks once more); behaviour conflicts come back to me as decisions ("found by the consistency check"),
+7. runs the **graph gate**: the lists stay as they are, and a traceability graph is built in addition to them. `ck graph` reads the links the lists declare (traceability table, test-plan criterion columns, **Requirements:**, **Verified by:**) and checks that every criterion is designed, covered by a test case or property, implemented and tested, with no dangling ids. A separate agent, which sees only the content with every declared link removed (`ck graph --blind`), infers the links on its own, and a reconciler works the differences: link drift and coverage gaps it fixes in the lists, a declared link the blind agent missed it keeps, behaviour conflicts come back to me as decisions ("found by the graph gate"). It writes `graph.json`, which is derived: rebuilt by every gate, never edited, and `ck lint` warns once the lists change after it. A spec whose graph still has errors is "Needs work".
 
 Your job here is to set up the run, launch it, and bring back anything that needs my decision.
 
@@ -73,7 +74,7 @@ Also read `specs/ck.json`. If it is missing or has no `"verify"` commands, tell 
        "date": "[today, YYYY-MM-DD]"
      }
      ```
-2. Tell me it's running: requirements, then design and test plan in parallel, then two task tracks in parallel and a link step, then adversarial review and revision. I can watch it with `/workflows`.
+2. Tell me it's running: requirements, then design and test plan in parallel, then two task tracks in parallel and a link step, then adversarial review and revision, then the graph gate. I can watch it with `/workflows`.
 
 **Without the Workflow tool** (it isn't among your tools, or calling it is refused or blocked, or I pass `--no-workflow`): run `.claude/workflows/spec-create.js` by hand with the Agent tool and the same args, as `.claude/workflows/without-workflow-tool.md` describes, and tell me once that you're doing so. The steps, prompts, and result are the same.
 
@@ -93,10 +94,11 @@ When the workflow returns:
 
    Adversarial review: [N] fixed, [M] refuted, [K] need your decision
    Consistency check: [passes] pass(es), [F] drift fixed, [D] behaviour conflicts for your decision
+   Graph gate: [inferredLinks] links inferred blind, [F] fixed, [K] kept, [D] for your decision, [E] errors remaining
    Assumptions to check: [only the ones that matter]
    ```
-   Mention any `unverified` findings, lost review lenses, or `consistency.lost` so I know coverage was partial.
-3. **Open questions:** if `review.openQuestions` is non-empty, ask me with AskUserQuestion (up to 4 per call; put the reviewer's suggested fix first when it is a sensible default). Each item has a `source`: `review` (a reviewer's question), `revise` (a fix that would have changed behaviour a criterion governs, so it was not applied) or `consistency` (a contradiction the consistency check found after the revision). For `revise` and `consistency` items, show the criterion or property in `conflictsWith` next to the question and offer the item's `options`; don't pick one yourself. Applying my answer may mean changing the criterion, the design, or both: keep requirements, design, test plan and tasks consistent. Then apply my answers to the spec files, keeping requirements, design, and tasks consistent. Record each answer under a new "Decisions" entry in PLAN.md (if it exists) and in the "Needs Your Decision" table of `review.md`.
+   Mention any `unverified` findings, lost review lenses, `consistency.lost`, or `graph.lost` so I know coverage was partial. If `graph.remainingErrors` is non-empty, list them: the spec is not ready until they are fixed.
+3. **Open questions:** if `review.openQuestions` is non-empty, ask me with AskUserQuestion (up to 4 per call; put the reviewer's suggested fix first when it is a sensible default). Each item has a `source`: `review` (a reviewer's question), `revise` (a fix that would have changed behaviour a criterion governs, so it was not applied) `consistency` (a contradiction the consistency check found after the revision) or `graph` (a link whose content contradicts its criterion, found by the graph gate; `location` names the nodes). For `revise`, `consistency` and `graph` items, show the criterion or property in `conflictsWith` next to the question and offer the item's `options`; don't pick one yourself. Applying my answer may mean changing the criterion, the design, or both: keep requirements, design, test plan and tasks consistent. Then apply my answers to the spec files, keeping requirements, design, and tasks consistent. Record each answer under a new "Decisions" entry in PLAN.md (if it exists) and in the "Needs Your Decision" table of `review.md`.
 4. Finish with: "Spec ready. Use `/spec:implement [task-number]` to start, or `/spec:implement [feature-name]` to run the whole spec (`/spec:spawn-worktree specs/[feature-name]` to steer it yourself). Tasks are only Done when `ck gate` passes."
 
 ---
@@ -112,7 +114,8 @@ specs/
     ├── design.md        # how: components, public interfaces, traceability
     ├── test-plan.md     # proof: integration-first test cases, infrastructure, commands
     ├── tasks.md         # steps: ### Task N, Track, Files, Verify, Verified by, Dependencies, Risk, Schedule
-    └── review.md        # adversarial review record
+    ├── review.md        # adversarial review record
+    └── graph.json       # traceability graph from the graph gate (derived: `ck graph --write` rebuilds it; never edit)
 ```
 
 Specs live at the project root, not in `.claude/`, so writing them never needs approval.

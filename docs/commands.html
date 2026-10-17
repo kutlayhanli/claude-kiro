@@ -277,6 +277,18 @@
                 drift itself (at most two passes) and brings behaviour conflicts
                 to you.
               </p>
+              <p style="margin-top: var(--space-3)">
+                <strong>Graph gate:</strong>
+                last, a traceability graph is built in addition to the lists.
+                <code>ck graph</code> reads the links they declare and checks
+                that every criterion is designed, covered by a test case or
+                property, implemented and tested. A separate agent sees only the
+                content, with every declared link removed, and infers the links
+                on its own; a reconciler fixes the drift and gaps between the
+                two, keeps declared links the blind agent missed, and brings
+                behaviour conflicts to you. The result is
+                <code>graph.json</code>, rebuilt by every gate and never edited.
+              </p>
             </div>
           </div>
 
@@ -399,7 +411,7 @@
             <code>/spec:create</code>
             workflow on an existing spec, for example after hand edits or code
             drift. Findings that survive refutation are applied, and the same
-            consistency check runs on the revision.
+            consistency check runs on the revision, followed by the graph gate.
           </p>
 
           <div class="code-block">

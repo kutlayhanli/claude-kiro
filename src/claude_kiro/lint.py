@@ -13,6 +13,9 @@
   is treated as **Risk:** safety; an untagged one is reported, not fatal.
 - Critical path: the longest dependency chain, the floor on wall-clock time
   however many agents run.
+- Stale graph: specs/<spec>/graph.json (written by `ck graph --write`, the
+  spec-create Graph Gate) records hashes of the lists it was built from; a list
+  edited since is reported, not fatal.
 """
 
 import re
@@ -21,6 +24,7 @@ from pathlib import Path, PurePosixPath
 from typing import Dict, List, Optional, Set
 
 from claude_kiro.config import load_config
+from claude_kiro.graph import graph_staleness
 from claude_kiro.hooks._shared.spec_parser import SpecTask, parse_tasks
 from claude_kiro.hooks._shared.test_heuristics import is_test_path
 
@@ -252,4 +256,5 @@ def lint_spec(spec_dir: Path, project_dir: Path) -> Dict:
         "verifyCycles": [] if cycles else verify_order_cycles(tasks, project_dir),
         "reasonless": reasonless_dependencies(tasks),
         "criticalPath": [] if cycles else critical_path(tasks),
+        "graphStale": graph_staleness(spec_dir) or [],
     }
