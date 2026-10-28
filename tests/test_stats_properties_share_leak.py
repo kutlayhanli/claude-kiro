@@ -71,7 +71,8 @@ def mutate(obj: Any, data, planted: List[str], top: bool = False, parent: str = 
             out[new_k] = mutate(v, data, planted, parent=k)
         return out
     if isinstance(obj, list):
-        return [mutate(v, data, planted, parent=parent) for v in obj]
+        # list items are schema-structural rows (e.g. spec-implement phases {group, tasks, minutes}): plant values, never keys
+        return [mutate(v, data, planted, parent="") for v in obj]
     if isinstance(obj, str) and data.draw(st.booleans()):
         value, core = render(data.draw(PLANT))
         planted.append(core)
@@ -130,6 +131,7 @@ def test_p5_shareable_record_holds_no_confidential_term(kind, data, record_id):
     original = seeded_local_record(kind)
     terms = analytics.confidential_terms([local])
     issues = data.draw(st.lists(st.sampled_from(sorted(analytics.ISSUE_CODES)), unique=True, max_size=6))
+    # no salt assertion: the local record holds no salt and build_shareable has no salt input (design 1.8), so there is nothing to plant
     # no machine label: a confidential label is caught by the leak scan, not by build_shareable (design S13/S14)
     shareable = build(analytics, local, record_id, None, issues)
 
@@ -203,16 +205,17 @@ def test_p24_vocabulary_never_trips_the_scanner(kind, data, record_id, label):
     kinds = data.draw(st.lists(st.sampled_from(sorted(analytics.ALLOWED_WORKFLOWS)), min_size=1, max_size=3))
     recs = []
     for k in kinds:
-        rec = build(analytics, seeded_local_record("spec-create" if k == "spec-create" else "spec-implement"), "0123456789abcdef", None, [])
-        recs.append(rec)
-    text = analytics.pr_text(recs, None, token)
+        base = seeded_local_record("spec-create" if k == "spec-create" else "spec-implement")
+        base["workflowName"] = k  # includes spec-implement-iso, so the iso variant reaches pr_text
+        recs.append(build(analytics, base, "0123456789abcdef", None, []))
+    pr_label = data.draw(st.one_of(st.none(), LABELS))
+    text = analytics.pr_text(recs, pr_label, token)
     assert text["branch"] == f"ck-stats-batch-{token}"
     for word in ("ck-stats-batch", "count", "kinds", "months", "machine", text["branch"]):
         assert generic_hits(analytics, word) == [], f"template word {word!r} trips a generic pattern"
     for part in ("commit", "title", "body"):
         for line in text[part].splitlines():
-            stripped = re.sub(r"\d{4}-\d{2}", "", line)
-            assert generic_hits(analytics, stripped) == [], f"{part} line {line!r} trips a generic pattern"
+            assert generic_hits(analytics, line) == [], f"{part} line {line!r} trips a generic pattern"
 
     # a built shareable record: every ISSUE_CODES member in issues, any valid machine label
     local = seeded_local_record(kind)
