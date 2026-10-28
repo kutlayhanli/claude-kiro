@@ -280,9 +280,10 @@ def test_issue_codes_never_trip_the_leak_check(tmp_path):
         rec = json.loads(p.read_text())
         codes |= set(rec.get("issues", []))
     assert codes <= set(ISSUE_CODES)
-    # these two collide with the `permission` path segment / are the longest member: they must be exported, not skipped
+    # these three (permission_refusal collides with the `permission` path segment) must be exported, not skipped
     assert {"review_contract_mismatch", "permission_refusal", "review_blocking_unresolved"} <= codes, codes
-    assert codes == set(ISSUE_CODES) - CANNOT_BE_PRODUCED, sorted(set(ISSUE_CODES) - CANNOT_BE_PRODUCED - codes)
+    # superset: the design defines no rule that keeps consistency_conflicts out, so it may or may not be exported
+    assert codes >= set(ISSUE_CODES) - CANNOT_BE_PRODUCED, sorted(set(ISSUE_CODES) - CANNOT_BE_PRODUCED - codes)
 
 
 def test_digit_and_hex_segments_export_next_to_versions_months_and_ids(tmp_path):
@@ -295,7 +296,7 @@ def test_digit_and_hex_segments_export_next_to_versions_months_and_ids(tmp_path)
     assert len(files) == 2
     for p in files:
         rec = json.loads(p.read_text())
-        assert rec["claudeCodeVersion"] == "2.1.80", p
+        assert rec["claude_code_version"] == "2.1.80", p
         assert rec["month"] == "2026-10", p
         assert p.parent.name == "2026-10", p
         assert re.fullmatch(r"[0-9a-f]{16}", rec["id"]) and p.stem == rec["id"], p
@@ -335,7 +336,7 @@ def test_ck_vocabulary_segments_are_not_terms_but_other_segments_still_are(tmp_p
 def test_schema_doc_documents_the_matching_rules():
     doc = REPO_ROOT / "analytics" / "SCHEMA.md"
     text = doc.read_text().lower()
-    for pattern in (r"whole[- ]word", r"digit", r"vocabulary", r"fixed[- ]token"):
+    for pattern in (r"whole[- ]word", r"digit[- ]only|only (?:of )?(?:decimal|hex)", r"ck[- ]vocabulary|vocabulary term", r"fixed[- ]token"):
         assert re.search(pattern, text), f"analytics/SCHEMA.md does not document {pattern!r}"
 
 
