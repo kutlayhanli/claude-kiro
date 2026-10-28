@@ -1191,7 +1191,7 @@ none of them from `confidential_terms`, so a record with `claudeCodeVersion` `2.
 ---
 
 ### Task 33: Property test for a shareable record holding no confidential term (P-5)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.2, 7.3, 9.4, 9.3, 8.1
 **Description:** Implements P-5 and P-24 against `build_shareable`, `SHAREABLE_FIELDS`, `confidential_terms` and
@@ -1213,11 +1213,11 @@ hit. Define the generators locally. Declare `PROPERTIES`.
 **Verifies:** Task 34
 
 **Acceptance:**
-- [ ] Generators cover every string leaf and surface form listed in the P-5 row, and every fixed set named in the P-24 row
-- [ ] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
-- [ ] Tests call the decision seams `build_shareable`, `confidential_terms` and `leak_scan`, not the CLI
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] `PROPERTIES` map names the test for P-5 and P-24
+- [x] Generators cover every string leaf and surface form listed in the P-5 row, and every fixed set named in the P-24 row
+- [x] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
+- [x] Tests call the decision seams `build_shareable`, `confidential_terms` and `leak_scan`, not the CLI
+- [x] Tests fail before the implementation exists for the right reason
+- [x] `PROPERTIES` map names the test for P-5 and P-24
 
 **Dependencies:** Task 1 (hypothesis, `seeded_local_record`, `CONFIDENTIAL`)
 **Complexity:** Medium
