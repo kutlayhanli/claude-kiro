@@ -33,6 +33,8 @@ from stats_helpers import (
     stats,
 )
 
+pytestmark = pytest.mark.usefixtures("no_network")
+
 REPO = Path(__file__).resolve().parent.parent
 SCHEMA_MD = REPO / "analytics" / "SCHEMA.md"
 UPSTREAM_URL = "https://github.com/angelsen/claude-kiro.git"

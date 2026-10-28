@@ -1463,11 +1463,11 @@ submitted records, are not.
 - [x] TC-46 scans every byte under the checkout's `analytics/` with `all_bytes`, case-insensitively
 - [x] TC-49 parses the real `analytics/SCHEMA.md`, not a copy
 - [x] Tests fail before the implementation exists for the right reason (no export command / schema doc)
+- [x] No mocks of the project's own code; no network (`no_network` on the module)
 
 Implementation note: the "submitted" half of TC-81 marks the record submitted in the ledger (`state.json`
 `submitted[<record id>]`, design Ledger shape) and deletes its file, instead of running `ck stats submit`, so this suite
 does not depend on the submit command.
-- [ ] No mocks of the project's own code; no network (`no_network` on the module)
 
 **Dependencies:** Task 1 (seeded home, kiro checkout, no_network)
 **Complexity:** High
