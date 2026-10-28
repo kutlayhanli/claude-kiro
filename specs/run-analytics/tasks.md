@@ -1335,7 +1335,7 @@ give different branches. Declare `PROPERTIES`.
 ---
 
 ### Task 37: Implement the submit flow (submit.py)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9, 10.11, 9.4
 **Description:** Create `submit.py` with `TARGET_REPO = "kutlayhanli/claude-kiro"`, `remote_urls(checkout)` ((name,
@@ -1371,10 +1371,10 @@ fetch/branch/commit/push against the target remote, `gh pr create --draft --repo
 The git/gh flow criteria are verified at Task 45 (Tasks 43, 44), which also lists `submit.py` for fix-ups.
 
 **Acceptance:**
-- [ ] Only remotes normalising to `github.com/kutlayhanli/claude-kiro` pass the target check
-- [ ] Preflight refuses on uncommitted changes outside this machine's pending files or on an existing destination path
-- [ ] The PR branch starts from `<target remote>/master`, is pushed to that remote only, and the PR is opened with `--base master --head <branch>`
-- [ ] An approved note is committed only after interactive confirmation; without a TTY and with `--yes` it is left out of the commit and the rest is submitted
+- [x] Only remotes normalising to `github.com/kutlayhanli/claude-kiro` pass the target check
+- [x] Preflight refuses on uncommitted changes outside this machine's pending files or on an existing destination path
+- [x] The PR branch starts from `<target remote>/master`, is pushed to that remote only, and the PR is opened with `--base master --head <branch>`
+- [x] An approved note is committed only after interactive confirmation; without a TTY and with `--yes` it is left out of the commit and the rest is submitted
 - [ ] Branch name, commit message, PR title and body contain only allowlisted values
 - [ ] gh missing, not logged in or failing leaves no branch or commit, keeps the files, and reports the error
 - [ ] Submitted record ids are never reselected
