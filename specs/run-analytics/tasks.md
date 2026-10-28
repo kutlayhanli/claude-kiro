@@ -1299,7 +1299,7 @@ Foundation task: smoke Verify only; TC-49 (Task 39) verifies it at Task 42 and T
 ---
 
 ### Task 36: Property tests for the submit target and PR text (P-19, P-20)
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 7.9, 9.4, 10.2, 10.9
 **Description:** Implements P-19 and P-20 against the Harness Contract seams `is_target_repo(url)` and
