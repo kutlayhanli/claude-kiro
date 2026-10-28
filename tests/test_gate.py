@@ -208,6 +208,26 @@ def test_test_task_needs_real_test_cases(project):
     assert "no test cases found" in report
 
 
+def test_test_task_may_list_helpers_beside_its_tests(project):
+    tasks_md = project / "specs/calc/tasks.md"
+    write_tasks(project, t1="Done", a1="x")
+    helper = "- `tests/helpers.py` - shared fakes for the subtract tests\n"
+    tasks_md.write_text(tasks_md.read_text().replace("**Verify:** `python -m pytest -q tests/test_subtract.py`", helper + "**Verify:** `python -m pytest -q tests/test_subtract.py`", 1))
+    (project / "tests" / "helpers.py").write_text("def fake():\n    return 1\n")
+    write_subtract_tests(project)
+    check = run_gate(project, project / "specs/calc", ["1"]).report()
+    assert "no test cases found" not in check
+
+    (project / "tests" / "test_subtract.py").write_text("# TODO\n")
+    assert "no test cases found" in run_gate(project, project / "specs/calc", ["1"]).report()
+
+
+def test_await_test_counts_as_a_test_case():
+    from claude_kiro.hooks._shared.test_heuristics import measure
+
+    assert measure("await test('lands a batch', async () => {\n  assert.ok(true)\n})\n").tests == 1
+
+
 def test_weakened_test_on_branch_fails_tamper_check(project):
     write_subtract_tests(project)
     implement_subtract(project)
