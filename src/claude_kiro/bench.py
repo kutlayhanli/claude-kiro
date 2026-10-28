@@ -63,7 +63,7 @@ class BenchError(Exception):
 
 
 def normalize_model(model: Optional[str]) -> str:
-    return re.sub(r"\[[^\]]*\]$", "", model or "?")
+    return re.sub(r"\[1m\]$", "", model or "?")
 
 
 def model_family(model: Optional[str], pricing: Optional[dict] = None) -> Optional[str]:

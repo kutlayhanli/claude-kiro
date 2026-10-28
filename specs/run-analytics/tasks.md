@@ -1551,7 +1551,7 @@ that no planted string appears and every enum field is in its set or `other`.
 ---
 
 ### Task 42: Add ck stats export with the interactive issues-note flow
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 7.1, 7.8, 7.9, 7.10, 7.11, 7.12, 8.2, 8.3, 8.4, 8.5, 9.1, 9.2, 10.10
 **Description:** In `cli/stats.py`, add `export [--to CHECKOUT] [--re-export RUN_ID ...] [--note] [--yes]` (also accept
@@ -1579,14 +1579,19 @@ network call other than the interactive drafter.
 These suites also verify the criteria of foundation Tasks 35 and 38 and the CLI-reached criteria of Tasks 8, 11 and 15.
 
 **Acceptance:**
-- [ ] Export into a non-claude-kiro checkout refuses and writes nothing
-- [ ] A note is included only after interactive accept with a clean final leak scan; `--yes` or no TTY withholds it, keeps the record and starts no drafter
-- [ ] Any leak hit prints file and field per hit, writes nothing and exits non-zero
-- [ ] Nothing new exits 0; re-export happens only when asked, or for an unsubmitted record whose files are missing from the checkout (10.10, new id)
+- [x] Export into a non-claude-kiro checkout refuses and writes nothing
+- [x] A note is included only after interactive accept with a clean final leak scan; `--yes` or no TTY withholds it, keeps the record and starts no drafter
+- [x] Any leak hit prints file and field per hit, writes nothing and exits non-zero
+- [x] Nothing new exits 0; re-export happens only when asked, or for an unsubmitted record whose files are missing from the checkout (10.10, new id)
 
 **Dependencies:** Task 31 (edits cli/stats.py after Task 31), Task 38 (calls export functions), Task 8 (calls draft_note/decide_note), Task 37 (calls is_target_repo/remote_urls), Task 35 (TC-49 checks exported paths against SCHEMA.md), Task 39 (its tests are the oracle), Task 40 (its tests are the oracle), Task 41 (its tests are the oracle)
 **Complexity:** High
 **Risk:** safety (writes publishable files and gates free-text approval)
+
+**Implementation notes:** Fix-ups outside the listed files, found by this task's suites: `share.py` (task index starts at 1;
+config always emits model and effort, `inherit` when unset; `cost.usd` kept to 9 digits; record ids never hold 10+
+consecutive digits), `export.py` (note written exactly as approved, no added newline), `collect.py` (`_split_config`
+splits the effort off the last `/`), `bench.py` (`normalize_model` strips only a trailing `[1m]`).
 
 ---
 

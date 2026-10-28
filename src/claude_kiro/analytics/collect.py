@@ -496,7 +496,10 @@ def derive_outcome(result: object) -> Tuple[Optional[str], bool]:
 def _split_config(value: Any) -> Optional[dict]:
     if not isinstance(value, str) or not value or value == "off":
         return None
-    model, _, effort = value.partition("/")
+    # the effort is the last segment; a model id may itself hold slashes
+    model, sep, effort = value.rpartition("/")
+    if not sep:
+        model, effort = value, ""
     return {"model": model or None, "effort": effort or None}
 
 

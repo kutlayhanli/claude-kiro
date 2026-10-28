@@ -98,7 +98,11 @@ def enum_value(field: str, value: Any) -> str:
 
 
 def new_record_id() -> str:
-    return secrets.token_hex(8)
+    """16 random hex digits, never holding a run of 10 or more digits (it would read as an epoch timestamp)."""
+    while True:
+        rid = secrets.token_hex(8)
+        if not re.search(r"[0-9]{10}", rid):
+            return rid
 
 
 def month_of(start: Any) -> str:
@@ -406,7 +410,7 @@ def _usage_tables(local: Mapping, key: str, enum_field: str) -> Tuple[Dict[str, 
 def _tasks(local: Mapping) -> List[dict]:
     out = []
     for i, t in enumerate(_dicts(local.get("tasks"))):
-        row: Dict[str, Any] = {"index": i, "track": to_enum(t.get("track"), TRACKS)}
+        row: Dict[str, Any] = {"index": i + 1, "track": to_enum(t.get("track"), TRACKS)}
         if isinstance(t.get("ok"), bool):
             row["ok"] = t["ok"]
         for out_key, key in (("attempts", "attempts"), ("review_rounds", "reviewRounds"), ("resolves", "resolves"),
@@ -496,13 +500,12 @@ def _config(local: Mapping) -> Dict[str, dict]:
         key = role.replace("-", "_")
         if key not in CONFIG_ROLES or not isinstance(cfg, Mapping):
             continue
-        row = {}
-        if cfg.get("model") is not None:
-            row["model"] = model_alias(cfg["model"])
-        if cfg.get("effort") is not None:
-            row["effort"] = to_enum(cfg["effort"], EFFORTS)
-        if row:
-            out[key] = row
+        # an unset model or effort is inherited from the session
+        model, effort = cfg.get("model"), cfg.get("effort")
+        out[key] = {
+            "model": model_alias(model) if model is not None else "inherit",
+            "effort": to_enum(effort, EFFORTS) if effort is not None else "inherit",
+        }
     return out
 
 
@@ -529,7 +532,7 @@ def _cost(local: Mapping, usd_by_model: Dict[str, float], usd_by_role: Dict[str,
         # the source is read from the run figure only, never from the session-wide `claude_total` figure
         source = to_enum(run.get("source"), COST_SOURCES)
         cost["source"] = "estimate" if source == "other" else source
-        usd = _num(run.get("usd"), 4)
+        usd = _num(run.get("usd"), 9)
         if usd is not None:
             cost["usd"] = usd
         pd = run.get("pricingDate")

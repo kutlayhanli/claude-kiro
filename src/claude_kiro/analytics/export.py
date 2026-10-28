@@ -100,7 +100,7 @@ def build_batch(plan: ExportPlan, *, machine_label: Optional[str] = None,
         files.append(PendingFile(base + ".json", text, rid, record_id, False))
         note = notes.get(rid)
         if isinstance(note, str) and note.strip():
-            files.append(PendingFile(base + ".md", note if note.endswith("\n") else note + "\n", rid, record_id, True))
+            files.append(PendingFile(base + ".md", note, rid, record_id, True))
     return files
 
 

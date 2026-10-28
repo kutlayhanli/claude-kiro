@@ -310,3 +310,139 @@ def label_cmd(slug: Optional[str], clear: bool):
         click.echo(f"❌ {e}")
         sys.exit(2)
     click.echo("✓ machine label cleared" if clear else f"✓ machine label = {slug}")
+
+
+# --------------------------------------------------------------------------- export
+
+NOTE_PATH = "issues-note.md"
+
+
+def _checkout_id(checkout: Path) -> str:
+    import hashlib
+
+    return hashlib.sha256(str(checkout.resolve()).encode("utf-8")).hexdigest()
+
+
+def _present_files(checkout: Path, ledger: dict) -> frozenset:
+    out = set()
+    for entry in (ledger.get("exported") or {}).values():
+        files = entry.get("files", []) if isinstance(entry, dict) else []
+        for rel in files if isinstance(files, list) else []:
+            if isinstance(rel, str) and (checkout / rel).is_file():
+                out.add(rel)
+    return frozenset(out)
+
+
+def _echo_hit(path: str, hit) -> None:
+    click.echo(f"{path}: {hit.field}: {hit.kind}")
+
+
+def _review_note(rid: str, local: dict, codes: List[str], terms) -> Optional[str]:
+    """Interactive review of one drafted note: returns the text to include, or None."""
+    from ..analytics import issues, leak
+
+    click.echo(f"\nIssues note for {rid}:")
+    draft = issues.draft_note(local, codes)
+    if draft.text is None:
+        click.echo(f"⚠ could not draft a note: {draft.error}")
+        try:
+            pick = click.prompt("write one by hand or skip [w/s]", default="s", show_default=False).strip().lower()
+        except click.Abort:
+            return None
+        if not pick.startswith("w"):
+            return None
+        text = click.edit("") or ""
+        if not text.strip():
+            return None
+    else:
+        text = draft.text
+    while True:
+        hits = leak.scan({NOTE_PATH: text}, terms)
+        bad_lines = {h.field for h in hits}
+        click.echo("-----")
+        for n, line in enumerate(text.splitlines(), 1):
+            mark = "!" if f"line {n}" in bad_lines else " "
+            click.echo(f"{mark} {line}")
+        click.echo("-----")
+        for h in hits:
+            _echo_hit(NOTE_PATH, h)
+        try:
+            pick = click.prompt("accept / edit / discard [a/e/d]", default="d", show_default=False).strip().lower()
+        except click.Abort:
+            return None
+        if pick.startswith("e"):
+            edited = click.edit(text)
+            if edited is not None:
+                text = edited
+            continue
+        if pick.startswith("a"):
+            final = leak.scan({NOTE_PATH: text}, terms)
+            decision = issues.decide_note(True, True, False, "accept", len(final))
+            if decision == "include":
+                return text
+            for h in final:
+                _echo_hit(NOTE_PATH, h)
+            click.echo("⚠ note not included: it still matches the leak check")
+            return None
+        return None
+
+
+@stats.command("export")
+@click.option("--to", "to", default=None, type=click.Path(), help="The claude-kiro checkout to write into (default: here)")
+@click.option("--re-export", "--reexport", "reexport", multiple=True, metavar="RUN_ID", help="Export this run again")
+@click.option("--note", "--notes", "note", is_flag=True, help="Draft an issues note per record (interactive only)")
+@click.option("--yes", is_flag=True, help="Do not ask")
+def export_cmd(to: Optional[str], reexport: Tuple[str, ...], note: bool, yes: bool):
+    """Write shareable records into a claude-kiro checkout (nothing leaves this machine)."""
+    from ..analytics import export as ex
+    from ..analytics import issues, leak
+
+    checkout = Path(to) if to else Path.cwd()
+    if not checkout.is_dir() or not any(ex.is_target_repo(u) for _n, u in ex.remote_urls(checkout)):
+        click.echo("❌ not a kutlayhanli/claude-kiro checkout; nothing written")
+        sys.exit(1)
+    checkout = checkout.resolve()
+    records, _bad = store.load_records_counted()
+    ledger = store.load_ledger()
+    cid = _checkout_id(checkout)
+    plan = ex.plan_export(records, ledger, list(reexport), cid, _present_files(checkout, ledger))
+    if plan.nothing_new:
+        click.echo("ℹ️ nothing new to export")
+        return
+    if plan.restore:
+        click.echo(f"ℹ️ re-exported {len(plan.restore)} record(s) whose files were missing")
+
+    interactive = sys.stdin.isatty() and sys.stdout.isatty() and not yes
+    identity = leak.git_identity(checkout)
+    non_ck = leak.non_ck_workflow_names(bench.claude_home())
+    terms = leak.build_terms(records, identity, non_ck)
+    notes = {}
+    if note and not interactive:
+        click.echo("⚠ issues note withheld: needs interactive approval")
+    elif note:
+        for rid in sorted(plan.records):
+            local = plan.records[rid]
+            text = _review_note(rid, local, issues.issue_codes(local), terms)
+            if text is not None:
+                notes[rid] = text
+    try:
+        files = ex.build_batch(plan, machine_label=store.machine_label(), notes=notes)
+    except ex.SchemaViolation as e:
+        click.echo(f"❌ {e}; nothing written")
+        sys.exit(1)
+    gate = ex.leak_gate(files, records, identity, non_ck)
+    if not gate.allowed:
+        for h in gate.hits:
+            _echo_hit(h.file, h)
+        click.echo("❌ leak check failed; nothing written or committed")
+        sys.exit(1)
+    try:
+        ex.remove_replaced(checkout, plan)
+        ex.write_batch(checkout, files)
+    except (OSError, ValueError) as e:
+        click.echo(f"❌ could not write: {e}")
+        sys.exit(1)
+    ex.record_exported(ledger, files, cid)
+    store.save_ledger(ledger)
+    for f in files:
+        click.echo(f"✓ wrote {f.rel_path}")
