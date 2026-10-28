@@ -127,7 +127,7 @@ Test infrastructure for Tasks 54 and 52; it asserts no TC.
 ---
 
 ### Task 3: Property test for the workflow allowlist seam (P-1)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.1
 **Description:** Implements P-1 against the Harness Contract seam `is_ck_workflow(name)` and `ALLOWED_WORKFLOWS` from
@@ -143,11 +143,11 @@ Settings `@settings(derandomize=True, max_examples=200, database=None, deadline=
 **Verifies:** Task 4
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the P-1 row
-- [ ] Settings are deterministic (`derandomize=True`, `database=None`)
-- [ ] The test calls the decision seam `is_ck_workflow`, not the CLI
-- [ ] Tests fail before the implementation exists for the right reason (missing module)
-- [ ] `PROPERTIES` map names the test for P-1
+- [x] Generators cover every surface form and negative listed in the P-1 row
+- [x] Settings are deterministic (`derandomize=True`, `database=None`)
+- [x] The test calls the decision seam `is_ck_workflow`, not the CLI
+- [x] Tests fail before the implementation exists for the right reason (missing module)
+- [x] `PROPERTIES` map names the test for P-1
 
 **Dependencies:** Task 1 (hypothesis, `CONFIDENTIAL`)
 **Complexity:** Low
