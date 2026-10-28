@@ -18,7 +18,7 @@ SETTINGS = dict(
     max_examples=200,
     database=None,
     deadline=None,
-    suppress_health_check=list(HealthCheck),
+    suppress_health_check=[HealthCheck.too_slow],
 )
 
 _NAME = st.from_regex(r"[a-z][a-z0-9]{1,8}(-[a-z0-9]{1,6}){0,2}", fullmatch=True)
@@ -27,7 +27,7 @@ _HOST = st.sampled_from(["github.com", "gitlab.example.com", "git.corp.example.o
 
 @st.composite
 def remotes(draw):
-    """-> (remote, [name/host segments that must not leak])."""
+    """-> (remote, [name/host segments that must not leak], (host or None, owner, repo))."""
     host, owner, repo = draw(_HOST), draw(_NAME), draw(_NAME)
     form = draw(st.sampled_from(["https", "https.git", "scp", "ssh", "bare"]))
     remote = {
@@ -38,14 +38,14 @@ def remotes(draw):
         "bare": f"{owner}/{repo}",
     }[form]
     segs = [owner, repo] + ([] if form == "bare" else [host] + host.split("."))
-    return remote, segs
+    return remote, segs, (None if form == "bare" else host, owner, repo)
 
 
 _SEEDED = st.sampled_from(
     [
-        (ACME_REMOTE, ["acme-corp", "acme-ledger", "github.com", "github"]),
-        (ORION_REMOTE, ["orion", "billing", "gitlab.example.com", "gitlab", "example"]),
-        ("o/r", ["o", "r"]),
+        (ACME_REMOTE, ["acme-corp", "acme-ledger", "github.com", "github"], (None, "acme-corp", "acme-ledger")),
+        (ORION_REMOTE, ["orion", "billing", "gitlab.example.com", "gitlab", "example"], (None, "orion", "billing")),
+        ("o/r", ["o", "r"], (None, "o", "r")),
     ]
 )
 _REMOTES = st.one_of(remotes(), _SEEDED)
@@ -67,7 +67,7 @@ def _leaks(pseudo: str, segments) -> list:
 def test_pseudonym_is_stable_keyed_and_opaque(a, b, salt_a, salt_b):
     from claude_kiro.analytics import pseudonym
 
-    (remote_a, segs_a), (remote_b, _segs_b) = a, b
+    (remote_a, segs_a, id_a), (remote_b, _segs_b, id_b) = a, b
     p = pseudonym(remote_a, salt_a)
     assert isinstance(p, str) and p
 
@@ -82,6 +82,29 @@ def test_pseudonym_is_stable_keyed_and_opaque(a, b, salt_a, salt_b):
     if salt_a != salt_b:
         assert pseudonym(remote_a, salt_b) != p
 
-    # a different remote gives a different pseudonym under the same salt
-    if remote_a != remote_b:
+    # a different project gives a different pseudonym under the same salt. Project identity, not
+    # the raw string: the pseudonym hashes the normalised remote, so the https, .git, scp and ssh
+    # forms of one project may (and should) share a pseudonym.
+    hosts_differ = id_a[0] is not None and id_b[0] is not None and id_a[0] != id_b[0]
+    if id_a[1:] != id_b[1:] or hosts_differ:
         assert pseudonym(remote_b, salt_a) != p
+
+
+@settings(**SETTINGS)
+@given(
+    items=st.lists(remotes(), min_size=2, max_size=12, unique_by=lambda r: r[2]),
+    salt=_SALTS,
+)
+def test_pseudonyms_do_not_collide_over_a_generated_set(items, salt):
+    from claude_kiro.analytics import pseudonym
+
+    # Distinct (host, owner, repo) identities. Two entries that differ only by host-less "bare"
+    # form vs a hosted form of the same owner/repo are one project under normalisation: dedupe.
+    seen, uniq = set(), []
+    for remote, _segs, ident in items:
+        if ident[1:] in seen:
+            continue
+        seen.add(ident[1:])
+        uniq.append(remote)
+    pseudos = [pseudonym(r, salt) for r in uniq]
+    assert len(set(pseudos)) == len(pseudos)
