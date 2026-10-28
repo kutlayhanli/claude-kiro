@@ -12,13 +12,11 @@ from pathlib import Path
 import pytest
 
 from stats_helpers import (
-    AgentSpec,
     FakeClaudeHome,
     fresh_env,
     git_project,
     load_record,
     stats,
-    store_files,
 )
 
 
@@ -141,7 +139,7 @@ def test_tc31_only_foreign_runs_says_none_found(env):
     home.session("-work-proj-b", cwd=pb).foreign_run("wf_foreign00002", name="tax-review-2026")
     res = _collect_all(env)
     assert res.exit_code == 0, res.output
-    assert re.search(r"no ck runs (were )?found", res.output, re.I), res.output
+    assert re.search(r"no ck (spec )?runs (were )?found", res.output, re.I), res.output
     assert _stored_ids(env) == []
     for needle in ("competitor-teardown-q4", "tax-review-2026", "wf_foreign00001"):
         assert needle not in res.output
@@ -150,5 +148,5 @@ def test_tc31_only_foreign_runs_says_none_found(env):
 def test_tc31_empty_home_says_none_found(env):
     res = _collect_all(env)
     assert res.exit_code == 0, res.output
-    assert re.search(r"no ck runs (were )?found", res.output, re.I), res.output
+    assert re.search(r"no ck (spec )?runs (were )?found", res.output, re.I), res.output
     assert _stored_ids(env) == []
