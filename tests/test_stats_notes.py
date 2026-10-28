@@ -15,7 +15,8 @@ from stats_helpers import (
 RUN_ID = "wf_zephyr-impl-1"
 DRAFT = "Resolver needed 3 rounds on zephyr-payroll lockfile"
 CLEAN = "Resolver needed 3 rounds on a lockfile conflict"
-PROMPT = r"(?is)accept\W{1,6}edit\W{1,6}discard"
+# any line naming all three choices, in any order and with any separators
+PROMPT = r"(?im)^(?=.*accept)(?=.*edit)(?=.*discard).*$"
 
 
 @contextlib.contextmanager
@@ -41,7 +42,9 @@ def note_setup(tmp_path, draft=DRAFT, editor_text=CLEAN):
 
 
 def files_in(checkout: Path, suffix: str):
-    return sorted(p for p in checkout.rglob(f"*{suffix}") if ".git" not in p.relative_to(checkout).parts)
+    """Files the export wrote: only under <checkout>/analytics/runs (the checkout's own README.md etc. are not ours)."""
+    root = checkout / "analytics" / "runs"
+    return sorted(root.rglob(f"*{suffix}")) if root.exists() else []
 
 
 def export_argv(checkout, *flags):
@@ -56,6 +59,7 @@ def test_tc55_edit_then_accept_writes_exactly_the_edited_note(tmp_path):
         )
         assert code == 0, transcript
         assert "zephyr-payroll" in transcript  # the draft is shown, with its hit
+        assert re.search(r"\.md: line \d+: ", transcript), transcript  # the hit is reported
         notes = files_in(checkout, ".md")
         records = files_in(checkout, ".json")
         assert len(notes) == 1 and len(records) == 1, transcript
@@ -74,7 +78,9 @@ def test_tc56_edited_text_still_confidential_is_not_written(tmp_path):
         )
         assert files_in(checkout, ".md") == [], transcript
         assert len(files_in(checkout, ".json")) == 1, transcript
-        assert re.search(r"(?i)leak|line 1", transcript.split("accept", 2)[-1]), transcript
+        prompts = list(re.finditer(PROMPT, transcript))
+        assert len(prompts) >= 2, transcript
+        assert re.search(r"\.md: line 1: ", transcript[prompts[-1].end():]), transcript
         assert b"acme-corp" not in all_bytes(checkout)
 
 
