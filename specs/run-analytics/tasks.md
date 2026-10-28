@@ -1507,7 +1507,7 @@ without `.md`.
 ---
 
 ### Task 41: Red-team the shareable-record exclusions (Story 7)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.1, 7.3, 7.4, 7.5
 **Description:** Try to break each SHALL NOT clause of Story 7 with adversarial inputs: unusual surface forms,
@@ -1529,10 +1529,10 @@ that no planted string appears and every enum field is in its set or `other`.
 **Verifies:** Task 42
 
 **Acceptance:**
-- [ ] Each adversarial case is a separate named test or parametrized id describing the trick
-- [ ] Cases run the real collector and exporter into a real git checkout
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] No mocks of the project's own code; no network
+- [x] Each adversarial case is a separate named test or parametrized id describing the trick
+- [x] Cases run the real collector and exporter into a real git checkout
+- [x] Tests fail before the implementation exists for the right reason
+- [x] No mocks of the project's own code; no network
 
 **Dependencies:** Task 1 (fake Claude home, kiro checkout, `CONFIDENTIAL`)
 **Complexity:** Medium
