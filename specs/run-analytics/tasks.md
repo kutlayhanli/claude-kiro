@@ -1423,7 +1423,7 @@ Foundation task: smoke Verify only; its criteria are verified at Task 42 (Tasks 
 ---
 
 ### Task 39: Integration tests for exporting shareable records and issue codes
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8, 7.9, 7.10, 7.11, 7.12, 8.1, 9.4, 10.10
 **Description:** Implements TC-44, TC-45, TC-46, TC-47, TC-48, TC-49, TC-50, TC-51, TC-52, TC-53, TC-54, TC-80, TC-81. All
@@ -1459,10 +1459,14 @@ submitted records, are not.
 **Verifies:** Task 42
 
 **Acceptance:**
-- [ ] Tests run the real `ck stats export` into a real git checkout whose remote is checked with real git
-- [ ] TC-46 scans every byte under the checkout's `analytics/` with `all_bytes`, case-insensitively
-- [ ] TC-49 parses the real `analytics/SCHEMA.md`, not a copy
-- [ ] Tests fail before the implementation exists for the right reason (no export command / schema doc)
+- [x] Tests run the real `ck stats export` into a real git checkout whose remote is checked with real git
+- [x] TC-46 scans every byte under the checkout's `analytics/` with `all_bytes`, case-insensitively
+- [x] TC-49 parses the real `analytics/SCHEMA.md`, not a copy
+- [x] Tests fail before the implementation exists for the right reason (no export command / schema doc)
+
+Implementation note: the "submitted" half of TC-81 marks the record submitted in the ledger (`state.json`
+`submitted[<record id>]`, design Ledger shape) and deletes its file, instead of running `ck stats submit`, so this suite
+does not depend on the submit command.
 - [ ] No mocks of the project's own code; no network (`no_network` on the module)
 
 **Dependencies:** Task 1 (seeded home, kiro checkout, no_network)
