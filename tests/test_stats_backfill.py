@@ -67,7 +67,9 @@ def test_tc28_all_ck_runs_across_projects_are_stored(env):
     assert _count(res.stdout, "collected") == 6
     for rid in ids:
         assert load_record(env.xdg, rid)["runId"] == rid
-    assert load_record(env.xdg, "wf_iso00000001")["workflow"] == "spec-implement-iso"
+    iso = load_record(env.xdg, "wf_iso00000001")
+    assert iso["workflow"] == "spec-implement"
+    assert iso["workflowName"] == "spec-implement-iso"
     assert load_record(env.xdg, "wf_create000001")["workflow"] == "spec-create"
 
 
