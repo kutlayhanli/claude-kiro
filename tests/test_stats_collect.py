@@ -95,6 +95,7 @@ def priced_figure(rec: dict) -> dict:
 
 
 def test_tc1_collect_writes_exactly_one_record_and_prints_its_path(env):
+    """TC-1."""
     _, sess, proj = world(env)
     run = sess.implement_run()
     r = collect(env, "--run", run.run_id, cwd=proj)
@@ -107,6 +108,7 @@ def test_tc1_collect_writes_exactly_one_record_and_prints_its_path(env):
 
 
 def test_tc2_default_data_home_is_under_home_local_share(env):
+    """TC-2."""
     from stats_helpers import CK
 
     _, sess, proj = world(env)
@@ -123,6 +125,7 @@ def test_tc2_default_data_home_is_under_home_local_share(env):
 
 
 def test_tc3_fresh_auto_collect_records_versions_and_run_header(env):
+    """TC-3."""
     _, sess, proj = world(env, cc_version="2.1.80")
     res = implement_result()
     run = sess.implement_run(result=res, duration_ms=654_321)
@@ -141,6 +144,7 @@ def test_tc3_fresh_auto_collect_records_versions_and_run_header(env):
 
 
 def test_tc3_no_version_in_transcripts_gives_null_claude_code_version(env):
+    """TC-3."""
     _, sess, proj = world(env, cc_version="2.1.80")
     run = sess.implement_run()
     for p in [sess.transcript_path, *run.agents_dir.glob("agent-*.jsonl")]:
@@ -161,6 +165,7 @@ def _manifest(proj: Path, version: str, when: str) -> None:
 
 
 def test_tc3_backfill_credits_manifest_version_only_when_it_predates_the_run(env):
+    """TC-3."""
     _, sess, proj = world(env)
     run = sess.implement_run()
     _manifest(proj, "0.8.0", "2026-09-01T00:00:00Z")
@@ -172,6 +177,7 @@ def test_tc3_backfill_credits_manifest_version_only_when_it_predates_the_run(env
 
 
 def test_tc3_backfill_with_newer_or_absent_manifest_gives_null_ck_version(env):
+    """TC-3."""
     _, sess, proj = world(env)
     newer = sess.implement_run()
     _manifest(proj, "0.8.0", "2026-11-01T00:00:00Z")
@@ -190,6 +196,7 @@ def test_tc3_backfill_with_newer_or_absent_manifest_gives_null_ck_version(env):
 
 
 def test_tc3_recollect_by_all_keeps_ck_version_of_an_auto_collected_run(env):
+    """TC-3."""
     _, sess, proj = world(env)
     run = sess.implement_run()
     assert collect(env, "--run", run.run_id, "--auto", cwd=proj).exit_code == 0
@@ -209,6 +216,7 @@ def test_tc3_recollect_by_all_keeps_ck_version_of_an_auto_collected_run(env):
 
 
 def test_tc4_tokens_and_usd_match_hand_computed_values_with_requests_counted_once(env):
+    """TC-4."""
     _, sess, proj = world(env)
     agents = three_model_agents()
     run = sess.implement_run(agents=agents)
@@ -251,6 +259,7 @@ def test_tc4_tokens_and_usd_match_hand_computed_values_with_requests_counted_onc
 
 
 def test_tc5_priced_total_matches_ck_cost_to_the_cent(env):
+    """TC-5."""
     _, sess, proj = world(env)
     run = sess.implement_run(agents=three_model_agents())
     assert collect(env, "--run", run.run_id, cwd=proj).exit_code == 0
@@ -262,6 +271,7 @@ def test_tc5_priced_total_matches_ck_cost_to_the_cent(env):
 
 
 def test_tc6_cost_source_without_and_with_budget_attachment(env):
+    """TC-6."""
     from claude_kiro import bench
 
     _, sess, proj = world(env)
@@ -287,6 +297,7 @@ def test_tc6_cost_source_without_and_with_budget_attachment(env):
 
 
 def test_tc7_per_task_and_per_run_fields_are_recorded(env):
+    """TC-7."""
     tasks = [
         TaskSpec(task="1", attempts=3, escalations=[{"from": "sonnet", "model": "opus"}], rounds=2, verdict="approve",
                  risk_tag="risky", fixes=[{"what": "lint"}], started_at="2026-10-12T09:00:00Z",
@@ -325,6 +336,7 @@ def test_tc7_per_task_and_per_run_fields_are_recorded(env):
 
 
 def test_tc8_spec_create_counts_and_phase_durations(env):
+    """TC-8."""
     _, sess, proj = world(env)
     run = sess.create_run(
         result=create_result(fixed=3, not_fixed=1, escalated=1, refuted=2, lenses_lost=1, consistency_passes=2, consistency_fixed=1),
@@ -348,6 +360,7 @@ def test_tc8_spec_create_counts_and_phase_durations(env):
 
 
 def test_tc9_resolves_recorded_or_inferred_from_labels(env):
+    """TC-9."""
     _, sess, proj = world(env)
     recorded = sess.implement_run(
         result=implement_result([TaskSpec(task="4", resolves=2)]),
@@ -369,6 +382,7 @@ def test_tc9_resolves_recorded_or_inferred_from_labels(env):
 
 
 def test_tc10_pseudonym_is_stable_opaque_and_salted(env):
+    """TC-10."""
     _, sess, proj = world(env, "git@github.com:acme-corp/acme-ledger.git")
     r1 = sess.implement_run()
     r2 = sess.implement_run(start="2026-10-13T09:00:00Z")
@@ -392,6 +406,7 @@ def test_tc10_pseudonym_is_stable_opaque_and_salted(env):
 
 
 def test_tc10_project_without_remote_has_null_pseudonym(env):
+    """TC-10."""
     _, sess, proj = world(env, None)
     run = sess.implement_run()
     assert collect(env, "--run", run.run_id, cwd=proj).exit_code == 0
@@ -402,6 +417,7 @@ def test_tc10_project_without_remote_has_null_pseudonym(env):
 
 
 def test_tc11_recollect_replaces_the_record(env):
+    """TC-11."""
     _, sess, proj = world(env)
     run = sess.implement_run(agents=[AgentSpec("task 1", requests=[("r1", 1000, 500, 0, 0)])])
     assert collect(env, "--run", run.run_id, cwd=proj).exit_code == 0
@@ -421,6 +437,7 @@ def test_tc11_recollect_replaces_the_record(env):
 
 
 def test_tc12_unknown_run_is_not_found_and_names_the_searched_home(env):
+    """TC-12."""
     world(env)
     r = collect(env, "--run", "wf_nope")
     assert r.exit_code != 0
@@ -430,6 +447,7 @@ def test_tc12_unknown_run_is_not_found_and_names_the_searched_home(env):
 
 
 def test_tc13_running_run_is_not_collected(env):
+    """TC-13."""
     _, sess, proj = world(env)
     run = sess.implement_run(status="running")
     r = collect(env, "--run", run.run_id, cwd=proj)
@@ -442,6 +460,7 @@ def test_tc13_running_run_is_not_collected(env):
 
 
 def test_tc14_missing_data_gives_nulls_and_missing_entries(env):
+    """TC-14."""
     _, sess, proj = world(env)
     run = sess.implement_run(agents=[
         AgentSpec("task 1 SECRETLABEL-a"), AgentSpec("review 1 SECRETLABEL-b", model="claude-opus-5-5"),
@@ -479,6 +498,7 @@ def _timed_agents() -> List[AgentSpec]:
 
 
 def test_tc15_run_file_gone_recovers_a_partial_record_from_the_session(env):
+    """TC-15."""
     _, sess, proj = world(env)
     run = sess.implement_run(agents=_timed_agents())
     run.drop_run_file()
@@ -502,6 +522,7 @@ def test_tc15_run_file_gone_recovers_a_partial_record_from_the_session(env):
 
 
 def test_tc15_spec_create_recognised_from_script_path_alone(env):
+    """TC-15."""
     _, sess, proj = world(env)
     run = sess.create_run(launch={"scriptPath": f"{proj}/.claude/workflows/spec-create.js"})
     run.drop_run_file()
@@ -512,6 +533,7 @@ def test_tc15_spec_create_recognised_from_script_path_alone(env):
 
 @pytest.mark.parametrize("case", ["foreign_launch", "no_launch", "other_id_launch", "no_session"])
 def test_tc15_unrecoverable_run_file_gone_is_not_found(env, case):
+    """TC-15."""
     _, sess, proj = world(env)
     kw: Dict[str, Any] = {}
     if case == "foreign_launch":
@@ -536,6 +558,7 @@ def test_tc15_unrecoverable_run_file_gone_is_not_found(env, case):
 
 
 def test_tc16_corrupt_allowlisted_run_file_is_unrecognised(env):
+    """TC-16."""
     _, sess, proj = world(env)
     obj = sess.implement_run().corrupt_format()
     absent = sess.implement_run(start="2026-10-12T10:00:00Z")
@@ -551,6 +574,7 @@ def test_tc16_corrupt_allowlisted_run_file_is_unrecognised(env):
 
 
 def test_tc16_corrupt_foreign_run_file_reveals_nothing(env):
+    """TC-16."""
     _, sess, proj = world(env)
     foreign = sess.foreign_run(name="tax-review-2026", result={"summary": "SECRET-CONTENT-42"}).corrupt_format()
     r = collect(env, "--run", foreign.run_id, cwd=proj)
@@ -560,6 +584,7 @@ def test_tc16_corrupt_foreign_run_file_reveals_nothing(env):
 
 
 def test_tc16_workflow_progress_with_odd_entries_still_gives_a_record(env):
+    """TC-16."""
     _, sess, proj = world(env)
     run = sess.implement_run(result="a string result")
     d = json.loads(run.path.read_text())
@@ -578,6 +603,7 @@ def test_tc16_workflow_progress_with_odd_entries_still_gives_a_record(env):
 
 
 def test_tc16_invalid_json_run_file_under_run_and_all(env):
+    """TC-16."""
     _, sess, proj = world(env)
     run = sess.implement_run()
     run.path.write_text("{ not json at all")
@@ -599,6 +625,7 @@ def test_tc16_invalid_json_run_file_under_run_and_all(env):
 @pytest.mark.skipif(os.geteuid() == 0, reason="chmod 000 does not restrict root")
 @pytest.mark.parametrize("flag", ["--run", "--all"])
 def test_tc17_unreadable_projects_dir(env, flag):
+    """TC-17."""
     _, sess, proj = world(env)
     run = sess.implement_run()
     projects = env.claude / "projects"
@@ -617,6 +644,7 @@ def test_tc17_unreadable_projects_dir(env, flag):
 
 
 def test_tc79_modes_of_records_directory_and_config(env):
+    """TC-79."""
     _, sess, proj = world(env)
     run = sess.implement_run()
     assert collect(env, "--run", run.run_id, cwd=proj).exit_code == 0
@@ -626,6 +654,7 @@ def test_tc79_modes_of_records_directory_and_config(env):
 
 
 def test_tc79_existing_world_readable_config_is_tightened_and_stays_so(env):
+    """TC-79."""
     _, sess, proj = world(env)
     run = sess.implement_run()
     assert ck_sub("agents", "set", "implementer.model", "sonnet", env=env, cwd=proj).exit_code == 0
@@ -651,6 +680,7 @@ def test_tc79_existing_world_readable_config_is_tightened_and_stays_so(env):
     ("d", {"refused": True, "halted": False, "failed": [], "notStarted": []}, "refused"),
 ])
 def test_tc83_pre_010_results_get_an_inferred_outcome(env, case, fields, want):
+    """TC-83."""
     _, sess, proj = world(env)
     res = implement_result(outcome=None)
     res.update(fields)
@@ -663,6 +693,7 @@ def test_tc83_pre_010_results_get_an_inferred_outcome(env, case, fields, want):
 
 
 def test_tc83_current_result_outcome_is_taken_as_recorded(env):
+    """TC-83."""
     _, sess, proj = world(env)
     run = sess.implement_run(result=implement_result(outcome="blocked"))
     assert collect(env, "--all", cwd=proj).exit_code == 0
@@ -675,6 +706,7 @@ def test_tc83_current_result_outcome_is_taken_as_recorded(env):
 
 @pytest.mark.parametrize("kind", ["spec-implement", "spec-create"])
 def test_seeded_local_record_has_the_key_set_of_a_collected_record(tmp_path, env, kind):
+    """Contract check: seeded_local_record() keys equal a really collected record's keys."""
     home, terms = seeded_home(tmp_path)
     e = dict(env)
     e["CLAUDE_CONFIG_DIR"] = str(home.root)
