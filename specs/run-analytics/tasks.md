@@ -821,7 +821,7 @@ runs are stored and foreign runs refused. Define the generators locally. Declare
 ---
 
 ### Task 23: Red-team the non-ck workflow prohibition (Story 2)
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 2.2, 2.3
 **Description:** Try to break each SHALL NOT clause of Story 2 with adversarial inputs: unusual surface forms,
