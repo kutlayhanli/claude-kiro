@@ -610,7 +610,7 @@ Declare `PROPERTIES`. Pure: no CLI.
 ---
 
 ### Task 17: Implement the collector core (collect.py)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.8, 1.9, 1.12, 1.15, 2.1, 2.2, 3.4, 3.5, 4.1, 4.2, 4.3, 4.4
 **Description:** Create `collect.py` with `collect_run(home, run_id, *, now, pricing=None, fresh=False) ->
@@ -656,16 +656,16 @@ Task 18 (keep a single hook function that Task 18 fills).
 The collection criteria reached through `ck stats collect` are verified at Task 24 (Tasks 19-23, 26, 29), which also lists `collect.py` for fix-ups.
 
 **Acceptance:**
-- [ ] Transcript-priced total equals `ck cost --run <id>` to the cent on the same fixture
-- [ ] Usage is counted once per requestId; tokens and cost are present per agent, model, role, phase and task
-- [ ] Every cost carries its source label and pricing date; missing transcripts make it `estimate`, never 0; the run figure is never `claude_total`, and a `budget_usd` total is a separate session-scoped figure
-- [ ] A backfilled run is never credited to the installed ck version unless S27 ties it to the run; a re-collect keeps a version tied earlier; `collectorVersion` is always the installed version
-- [ ] A run whose run file is gone gets a partial record only when S28 recovers an allowlisted name, else the not-found outcome
-- [ ] A non-dict `workflowProgress` entry is skipped and listed in `missing`, never a reason to refuse the run
-- [ ] A non-allowlisted run leaves no name or id in any record, outcome reason or summary (count only)
-- [ ] `collect_all` continues past a failing run, returns counts in input order, and reports failures
-- [ ] `pseudonym` is stable for equal inputs, keyed by the salt and contains no part of the remote
-- [ ] A 250-agent fixture run collects in under 10 s
+- [x] Transcript-priced total equals `ck cost --run <id>` to the cent on the same fixture
+- [x] Usage is counted once per requestId; tokens and cost are present per agent, model, role, phase and task
+- [x] Every cost carries its source label and pricing date; missing transcripts make it `estimate`, never 0; the run figure is never `claude_total`, and a `budget_usd` total is a separate session-scoped figure
+- [x] A backfilled run is never credited to the installed ck version unless S27 ties it to the run; a re-collect keeps a version tied earlier; `collectorVersion` is always the installed version
+- [x] A run whose run file is gone gets a partial record only when S28 recovers an allowlisted name, else the not-found outcome
+- [x] A non-dict `workflowProgress` entry is skipped and listed in `missing`, never a reason to refuse the run
+- [x] A non-allowlisted run leaves no name or id in any record, outcome reason or summary (count only)
+- [x] `collect_all` continues past a failing run, returns counts in input order, and reports failures
+- [x] `pseudonym` is stable for equal inputs, keyed by the salt and contains no part of the remote
+- [x] A 250-agent fixture run collects in under 10 s
 
 **Dependencies:** Task 14 (calls aggregate_usage), Task 4 (calls runfile seams), Task 6 (calls the label parser), Task 15 (calls ensure_salt and write_private_json), Task 16 (its tests are the oracle)
 **Complexity:** High
