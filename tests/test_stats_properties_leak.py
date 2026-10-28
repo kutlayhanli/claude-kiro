@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from stats_helpers import CONFIDENTIAL, seeded_local_record
+from stats_helpers import CONFIDENTIAL, ORION_REMOTE, seeded_local_record
 
 PROPERTIES = {
     "P-12": "test_p12_confidential_terms_are_always_caught",
@@ -31,7 +31,7 @@ SETTINGS = settings(
 
 NON_CK = ("competitor-teardown-q4", "tax-review-2026", "quarterly-bonus-audit")
 IDENTITY = ("Dana Scully", "dana.scully@acme-corp.com")
-WEAK = ("ui", "review", "ledger")
+WEAK = ("ui", "ops", "ledger")
 RECORD_HEAD = '"schema": "ck-run-analytics/1", "id": "0123456789abcdef", "month": "2026-10"'
 
 
@@ -39,14 +39,15 @@ RECORD_HEAD = '"schema": "ck-run-analytics/1", "id": "0123456789abcdef", "month"
 
 
 def _records():
-    """Two projects' local records, with the weak terms `ui`, `review`, `ledger` planted as spec and path segments."""
+    """Two projects' local records, with the weak terms `ui`, `ops`, `ledger` planted as spec and path segments."""
     first = seeded_local_record("spec-implement")
     first["project"]["spec"] = "ui"
-    first["project"]["root"] = "/work/review/ledger/app"
+    first["project"]["root"] = "/work/ops/ledger/app"
     first["terms"] = list(first["terms"]) + list(WEAK)
     second = copy.deepcopy(seeded_local_record("spec-create"))
     second["project"]["root"] = "/srv/orion/billing"
     second["project"]["spec"] = "orion-billing"
+    second["project"]["remote"] = ORION_REMOTE
     return [first, second]
 
 
@@ -96,6 +97,11 @@ def _json_file(where, value, escape=False):
     if where == "issues":
         return "{%s, \"issues\": [%s]}" % (RECORD_HEAD, lit)
     return "{%s, \"extra\": {\"deep\": %s}}" % (RECORD_HEAD, lit)
+
+
+def _term_hits(hits, name):
+    """Hits in `name` that come from term or identity matching (not from a generic shape)."""
+    return [h for h in hits if h["file"] == name and h["kind"] in ("term", "identity")]
 
 
 def _check_field(hit, where, text):
@@ -154,16 +160,17 @@ _PLANT = st.tuples(
     st.sampled_from(["machine", "issues", "extra"]),
     st.booleans(),
     st.integers(0, 3),
-    st.text(alphabet="abcdefghij klmnop.", max_size=30),
 )
 
 
 def test_p12_domain_setup():
-    terms = _terms()
-    missing = [c for c in CONFIDENTIAL if c not in terms]
+    terms = {t.lower() for t in _terms()}
+    missing = [c for c in CONFIDENTIAL if c.lower() not in terms]
     assert not missing, "confidential_terms must return every seeded string: %r" % missing
-    assert set(NON_CK) <= terms
+    assert {t.lower() for t in NON_CK} <= terms
     assert set(WEAK) <= terms
+    # `review` is a whole word of ck vocabulary (review_rounds, ...), so it is dropped (design D18)
+    assert "review" not in terms
 
 
 @SETTINGS
@@ -172,7 +179,7 @@ def test_p12_confidential_terms_are_always_caught(plants):
     terms = _terms()
     sources = _sources()
     files, expect = {}, []
-    for i, (si, form, kind, where, escape, pad, extra) in enumerate(plants):
+    for i, (si, form, kind, where, escape, pad) in enumerate(plants):
         term, strong, source = sources[si]
         planted = _surface(term, form, strong)
         if kind == "md":
@@ -186,7 +193,7 @@ def test_p12_confidential_terms_are_always_caught(plants):
             expect.append((name, "key" if kind == "json_key" else where, source, term, None))
     for name, where, source, term, line in expect:
         use_terms = set() if source == "identity" else terms
-        hits = _hits_for(_scan(files, use_terms, IDENTITY), name)
+        hits = _term_hits(_scan(files, use_terms, IDENTITY), name)
         assert hits, ("no hit for %r planted in %s: %s" % (term, name, files[name]))
         if where == "md":
             fields = [h["field"] for h in hits]
@@ -197,8 +204,11 @@ def test_p12_confidential_terms_are_always_caught(plants):
         # metamorphic: appending text never removes a hit
         for suffix in ("\nmore words here\n", " and a trailing note"):
             bigger = dict(files)
-            bigger[name] = files[name] + suffix
-            after = _hits_for(_scan(bigger, use_terms, IDENTITY), name)
+            if where == "md":
+                bigger[name] = files[name] + suffix
+            else:  # keep the JSON valid: add a member inside the object
+                bigger[name] = files[name][:-1] + ', "zz_more": "%s"}' % suffix.strip()
+            after = _term_hits(_scan(bigger, use_terms, IDENTITY), name)
             assert after, ("appending %r removed the hit for %r" % (suffix, term))
             if where == "md":
                 assert "line %d" % line in [h["field"] for h in after]
@@ -335,40 +345,28 @@ def test_p14_listed_hosts_never_hit():
                 assert not _scan(_contexts(host), {term}), (term, host)
 
 
-def _roles_to_reviewer(obj):
-    """Replace every role-valued leaf by `reviewer` -> count."""
-    from claude_kiro.analytics import ROLES
-
-    n = 0
-    if isinstance(obj, dict):
-        for k, v in list(obj.items()):
-            if isinstance(v, str) and v in ROLES:
-                obj[k] = "reviewer"
-                n += 1
-            else:
-                n += _roles_to_reviewer(v)
-    elif isinstance(obj, list):
-        for i, v in enumerate(obj):
-            if isinstance(v, str) and v in ROLES:
-                obj[i] = "reviewer"
-                n += 1
-            else:
-                n += _roles_to_reviewer(v)
-    return n
+ENUM_CASES = [
+    ("needs", "issues", ["review_needs_work"], "review_needs_work"),
+    ("after", "outcome", "ready_after_decisions", "ready_after_decisions"),
+    ("implement", "workflow", "spec-implement", "spec-implement"),
+    ("blocking", "issues", ["review_blocking_unresolved"], "review_blocking_unresolved"),
+    ("decisions", "outcome", "ready_after_decisions", "ready_after_decisions"),
+]
 
 
 @SETTINGS
-@given(kind=st.sampled_from(["spec-implement", "spec-create"]), term=st.sampled_from(["review", "a", "ui"]))
-def test_p14_enum_member_in_enum_position_never_hits(kind, term):
-    from claude_kiro.analytics import build_shareable
-
-    rec = build_shareable(seeded_local_record(kind), record_id="0123456789abcdef")
-    swapped = _roles_to_reviewer(rec)
-    text = json.dumps(rec, indent=2)
-    if swapped:
-        assert "reviewer" in text
+@given(case=st.sampled_from(ENUM_CASES))
+def test_p14_enum_member_in_enum_position_never_hits(case):
+    """A term that whole-word-matches part of a fixed token never hits where that token is an enum value, and hits elsewhere."""
+    term, field, value, token = case
+    head = {"schema": "ck-run-analytics/1", "id": "0123456789abcdef", "month": "2026-10"}
     name = "analytics/runs/2026-10/0123456789abcdef.json"
-    assert not _hits_for(_scan({name: text}, {term}), name)
+    text = json.dumps({**head, field: value}, indent=2)
+    assert not _hits_for(_scan({name: text}, {term}), name), text
+    # the same string in a non-enum position (an unknown key's value) and in free text does hit
+    moved = json.dumps({**head, "extra": {"deep": "see " + token}}, indent=2)
+    assert _hits_for(_scan({name: moved}, {term}), name), moved
+    assert _hits_for(_scan({"notes.md": "note %s end\n" % token}, {term}), "notes.md")
 
 
 _HEXDIGITS = st.text(alphabet="0123456789abcdefABCDEF", min_size=1, max_size=8)
@@ -383,17 +381,19 @@ _FIXED_SEGMENTS = ["1", "10", "80", "2026", "cafe", "beef", "0a1b"]
     where=st.sampled_from(["version", "month", "id", "free"]),
 )
 def test_p14_digit_and_hex_only_strings_are_not_terms(extra, rid, where):
+    where_digits = {"version": "2.1.80", "month": "2026-10", "id": rid, "free": " ".join(extra)}[where]
     segments = _FIXED_SEGMENTS + extra
     rec = seeded_local_record("spec-implement")
     rec["project"]["root"] = "/" + "/".join(segments) + "/app"
     rec["terms"] = list(rec["terms"]) + segments
     terms = _terms([rec], ())
-    kept = [s for s in segments if s in terms]
+    low = {t.lower() for t in terms}
+    kept = [s for s in segments if s.lower() in low]
     assert not kept, "digit-only or hex-only strings were returned as terms: %r" % kept
-    head = '"schema": "ck-run-analytics/1", "id": "%s", "month": "2026-10", "claudeCodeVersion": "2.1.80"' % rid
+    head = '"schema": "ck-run-analytics/1", "id": "%s", "month": "2026-10", "claude_code_version": "2.1.80"' % rid
     files = {
         "analytics/runs/2026-10/%s.json" % rid: "{%s}" % head,
-        "notes.md": "ran on port 80 with version 2.1.80 in 2026-10 for id %s and %s\n" % (rid, " ".join(segments[:7])),
+        "notes.md": "ran on port 80 with version 2.1.80 in 2026-10 for id %s and %s %s\n" % (rid, " ".join(segments[:7]), where_digits),
     }
     hits = _scan(files, terms)
     assert not hits, (where, hits)
