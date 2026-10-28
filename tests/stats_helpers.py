@@ -1018,12 +1018,14 @@ def seeded_local_record(kind: str) -> dict:
             "finalGate": {"green": True, "summary": f"{pick(8)} {_SUMMARY}"},
             "crossTests": [{"wave": 1, "tasks": 2, "verdict": pick(9), "blocking": 1}],
             "fixerEscalations": [{"model": model, "green": True}],
+            "reportSource": "workflow", "taskSpanMinutes": 12.0, "stats": {"planFailures": 1},
             "phases": [{"group": pick(2), "tasks": 2, "start": SEEDED_TIMESTAMP, "end": SEEDED_TIMESTAMP, "minutes": 12.0}],
         })
     else:
         rec.update({
             "review": {"fixed": 3, "notFixed": 1, "escalated": 1, "refuted": 2, "lensesLost": 1},
             "consistency": {"passes": 2, "fixed": 1},
+            "mode": "create", "reviewResult": "Ready", "openQuestions": 2,
             "phases": {pick(2): 1.7, pick(3): 3.3},
         })
     return rec
