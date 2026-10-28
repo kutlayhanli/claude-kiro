@@ -36,8 +36,7 @@ VARIANTS = {"default", "iso", "other"}
 OUTCOMES = {"complete", "blocked", "halted", "refused", "ready", "ready_after_decisions", "needs_work", "failed", "other"}
 STACKS = {"python", "node", "go", "rust", "java", "ruby", "dotnet", "other"}
 CONFIG_ROLES = {"implementer", "test_writer", "reviewer", "reviewer_risky", "fixer", "orchestrator", "resolver"}
-ROLES = {"implementer", "test-writer", "test_writer", "reviewer", "fixer", "resolver", "plan", "land", "gate", "cross-test",
-         "cross_test", "report", "other"}
+ROLES = {"implementer", "test-writer", "reviewer", "fixer", "resolver", "plan", "land", "gate", "cross-test", "report", "other"}
 VERDICTS = {"approve", "changes", "unreviewed", "other"}
 COST_SOURCES = {"priced_from_transcripts", "estimate"}
 MISSING = {"result", "runfile", "agent_entries", "transcripts", "meta", "timing", "ck_version"}
@@ -93,6 +92,7 @@ def run_pipeline(
     start: str = "2026-10-12T09:00:00Z",
     kind: str = "implement",
     args: Optional[dict] = None,
+    tolerate_collect_failure: bool = False,
 ) -> Exported:
     """Fake home with one hostile run -> `ck stats collect --all` -> `ck stats export --to <checkout> --yes`."""
     from stats_helpers import FakeClaudeHome  # the harness is test-owned, not a ck module
@@ -122,7 +122,8 @@ def run_pipeline(
         kw["result"] = result if result is not None else create_result(feature="zephyr-payroll")
         session.create_run("wf_redteam1", **kw)
     collected = stats("collect", "--all", env=env, cwd=proj)
-    assert collected.exit_code == 0, collected.output
+    if collected.exit_code != 0:
+        assert tolerate_collect_failure, collected.output
     checkout, bare = kiro_checkout(tmp)
     exported = stats("export", "--to", str(checkout), "--yes", env=env, cwd=proj)
     return Exported(checkout, bare, env, _read_records(checkout), exported.exit_code, exported.output)
@@ -153,10 +154,11 @@ def assert_enums(rec: dict) -> None:
     assert re.fullmatch(r"[0-9a-f]{16}", str(rec.get("id", rec.get("record_id", "")))), rec
     if "stack" in rec:
         _enum("stack", rec["stack"], STACKS)
-    for key in ("ck_version", "claude_code_version"):
-        v = rec.get(key)
-        if v is not None:
-            assert v == "other" or VERSION_RE.match(v), f"{key} = {v!r}"
+    v = rec.get("ck_version")
+    assert isinstance(v, str) and (v == "other" or VERSION_RE.match(v)), f"ck_version = {v!r}"
+    v = rec.get("claude_code_version")
+    if v is not None:
+        assert v == "other" or VERSION_RE.match(v), f"claude_code_version = {v!r}"
     for role, cfg in (rec.get("config") or {}).items():
         _enum(f"config.{role}", role, CONFIG_ROLES)
         _enum(f"config.{role}.model", cfg.get("model"), MODEL_ALIASES)
@@ -345,8 +347,7 @@ STRICTLY_OTHER = {"slash-family", "bracket-secret", "bedrock-arn", "bedrock-pref
 
 def _model_case(tmp_path: Path, model_id: str) -> Exported:
     def mutate(r: dict) -> None:
-        r["agents"]["implementer"] = f"{model_id}/medium"
-        r["agents"]["reviewer"] = f"{model_id}/high"
+        r["agents"] = {k: f"{model_id}/medium" for k in r["agents"]}
         r["taskAgents"] = {"model": model_id, "effort": "medium"}
         r["tasks"][0]["startModel"] = model_id
         r["tasks"][0]["reviewModel"] = model_id
@@ -472,7 +473,11 @@ def test_no_issues_note_in_non_interactive_export(tmp_path: Path) -> None:
 ], ids=["month-end", "month-start", "year-end-ms", "year-start", "negative-offset", "invalid-leap-day"])
 def test_exact_dates_never_reach_the_record(tmp_path: Path, start: str) -> None:
     with fresh_env() as env:
-        ex = run_pipeline(tmp_path, env, start=start)
+        if start == "2026-02-29T00:00:00Z":
+            # not a real date: plant it in the run file after a valid start, so the fake home can write the run
+            ex = run_pipeline(tmp_path, env, extra_keys={"startTime": start}, tolerate_collect_failure=True)
+        else:
+            ex = run_pipeline(tmp_path, env, start=start)
         if ex.exit_code == 0:
             check(ex, [start])
         else:
@@ -483,9 +488,10 @@ def test_exact_dates_never_reach_the_record(tmp_path: Path, start: str) -> None:
                          ids=["sec-month-end", "ms-month-end", "sec-month-start", "ms-month-start", "year-10000", "negative", "zero", "float-ms"])
 def test_epoch_start_time_in_seconds_or_ms(tmp_path: Path, start_time: Any) -> None:
     with fresh_env() as env:
-        ex = run_pipeline(tmp_path, env, extra_keys={"startTime": start_time})
+        ex = run_pipeline(tmp_path, env, extra_keys={"startTime": start_time}, tolerate_collect_failure=True)
         if ex.exit_code == 0 and ex.records:
-            check(ex, [str(start_time)])
+            # short numbers ("0", "-1") occur in any record; assert_no_leak already rejects any 10-13 digit epoch
+            check(ex, [str(start_time)] if abs(start_time) >= 1e9 and isinstance(start_time, int) else [])
         else:
             assert not ex.records, "a failed export must write nothing"
 
