@@ -439,10 +439,10 @@ accepts the label. Use the Harness Contract key names in the output
 The no-confidential-term property P-5 needs the leak term builder and is verified at Task 34 (Task 33).
 
 **Acceptance:**
-- [ ] Every value of an enumerated field outside its set is written as `other`, never the original string
-- [ ] A custom or provider-specific model id becomes `other`; known families map to their alias
-- [ ] `validate_shareable(build_shareable(r))` is empty for every local record, and every emitted path is in `SHAREABLE_FIELDS`
-- [ ] No excluded category of 7.3 can appear: the builder has no code path that copies a free-text or id field
+- [x] Every value of an enumerated field outside its set is written as `other`, never the original string
+- [x] A custom or provider-specific model id becomes `other`; known families map to their alias
+- [x] `validate_shareable(build_shareable(r))` is empty for every local record, and every emitted path is in `SHAREABLE_FIELDS`
+- [x] No excluded category of 7.3 can appear: the builder has no code path that copies a free-text or id field
 
 **Dependencies:** Task 4 (module lives in the package whose `__init__.py` Task 4 creates), Task 8 (calls derive_issue_codes), Task 13 (calls agents.valid_machine_label for the machine field), Task 9 (its tests are the oracle), Task 10 (its tests are the oracle)
 **Complexity:** High
