@@ -22,6 +22,7 @@ from .update import update
 from .hooks import hook
 from .run import run
 from .bench import bench, cost
+from .stats import stats
 from .worktree import lint, plan, waves, worktree
 from .runner import HOOK_SETTINGS, configured_hooks, execute_hook, install_hook_settings
 
@@ -1129,6 +1130,7 @@ cli.add_command(update)
 cli.add_command(run)
 cli.add_command(bench)
 cli.add_command(cost)
+cli.add_command(stats)
 
 
 if __name__ == "__main__":

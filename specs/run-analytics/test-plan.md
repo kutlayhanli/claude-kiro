@@ -341,7 +341,7 @@ The tests call only these names. Each is required of the implementation; design.
   includes `runfile` and `result` for a 1.15 record, and `agent_entry` for a skipped non-object agent entry), and for
   spec-implement `tasks` (list of `{task, attempts, retries, escalations, reviewRounds, verdict, resolves,
   resolvesInferred, fixes, agentMinutes, toMergedMinutes, riskTag, idleBeforeMergeMs}`), `landings`, `fullGates`,
-  `finalGate`, `crossTests`, `fixerEscalations`, `phases`; for spec-create `review: {fixed, notFixed, escalated,
+  `finalGate`, `crossTests`, `fixerEscalations`, `phases`, `reportSource`, `taskSpanMinutes`, `stats` (design.md ImplementMetrics); for spec-create `mode`, `reviewResult`, `openQuestions` (design.md CreateMetrics), `review: {fixed, notFixed, escalated,
   refuted, lensesLost}`, `consistency: {passes, fixed}`, `phases`. Unknown numbers are null, never 0.
 - Shareable record: `<checkout>/analytics/runs/<yyyy-mm>/<id>.json`, `schema` = `ck-run-analytics/1`, `id`, `month`,
   `machine` (absent when unset), `issues` (list of codes); an approved note is `<id>.md` next to it.

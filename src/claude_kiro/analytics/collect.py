@@ -392,6 +392,11 @@ def _build_agent(a: _Agent, workflow_name: str, pricing: dict, missing: List[dic
         "cacheRead": usage["cacheRead"] if usage else None, "cacheCreation": usage["cacheCreation"] if usage else None,
         "transcript": status,
     }
+    if status == "truncated":
+        # a cut file cannot show that a figure is really 0: report it as unknown
+        for k in ("usd", "input", "output", "cacheRead", "cacheCreation"):
+            if row[k] == 0:
+                row[k] = None
     info = {"scan": scan, "usage_by_model": usage_by_model, "usage": usage, "match": match,
             "first_ts": first_ts, "last_ts": last_ts}
     return row, info

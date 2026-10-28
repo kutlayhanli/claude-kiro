@@ -1,6 +1,7 @@
 """Run-file reader: allowlist, format check, run state and run-file discovery."""
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Literal, Mapping, Optional, Sequence, Tuple
@@ -183,7 +184,8 @@ def recover_workflow_name(launches: Sequence[Tuple[Mapping, str]], run_id: str) 
     if not run_id:
         return None
     for inp, text in launches:
-        if not isinstance(text, str) or run_id not in text:
+        if not isinstance(text, str) or not re.search(
+                r"(?<![A-Za-z0-9_-])" + re.escape(run_id) + r"(?![A-Za-z0-9_-])", text):
             continue
         name: Optional[str] = None
         raw = inp.get("name") if isinstance(inp, Mapping) else None

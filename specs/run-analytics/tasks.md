@@ -853,7 +853,7 @@ corrupt foreign run next to a corrupt ck run in `--all`.
 ---
 
 ### Task 24: Add the ck stats command group with collect and label
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 1.10, 1.11, 1.12, 1.13, 1.14, 1.15, 2.2, 2.3, 3.3, 3.4, 4.1, 4.2, 4.3, 4.4, 7.6
 **Description:** Create `src/claude_kiro/cli/stats.py` with the click group `stats` (`invoke_without_command=True`; the
@@ -885,17 +885,25 @@ contents from Tasks 14, 15, 17 and 18), so fix-ups this gate finds in those modu
 These suites also verify the criteria of foundation Tasks 14, 15 and 18 and the CLI-reached criteria of Task 17.
 
 **Acceptance:**
-- [ ] `collect --run` writes one record and prints its path; re-running replaces it
-- [ ] Not found, unrecognised format, not allowlisted and sandboxed each exit non-zero and write nothing; unfinished exits 0 and writes nothing
-- [ ] A run whose run file is gone gives a partial record when its launch names an allowlisted workflow, else the not-found message, never the unknown name
-- [ ] `--all` prints every 4.2 count and continues past failures
-- [ ] `--auto` exits 0 on any failure, logs it and prints the retry command, and does nothing when auto-collect is off
-- [ ] `label` rejects an invalid slug with an error
-- [ ] The collected record carries every 1.2-1.9 field with the Harness Contract keys, and partial runs follow 1.12 (Tasks 26, 29)
+- [x] `collect --run` writes one record and prints its path; re-running replaces it
+- [x] Not found, unrecognised format, not allowlisted and sandboxed each exit non-zero and write nothing; unfinished exits 0 and writes nothing
+- [x] A run whose run file is gone gives a partial record when its launch names an allowlisted workflow, else the not-found message, never the unknown name
+- [x] `--all` prints every 4.2 count and continues past failures
+- [x] `--auto` exits 0 on any failure, logs it and prints the retry command, and does nothing when auto-collect is off
+- [x] `label` rejects an invalid slug with an error
+- [x] The collected record carries every 1.2-1.9 field with the Harness Contract keys, and partial runs follow 1.12 (Tasks 26, 29)
 
 **Dependencies:** Task 17 (calls collect_run/collect_all/write_outcome), Task 18 (collect --run must write the metrics Task 18 adds to collect.py; Task 26's tests are their oracle), Task 15 (calls store), Task 13 (writes run.machine_label), Task 19 (its tests are the oracle), Task 20 (its tests are the oracle), Task 21 (its tests are the oracle), Task 22 (its tests are the oracle), Task 23 (its tests are the oracle), Task 26 (its tests are the oracle), Task 29 (its tests are the oracle)
 **Complexity:** High
 **Risk:** normal
+
+**Implementation notes:** Collector fix-ups found by this gate: a truncated transcript reports 0 figures as null; S28
+matches the run id on token boundaries. The record keeps `reportSource`, `stats`, `taskSpanMinutes` (implement) and `mode`,
+`reviewResult`, `openQuestions` (create) as design.md specifies; `tests/stats_helpers.seeded_local_record` (Task 1) and the
+test-plan Harness Contract 'Local record keys' list gained those keys in this task (cross-task edit, noted for the owners of
+Tasks 1 and 26). `ck stats collect --run BAD --auto` goes through `collect_auto` and exits 0. Under `--auto` a sandboxed home
+prints the "ck run collects" line only when `CK_RUN_SANDBOXED=1`; otherwise it is logged and the retry command printed.
+`analytics/runfile.py` is in the listed files.
 
 ---
 
