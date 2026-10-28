@@ -1749,7 +1749,7 @@ Wire it into `doctor()` in `cli/main.py`: warnings go into the existing `warning
 ---
 
 ### Task 48: End-to-end tests for automatic collection after ck run
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 3.3, 3.4, 3.5, 3.6
 **Description:** Implements TC-21, TC-22, TC-23, TC-24, TC-25, TC-27, TC-84 and P-23. TC-21: a fake `claude` on PATH
