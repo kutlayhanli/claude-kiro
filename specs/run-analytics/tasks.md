@@ -1279,7 +1279,7 @@ The end-to-end leak criteria are verified at Task 42 (Task 39) and Task 45 (Task
 ---
 
 ### Task 35: Publish the shareable schema document (analytics/SCHEMA.md)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 7.7, 9.3
 **Description:** Write `analytics/SCHEMA.md` at the repository root (it ships in claude-kiro, the PR target). Owns the
@@ -1296,9 +1296,9 @@ themselves; and the fixed enums including `ISSUE_CODES` and the stack hints. Gen
 Foundation task: smoke Verify only; TC-49 (Task 39) verifies it at Task 42 and TC-61 (Task 43) at Task 45.
 
 **Acceptance:**
-- [ ] Every path the exporter can emit is listed, and nothing else
-- [ ] Every 7.3 category is named under "Never exported"
-- [ ] The leak-check matching rule and `ISSUE_CODES` are documented
+- [x] Every path the exporter can emit is listed, and nothing else
+- [x] Every 7.3 category is named under "Never exported"
+- [x] The leak-check matching rule and `ISSUE_CODES` are documented
 
 **Dependencies:** Task 11 (reads the field list and enums), Task 34 (documents its matching rule and patterns), Task 8 (lists ISSUE_CODES)
 **Complexity:** Low
