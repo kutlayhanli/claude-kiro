@@ -1394,7 +1394,7 @@ The git/gh flow criteria are verified at Task 45 (Tasks 43, 44), which also list
 ---
 
 ### Task 38: Implement export planning, batch building and writing (export.py)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 7.1, 7.8, 7.9, 7.10, 7.11, 9.1, 9.2, 10.10
 **Description:** Create `export.py` with S19 `plan_export(records, ledger, reexport, checkout_id, present) ->
@@ -1419,14 +1419,16 @@ interface for the shareable record (`<checkout>/analytics/runs/<yyyy-mm>/<id>.js
 Foundation task: smoke Verify only; its criteria are verified at Task 42 (Tasks 39, 41), which also lists `export.py` for fix-ups, and Task 45 (Tasks 43, 44).
 
 **Acceptance:**
-- [ ] One shareable file per not-yet-exported record, grouped by `yyyy-mm`, each with a new random id
-- [ ] Already exported records are skipped unless re-export is requested, or their unsubmitted files are missing from the checkout (then re-exported with a new id)
-- [ ] A leak hit or schema violation means nothing is written
-- [ ] Re-exporting the same record gives identical bytes apart from the id
+- [x] One shareable file per not-yet-exported record, grouped by `yyyy-mm`, each with a new random id
+- [x] Already exported records are skipped unless re-export is requested, or their unsubmitted files are missing from the checkout (then re-exported with a new id)
+- [x] A leak hit or schema violation means nothing is written
+- [x] Re-exporting the same record gives identical bytes apart from the id
 
 **Dependencies:** Task 11 (calls build_shareable), Task 15 (reads records and ledger), Task 34 (calls the leak scan), Task 37 (calls is_target_repo)
 **Complexity:** Medium
 **Risk:** safety (writes data destined for a public repository)
+
+**Implementation notes:** `PendingFile` and `ExportPlan` live in `export.py`; `ExportPlan` carries an extra `records` field (compare=False) so `build_batch(plan, ...)` needs only the plan. Added `remove_replaced(checkout, plan)` and `SchemaViolation`.
 
 ---
 
