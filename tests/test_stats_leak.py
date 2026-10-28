@@ -20,7 +20,8 @@ from stats_helpers import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-HIT_WORDS = re.compile(r"(?i)leak|hit")
+# The per-hit line the design specifies: the file (`<record_id>.md`, or a note pseudo-path) and `line N`.
+HIT_WORDS = re.compile(r"(?i)(?:[0-9a-f]{16}\.md|note)\S*.*\bline\s+\d+")
 BATCH_BRANCH = re.compile(r"^ck-stats-batch-[0-9a-f]{8}$")
 
 
@@ -131,6 +132,10 @@ NOTE_CASES = [
 def test_a_note_naming_confidential_data_is_a_hit_and_excluded(tmp_path, hit):
     home, _terms = seeded_home(tmp_path)
     world = World(tmp_path, home)
+    if hit in ("Dana Scully", "dana.scully@acme-corp.com"):
+        # the hit must come from the git identity of the checkout the design names, not from a path segment
+        git(world.checkout, "config", "user.name", "Dana Scully")
+        git(world.checkout, "config", "user.email", "dana.scully@acme-corp.com")
     note = f"Resolver needed 3 rounds on {hit} lockfile"
     world.collect("--run", SEEDED_RUN_IDS[2])
     assert world.export("--yes").exit_code == 0
@@ -142,6 +147,19 @@ def test_a_note_naming_confidential_data_is_a_hit_and_excluded(tmp_path, hit):
     assert world.exported_notes() == [], text
     assert len(world.exported_json()) == 2
     assert hit.encode() not in all_bytes(world.checkout / "analytics")
+
+
+def test_a_clean_note_is_included_under_the_same_flow(tmp_path):
+    home, _terms = seeded_home(tmp_path)
+    world = World(tmp_path, home)
+    world.collect("--run", SEEDED_RUN_IDS[2])
+    assert world.export("--yes").exit_code == 0
+    world.collect("--run", SEEDED_RUN_IDS[0])
+    fake_claude_drafter(world.bin, "Resolver needed 3 rounds on a lockfile")
+    code, text = world.export_tty("--note", script=[(r"(?i)accept", "a\n")])
+    assert code == 0, text
+    assert len(world.exported_notes()) == 1, text
+    assert len(world.exported_json()) == 2
 
 
 # --------------------------------------------------------------------------- TC-60
@@ -197,23 +215,74 @@ def test_whole_word_rule_normal_export_has_no_hit_but_a_note_naming_the_spec_doe
     assert len(world2.exported_json()) == 2
 
 
+# Codes the fixtures cannot force: the design gives no derivation rule a run file can trigger.
+CANNOT_BE_PRODUCED = {
+    "worktree_busy",          # a worktree-claim condition, never recorded in a run result or label
+    "consistency_conflicts",  # the design states no rule for it that a fixture can force
+}
+
+
+def _issue_world_runs(home: FakeClaudeHome) -> None:
+    """Add runs to project A that force the outcome, review, permission, landing, gate and collection codes."""
+    sess = home.sessions[0]
+    tasks = [
+        TaskSpec(task="5", wave=1, ok=False, reason="review: blocking findings remain",
+                 findings=[{"severity": "blocking", "issue": "x", "file": "f.py"}], verdict="changes"),
+        TaskSpec(task="6", wave=1, ok=False, reason="review: blocking findings remain",
+                 findings=[{"severity": "blocking", "issue": "x", "file": "f.py"}], verdict="changes"),
+        TaskSpec(task="7", wave=1, ok=False, reason="refused by the permission layer"),
+        TaskSpec(task="8", wave=1, unreviewed=True, attempts=2, escalations=[{"stage": "retry", "model": "opus"}]),
+        TaskSpec(task="9", wave=1),
+    ]
+    landings = [{"tasks": ["8"], "size": 1, "window": 2, "merged": ["8"], "red": ["8"], "conflict": [], "deferred": [],
+                 "other": [], "gates": 2, "bisected": True, "minutes": 1.0}]
+    result = implement_result(
+        tasks, landings=landings, full_gates=[{"afterMerges": 1, "green": False}], final_gate={"green": False},
+        cross_tests=[{"wave": 1, "tasks": 2, "verdict": "changes", "summary": "s",
+                      "findings": [{"severity": "blocking", "issue": "x", "file": "f.py"}]}],
+        fixer_escalations=[{"model": "opus"}], outcome="blocked")
+    result["reportSource"] = "agents"
+    result["stats"]["planFailures"] = 1
+    agents = [
+        AgentSpec("task 5", phase="Wave 1"),
+        AgentSpec("task 6 [test]", phase="Wave 1"),
+        AgentSpec("task 7", phase="Wave 1"),
+        AgentSpec("task 8", phase="Wave 1"),
+        AgentSpec("fix 1 (Task 8 red on landing)", phase="Wave 1", model="claude-opus-5-5"),
+        AgentSpec("mystery step", phase="Wave 1"),
+        AgentSpec("task 9", phase="Wave 1"),
+    ]
+    run = sess.implement_run("wf_seg-a-issues", start="2026-10-14T09:00:00Z", args={"spec": "ui", "root": str(sess.cwd)},
+                             result=result, agents=agents)
+    run.drop_transcript(len(agents) - 1)  # an agent with no transcript
+    sess.implement_run("wf_seg-a-halted", start="2026-10-15T09:00:00Z", args={"spec": "ui", "root": str(sess.cwd)},
+                       result=implement_result([TaskSpec(task="1", ok=False, reason="planning step failed")], outcome="halted"))
+    refused = implement_result([TaskSpec(task="1")], outcome="refused")
+    refused["refused"] = True
+    sess.implement_run("wf_seg-a-refused", start="2026-10-16T09:00:00Z", args={"spec": "ui", "root": str(sess.cwd)}, result=refused)
+    create = create_result(feature="ui", result="Needs work", lenses_lost=1, escalated=1, consistency_passes=2)
+    create["consistency"]["decisions"] = [{"id": "D1"}]
+    sess.create_run("wf_seg-a-create", start="2026-10-17T09:00:00Z", args={"feature": "ui", "root": str(sess.cwd)}, result=create)
+
+
 def test_issue_codes_never_trip_the_leak_check(tmp_path):
     from claude_kiro.analytics.issues import ISSUE_CODES
 
     home, a_run, b_run = _segment_world(tmp_path, ["analytics", "transcripts", "permission"])
-    home.sessions[0].create_run("wf_seg-a-create", args={"feature": "ui", "root": str(home.sessions[0].cwd)},
-                                result=create_result(feature="ui", result="Needs work", lenses_lost=1))
+    _issue_world_runs(home)
     world = World(tmp_path, home)
     world.collect("--all")
     out = world.export("--yes")
     assert out.exit_code == 0, out.output
+    assert not HIT_WORDS.search(out.output), out.output
     codes = set()
     for p in world.exported_json():
         rec = json.loads(p.read_text())
         codes |= set(rec.get("issues", []))
-    assert codes, "the rich run should carry issue codes"
     assert codes <= set(ISSUE_CODES)
-    assert "review_contract_mismatch" in ISSUE_CODES  # a 24-character member: the 32+ pattern must not catch it
+    # these two collide with the `permission` path segment / are the longest member: they must be exported, not skipped
+    assert {"review_contract_mismatch", "permission_refusal", "review_blocking_unresolved"} <= codes, codes
+    assert codes == set(ISSUE_CODES) - CANNOT_BE_PRODUCED, sorted(set(ISSUE_CODES) - CANNOT_BE_PRODUCED - codes)
 
 
 def test_digit_and_hex_segments_export_next_to_versions_months_and_ids(tmp_path):
@@ -225,7 +294,11 @@ def test_digit_and_hex_segments_export_next_to_versions_months_and_ids(tmp_path)
     files = world.exported_json()
     assert len(files) == 2
     for p in files:
-        assert p.parent.name == "2026-10" or re.fullmatch(r"\d{4}-\d{2}", p.parent.name), p
+        rec = json.loads(p.read_text())
+        assert rec["claudeCodeVersion"] == "2.1.80", p
+        assert rec["month"] == "2026-10", p
+        assert p.parent.name == "2026-10", p
+        assert re.fullmatch(r"[0-9a-f]{16}", rec["id"]) and p.stem == rec["id"], p
 
 
 def test_submit_passes_the_leak_check_with_ck_words_in_the_records_and_opens_the_pr(tmp_path):
@@ -262,8 +335,8 @@ def test_ck_vocabulary_segments_are_not_terms_but_other_segments_still_are(tmp_p
 def test_schema_doc_documents_the_matching_rules():
     doc = REPO_ROOT / "analytics" / "SCHEMA.md"
     text = doc.read_text().lower()
-    for needle in ("whole word", "digit", "vocabulary", "fixed token"):
-        assert needle in text, f"analytics/SCHEMA.md does not document {needle!r}"
+    for pattern in (r"whole[- ]word", r"digit", r"vocabulary", r"fixed[- ]token"):
+        assert re.search(pattern, text), f"analytics/SCHEMA.md does not document {pattern!r}"
 
 
 # --------------------------------------------------------------------------- TC-62
