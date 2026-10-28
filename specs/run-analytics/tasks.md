@@ -674,7 +674,7 @@ The collection criteria reached through `ck stats collect` are verified at Task 
 ---
 
 ### Task 18: Add spec-implement and spec-create metrics to the collector
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.2, 1.5, 1.6, 1.7
 **Description:** In `collect.py`, fill the metrics hook from Task 17. For spec-implement (result shape at
@@ -698,11 +698,11 @@ adds `result` to `missing`. Task titles, reasons and summaries stay local and ar
 Foundation task: smoke Verify only; its criteria (TC-7, TC-8, TC-9, TC-11, TC-83) are verified at Task 24 (Task 26), which also lists `collect.py` for fix-ups.
 
 **Acceptance:**
-- [ ] Every per-task and per-run field of 1.5 is recorded from a spec-implement result
-- [ ] Review counts, consistency passes/fixes and phase durations of 1.6 are recorded from a spec-create run
-- [ ] With `resolves` in the result the count is used as is; without it the count comes from resolver labels and `resolvesInferred` is true
-- [ ] A pre-0.10 result without `outcome` gets `complete`/`blocked`/`halted`/`refused` from S26 with `outcomeInferred` true
-- [ ] Absent values are null, never 0
+- [x] Every per-task and per-run field of 1.5 is recorded from a spec-implement result
+- [x] Review counts, consistency passes/fixes and phase durations of 1.6 are recorded from a spec-create run
+- [x] With `resolves` in the result the count is used as is; without it the count comes from resolver labels and `resolvesInferred` is true
+- [x] A pre-0.10 result without `outcome` gets `complete`/`blocked`/`halted`/`refused` from S26 with `outcomeInferred` true
+- [x] Absent values are null, never 0
 
 **Dependencies:** Task 17 (edits collect.py, which Task 17 creates)
 **Complexity:** High
