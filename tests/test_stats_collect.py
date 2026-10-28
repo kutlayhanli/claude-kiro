@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 import subprocess
 from pathlib import Path
@@ -140,7 +141,9 @@ def test_tc3_fresh_auto_collect_records_versions_and_run_header(env):
     assert rec["outcome"] == "complete"
     assert rec["startTime"].startswith("2026-10-12T09:00:00")
     assert rec["wallMs"] == 654_321
-    assert rec["agentsConfig"] == res["agents"]
+    for role, spec in res["agents"].items():
+        m, e = spec.split("/", 1)
+        assert rec["agentsConfig"][role] == {"model": m, "effort": e}
 
 
 def test_tc3_no_version_in_transcripts_gives_null_claude_code_version(env):
@@ -299,7 +302,7 @@ def test_tc6_cost_source_without_and_with_budget_attachment(env):
 def test_tc7_per_task_and_per_run_fields_are_recorded(env):
     """TC-7."""
     tasks = [
-        TaskSpec(task="1", attempts=3, escalations=[{"from": "sonnet", "model": "opus"}], rounds=2, verdict="approve",
+        TaskSpec(task="1", attempts=3, escalations=[{"stage": "revise", "model": "opus"}], rounds=2, verdict="approve",
                  risk_tag="risky", fixes=[{"what": "lint"}], started_at="2026-10-12T09:00:00Z",
                  finished_at="2026-10-12T09:05:00Z", merged_at="2026-10-12T09:12:00Z", findings=[{"severity": "minor"}]),
         TaskSpec(task="2", wave=2, attempts=1, rounds=0, verdict="approve"),
@@ -312,18 +315,21 @@ def test_tc7_per_task_and_per_run_fields_are_recorded(env):
     res = implement_result(tasks, landings=landings, full_gates=full_gates, final_gate={"green": True},
                            cross_tests=cross, fixer_escalations=fixers)
     _, sess, proj = world(env)
-    run = sess.implement_run(result=res)
+    run = sess.implement_run(result=res, agents=[
+        AgentSpec("task 1", phase="Wave 1"), AgentSpec("review 1", phase="Wave 1"),
+        AgentSpec("fix 1 (Task 1 red on landing)", phase="Wave 1"),
+        AgentSpec("task 2", phase="Wave 2"), AgentSpec("land 1 2", phase="Wave 2")])
     assert collect(env, "--run", run.run_id, cwd=proj).exit_code == 0
     rec = load_record(env.xdg, run.run_id)
     t1 = next(t for t in rec["tasks"] if str(t["task"]) == "1")
     assert t1["attempts"] == 3 and t1["retries"] == 2
     assert t1["escalations"] and t1["reviewRounds"] == 2 and t1["verdict"] == "approve"
     assert t1["riskTag"] == "risky"
-    assert t1["fixes"]
+    assert t1["fixes"] == 1
     assert t1["idleBeforeMergeMs"] == 7 * 60_000
     assert t1["agentMinutes"] is not None and t1["toMergedMinutes"] is not None
     t2 = next(t for t in rec["tasks"] if str(t["task"]) == "2")
-    assert t2["retries"] == 0
+    assert t2["retries"] == 0 and t2["fixes"] == 0
     assert rec["landings"][0]["size"] == 2 and rec["landings"][0]["bisected"] is False
     assert rec["fullGates"] and rec["fullGates"][0]["green"] is True
     assert rec["finalGate"]["green"] is True
@@ -480,7 +486,8 @@ def test_tc14_missing_data_gives_nulls_and_missing_entries(env):
         if a["agentId"] in (run.agent_ids[0], run.agent_ids[1]):
             assert a["usd"] != 0
     estimates = [c for c in rec["costs"] if c["source"] == "estimate"]
-    assert estimates or all(c["source"] != "priced_from_transcripts" or c["usd"] is not None for c in rec["costs"])
+    assert estimates
+    assert [c for c in rec["costs"] if c["scope"] == "run"][0]["source"] == "estimate"
     assert "SECRETLABEL" not in json.dumps(rec["missing"])
     assert "SECRETLABEL" not in r.output
 
@@ -568,7 +575,7 @@ def test_tc16_corrupt_allowlisted_run_file_is_unrecognised(env):
     for run in (obj, absent):
         r = collect(env, "--run", run.run_id, cwd=proj)
         assert r.exit_code != 0
-        assert "unrecognised" in r.output.lower() or "unrecognized" in r.output.lower()
+        assert re.search(r"not recogni[sz]ed", r.output.lower())
         assert run.run_id in r.output
     assert store_files(env.xdg) == []
 
@@ -610,7 +617,7 @@ def test_tc16_invalid_json_run_file_under_run_and_all(env):
     r = collect(env, "--run", run.run_id, cwd=proj)
     assert r.exit_code != 0
     assert run.run_id in r.output
-    assert "unrecognised" in r.output.lower() or "unrecognized" in r.output.lower()
+    assert re.search(r"not recogni[sz]ed", r.output.lower())
     assert store_files(env.xdg) == []
 
     foreign = sess.foreign_run("wf_foreignbad", name="tax-review-2026")
