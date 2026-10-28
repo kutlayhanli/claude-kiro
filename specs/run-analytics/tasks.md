@@ -1946,7 +1946,7 @@ must be byte-identical to the plugin copy.
 ---
 
 ### Task 54: Label corpus check for the role parser (TC-34)
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 5.1, 5.3
 **Description:** Implements TC-34 against the Harness Contract seam `parse_label(label, workflow)` from
@@ -1967,10 +1967,10 @@ role with task None). The same check over the corpus plus one unknown label fail
 **Verifies:** Task 6
 
 **Acceptance:**
-- [ ] The current corpus comes from the real workflow scripts under node, not from a hand-written list
-- [ ] The legacy corpus is taken from the pre-batch-landing script's templates and covers `merge N` and path-shaped ids
-- [ ] Tests fail before the implementation exists for the right reason (no `roles` module)
-- [ ] No mocks of the project's own code
+- [x] The current corpus comes from the real workflow scripts under node, not from a hand-written list
+- [x] The legacy corpus is taken from the pre-batch-landing script's templates and covers `merge N` and path-shaped ids
+- [x] Tests fail before the implementation exists for the right reason (no `roles` module)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (isolation fixtures), Task 2 (label emitter)
 **Complexity:** Low
