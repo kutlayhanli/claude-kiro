@@ -1808,7 +1808,7 @@ record (a transcript chmod 000, a `.meta.json` that is not JSON). Declare `PROPE
 ---
 
 ### Task 49: Collect automatically after ck run exits
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 3.1, 3.3, 3.4, 3.5, 1.14
 **Description:** In `src/claude_kiro/cli/run.py`: (a) set `CK_RUN_SANDBOXED=1` in the child environment when the run is
@@ -1832,11 +1832,11 @@ the same code path as `ck stats collect --auto`".
 **Verified by:** Task 48
 
 **Acceptance:**
-- [ ] Every allowlisted run the session started is collected and logged with one line each; non-ck runs are not mentioned
-- [ ] Run files of the session whose workflow name cannot be read are reported by one count-only line naming `ck stats collect --all` and no run id
-- [ ] With collection forced to fail, the exit status and report equal those with collection off, and the retry command is logged
-- [ ] With `run.analytics` false nothing is collected
-- [ ] The sandbox settings deny the data dir; any failure in discovery, parsing or writing (P-23) leaves the exit code and report unchanged
+- [x] Every allowlisted run the session started is collected and logged with one line each; non-ck runs are not mentioned
+- [x] Run files of the session whose workflow name cannot be read are reported by one count-only line naming `ck stats collect --all` and no run id
+- [x] With collection forced to fail, the exit status and report equal those with collection off, and the retry command is logged
+- [x] With `run.analytics` false nothing is collected
+- [x] The sandbox settings deny the data dir; any failure in discovery, parsing or writing (P-23) leaves the exit code and report unchanged
 
 **Dependencies:** Task 24 (calls the `ck stats collect --auto` code path in cli/stats.py), Task 17 (calls auto_collect_enabled and the runfile session lookup), Task 48 (its tests are the oracle)
 **Complexity:** Medium

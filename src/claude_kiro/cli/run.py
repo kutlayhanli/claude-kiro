@@ -129,6 +129,68 @@ def spend_report(cwd: Path, session_id: Optional[str], started: float) -> List[s
     except Exception as e:  # a report must never fail the run
         return [f"Spend: could not read the transcripts ({e})"]
 
+def _collect_line(run_id: str, text: str) -> str:
+    """One log line from what `ck stats collect --auto` printed for a run."""
+    retry = f"retry: ck stats collect --run {run_id}"
+    text = text.strip()
+    marker = f"✓ {run_id}: wrote "
+    if text.startswith(marker):
+        return f"stats: {run_id} collected -> {text[len(marker):].strip()}"
+    if "has not finished" in text:
+        return f"stats: {run_id} not collected (not finished); {retry}"
+    prefix = f"⚠ could not collect {run_id}: "
+    if text.startswith(prefix):
+        reason = text[len(prefix):]
+        cut = reason.rfind("; retry:")
+        reason = (reason[:cut] if cut >= 0 else reason).strip().replace("\n", " ")
+        return f"stats: {run_id} not collected ({reason}); {retry}"
+    return f"stats: {run_id} not collected (unexpected result); {retry}"
+
+
+def auto_collect_after_run(cwd: Path, session_id: Optional[str], started: float, log: Optional[Path] = None) -> List[str]:
+    """Collect the analytics records of the runs the session just started. Never raises."""
+    import contextlib
+    import io
+
+    from .. import bench
+    from ..analytics import collect as col
+    from ..analytics import runfile, store
+    from . import stats as st
+
+    lines: List[str] = []
+    try:
+        try:
+            enabled = col.auto_collect_enabled(ag.resolve(cwd)["roles"]["run"])
+        except ag.AgentConfigError:
+            enabled = True
+        if not enabled:
+            return []
+        home = bench.claude_home()
+        sid = session_id or bench.latest_session(home, cwd, since=started - 5)
+        if not sid:
+            return []
+        ids, unreadable = runfile.session_run_ids(home, sid, since_ms=int(started * 1000) - 5000)
+        for rid in ids:
+            buf = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(buf):
+                    st.collect_auto(rid, home=home)
+                lines.append(_collect_line(rid, buf.getvalue()))
+            except Exception as e:  # noqa: BLE001
+                lines.append(f"stats: {rid} not collected ({type(e).__name__}); retry: ck stats collect --run {rid}")
+        if unreadable:
+            noun = "1 run file" if unreadable == 1 else f"{unreadable} run files"
+            lines.append(f"stats: {noun} in this session could not be read; retry: ck stats collect --all")
+            for _ in range(unreadable):
+                try:
+                    store.append_collect_log(f"{st._utc_iso()} - unrecognised")
+                except Exception:  # noqa: BLE001
+                    break
+    except Exception as e:  # a collection failure must never change the run
+        lines.append(f"stats: could not collect this session's runs ({type(e).__name__}); retry: ck stats collect --all")
+    return lines
+
+
 SANDBOX_TOOLS = ("bwrap", "socat")
 APT_INSTALL = "sudo apt-get install bubblewrap socat"
 # The sandbox hides the home directory from shell commands. Toolchains live there too
@@ -152,6 +214,12 @@ def file_rules(project: Path, worktree_dir: Optional[Path] = None) -> List[str]:
         if not wd.is_relative_to(dirs[0]):
             dirs.append(wd)
     return [f"Edit(/{d}/**)" for d in dirs]
+
+
+def _data_dir() -> Path:
+    from ..analytics import store
+
+    return store.data_dir()
 
 
 def credential_env_names(environ: Mapping[str, str]) -> List[str]:
@@ -191,7 +259,7 @@ def sandbox_settings(project: Path, allowed_domains: List[str], worktree_dir: Op
             # denyRead ~/ already hides these; listing them also blocks a repository's
             # settings from re-opening them with allowRead (a --settings lock).
             "credentials": {
-                "files": [{"path": p, "mode": "deny"} for p in CREDENTIAL_PATHS],
+                "files": [{"path": p, "mode": "deny"} for p in [*CREDENTIAL_PATHS, str(_data_dir())]],
                 "envVars": [{"name": n, "mode": "deny"} for n in env_names],
             },
         }
@@ -383,6 +451,8 @@ def run(spec: str, extra: tuple, model: str, effort: str, budget: float, max_tur
                f"{PERMISSION_MODE}, budget ${_number(budget)}, max {max_turns} turns); log: {log}")
     child_env = {k: v for k, v in os.environ.items() if k not in ENV_UNSET}
     child_env.update(env)
+    if settings is not None:
+        child_env["CK_RUN_SANDBOXED"] = "1"
     with log.open("w") as out, (err.open("w") if err else open(os.devnull, "w")) as errf:
         header = errf if err else out  # keep a JSON log pure; the header goes with stderr then
         header.write(f"ck run {name}: isolation: {isolation}, {guard}, permission mode: {PERMISSION_MODE}, "
@@ -397,7 +467,10 @@ def run(spec: str, extra: tuple, model: str, effort: str, budget: float, max_tur
         spend = spend_report(cwd, session_id, started)
         if spend:
             header.write("\n" + "\n".join(spend) + "\n")
-    for line in spend:
+        collected = auto_collect_after_run(cwd, session_id, started, log)
+        if collected:
+            header.write("\n".join(collected) + "\n")
+    for line in [*spend, *collected]:
         click.echo(line)
     click.echo(f"{'✓' if code == 0 else '❌'} claude exited {code}; log: {log}")
     sys.exit(code)
