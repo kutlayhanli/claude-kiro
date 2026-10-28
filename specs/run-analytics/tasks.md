@@ -310,7 +310,7 @@ same class from the P-10 reason-class table (each class at least two exemplars; 
 ---
 
 ### Task 8: Implement issue codes, note drafting and the note decision (issues.py)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 8.1, 8.2, 8.3, 8.4, 8.5
 **Description:** Create `issues.py` with `ISSUE_CODES` exactly as listed in design.md Data Models, S15
@@ -331,9 +331,9 @@ the CLI does that (Task 42).
 The note drafting and decision criteria (8.2-8.5) are verified at Task 42 (Task 40).
 
 **Acceptance:**
-- [ ] The same local record always yields the same codes, all members of `ISSUE_CODES`
-- [ ] `decide_note` never returns `include` when non-interactive, when `yes` is set, on discard, or with final hits
-- [ ] `draft_note` returns an error, not an exception, when `claude` is missing, fails or times out
+- [x] The same local record always yields the same codes, all members of `ISSUE_CODES`
+- [x] `decide_note` never returns `include` when non-interactive, when `yes` is set, on discard, or with final hits
+- [x] `draft_note` returns an error, not an exception, when `claude` is missing, fails or times out
 
 **Dependencies:** Task 4 (module lives in the package whose `__init__.py` Task 4 creates), Task 7 (its tests are the oracle)
 **Complexity:** Medium
