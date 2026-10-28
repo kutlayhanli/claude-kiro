@@ -836,6 +836,25 @@ def doctor(unattended: bool):
             f"Specs found in {LEGACY_SPECS_DIR}/ - run 'ck migrate' to move them to {SPECS_DIR}/"
         )
 
+    try:
+        from .. import agents as _ag
+        from .. import bench as _bench
+        from ..analytics import collect as _col
+        from ..analytics import health as _health
+        from ..analytics import store as _store
+
+        try:
+            auto_on = _col.auto_collect_enabled(_ag.resolve(project_dir)["roles"]["run"])
+        except _ag.AgentConfigError:
+            auto_on = True
+        for finding in _health.doctor_findings(_bench.claude_home(), auto_on, _store.load_records()):
+            if finding.level == "warning":
+                warnings.append(finding.message)
+            else:
+                click.echo(f"ℹ️  {finding.message}")
+    except Exception:  # noqa: BLE001 - collection health must never break doctor
+        pass
+
     _report_doctor_results(issues, warnings)
 
 
