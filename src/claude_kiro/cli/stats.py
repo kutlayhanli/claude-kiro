@@ -91,7 +91,12 @@ def collect_auto(run_id: str, *, home: Optional[Path] = None) -> int:
         if not RUN_ID_RE.match(run_id):
             raise ValueError("run id is not valid")
         if _classify(home) == "sandboxed":
-            click.echo(f"ℹ️ {run_id}: ck run collects this run after the session exits")
+            if os.environ.get("CK_RUN_SANDBOXED") == "1":
+                click.echo(f"ℹ️ {run_id}: ck run collects this run after the session exits")
+                return 0
+            reason = _sandbox_text(home)
+            _log_failure(home, run_id, "sandboxed", reason)
+            click.echo(f"⚠ could not collect {run_id}: {reason}; retry: {retry}")
             return 0
         outcome = col.collect_run(home, run_id, now=_now(), fresh=True)
         if outcome.kind == "unfinished":
@@ -117,7 +122,7 @@ def collect_auto(run_id: str, *, home: Optional[Path] = None) -> int:
 
 
 def _log_failure(home: Optional[Path], run_id: str, kind: str, message: str) -> None:
-    known = _known_allowlisted(home, run_id) if home is not None else False
+    known = home is not None and RUN_ID_RE.match(run_id) is not None and _known_allowlisted(home, run_id)
     if known:
         line = f"{_utc_iso()} {run_id} {kind}: {message}"
     else:

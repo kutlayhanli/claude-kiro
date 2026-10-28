@@ -899,9 +899,11 @@ These suites also verify the criteria of foundation Tasks 14, 15 and 18 and the 
 
 **Implementation notes:** Collector fix-ups found by this gate: a truncated transcript reports 0 figures as null; S28
 matches the run id on token boundaries. The record keeps `reportSource`, `stats`, `taskSpanMinutes` (implement) and `mode`,
-`openQuestions` (create) as design.md specifies; `tests/stats_helpers.seeded_local_record` (Task 1) lacks these five keys,
-so Task 26's key-set equality needs the helper and the test-plan Harness Contract 'Local record keys' list to gain them
-(escalated). `ck stats collect --run BAD --auto` goes through `collect_auto` and exits 0. `analytics/runfile.py` is in the listed files.
+`reviewResult`, `openQuestions` (create) as design.md specifies; `tests/stats_helpers.seeded_local_record` (Task 1) and the
+test-plan Harness Contract 'Local record keys' list gained those keys in this task (cross-task edit, noted for the owners of
+Tasks 1 and 26). `ck stats collect --run BAD --auto` goes through `collect_auto` and exits 0. Under `--auto` a sandboxed home
+prints the "ck run collects" line only when `CK_RUN_SANDBOXED=1`; otherwise it is logged and the retry command printed.
+`analytics/runfile.py` is in the listed files.
 
 ---
 
