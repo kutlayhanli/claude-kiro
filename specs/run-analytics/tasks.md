@@ -94,7 +94,7 @@ suites `test_worktree_land.py`, `test_gate.py`, `test_upgrade.py`, `test_plugin_
 ---
 
 ### Task 2: Add the label-corpus and conflict-round hooks to the Node workflow harness
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.3, 11.1
 **Description:** Test-plan.md "To add" items 5-6. In `tests/js/load_workflow.mjs`, record every `opts.label` (with the
@@ -115,10 +115,10 @@ unchanged.
 Test infrastructure for Tasks 54 and 52; it asserts no TC.
 
 **Acceptance:**
-- [ ] `node tests/js/emit_labels.mjs` prints labels from both real workflow scripts, including every template family in design.md's grammar table
-- [ ] `CK_DUMP_LABELS` writes the corpus when the existing suites run
-- [ ] Every existing JS test passes unchanged
-- [ ] The real workflow scripts run; only `agent` is stubbed (as today)
+- [x] `node tests/js/emit_labels.mjs` prints labels from both real workflow scripts, including every template family in design.md's grammar table
+- [x] `CK_DUMP_LABELS` writes the corpus when the existing suites run
+- [x] Every existing JS test passes unchanged
+- [x] The real workflow scripts run; only `agent` is stubbed (as today)
 
 **Dependencies:** None
 **Complexity:** Medium
@@ -524,7 +524,7 @@ The auto-collect default and salt criteria (1.8, 3.4, 3.5) are verified at Tasks
 ---
 
 ### Task 14: Extract per-model usage summing in bench.py into aggregate_usage
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.3
 **Description:** `bench.session_spend` (src/claude_kiro/bench.py:354) sums the per-model usage of its transcript scans
@@ -540,8 +540,8 @@ agree to the cent (NFR "Agreement with existing numbers").
 Foundation task: its smoke check is the existing cost and bench suites; the agreement criterion (1.3) is verified at Task 24 (Tasks 26, 29).
 
 **Acceptance:**
-- [ ] `aggregate_usage` returns per-model sums of input/output/cacheRead/cacheCreation over the given scans
-- [ ] `session_spend` output is unchanged for every existing test fixture (test_cost.py and test_bench.py pass unchanged)
+- [x] `aggregate_usage` returns per-model sums of input/output/cacheRead/cacheCreation over the given scans
+- [x] `session_spend` output is unchanged for every existing test fixture (test_cost.py and test_bench.py pass unchanged)
 
 **Dependencies:** None
 **Complexity:** Low
@@ -1891,7 +1891,7 @@ before the open questions (`/spec:review` runs spec-create in review mode). Use 
 ---
 
 ### Task 52: Workflow tests for the per-task conflict-resolution count
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 11.1, 11.2
 **Description:** Implements TC-72 and TC-73 in the existing stubbed-agent suite. TC-72: with the stubbed project having
@@ -1908,10 +1908,10 @@ before any implementation change); and the existing
 **Verifies:** Task 53
 
 **Acceptance:**
-- [ ] Tests run the real `plugin/workflows/spec-implement.js` with only `agent` stubbed
-- [ ] The key-set snapshot is taken from today's script, so any other result change fails
-- [ ] TC-72 tests fail before the implementation exists because `resolves` is absent, not because of harness errors
-- [ ] No mocks of the project's own code
+- [x] Tests run the real `plugin/workflows/spec-implement.js` with only `agent` stubbed
+- [x] The key-set snapshot is taken from today's script, so any other result change fails
+- [x] TC-72 tests fail before the implementation exists because `resolves` is absent, not because of harness errors
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 2 (`conflictRounds` in the fake project; both edit tests/js/spec_implement.test.mjs)
 **Complexity:** Medium
