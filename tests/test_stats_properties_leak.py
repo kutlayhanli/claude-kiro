@@ -287,7 +287,10 @@ def test_p13_generic_shapes_always_hit(shape, where):
 
 
 SHORT_TERMS = ["a", "ui", "api", "test", "review", "plan", "land"]
-HOSTS = ["reviewer", "reviewRounds", "attempts", "planSteps", "landings", "ui_kit"]
+# `_` is a boundary under design.md's whole-word rule `(?<![A-Za-z0-9])term(?![A-Za-z0-9])`, so a snake_case name such as
+# `ui_kit` is not a host: `ui` hits there (see test_p14_underscore_is_a_word_boundary). Snake_case names stay clean only
+# as fixed tokens (see test_p14_enum_member_in_enum_position_never_hits).
+HOSTS = ["reviewer", "reviewRounds", "attempts", "planSteps", "landings"]
 STANDALONE = [
     "{t}", "the {t} spec", "x/{t}", "'{t}' ok", "{t}, next", "(see {t}).", "say \"{t}\"", "path/{t}/end", "ok {t}",
 ]
@@ -345,7 +348,17 @@ def test_p14_listed_hosts_never_hit():
                 assert not _scan(_contexts(host), {term}), (term, host)
 
 
+def test_p14_underscore_is_a_word_boundary():
+    """Design.md: `_` is outside [A-Za-z0-9], so a weak term standing between underscores is a whole word."""
+    for text in ("ui_kit", "kit_ui", "my_ui_kit"):
+        files = _contexts(text)
+        for name in ("notes.md", "<pr-body>", "<commit>", "analytics/runs/2026-10/v.json"):
+            assert _hits_for(_scan({name: files[name]}, {"ui"}), name), (name, text)
+
+
 ENUM_CASES = [
+    ("reviewer", "agents_by_role", {"reviewer": 2}, "reviewer"),
+    ("reviewer", "config", {"reviewer": {"model": "opus", "effort": "high"}}, "reviewer"),
     ("needs", "issues", ["review_needs_work"], "review_needs_work"),
     ("after", "outcome", "ready_after_decisions", "ready_after_decisions"),
     ("implement", "workflow", "spec-implement", "spec-implement"),
