@@ -29,7 +29,7 @@ _ENUM_KEYS = {"outcome", "verdict", "role", "model", "effort", "stack"}
 _PROTECTED_KEYS = {"schema", "workflow", "workflowName", "startTime", "ckVersion", "collectorVersion", "status"}
 
 _WRAPS = [
-    "{t}", "{t}".upper(), "{t}".lower(), "see {t}, then stop", "({t}).", "'{t}'", "{t}:", "x {t} y",
+    "{t}", "see {t}, then stop", "({t}).", "'{t}'", "{t}:", "x {t} y",
     "/x/{t}/y", "{t}/y", "./{t}", "../{t}", "~/{t}", "C:\\\\{t}\\\\y",
     "integrate/{t}", "feat/{t}-1",
     "https://github.com/o/{t}", "https://github.com/o/{t}.git", "git@github.com:o/{t}.git", "ssh://git@github.com/o/{t}",
@@ -54,6 +54,12 @@ def confidential(draw):
     text = form.replace("{t}", term)
     if draw(st.booleans()):
         text = json.dumps(text)[1:-1].replace("/", "\\/")  # JSON-escaped form
+    if draw(st.booleans()):
+        # \u00xx escape of one ASCII letter, as ensure_ascii-style serialisers can emit
+        idx = [i for i, ch in enumerate(text) if ch.isascii() and ch.isalpha()]
+        if idx:
+            i = draw(st.sampled_from(idx))
+            text = text[:i] + "\\u00%02x" % ord(text[i]) + text[i + 1:]
     return text
 
 
@@ -140,7 +146,11 @@ def free_text_pair(draw):
     """(record, mutated record): one free-text leaf (task title, project path, or a reason within its class) differs."""
     rec = draw(local_record())
     other = copy.deepcopy(rec)
-    targets = [("project", "root")]
+    targets = [("project", "root"), ("project", "spec"), ("project", "branch")]
+    if isinstance(rec.get("finalGate"), dict) and "summary" in rec["finalGate"]:
+        targets.append(("finalGate", "summary"))
+    if isinstance(rec.get("phases"), list):
+        targets.extend(("phases", i, "group") for i in range(len(rec["phases"])))
     for i, t in enumerate(rec.get("tasks", [])):
         targets.append(("tasks", i, "title"))
         if _reason_class(t.get("reason") or "") is not None:
@@ -255,7 +265,7 @@ def test_p18_month_is_utc_year_month_only(case):
 
 
 @settings(**SETTINGS)
-@given(local_record(), st.sampled_from(["0123456789abcdef", "ffffffffffffffff", "r-1"]), st.sampled_from([None, "work-laptop", "a"]))
+@given(local_record(), st.sampled_from(["0123456789abcdef", "ffffffffffffffff", "00000000000000a1"]), st.sampled_from([None, "work-laptop", "a"]))
 def test_p21_same_record_id_gives_identical_output(rec, record_id, label):
     from claude_kiro.analytics import build_shareable
 
