@@ -1749,7 +1749,7 @@ Wire it into `doctor()` in `cli/main.py`: warnings go into the existing `warning
 ---
 
 ### Task 48: End-to-end tests for automatic collection after ck run
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 3.1, 3.3, 3.4, 3.5, 3.6
 **Description:** Implements TC-21, TC-22, TC-23, TC-24, TC-25, TC-27, TC-84 and P-23. TC-21: a fake `claude` on PATH
@@ -1783,11 +1783,11 @@ record (a transcript chmod 000, a `.meta.json` that is not JSON). Declare `PROPE
 **Verifies:** Task 49
 
 **Acceptance:**
-- [ ] `ck run` is run as a real subprocess with a fake `claude` on PATH; the outer ck process is not mocked
-- [ ] Exit-code equality with collection forced to fail is asserted for both a 0 and a non-zero child status
-- [ ] Config files are compared byte for byte before and after rejected sets
-- [ ] Tests fail before the implementation exists for the right reason (no collection after `ck run`, unknown `run.analytics` key)
-- [ ] No mocks of the project's own code
+- [x] `ck run` is run as a real subprocess with a fake `claude` on PATH; the outer ck process is not mocked
+- [x] Exit-code equality with collection forced to fail is asserted for both a 0 and a non-zero child status
+- [x] Config files are compared byte for byte before and after rejected sets
+- [x] Tests fail before the implementation exists for the right reason (no collection after `ck run`, unknown `run.analytics` key)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake claude session writer, isolation fixtures)
 **Complexity:** High
