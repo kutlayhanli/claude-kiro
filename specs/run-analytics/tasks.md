@@ -1696,7 +1696,7 @@ These suites also verify the git/gh criteria of Task 37 and the end-to-end leak 
 ---
 
 ### Task 46: Integration tests for collection health in ck doctor
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 12.1, 12.2, 12.3
 **Description:** Implements TC-74, TC-75, TC-76, running the real `ck doctor` in a ck project (`project` fixture) with a
@@ -1711,9 +1711,9 @@ completed allowlisted runs, 1 collected with `ck stats collect --run`: reports 2
 **Verifies:** Task 47
 
 **Acceptance:**
-- [ ] Tests run the real `ck doctor` CLI over real fake Claude homes and config files
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] No mocks of the project's own code
+- [x] Tests run the real `ck doctor` CLI over real fake Claude homes and config files
+- [x] Tests fail before the implementation exists for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake Claude home)
 **Complexity:** Low
