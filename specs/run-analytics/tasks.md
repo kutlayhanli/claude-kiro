@@ -1833,7 +1833,7 @@ the same code path as `ck stats collect --auto`".
 ---
 
 ### Task 50: Static contract test for the skills' end-of-run collect step
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 3.2, 3.3, 3.4
 **Description:** Implements TC-26. `plugin/skills/implement/SKILL.md` step 9, `plugin/skills/create/SKILL.md` "Close
@@ -1847,9 +1847,9 @@ run's report; the vendored renderings from `plugin.vendor_files()` (`.claude/com
 **Verifies:** Task 51
 
 **Acceptance:**
-- [ ] The test reads the real skill files and the real vendored renderings
-- [ ] Tests fail before the implementation exists for the right reason (skill text missing)
-- [ ] No mocks of the project's own code
+- [x] The test reads the real skill files and the real vendored renderings
+- [x] Tests fail before the implementation exists for the right reason (skill text missing)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (isolation fixtures)
 **Complexity:** Low
