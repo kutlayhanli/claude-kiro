@@ -1920,7 +1920,7 @@ before any implementation change); and the existing
 ---
 
 ### Task 53: Return the per-task conflict-resolution count from spec-implement
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 11.1, 11.2
 **Description:** In `plugin/workflows/spec-implement.js`: in `runTask` (:646) initialise `rec.resolves = 0`; in
