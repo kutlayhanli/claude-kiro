@@ -210,7 +210,7 @@ The CLI-level criteria (1.10, 1.11, 1.13, 1.14, 1.15, 2.2) are verified at Task 
 ---
 
 ### Task 5: Property tests for the label grammar (P-3, P-4)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.1, 5.2
 **Description:** Implements P-3 and P-4 against the Harness Contract seam `parse_label(label, workflow) -> dict` (keys
@@ -229,11 +229,11 @@ labels with leading/trailing whitespace or a suffix such as `task 3 extra`, and 
 **Verifies:** Task 6
 
 **Acceptance:**
-- [ ] Generators cover every template and every near miss listed in the P-3 and P-4 rows
-- [ ] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
-- [ ] Tests call the decision seam `parse_label`, not the CLI
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] `PROPERTIES` map names the test for each P-id
+- [x] Generators cover every template and every near miss listed in the P-3 and P-4 rows
+- [x] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
+- [x] Tests call the decision seam `parse_label`, not the CLI
+- [x] Tests fail before the implementation exists for the right reason
+- [x] `PROPERTIES` map names the test for each P-id
 
 **Dependencies:** Task 1 (hypothesis, `CONFIDENTIAL`)
 **Complexity:** Medium
@@ -376,7 +376,7 @@ generators in this file. Declare `PROPERTIES`.
 ---
 
 ### Task 10: Property test for enum mapping (P-7)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.4, 7.5
 **Description:** Implements P-7 against the Harness Contract seams `enum_value(field, value)`, `model_family(model)`,
@@ -396,11 +396,11 @@ generators locally (do not import from Task 9's file). Declare `PROPERTIES`.
 **Verifies:** Task 11
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the P-7 row
-- [ ] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
-- [ ] Tests call the decision seams (`enum_value`, `model_family`, `build_shareable`), not the CLI
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] `PROPERTIES` map names the test for P-7
+- [x] Generators cover every surface form and negative listed in the P-7 row
+- [x] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
+- [x] Tests call the decision seams (`enum_value`, `model_family`, `build_shareable`), not the CLI
+- [x] Tests fail before the implementation exists for the right reason
+- [x] `PROPERTIES` map names the test for P-7
 
 **Dependencies:** Task 1 (hypothesis, `seeded_local_record`, `CONFIDENTIAL`)
 **Complexity:** Medium
@@ -451,7 +451,7 @@ The no-confidential-term property P-5 needs the leak term builder and is verifie
 ---
 
 ### Task 12: Property tests for settings validation (P-8, P-9)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.6, 7.6
 **Description:** Implements P-8 and P-9. P-8 pure half: for any string, `valid_machine_label(s)` from
@@ -472,11 +472,11 @@ another. Declare `PROPERTIES`.
 **Verifies:** Task 13
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the P-8 and P-9 rows
-- [ ] Settings are deterministic (`derandomize=True`, `database=None`, `deadline=None`; 200 for the pure half, 25 for CLI halves)
-- [ ] The pure half calls `valid_machine_label`; CLI halves run the real `ck agents set` against real config files
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] `PROPERTIES` map names the test for each P-id
+- [x] Generators cover every surface form and negative listed in the P-8 and P-9 rows
+- [x] Settings are deterministic (`derandomize=True`, `database=None`, `deadline=None`; 200 for the pure half, 25 for CLI halves)
+- [x] The pure half calls `valid_machine_label`; CLI halves run the real `ck agents set` against real config files
+- [x] Tests fail before the implementation exists for the right reason
+- [x] `PROPERTIES` map names the test for each P-id
 
 **Dependencies:** Task 1 (hypothesis, isolated config home, `ck_sub`)
 **Complexity:** Medium
@@ -711,7 +711,7 @@ Foundation task: smoke Verify only; its criteria (TC-7, TC-8, TC-9, TC-11, TC-83
 ---
 
 ### Task 19: Integration tests for collecting only ck workflows
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.1, 2.2, 2.3
 **Description:** Implements TC-18, TC-19, TC-20. TC-18: a session holding two ck runs and foreign runs
@@ -727,10 +727,10 @@ exits non-zero, refuses, does not print the name, writes nothing. CLI runs go th
 **Verifies:** Task 24
 
 **Acceptance:**
-- [ ] Tests run the real `ck stats collect` over a real fake Claude home with real file permissions
-- [ ] Scans cover every file under `$XDG_DATA_HOME` plus captured stdout and stderr, using `all_bytes`
-- [ ] Tests fail before the implementation exists for the right reason (missing command/allowlist), not broken fixtures
-- [ ] No mocks of the project's own code
+- [x] Tests run the real `ck stats collect` over a real fake Claude home with real file permissions
+- [x] Scans cover every file under `$XDG_DATA_HOME` plus captured stdout and stderr, using `all_bytes`
+- [x] Tests fail before the implementation exists for the right reason (missing command/allowlist), not broken fixtures
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake Claude home with foreign runs)
 **Complexity:** Medium
@@ -767,7 +767,7 @@ an empty home: says no ck runs were found, exit 0.
 ---
 
 ### Task 21: Performance tests for collect
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 4.1
 **Description:** Implements TC-77 and TC-78 (NFR Performance). TC-77: one fixture run with 250 agents, 3 requests
@@ -780,10 +780,10 @@ the measurement). Mark the module `slow` if the repo has such a marker, otherwis
 **Verifies:** Task 24
 
 **Acceptance:**
-- [ ] Timed through the real CLI, not by calling internals
-- [ ] Bounds are exactly the NFR's (10 s, 120 s)
-- [ ] Tests fail before the implementation exists for the right reason (no command), not timeouts in fixture setup
-- [ ] No mocks of the project's own code
+- [x] Timed through the real CLI, not by calling internals
+- [x] Bounds are exactly the NFR's (10 s, 120 s)
+- [x] Tests fail before the implementation exists for the right reason (no command), not timeouts in fixture setup
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake Claude home)
 **Complexity:** Low
@@ -792,7 +792,7 @@ the measurement). Mark the module `slow` if the repo has such a marker, otherwis
 ---
 
 ### Task 22: Property test for keeping foreign workflows out of every output (P-2)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.2, 2.3
 **Description:** Implements P-2 through the CLI (`max_examples=25`, other settings as P-1; each example builds its
@@ -808,11 +808,11 @@ runs are stored and foreign runs refused. Define the generators locally. Declare
 **Verifies:** Task 24
 
 **Acceptance:**
-- [ ] Generators cover every foreign name form listed in the P-2 row
-- [ ] Settings are deterministic (`derandomize=True`, `max_examples=25`, `database=None`, `deadline=None`)
-- [ ] The property runs the real CLI over real temp homes
-- [ ] Tests fail before the implementation exists for the right reason (missing command)
-- [ ] `PROPERTIES` map names the test for P-2
+- [x] Generators cover every foreign name form listed in the P-2 row
+- [x] Settings are deterministic (`derandomize=True`, `max_examples=25`, `database=None`, `deadline=None`)
+- [x] The property runs the real CLI over real temp homes
+- [x] Tests fail before the implementation exists for the right reason (missing command)
+- [x] `PROPERTIES` map names the test for P-2
 
 **Dependencies:** Task 1 (hypothesis, fake Claude home, `CONFIDENTIAL`)
 **Complexity:** Medium
@@ -990,7 +990,7 @@ set of the record really collected from `seeded_home` (both kinds), so the pure 
 ---
 
 ### Task 27: Integration tests for role attribution and the label contract
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.1, 5.2, 6.2
 **Description:** Implements TC-32 and TC-33 (TC-34, the label corpus check, is Task 54). TC-32: agents labelled with every template in design.md's grammar
@@ -1009,9 +1009,9 @@ template meaning. TC-33: labels `triage invoices` and `tasks 3` (labels no templ
 **Verifies:** Task 31
 
 **Acceptance:**
-- [ ] TC-32/33 drive the real `ck stats collect`/`show` over a fake Claude home
-- [ ] Tests fail before the implementation exists for the right reason (no `roles` module / no role fields)
-- [ ] No mocks of the project's own code
+- [x] TC-32/33 drive the real `ck stats collect`/`show` over a fake Claude home
+- [x] Tests fail before the implementation exists for the right reason (no `roles` module / no role fields)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake Claude home)
 **Complexity:** Medium
@@ -1833,7 +1833,7 @@ the same code path as `ck stats collect --auto`".
 ---
 
 ### Task 50: Static contract test for the skills' end-of-run collect step
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.2, 3.3, 3.4
 **Description:** Implements TC-26. `plugin/skills/implement/SKILL.md` step 9, `plugin/skills/create/SKILL.md` "Close
@@ -1847,9 +1847,9 @@ run's report; the vendored renderings from `plugin.vendor_files()` (`.claude/com
 **Verifies:** Task 51
 
 **Acceptance:**
-- [ ] The test reads the real skill files and the real vendored renderings
-- [ ] Tests fail before the implementation exists for the right reason (skill text missing)
-- [ ] No mocks of the project's own code
+- [x] The test reads the real skill files and the real vendored renderings
+- [x] Tests fail before the implementation exists for the right reason (skill text missing)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (isolation fixtures)
 **Complexity:** Low
