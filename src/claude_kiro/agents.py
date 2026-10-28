@@ -242,7 +242,9 @@ def parse_override(text: str) -> Tuple[str, str, str]:
         raise AgentConfigError(f"override {text!r} must look like role.key=value, e.g. implementer.model=haiku")
     path, value = text.split("=", 1)
     role, key = path.split(".", 1)
-    return role.strip(), key.strip(), value.strip()
+    key = key.strip()
+    # Whitespace is part of a machine label or boolean word, so it must be rejected, not trimmed away.
+    return role.strip(), key, value if key in ("machine_label", "analytics") else value.strip()
 
 
 def resolve(project_dir: Path, overrides: Optional[List[str]] = None) -> Dict[str, Any]:
