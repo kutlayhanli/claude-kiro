@@ -1149,7 +1149,7 @@ These suites also verify the criteria of foundation Task 25 and the CLI-reached 
 ---
 
 ### Task 32: Property tests for the leak scanner (P-12, P-13, P-14)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 9.1, 9.2, 9.3
 **Description:** Implements P-12, P-13, P-14 against the Harness Contract seams
@@ -1178,11 +1178,11 @@ none of them from `confidential_terms`, so a record with `claudeCodeVersion` `2.
 **Verifies:** Task 34
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the P-12, P-13, P-14 rows
-- [ ] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
-- [ ] Tests call the decision seams `confidential_terms` and `leak_scan`, not the CLI
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] `PROPERTIES` map names the test for each P-id
+- [x] Generators cover every surface form and negative listed in the P-12, P-13, P-14 rows
+- [x] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
+- [x] Tests call the decision seams `confidential_terms` and `leak_scan`, not the CLI
+- [x] Tests fail before the implementation exists for the right reason
+- [x] `PROPERTIES` map names the test for each P-id
 
 **Dependencies:** Task 1 (hypothesis, `CONFIDENTIAL`, `seeded_local_record`)
 **Complexity:** High
