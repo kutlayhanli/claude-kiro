@@ -105,8 +105,11 @@ def run_cost(rec):
 @st.composite
 def homes(draw):
     projects = draw(st.integers(1, 2))
-    n = draw(st.integers(1, 4))
-    kinds = [draw(st.sampled_from(["implement", "create", "running", "foreign"])) for _ in range(n)]
+    n_done = draw(st.integers(1, 4))
+    n_other = draw(st.integers(0, 3))
+    n = n_done + n_other
+    kinds = [draw(st.sampled_from(["implement", "create"])) for _ in range(n_done)]
+    kinds += [draw(st.sampled_from(["running", "foreign"])) for _ in range(n_other)]
     which = [draw(st.integers(0, projects - 1)) for _ in range(n)]
     return projects, list(zip(kinds, which))
 
@@ -242,7 +245,8 @@ def test_missing_data_is_null_never_zero(case):
                 data = path.read_bytes()
                 lines = data.rstrip(b"\n").split(b"\n")
                 last_start = len(data.rstrip(b"\n")) - len(lines[-1])
-                cut = last_start + int(cuts[i] * len(lines[-1]))
+                # strictly inside the last line, so the file ends in partial JSON
+                cut = last_start + max(1, min(len(lines[-1]) - 1, int(cuts[i] * len(lines[-1]))))
                 path.write_bytes(data[:cut])
 
         after = collect_run(env, run.run_id)
