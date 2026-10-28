@@ -342,7 +342,7 @@ The note drafting and decision criteria (8.2-8.5) are verified at Task 42 (Task 
 ---
 
 ### Task 9: Property tests for the shareable record builder (P-6, P-17, P-18, P-21)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.1, 7.2, 7.3, 9.4
 **Description:** Implements P-6, P-17, P-18, P-21 against the Harness Contract seams `build_shareable(local, *,
@@ -363,11 +363,11 @@ generators in this file. Declare `PROPERTIES`.
 **Verifies:** Task 11
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the P-6, P-17, P-18, P-21 rows
-- [ ] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
-- [ ] Tests call the decision seams (`build_shareable`, `month_of`), not the CLI
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] `PROPERTIES` map names the test for each P-id
+- [x] Generators cover every surface form and negative listed in the P-6, P-17, P-18, P-21 rows
+- [x] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
+- [x] Tests call the decision seams (`build_shareable`, `month_of`), not the CLI
+- [x] Tests fail before the implementation exists for the right reason
+- [x] `PROPERTIES` map names the test for each P-id
 
 **Dependencies:** Task 1 (hypothesis, `seeded_local_record`, `CONFIDENTIAL`)
 **Complexity:** High
@@ -821,7 +821,7 @@ runs are stored and foreign runs refused. Define the generators locally. Declare
 ---
 
 ### Task 23: Red-team the non-ck workflow prohibition (Story 2)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.2, 2.3
 **Description:** Try to break each SHALL NOT clause of Story 2 with adversarial inputs: unusual surface forms,
@@ -841,10 +841,10 @@ corrupt foreign run next to a corrupt ck run in `--all`.
 **Verifies:** Task 24
 
 **Acceptance:**
-- [ ] Each adversarial case is a separate named test or parametrized id describing the trick
-- [ ] Cases run the real `ck stats collect` CLI over real temp homes
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] No mocks of the project's own code
+- [x] Each adversarial case is a separate named test or parametrized id describing the trick
+- [x] Cases run the real `ck stats collect` CLI over real temp homes
+- [x] Tests fail before the implementation exists for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake Claude home, foreign runs)
 **Complexity:** Medium
@@ -935,7 +935,7 @@ Foundation task: smoke Verify only; its criteria are verified at Task 31 (Tasks 
 ---
 
 ### Task 26: Integration tests for collecting a run's local record
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 1.10, 1.11, 1.12, 1.13, 1.14, 1.15, 2.2
 **Description:** Implements TC-1, TC-2, TC-3, TC-4, TC-5, TC-6, TC-7, TC-8, TC-9, TC-10, TC-11, TC-12, TC-13, TC-14,
@@ -976,12 +976,12 @@ set of the record really collected from `seeded_home` (both kinds), so the pure 
 **Verifies:** Task 24
 
 **Acceptance:**
-- [ ] Each TC listed above has at least one test whose name or docstring cites its TC id
-- [ ] Tests exercise the real boundary named in the test plan: the real `ck` CLI over real temp `CLAUDE_CONFIG_DIR`/`XDG_DATA_HOME`/`CK_CONFIG_HOME` trees and real git repos
-- [ ] Tests fail before the implementation exists for the right reason (no `ck stats` command / missing record fields), not because of broken fixtures
-- [ ] No mocks of the project's own code; `bench`, the store and config are used for real
-- [ ] No unknown number is accepted as 0 in any assertion (1.12)
-- [ ] Every test runs under `no_network`
+- [x] Each TC listed above has at least one test whose name or docstring cites its TC id
+- [x] Tests exercise the real boundary named in the test plan: the real `ck` CLI over real temp `CLAUDE_CONFIG_DIR`/`XDG_DATA_HOME`/`CK_CONFIG_HOME` trees and real git repos
+- [x] Tests fail before the implementation exists for the right reason (no `ck stats` command / missing record fields), not because of broken fixtures
+- [x] No mocks of the project's own code; `bench`, the store and config are used for real
+- [x] No unknown number is accepted as 0 in any assertion (1.12)
+- [x] Every test runs under `no_network`
 
 **Dependencies:** Task 1 (fake Claude home, store helpers, no_network)
 **Complexity:** High
@@ -1020,7 +1020,7 @@ template meaning. TC-33: labels `triage invoices` and `tasks 3` (labels no templ
 ---
 
 ### Task 28: Integration tests for ck stats show breakdowns and trends
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.12, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8
 **Description:** Implements TC-35, TC-36, TC-37, TC-38, TC-39, TC-40, TC-41, TC-42, TC-43. Records are produced by
@@ -1042,10 +1042,10 @@ exclude.
 **Verifies:** Task 31
 
 **Acceptance:**
-- [ ] Tests run the real `ck stats` / `ck stats show` CLI against a store filled by the real collector
-- [ ] Trend numbers are compared with values computed by hand from fixture inputs
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] No mocks of the project's own code
+- [x] Tests run the real `ck stats` / `ck stats show` CLI against a store filled by the real collector
+- [x] Trend numbers are compared with values computed by hand from fixture inputs
+- [x] Tests fail before the implementation exists for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake Claude home, store helpers)
 **Complexity:** Medium
@@ -1089,7 +1089,7 @@ transcripts deleted or truncated at any byte offset of the last line: no affecte
 ---
 
 ### Task 30: Red-team the role parser's no-guess rule (Story 5)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.2, 6.2
 **Description:** Try to break each SHALL NOT clause of Story 5 with adversarial inputs: unusual surface forms,
@@ -1109,10 +1109,10 @@ counted in its `other` summary.
 **Verifies:** Task 31
 
 **Acceptance:**
-- [ ] Each adversarial case is a separate named test or parametrized id describing the trick
-- [ ] Cases exercise the real CLI over a fake Claude home as well as the seam
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] No mocks of the project's own code
+- [x] Each adversarial case is a separate named test or parametrized id describing the trick
+- [x] Cases exercise the real CLI over a fake Claude home as well as the seam
+- [x] Tests fail before the implementation exists for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake Claude home)
 **Complexity:** Medium
@@ -1507,7 +1507,7 @@ without `.md`.
 ---
 
 ### Task 41: Red-team the shareable-record exclusions (Story 7)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.1, 7.3, 7.4, 7.5
 **Description:** Try to break each SHALL NOT clause of Story 7 with adversarial inputs: unusual surface forms,
@@ -1529,10 +1529,10 @@ that no planted string appears and every enum field is in its set or `other`.
 **Verifies:** Task 42
 
 **Acceptance:**
-- [ ] Each adversarial case is a separate named test or parametrized id describing the trick
-- [ ] Cases run the real collector and exporter into a real git checkout
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] No mocks of the project's own code; no network
+- [x] Each adversarial case is a separate named test or parametrized id describing the trick
+- [x] Cases run the real collector and exporter into a real git checkout
+- [x] Tests fail before the implementation exists for the right reason
+- [x] No mocks of the project's own code; no network
 
 **Dependencies:** Task 1 (fake Claude home, kiro checkout, `CONFIDENTIAL`)
 **Complexity:** Medium
@@ -1753,7 +1753,7 @@ Wire it into `doctor()` in `cli/main.py`: warnings go into the existing `warning
 ---
 
 ### Task 48: End-to-end tests for automatic collection after ck run
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 3.3, 3.4, 3.5, 3.6
 **Description:** Implements TC-21, TC-22, TC-23, TC-24, TC-25, TC-27, TC-84 and P-23. TC-21: a fake `claude` on PATH
@@ -1787,11 +1787,11 @@ record (a transcript chmod 000, a `.meta.json` that is not JSON). Declare `PROPE
 **Verifies:** Task 49
 
 **Acceptance:**
-- [ ] `ck run` is run as a real subprocess with a fake `claude` on PATH; the outer ck process is not mocked
-- [ ] Exit-code equality with collection forced to fail is asserted for both a 0 and a non-zero child status
-- [ ] Config files are compared byte for byte before and after rejected sets
-- [ ] Tests fail before the implementation exists for the right reason (no collection after `ck run`, unknown `run.analytics` key)
-- [ ] No mocks of the project's own code
+- [x] `ck run` is run as a real subprocess with a fake `claude` on PATH; the outer ck process is not mocked
+- [x] Exit-code equality with collection forced to fail is asserted for both a 0 and a non-zero child status
+- [x] Config files are compared byte for byte before and after rejected sets
+- [x] Tests fail before the implementation exists for the right reason (no collection after `ck run`, unknown `run.analytics` key)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake claude session writer, isolation fixtures)
 **Complexity:** High
