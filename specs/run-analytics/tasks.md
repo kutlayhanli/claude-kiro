@@ -156,7 +156,7 @@ Settings `@settings(derandomize=True, max_examples=200, database=None, deadline=
 ---
 
 ### Task 4: Create the analytics package and the run-file reader (runfile.py)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.10, 1.11, 1.13, 1.14, 1.15, 2.1, 2.2
 **Description:** Create `src/claude_kiro/analytics/` with `__init__.py` and `runfile.py`.
@@ -195,13 +195,13 @@ All seams are pure: no I/O, clock or environment reads. Stdlib only.
 The CLI-level criteria (1.10, 1.11, 1.13, 1.14, 1.15, 2.2) are verified at Task 24.
 
 **Acceptance:**
-- [ ] `is_ck_workflow` is True only for the three exact names, False for any other value
-- [ ] `check_format` accepts real run files with extra keys, and a `workflowProgress` list holding non-dict entries; it rejects a run file whose `workflowProgress` is missing or an object, with problems that do not name the workflow
-- [ ] `run_state` returns `unfinished` for `running`/`pending`/`queued`/`starting` and for a non-terminal status with no `durationMs`
-- [ ] `classify_home` returns `sandboxed` when the home is not listable, or missing while the sandbox flag is set
-- [ ] `peek_workflow_name` returns only `workflowName` (any value) and keeps no other field; callers other than `leak.non_ck_workflow_names` discard non-allowlisted names immediately
-- [ ] `session_run_ids` never returns or retains a non-allowlisted run's name or id, and returns unreadable-name run files as a count only
-- [ ] `recover_workflow_name` returns an allowlisted name only from the launch whose result names the run id (`spec:spec-implement`, `spec:spec-create`, or a `scriptPath` ending in `spec-implement.js` / `spec-create.js`), and None for anything else
+- [x] `is_ck_workflow` is True only for the three exact names, False for any other value
+- [x] `check_format` accepts real run files with extra keys, and a `workflowProgress` list holding non-dict entries; it rejects a run file whose `workflowProgress` is missing or an object, with problems that do not name the workflow
+- [x] `run_state` returns `unfinished` for `running`/`pending`/`queued`/`starting` and for a non-terminal status with no `durationMs`
+- [x] `classify_home` returns `sandboxed` when the home is not listable, or missing while the sandbox flag is set
+- [x] `peek_workflow_name` returns only `workflowName` (any value) and keeps no other field; callers other than `leak.non_ck_workflow_names` discard non-allowlisted names immediately
+- [x] `session_run_ids` never returns or retains a non-allowlisted run's name or id, and returns unreadable-name run files as a count only
+- [x] `recover_workflow_name` returns an allowlisted name only from the launch whose result names the run id (`spec:spec-implement`, `spec:spec-create`, or a `scriptPath` ending in `spec-implement.js` / `spec-create.js`), and None for anything else
 
 **Dependencies:** Task 3 (its tests are the oracle)
 **Complexity:** Medium
@@ -242,7 +242,7 @@ labels with leading/trailing whitespace or a suffix such as `task 3 extra`, and 
 ---
 
 ### Task 6: Implement the label grammar (roles.py)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 5.1, 5.2, 5.3
 **Description:** Create `roles.py` with `ROLES` (implementer, test-writer, reviewer, fixer, resolver, plan, land, gate,
@@ -267,9 +267,9 @@ and legacy labels (5.3) is test-owned (Task 54).
 **Verified by:** Task 5, Task 54
 
 **Acceptance:**
-- [ ] Every row of the design grammar table parses to its role, task, attempt/round, step and escalated_to
-- [ ] Every label template in both workflow scripts is matched (`matched=True`), and every label of the legacy corpus
-- [ ] An unknown label, or a template label with surrounding whitespace, gives `other` with `matched=False`
+- [x] Every row of the design grammar table parses to its role, task, attempt/round, step and escalated_to
+- [x] Every label template in both workflow scripts is matched (`matched=True`), and every label of the legacy corpus
+- [x] An unknown label, or a template label with surrounding whitespace, gives `other` with `matched=False`
 
 **Dependencies:** Task 4 (module lives in the package whose `__init__.py` Task 4 creates), Task 5 (its tests are the oracle), Task 54 (its tests are the oracle)
 **Complexity:** Medium
@@ -342,7 +342,7 @@ The note drafting and decision criteria (8.2-8.5) are verified at Task 42 (Task 
 ---
 
 ### Task 9: Property tests for the shareable record builder (P-6, P-17, P-18, P-21)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.1, 7.2, 7.3, 9.4
 **Description:** Implements P-6, P-17, P-18, P-21 against the Harness Contract seams `build_shareable(local, *,
@@ -363,11 +363,11 @@ generators in this file. Declare `PROPERTIES`.
 **Verifies:** Task 11
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the P-6, P-17, P-18, P-21 rows
-- [ ] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
-- [ ] Tests call the decision seams (`build_shareable`, `month_of`), not the CLI
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] `PROPERTIES` map names the test for each P-id
+- [x] Generators cover every surface form and negative listed in the P-6, P-17, P-18, P-21 rows
+- [x] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
+- [x] Tests call the decision seams (`build_shareable`, `month_of`), not the CLI
+- [x] Tests fail before the implementation exists for the right reason
+- [x] `PROPERTIES` map names the test for each P-id
 
 **Dependencies:** Task 1 (hypothesis, `seeded_local_record`, `CONFIDENTIAL`)
 **Complexity:** High
@@ -376,7 +376,7 @@ generators in this file. Declare `PROPERTIES`.
 ---
 
 ### Task 10: Property test for enum mapping (P-7)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.4, 7.5
 **Description:** Implements P-7 against the Harness Contract seams `enum_value(field, value)`, `model_family(model)`,
@@ -396,11 +396,11 @@ generators locally (do not import from Task 9's file). Declare `PROPERTIES`.
 **Verifies:** Task 11
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the P-7 row
-- [ ] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
-- [ ] Tests call the decision seams (`enum_value`, `model_family`, `build_shareable`), not the CLI
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] `PROPERTIES` map names the test for P-7
+- [x] Generators cover every surface form and negative listed in the P-7 row
+- [x] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
+- [x] Tests call the decision seams (`enum_value`, `model_family`, `build_shareable`), not the CLI
+- [x] Tests fail before the implementation exists for the right reason
+- [x] `PROPERTIES` map names the test for P-7
 
 **Dependencies:** Task 1 (hypothesis, `seeded_local_record`, `CONFIDENTIAL`)
 **Complexity:** Medium
@@ -485,7 +485,7 @@ another. Declare `PROPERTIES`.
 ---
 
 ### Task 13: Add run.analytics and run.machine_label settings and the salt helper to the agent config
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.8, 3.4, 3.5, 3.6, 7.6
 **Description:** In `src/claude_kiro/agents.py`: add `"analytics": True` and `"machine_label": None` to
@@ -511,11 +511,11 @@ seam `valid_machine_label`, which the package map of Task 4 exports from `claude
 The auto-collect default and salt criteria (1.8, 3.4, 3.5) are verified at Tasks 24 (Task 26: TC-10, TC-79) and 49.
 
 **Acceptance:**
-- [ ] `valid_machine_label` accepts exactly the strings matching `^[a-z0-9-]{1,32}$`
-- [ ] An unset `run.analytics` resolves to true; `ck agents set run.analytics false` turns it off
-- [ ] `ck agents set run.analytics maybe` fails naming the accepted values and leaves the config file byte-identical
-- [ ] `ck agents set run.machine_label Bad_Label` (and `NONE`) is rejected; a valid slug is stored; exactly `none` or `default` unsets it
-- [ ] The salt is created once, kept on later calls, stored with mode 0600 (an existing 0644 `config.json` becomes 0600 and keeps its other keys; a later `ck agents set` leaves it 0600), and absent from `ck agents --json`
+- [x] `valid_machine_label` accepts exactly the strings matching `^[a-z0-9-]{1,32}$`
+- [x] An unset `run.analytics` resolves to true; `ck agents set run.analytics false` turns it off
+- [x] `ck agents set run.analytics maybe` fails naming the accepted values and leaves the config file byte-identical
+- [x] `ck agents set run.machine_label Bad_Label` (and `NONE`) is rejected; a valid slug is stored; exactly `none` or `default` unsets it
+- [x] The salt is created once, kept on later calls, stored with mode 0600 (an existing 0644 `config.json` becomes 0600 and keeps its other keys; a later `ck agents set` leaves it 0600), and absent from `ck agents --json`
 
 **Dependencies:** Task 4 (P-8 reaches valid_machine_label through the package export map Task 4 writes), Task 12 (its tests are the oracle)
 **Complexity:** Medium
@@ -550,7 +550,7 @@ Foundation task: its smoke check is the existing cost and bench suites; the agre
 ---
 
 ### Task 15: Implement the local data store (store.py)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.1, 1.8, 1.9, 7.8, 10.3
 **Description:** Create `store.py` per design.md "analytics/store.py": `data_dir(env)` (`$CK_DATA_HOME`, else
@@ -569,10 +569,10 @@ Harness Contract Files interface for the local store (`$XDG_DATA_HOME/claude-kir
 Foundation task: smoke Verify only; its criteria are verified at Task 24 (Task 26: TC-9, TC-10, TC-79), which also lists `store.py` for fix-ups, and Task 42 (Task 39: ledger).
 
 **Acceptance:**
-- [ ] Records land under `$XDG_DATA_HOME/claude-kiro/runs/<run_id>.json` (fallback `~/.local/share/claude-kiro`) with mode 0600, directory 0700 when created
-- [ ] Writing the same run twice leaves exactly one file
-- [ ] `load_records` returns records of an older schema version and counts unreadable files instead of failing
-- [ ] The ledger round-trips `exported` and `submitted` entries
+- [x] Records land under `$XDG_DATA_HOME/claude-kiro/runs/<run_id>.json` (fallback `~/.local/share/claude-kiro`) with mode 0600, directory 0700 when created
+- [x] Writing the same run twice leaves exactly one file
+- [x] `load_records` returns records of an older schema version and counts unreadable files instead of failing
+- [x] The ledger round-trips `exported` and `submitted` entries
 
 **Dependencies:** Task 4 (module lives in the package whose `__init__.py` Task 4 creates), Task 13 (calls the salt helper and reads run.machine_label)
 **Complexity:** Medium
@@ -581,7 +581,7 @@ Foundation task: smoke Verify only; its criteria are verified at Task 24 (Task 2
 ---
 
 ### Task 16: Property test for the project pseudonym (P-22)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.8, 7.3
 **Description:** Implements P-22 against the Harness Contract seam `pseudonym(remote, salt) -> str` from
@@ -597,11 +597,11 @@ Declare `PROPERTIES`. Pure: no CLI.
 **Verifies:** Task 17
 
 **Acceptance:**
-- [ ] Generators cover every remote form and salt length listed in the P-22 row
-- [ ] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
-- [ ] The test calls the decision seam `pseudonym`, not the CLI
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] `PROPERTIES` map names the test for P-22
+- [x] Generators cover every remote form and salt length listed in the P-22 row
+- [x] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
+- [x] The test calls the decision seam `pseudonym`, not the CLI
+- [x] Tests fail before the implementation exists for the right reason
+- [x] `PROPERTIES` map names the test for P-22
 
 **Dependencies:** Task 1 (hypothesis, `CONFIDENTIAL`)
 **Complexity:** Low
@@ -610,7 +610,7 @@ Declare `PROPERTIES`. Pure: no CLI.
 ---
 
 ### Task 17: Implement the collector core (collect.py)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.8, 1.9, 1.12, 1.15, 2.1, 2.2, 3.4, 3.5, 4.1, 4.2, 4.3, 4.4
 **Description:** Create `collect.py` with `collect_run(home, run_id, *, now, pricing=None, fresh=False) ->
@@ -656,16 +656,16 @@ Task 18 (keep a single hook function that Task 18 fills).
 The collection criteria reached through `ck stats collect` are verified at Task 24 (Tasks 19-23, 26, 29), which also lists `collect.py` for fix-ups.
 
 **Acceptance:**
-- [ ] Transcript-priced total equals `ck cost --run <id>` to the cent on the same fixture
-- [ ] Usage is counted once per requestId; tokens and cost are present per agent, model, role, phase and task
-- [ ] Every cost carries its source label and pricing date; missing transcripts make it `estimate`, never 0; the run figure is never `claude_total`, and a `budget_usd` total is a separate session-scoped figure
-- [ ] A backfilled run is never credited to the installed ck version unless S27 ties it to the run; a re-collect keeps a version tied earlier; `collectorVersion` is always the installed version
-- [ ] A run whose run file is gone gets a partial record only when S28 recovers an allowlisted name, else the not-found outcome
-- [ ] A non-dict `workflowProgress` entry is skipped and listed in `missing`, never a reason to refuse the run
-- [ ] A non-allowlisted run leaves no name or id in any record, outcome reason or summary (count only)
-- [ ] `collect_all` continues past a failing run, returns counts in input order, and reports failures
-- [ ] `pseudonym` is stable for equal inputs, keyed by the salt and contains no part of the remote
-- [ ] A 250-agent fixture run collects in under 10 s
+- [x] Transcript-priced total equals `ck cost --run <id>` to the cent on the same fixture
+- [x] Usage is counted once per requestId; tokens and cost are present per agent, model, role, phase and task
+- [x] Every cost carries its source label and pricing date; missing transcripts make it `estimate`, never 0; the run figure is never `claude_total`, and a `budget_usd` total is a separate session-scoped figure
+- [x] A backfilled run is never credited to the installed ck version unless S27 ties it to the run; a re-collect keeps a version tied earlier; `collectorVersion` is always the installed version
+- [x] A run whose run file is gone gets a partial record only when S28 recovers an allowlisted name, else the not-found outcome
+- [x] A non-dict `workflowProgress` entry is skipped and listed in `missing`, never a reason to refuse the run
+- [x] A non-allowlisted run leaves no name or id in any record, outcome reason or summary (count only)
+- [x] `collect_all` continues past a failing run, returns counts in input order, and reports failures
+- [x] `pseudonym` is stable for equal inputs, keyed by the salt and contains no part of the remote
+- [x] A 250-agent fixture run collects in under 10 s
 
 **Dependencies:** Task 14 (calls aggregate_usage), Task 4 (calls runfile seams), Task 6 (calls the label parser), Task 15 (calls ensure_salt and write_private_json), Task 16 (its tests are the oracle)
 **Complexity:** High
@@ -674,7 +674,7 @@ The collection criteria reached through `ck stats collect` are verified at Task 
 ---
 
 ### Task 18: Add spec-implement and spec-create metrics to the collector
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.2, 1.5, 1.6, 1.7
 **Description:** In `collect.py`, fill the metrics hook from Task 17. For spec-implement (result shape at
@@ -698,11 +698,11 @@ adds `result` to `missing`. Task titles, reasons and summaries stay local and ar
 Foundation task: smoke Verify only; its criteria (TC-7, TC-8, TC-9, TC-11, TC-83) are verified at Task 24 (Task 26), which also lists `collect.py` for fix-ups.
 
 **Acceptance:**
-- [ ] Every per-task and per-run field of 1.5 is recorded from a spec-implement result
-- [ ] Review counts, consistency passes/fixes and phase durations of 1.6 are recorded from a spec-create run
-- [ ] With `resolves` in the result the count is used as is; without it the count comes from resolver labels and `resolvesInferred` is true
-- [ ] A pre-0.10 result without `outcome` gets `complete`/`blocked`/`halted`/`refused` from S26 with `outcomeInferred` true
-- [ ] Absent values are null, never 0
+- [x] Every per-task and per-run field of 1.5 is recorded from a spec-implement result
+- [x] Review counts, consistency passes/fixes and phase durations of 1.6 are recorded from a spec-create run
+- [x] With `resolves` in the result the count is used as is; without it the count comes from resolver labels and `resolvesInferred` is true
+- [x] A pre-0.10 result without `outcome` gets `complete`/`blocked`/`halted`/`refused` from S26 with `outcomeInferred` true
+- [x] Absent values are null, never 0
 
 **Dependencies:** Task 17 (edits collect.py, which Task 17 creates)
 **Complexity:** High
@@ -792,7 +792,7 @@ the measurement). Mark the module `slow` if the repo has such a marker, otherwis
 ---
 
 ### Task 22: Property test for keeping foreign workflows out of every output (P-2)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.2, 2.3
 **Description:** Implements P-2 through the CLI (`max_examples=25`, other settings as P-1; each example builds its
@@ -808,11 +808,11 @@ runs are stored and foreign runs refused. Define the generators locally. Declare
 **Verifies:** Task 24
 
 **Acceptance:**
-- [ ] Generators cover every foreign name form listed in the P-2 row
-- [ ] Settings are deterministic (`derandomize=True`, `max_examples=25`, `database=None`, `deadline=None`)
-- [ ] The property runs the real CLI over real temp homes
-- [ ] Tests fail before the implementation exists for the right reason (missing command)
-- [ ] `PROPERTIES` map names the test for P-2
+- [x] Generators cover every foreign name form listed in the P-2 row
+- [x] Settings are deterministic (`derandomize=True`, `max_examples=25`, `database=None`, `deadline=None`)
+- [x] The property runs the real CLI over real temp homes
+- [x] Tests fail before the implementation exists for the right reason (missing command)
+- [x] `PROPERTIES` map names the test for P-2
 
 **Dependencies:** Task 1 (hypothesis, fake Claude home, `CONFIDENTIAL`)
 **Complexity:** Medium
@@ -821,7 +821,7 @@ runs are stored and foreign runs refused. Define the generators locally. Declare
 ---
 
 ### Task 23: Red-team the non-ck workflow prohibition (Story 2)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.2, 2.3
 **Description:** Try to break each SHALL NOT clause of Story 2 with adversarial inputs: unusual surface forms,
@@ -841,10 +841,10 @@ corrupt foreign run next to a corrupt ck run in `--all`.
 **Verifies:** Task 24
 
 **Acceptance:**
-- [ ] Each adversarial case is a separate named test or parametrized id describing the trick
-- [ ] Cases run the real `ck stats collect` CLI over real temp homes
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] No mocks of the project's own code
+- [x] Each adversarial case is a separate named test or parametrized id describing the trick
+- [x] Cases run the real `ck stats collect` CLI over real temp homes
+- [x] Tests fail before the implementation exists for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake Claude home, foreign runs)
 **Complexity:** Medium
@@ -935,7 +935,7 @@ Foundation task: smoke Verify only; its criteria are verified at Task 31 (Tasks 
 ---
 
 ### Task 26: Integration tests for collecting a run's local record
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 1.10, 1.11, 1.12, 1.13, 1.14, 1.15, 2.2
 **Description:** Implements TC-1, TC-2, TC-3, TC-4, TC-5, TC-6, TC-7, TC-8, TC-9, TC-10, TC-11, TC-12, TC-13, TC-14,
@@ -976,12 +976,12 @@ set of the record really collected from `seeded_home` (both kinds), so the pure 
 **Verifies:** Task 24
 
 **Acceptance:**
-- [ ] Each TC listed above has at least one test whose name or docstring cites its TC id
-- [ ] Tests exercise the real boundary named in the test plan: the real `ck` CLI over real temp `CLAUDE_CONFIG_DIR`/`XDG_DATA_HOME`/`CK_CONFIG_HOME` trees and real git repos
-- [ ] Tests fail before the implementation exists for the right reason (no `ck stats` command / missing record fields), not because of broken fixtures
-- [ ] No mocks of the project's own code; `bench`, the store and config are used for real
-- [ ] No unknown number is accepted as 0 in any assertion (1.12)
-- [ ] Every test runs under `no_network`
+- [x] Each TC listed above has at least one test whose name or docstring cites its TC id
+- [x] Tests exercise the real boundary named in the test plan: the real `ck` CLI over real temp `CLAUDE_CONFIG_DIR`/`XDG_DATA_HOME`/`CK_CONFIG_HOME` trees and real git repos
+- [x] Tests fail before the implementation exists for the right reason (no `ck stats` command / missing record fields), not because of broken fixtures
+- [x] No mocks of the project's own code; `bench`, the store and config are used for real
+- [x] No unknown number is accepted as 0 in any assertion (1.12)
+- [x] Every test runs under `no_network`
 
 **Dependencies:** Task 1 (fake Claude home, store helpers, no_network)
 **Complexity:** High
@@ -990,7 +990,7 @@ set of the record really collected from `seeded_home` (both kinds), so the pure 
 ---
 
 ### Task 27: Integration tests for role attribution and the label contract
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.1, 5.2, 6.2
 **Description:** Implements TC-32 and TC-33 (TC-34, the label corpus check, is Task 54). TC-32: agents labelled with every template in design.md's grammar
@@ -1009,9 +1009,9 @@ template meaning. TC-33: labels `triage invoices` and `tasks 3` (labels no templ
 **Verifies:** Task 31
 
 **Acceptance:**
-- [ ] TC-32/33 drive the real `ck stats collect`/`show` over a fake Claude home
-- [ ] Tests fail before the implementation exists for the right reason (no `roles` module / no role fields)
-- [ ] No mocks of the project's own code
+- [x] TC-32/33 drive the real `ck stats collect`/`show` over a fake Claude home
+- [x] Tests fail before the implementation exists for the right reason (no `roles` module / no role fields)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake Claude home)
 **Complexity:** Medium
@@ -1020,7 +1020,7 @@ template meaning. TC-33: labels `triage invoices` and `tasks 3` (labels no templ
 ---
 
 ### Task 28: Integration tests for ck stats show breakdowns and trends
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.12, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8
 **Description:** Implements TC-35, TC-36, TC-37, TC-38, TC-39, TC-40, TC-41, TC-42, TC-43. Records are produced by
@@ -1042,10 +1042,10 @@ exclude.
 **Verifies:** Task 31
 
 **Acceptance:**
-- [ ] Tests run the real `ck stats` / `ck stats show` CLI against a store filled by the real collector
-- [ ] Trend numbers are compared with values computed by hand from fixture inputs
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] No mocks of the project's own code
+- [x] Tests run the real `ck stats` / `ck stats show` CLI against a store filled by the real collector
+- [x] Trend numbers are compared with values computed by hand from fixture inputs
+- [x] Tests fail before the implementation exists for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake Claude home, store helpers)
 **Complexity:** Medium
@@ -1089,7 +1089,7 @@ transcripts deleted or truncated at any byte offset of the last line: no affecte
 ---
 
 ### Task 30: Red-team the role parser's no-guess rule (Story 5)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.2, 6.2
 **Description:** Try to break each SHALL NOT clause of Story 5 with adversarial inputs: unusual surface forms,
@@ -1109,10 +1109,10 @@ counted in its `other` summary.
 **Verifies:** Task 31
 
 **Acceptance:**
-- [ ] Each adversarial case is a separate named test or parametrized id describing the trick
-- [ ] Cases exercise the real CLI over a fake Claude home as well as the seam
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] No mocks of the project's own code
+- [x] Each adversarial case is a separate named test or parametrized id describing the trick
+- [x] Cases exercise the real CLI over a fake Claude home as well as the seam
+- [x] Tests fail before the implementation exists for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake Claude home)
 **Complexity:** Medium
@@ -1299,7 +1299,7 @@ Foundation task: smoke Verify only; TC-49 (Task 39) verifies it at Task 42 and T
 ---
 
 ### Task 36: Property tests for the submit target and PR text (P-19, P-20)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.9, 9.4, 10.2, 10.9
 **Description:** Implements P-19 and P-20 against the Harness Contract seams `is_target_repo(url)` and
@@ -1322,11 +1322,11 @@ give different branches. Declare `PROPERTIES`.
 **Verifies:** Task 37
 
 **Acceptance:**
-- [ ] Generators cover every accept form and every near miss listed in the P-19 and P-20 rows
-- [ ] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
-- [ ] Tests call the decision seams `is_target_repo` and `pr_text`, not GitHub
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] `PROPERTIES` map names the test for each P-id
+- [x] Generators cover every accept form and every near miss listed in the P-19 and P-20 rows
+- [x] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
+- [x] Tests call the decision seams `is_target_repo` and `pr_text`, not GitHub
+- [x] Tests fail before the implementation exists for the right reason
+- [x] `PROPERTIES` map names the test for each P-id
 
 **Dependencies:** Task 1 (hypothesis, `seeded_local_record`, `CONFIDENTIAL`)
 **Complexity:** Medium
@@ -1423,7 +1423,7 @@ Foundation task: smoke Verify only; its criteria are verified at Task 42 (Tasks 
 ---
 
 ### Task 39: Integration tests for exporting shareable records and issue codes
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8, 7.9, 7.10, 7.11, 7.12, 8.1, 9.4, 10.10
 **Description:** Implements TC-44, TC-45, TC-46, TC-47, TC-48, TC-49, TC-50, TC-51, TC-52, TC-53, TC-54, TC-80, TC-81. All
@@ -1459,11 +1459,15 @@ submitted records, are not.
 **Verifies:** Task 42
 
 **Acceptance:**
-- [ ] Tests run the real `ck stats export` into a real git checkout whose remote is checked with real git
-- [ ] TC-46 scans every byte under the checkout's `analytics/` with `all_bytes`, case-insensitively
-- [ ] TC-49 parses the real `analytics/SCHEMA.md`, not a copy
-- [ ] Tests fail before the implementation exists for the right reason (no export command / schema doc)
-- [ ] No mocks of the project's own code; no network (`no_network` on the module)
+- [x] Tests run the real `ck stats export` into a real git checkout whose remote is checked with real git
+- [x] TC-46 scans every byte under the checkout's `analytics/` with `all_bytes`, case-insensitively
+- [x] TC-49 parses the real `analytics/SCHEMA.md`, not a copy
+- [x] Tests fail before the implementation exists for the right reason (no export command / schema doc)
+- [x] No mocks of the project's own code; no network (`no_network` on the module)
+
+Implementation note: the "submitted" half of TC-81 marks the record submitted in the ledger (`state.json`
+`submitted[<record id>]`, design Ledger shape) and deletes its file, instead of running `ck stats submit`, so this suite
+does not depend on the submit command.
 
 **Dependencies:** Task 1 (seeded home, kiro checkout, no_network)
 **Complexity:** High
@@ -1472,7 +1476,7 @@ submitted records, are not.
 ---
 
 ### Task 40: Pty tests for the interactive issues note
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 8.2, 8.3, 8.4, 8.5, 7.12
 **Description:** Implements TC-55, TC-56, TC-57, TC-58. Use `run_tty` (real pty) with `fake_claude_drafter` on PATH and
@@ -1491,10 +1495,10 @@ without `.md`.
 **Verifies:** Task 42
 
 **Acceptance:**
-- [ ] Interaction runs under a real pseudo-terminal, not a patched `isatty`
-- [ ] Only `claude` and `$EDITOR` are faked; export, leak check and file writes are real
-- [ ] Tests fail before the implementation exists for the right reason (no `--note` flow)
-- [ ] No mocks of the project's own code
+- [x] Interaction runs under a real pseudo-terminal, not a patched `isatty`
+- [x] Only `claude` and `$EDITOR` are faked; export, leak check and file writes are real
+- [x] Tests fail before the implementation exists for the right reason (no `--note` flow)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (run_tty, fake drafter, fake editor, kiro checkout)
 **Complexity:** High
@@ -1503,7 +1507,7 @@ without `.md`.
 ---
 
 ### Task 41: Red-team the shareable-record exclusions (Story 7)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.1, 7.3, 7.4, 7.5
 **Description:** Try to break each SHALL NOT clause of Story 7 with adversarial inputs: unusual surface forms,
@@ -1525,10 +1529,10 @@ that no planted string appears and every enum field is in its set or `other`.
 **Verifies:** Task 42
 
 **Acceptance:**
-- [ ] Each adversarial case is a separate named test or parametrized id describing the trick
-- [ ] Cases run the real collector and exporter into a real git checkout
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] No mocks of the project's own code; no network
+- [x] Each adversarial case is a separate named test or parametrized id describing the trick
+- [x] Cases run the real collector and exporter into a real git checkout
+- [x] Tests fail before the implementation exists for the right reason
+- [x] No mocks of the project's own code; no network
 
 **Dependencies:** Task 1 (fake Claude home, kiro checkout, `CONFIDENTIAL`)
 **Complexity:** Medium
@@ -1615,7 +1619,7 @@ the PR title and body (from the gh log) contain none of the seeded strings in an
 ---
 
 ### Task 44: End-to-end tests for submitting a batch as a draft PR
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9, 10.10, 10.11
 **Description:** Implements TC-63, TC-64, TC-65, TC-66, TC-67, TC-68, TC-69, TC-70, TC-71, TC-82. TC-63 (pty): before the
@@ -1649,10 +1653,10 @@ exits non-zero, no branch, gh not called, files unchanged and no file added for 
 **Verifies:** Task 45
 
 **Acceptance:**
-- [ ] Branch, commit and push are real git into a local bare repo; only `gh` is faked; prompts run under a real pty
-- [ ] Every refusal and decline asserts no branch (local and bare), no commit and an empty gh log
-- [ ] Tests fail before the implementation exists for the right reason (no submit command)
-- [ ] No mocks of the project's own code; no network
+- [x] Branch, commit and push are real git into a local bare repo; only `gh` is faked; prompts run under a real pty
+- [x] Every refusal and decline asserts no branch (local and bare), no commit and an empty gh log
+- [x] Tests fail before the implementation exists for the right reason (no submit command)
+- [x] No mocks of the project's own code; no network
 
 **Dependencies:** Task 1 (kiro checkout, fake gh, path_without_gh, run_tty)
 **Complexity:** High
@@ -1696,7 +1700,7 @@ These suites also verify the git/gh criteria of Task 37 and the end-to-end leak 
 ---
 
 ### Task 46: Integration tests for collection health in ck doctor
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 12.1, 12.2, 12.3
 **Description:** Implements TC-74, TC-75, TC-76, running the real `ck doctor` in a ck project (`project` fixture) with a
@@ -1711,9 +1715,9 @@ completed allowlisted runs, 1 collected with `ck stats collect --run`: reports 2
 **Verifies:** Task 47
 
 **Acceptance:**
-- [ ] Tests run the real `ck doctor` CLI over real fake Claude homes and config files
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] No mocks of the project's own code
+- [x] Tests run the real `ck doctor` CLI over real fake Claude homes and config files
+- [x] Tests fail before the implementation exists for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake Claude home)
 **Complexity:** Low
@@ -1749,7 +1753,7 @@ Wire it into `doctor()` in `cli/main.py`: warnings go into the existing `warning
 ---
 
 ### Task 48: End-to-end tests for automatic collection after ck run
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 3.3, 3.4, 3.5, 3.6
 **Description:** Implements TC-21, TC-22, TC-23, TC-24, TC-25, TC-27, TC-84 and P-23. TC-21: a fake `claude` on PATH
@@ -1783,11 +1787,11 @@ record (a transcript chmod 000, a `.meta.json` that is not JSON). Declare `PROPE
 **Verifies:** Task 49
 
 **Acceptance:**
-- [ ] `ck run` is run as a real subprocess with a fake `claude` on PATH; the outer ck process is not mocked
-- [ ] Exit-code equality with collection forced to fail is asserted for both a 0 and a non-zero child status
-- [ ] Config files are compared byte for byte before and after rejected sets
-- [ ] Tests fail before the implementation exists for the right reason (no collection after `ck run`, unknown `run.analytics` key)
-- [ ] No mocks of the project's own code
+- [x] `ck run` is run as a real subprocess with a fake `claude` on PATH; the outer ck process is not mocked
+- [x] Exit-code equality with collection forced to fail is asserted for both a 0 and a non-zero child status
+- [x] Config files are compared byte for byte before and after rejected sets
+- [x] Tests fail before the implementation exists for the right reason (no collection after `ck run`, unknown `run.analytics` key)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake claude session writer, isolation fixtures)
 **Complexity:** High
@@ -1833,7 +1837,7 @@ the same code path as `ck stats collect --auto`".
 ---
 
 ### Task 50: Static contract test for the skills' end-of-run collect step
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.2, 3.3, 3.4
 **Description:** Implements TC-26. `plugin/skills/implement/SKILL.md` step 9, `plugin/skills/create/SKILL.md` "Close
@@ -1847,9 +1851,9 @@ run's report; the vendored renderings from `plugin.vendor_files()` (`.claude/com
 **Verifies:** Task 51
 
 **Acceptance:**
-- [ ] The test reads the real skill files and the real vendored renderings
-- [ ] Tests fail before the implementation exists for the right reason (skill text missing)
-- [ ] No mocks of the project's own code
+- [x] The test reads the real skill files and the real vendored renderings
+- [x] Tests fail before the implementation exists for the right reason (skill text missing)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (isolation fixtures)
 **Complexity:** Low
@@ -1920,7 +1924,7 @@ before any implementation change); and the existing
 ---
 
 ### Task 53: Return the per-task conflict-resolution count from spec-implement
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 11.1, 11.2
 **Description:** In `plugin/workflows/spec-implement.js`: in `runTask` (:646) initialise `rec.resolves = 0`; in
@@ -1936,8 +1940,8 @@ must be byte-identical to the plugin copy.
 **Verified by:** Task 52
 
 **Acceptance:**
-- [ ] Every `result.tasks` entry has an integer `resolves`, 0 when no conflict
-- [ ] All existing workflow tests pass unchanged; the vendored copy matches the plugin source
+- [x] Every `result.tasks` entry has an integer `resolves`, 0 when no conflict
+- [x] All existing workflow tests pass unchanged; the vendored copy matches the plugin source
 
 **Dependencies:** Task 52 (its tests are the oracle)
 **Complexity:** Low
@@ -1946,7 +1950,7 @@ must be byte-identical to the plugin copy.
 ---
 
 ### Task 54: Label corpus check for the role parser (TC-34)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.1, 5.3
 **Description:** Implements TC-34 against the Harness Contract seam `parse_label(label, workflow)` from
@@ -1967,10 +1971,10 @@ role with task None). The same check over the corpus plus one unknown label fail
 **Verifies:** Task 6
 
 **Acceptance:**
-- [ ] The current corpus comes from the real workflow scripts under node, not from a hand-written list
-- [ ] The legacy corpus is taken from the pre-batch-landing script's templates and covers `merge N` and path-shaped ids
-- [ ] Tests fail before the implementation exists for the right reason (no `roles` module)
-- [ ] No mocks of the project's own code
+- [x] The current corpus comes from the real workflow scripts under node, not from a hand-written list
+- [x] The legacy corpus is taken from the pre-batch-landing script's templates and covers `merge N` and path-shaped ids
+- [x] Tests fail before the implementation exists for the right reason (no `roles` module)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (isolation fixtures), Task 2 (label emitter)
 **Complexity:** Low
