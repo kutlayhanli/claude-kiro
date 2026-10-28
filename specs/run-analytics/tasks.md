@@ -242,7 +242,7 @@ labels with leading/trailing whitespace or a suffix such as `task 3 extra`, and 
 ---
 
 ### Task 6: Implement the label grammar (roles.py)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 5.1, 5.2, 5.3
 **Description:** Create `roles.py` with `ROLES` (implementer, test-writer, reviewer, fixer, resolver, plan, land, gate,
@@ -267,9 +267,9 @@ and legacy labels (5.3) is test-owned (Task 54).
 **Verified by:** Task 5, Task 54
 
 **Acceptance:**
-- [ ] Every row of the design grammar table parses to its role, task, attempt/round, step and escalated_to
-- [ ] Every label template in both workflow scripts is matched (`matched=True`), and every label of the legacy corpus
-- [ ] An unknown label, or a template label with surrounding whitespace, gives `other` with `matched=False`
+- [x] Every row of the design grammar table parses to its role, task, attempt/round, step and escalated_to
+- [x] Every label template in both workflow scripts is matched (`matched=True`), and every label of the legacy corpus
+- [x] An unknown label, or a template label with surrounding whitespace, gives `other` with `matched=False`
 
 **Dependencies:** Task 4 (module lives in the package whose `__init__.py` Task 4 creates), Task 5 (its tests are the oracle), Task 54 (its tests are the oracle)
 **Complexity:** Medium
@@ -1020,7 +1020,7 @@ template meaning. TC-33: labels `triage invoices` and `tasks 3` (labels no templ
 ---
 
 ### Task 28: Integration tests for ck stats show breakdowns and trends
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.12, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8
 **Description:** Implements TC-35, TC-36, TC-37, TC-38, TC-39, TC-40, TC-41, TC-42, TC-43. Records are produced by
@@ -1042,10 +1042,10 @@ exclude.
 **Verifies:** Task 31
 
 **Acceptance:**
-- [ ] Tests run the real `ck stats` / `ck stats show` CLI against a store filled by the real collector
-- [ ] Trend numbers are compared with values computed by hand from fixture inputs
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] No mocks of the project's own code
+- [x] Tests run the real `ck stats` / `ck stats show` CLI against a store filled by the real collector
+- [x] Trend numbers are compared with values computed by hand from fixture inputs
+- [x] Tests fail before the implementation exists for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake Claude home, store helpers)
 **Complexity:** Medium
@@ -1507,7 +1507,7 @@ without `.md`.
 ---
 
 ### Task 41: Red-team the shareable-record exclusions (Story 7)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.1, 7.3, 7.4, 7.5
 **Description:** Try to break each SHALL NOT clause of Story 7 with adversarial inputs: unusual surface forms,
@@ -1529,10 +1529,10 @@ that no planted string appears and every enum field is in its set or `other`.
 **Verifies:** Task 42
 
 **Acceptance:**
-- [ ] Each adversarial case is a separate named test or parametrized id describing the trick
-- [ ] Cases run the real collector and exporter into a real git checkout
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] No mocks of the project's own code; no network
+- [x] Each adversarial case is a separate named test or parametrized id describing the trick
+- [x] Cases run the real collector and exporter into a real git checkout
+- [x] Tests fail before the implementation exists for the right reason
+- [x] No mocks of the project's own code; no network
 
 **Dependencies:** Task 1 (fake Claude home, kiro checkout, `CONFIDENTIAL`)
 **Complexity:** Medium
@@ -1753,7 +1753,7 @@ Wire it into `doctor()` in `cli/main.py`: warnings go into the existing `warning
 ---
 
 ### Task 48: End-to-end tests for automatic collection after ck run
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 3.3, 3.4, 3.5, 3.6
 **Description:** Implements TC-21, TC-22, TC-23, TC-24, TC-25, TC-27, TC-84 and P-23. TC-21: a fake `claude` on PATH
@@ -1787,11 +1787,11 @@ record (a transcript chmod 000, a `.meta.json` that is not JSON). Declare `PROPE
 **Verifies:** Task 49
 
 **Acceptance:**
-- [ ] `ck run` is run as a real subprocess with a fake `claude` on PATH; the outer ck process is not mocked
-- [ ] Exit-code equality with collection forced to fail is asserted for both a 0 and a non-zero child status
-- [ ] Config files are compared byte for byte before and after rejected sets
-- [ ] Tests fail before the implementation exists for the right reason (no collection after `ck run`, unknown `run.analytics` key)
-- [ ] No mocks of the project's own code
+- [x] `ck run` is run as a real subprocess with a fake `claude` on PATH; the outer ck process is not mocked
+- [x] Exit-code equality with collection forced to fail is asserted for both a 0 and a non-zero child status
+- [x] Config files are compared byte for byte before and after rejected sets
+- [x] Tests fail before the implementation exists for the right reason (no collection after `ck run`, unknown `run.analytics` key)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake claude session writer, isolation fixtures)
 **Complexity:** High
