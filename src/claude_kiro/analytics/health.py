@@ -1,6 +1,7 @@
 """Collection health for `ck doctor`: format drift, auto-collect state, uncollected runs."""
 
 import json
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Literal, Mapping, Optional, Sequence
@@ -20,25 +21,40 @@ def decide(newest: Optional[runfile.FormatCheck], auto_collect: bool, uncollecte
         detail = "; ".join(newest.problems)
         out.append(DoctorFinding(
             "warning",
-            "The newest ck run file format is not recognised"
+            "Run-file format of the newest ck run is not recognised"
             + (f" ({detail})" if detail else "")
-            + " - ck stats cannot collect it; Claude Code may have changed its run files"))
+            + ": ck stats cannot collect it - update ck"))
     if not auto_collect:
         out.append(DoctorFinding(
-            "info", "Automatic run analytics is off - turn it on with: ck agents set run.analytics true"))
+            "info", "Automatic run analytics is off (ck agents set run.analytics true)"))
     if uncollected > 0:
         out.append(DoctorFinding(
             "warning", f"{uncollected} finished ck run(s) not collected - run ck stats collect --all"))
     return out
 
 
-def _start_key(data: Any) -> str:
+def _start_ms(data: Any, path: Path) -> float:
+    """Run start as epoch ms; falls back to the file's mtime when startTime is unusable."""
     st = data.get("startTime") if isinstance(data, dict) else None
-    if isinstance(st, bool) or st is None:
-        return ""
-    if isinstance(st, (int, float)):
-        return f"{int(st):020d}"
-    return "~" + str(st)
+    if isinstance(st, (int, float)) and not isinstance(st, bool):
+        return float(st)
+    if isinstance(st, str):
+        text = st.strip()
+        try:
+            return float(text)
+        except ValueError:
+            pass
+        try:
+            when = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+            return when.timestamp() * 1000.0
+        except ValueError:
+            pass
+    try:
+        return path.stat().st_mtime * 1000.0
+    except OSError:
+        return 0.0
 
 
 def doctor_findings(home: Path, auto_collect: bool, records: Sequence[Mapping]) -> List[DoctorFinding]:
@@ -56,7 +72,7 @@ def doctor_findings(home: Path, auto_collect: bool, records: Sequence[Mapping]) 
                 data = None
             if not isinstance(data, dict) or not runfile.is_allowlisted(data.get("workflowName")):
                 continue
-            key = (_start_key(data), p.stem)
+            key = (_start_ms(data, p), p.stem)
             if newest_key is None or key > newest_key:
                 newest_key, newest_data = key, data
             if p.stem not in have and runfile.check_format(data).ok and runfile.run_state(data) == "finished":
