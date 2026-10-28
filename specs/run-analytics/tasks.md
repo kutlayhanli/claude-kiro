@@ -1020,7 +1020,7 @@ template meaning. TC-33: labels `triage invoices` and `tasks 3` (labels no templ
 ---
 
 ### Task 28: Integration tests for ck stats show breakdowns and trends
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.12, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8
 **Description:** Implements TC-35, TC-36, TC-37, TC-38, TC-39, TC-40, TC-41, TC-42, TC-43. Records are produced by
@@ -1042,10 +1042,10 @@ exclude.
 **Verifies:** Task 31
 
 **Acceptance:**
-- [ ] Tests run the real `ck stats` / `ck stats show` CLI against a store filled by the real collector
-- [ ] Trend numbers are compared with values computed by hand from fixture inputs
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] No mocks of the project's own code
+- [x] Tests run the real `ck stats` / `ck stats show` CLI against a store filled by the real collector
+- [x] Trend numbers are compared with values computed by hand from fixture inputs
+- [x] Tests fail before the implementation exists for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake Claude home, store helpers)
 **Complexity:** Medium
