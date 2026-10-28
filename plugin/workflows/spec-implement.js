@@ -615,6 +615,7 @@ async function landTask(n, rec) {
     if (t.state === 'CONFLICT') {
       if (resolves >= MAX_RESOLVES) return { merged: false, error: `still conflicting after ${resolves} resolution(s): ${(t.files || []).join(', ')}` }
       resolves++
+      rec.resolves = resolves
       log(`Task ${n}: conflicts with ${INTO}, handing it to the resolver`)
       const r = await agent(resolvePrompt(n, (t.files || []).join(', ') || t.detail), { label: `resolve ${n}${resolves > 1 ? ` round ${resolves}` : ''}`, phase: phaseOf(n), schema: RESOLVED, ...RESOLVE })
       if (!r || !r.resolved) return { merged: false, error: `conflict not resolved: ${(r && r.error) || 'no result'}` }
@@ -644,7 +645,7 @@ async function landTask(n, rec) {
 }
 
 async function runTask(n) {
-  const rec = { task: n, wave: waveOf(n), title: TITLES[n], attempts: 0, ok: false, escalations: [] }
+  const rec = { task: n, wave: waveOf(n), title: TITLES[n], attempts: 0, ok: false, escalations: [], resolves: 0 }
   const busy = r => !!(r && r.blocker && /worktree busy/i.test(r.blocker))
   rec.riskTag = isSafety(n) ? 'safety' : 'normal'
   rec.startModel = codeOpts(n).model || 'inherited'
@@ -833,6 +834,7 @@ const taskReport = Object.values(records).map(r => ({
   title: r.title,
   ok: r.ok,
   attempts: r.attempts,
+  resolves: r.resolves || 0,
   startedAt: r.startedAt,
   finishedAt: r.finishedAt,
   mergedAt: r.mergedAt,

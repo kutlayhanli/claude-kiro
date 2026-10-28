@@ -1924,7 +1924,7 @@ before any implementation change); and the existing
 ---
 
 ### Task 53: Return the per-task conflict-resolution count from spec-implement
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 11.1, 11.2
 **Description:** In `plugin/workflows/spec-implement.js`: in `runTask` (:646) initialise `rec.resolves = 0`; in
@@ -1940,8 +1940,8 @@ must be byte-identical to the plugin copy.
 **Verified by:** Task 52
 
 **Acceptance:**
-- [ ] Every `result.tasks` entry has an integer `resolves`, 0 when no conflict
-- [ ] All existing workflow tests pass unchanged; the vendored copy matches the plugin source
+- [x] Every `result.tasks` entry has an integer `resolves`, 0 when no conflict
+- [x] All existing workflow tests pass unchanged; the vendored copy matches the plugin source
 
 **Dependencies:** Task 52 (its tests are the oracle)
 **Complexity:** Low
