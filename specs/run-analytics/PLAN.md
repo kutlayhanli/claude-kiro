@@ -1,7 +1,7 @@
 # Plan: Run Analytics
 
 **Created:** 2026-10-28
-**Status:** Pending Decision
+**Status:** Decisions Made
 
 ## Problem Statement
 
@@ -182,9 +182,9 @@ Constraints found in the code:
 
 ## Open Questions
 
-- [ ] Is pushing ck-level metrics (no project data) from the work machine to a personal GitHub repo acceptable under your employer's policy? If unsure, the work machine can use `ck stats export` to a file and you submit from a personal machine.
-- [ ] Target repo: PRs against `kutlayhanli/claude-kiro` (your fork) only, or also upstream `angelsen/claude-kiro`?
-- [ ] Month granularity for dates, or exact dates acceptable?
+- [x] Work machine submits the same way as personal machines (draft PR via `gh`); records carry ck-level data only (D5).
+- [x] Target repo: `kutlayhanli/claude-kiro` only (D9).
+- [x] Month granularity (`yyyy-mm`) only (D9).
 - [ ] Should the repo also get an aggregate report (e.g. `ck stats report` over `analytics/runs/` producing `analytics/SUMMARY.md`) in v1, or later?
 - [ ] Technical: confirm Claude Code's run-file retention (how long until `workflows/*.json` and transcripts are pruned) to size the "collect soon" guarantee.
 - [ ] Technical: label grammar is defined in spec-implement.js; should it move to a shared constant that the collector's tests pin?
@@ -210,6 +210,12 @@ Constraints found in the code:
 
 | # | Decision | Choice | Rationale | Date |
 |---|----------|--------|-----------|------|
-| | | | | |
-
-_Populated after discussion with user._
+| 1 | Capture approach | Option A: post-hoc collector over Claude Code run files + transcripts; plus expose per-task conflict-resolution count in the spec-implement result | Zero run overhead, backfills past runs, reuses bench.py parsing/pricing | 2026-10-28 |
+| 2 | Local full-fidelity store | Machine-local data dir (`$XDG_DATA_HOME/claude-kiro/runs/`), never inside a project | No analytics can be committed to a client repo by accident | 2026-10-28 (default, not contested) |
+| 3 | Shareable record contents | Allowlist from Key Decision 3, enforced by the exporter's schema and documented in the repo | Privacy by construction | 2026-10-28 (default, not contested) |
+| 4 | Issues found | Deterministic issue codes + agent-drafted ck-level note, leak-checked, and approved/edited by me interactively before export; free text never exported non-interactively | Lets records explain *why* a run was slow without leaking project details | 2026-10-28 |
+| 5 | Submission | `ck stats submit` opens a draft PR via `gh`, after showing the diff and a passing leak check; one PR per batch; same flow on personal and work machines | Reviewable in the repo; single workflow everywhere | 2026-10-28 |
+| 6 | Project identity | None in shared records; salted pseudonym only in local records (salt never exported) | Repo analysis is about ck, not my projects | 2026-10-28 (default, not contested) |
+| 7 | When collection runs | Automatic local collect after `ck run` and at the end of `/spec:implement` and `/spec:create`, plus `ck stats collect --all` for backfill; export/submit manual; a setting disables auto-collect | Beat transcript pruning; nothing leaves the machine automatically | 2026-10-28 (default, not contested) |
+| 8 | spec:plan coverage | v1 covers spec-implement and spec-create; spec:plan is a stretch goal | No run id, interactive wall time | 2026-10-28 (default, not contested) |
+| 9 | Date precision and target repo | Month (`yyyy-mm`) only; PRs to `kutlayhanli/claude-kiro` only | Less fingerprintable; fork is where ck is developed | 2026-10-28 |
