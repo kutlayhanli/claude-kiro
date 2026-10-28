@@ -156,7 +156,7 @@ Settings `@settings(derandomize=True, max_examples=200, database=None, deadline=
 ---
 
 ### Task 4: Create the analytics package and the run-file reader (runfile.py)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.10, 1.11, 1.13, 1.14, 1.15, 2.1, 2.2
 **Description:** Create `src/claude_kiro/analytics/` with `__init__.py` and `runfile.py`.
@@ -195,13 +195,13 @@ All seams are pure: no I/O, clock or environment reads. Stdlib only.
 The CLI-level criteria (1.10, 1.11, 1.13, 1.14, 1.15, 2.2) are verified at Task 24.
 
 **Acceptance:**
-- [ ] `is_ck_workflow` is True only for the three exact names, False for any other value
-- [ ] `check_format` accepts real run files with extra keys, and a `workflowProgress` list holding non-dict entries; it rejects a run file whose `workflowProgress` is missing or an object, with problems that do not name the workflow
-- [ ] `run_state` returns `unfinished` for `running`/`pending`/`queued`/`starting` and for a non-terminal status with no `durationMs`
-- [ ] `classify_home` returns `sandboxed` when the home is not listable, or missing while the sandbox flag is set
-- [ ] `peek_workflow_name` returns only `workflowName` (any value) and keeps no other field; callers other than `leak.non_ck_workflow_names` discard non-allowlisted names immediately
-- [ ] `session_run_ids` never returns or retains a non-allowlisted run's name or id, and returns unreadable-name run files as a count only
-- [ ] `recover_workflow_name` returns an allowlisted name only from the launch whose result names the run id (`spec:spec-implement`, `spec:spec-create`, or a `scriptPath` ending in `spec-implement.js` / `spec-create.js`), and None for anything else
+- [x] `is_ck_workflow` is True only for the three exact names, False for any other value
+- [x] `check_format` accepts real run files with extra keys, and a `workflowProgress` list holding non-dict entries; it rejects a run file whose `workflowProgress` is missing or an object, with problems that do not name the workflow
+- [x] `run_state` returns `unfinished` for `running`/`pending`/`queued`/`starting` and for a non-terminal status with no `durationMs`
+- [x] `classify_home` returns `sandboxed` when the home is not listable, or missing while the sandbox flag is set
+- [x] `peek_workflow_name` returns only `workflowName` (any value) and keeps no other field; callers other than `leak.non_ck_workflow_names` discard non-allowlisted names immediately
+- [x] `session_run_ids` never returns or retains a non-allowlisted run's name or id, and returns unreadable-name run files as a count only
+- [x] `recover_workflow_name` returns an allowlisted name only from the launch whose result names the run id (`spec:spec-implement`, `spec:spec-create`, or a `scriptPath` ending in `spec-implement.js` / `spec-create.js`), and None for anything else
 
 **Dependencies:** Task 3 (its tests are the oracle)
 **Complexity:** Medium
