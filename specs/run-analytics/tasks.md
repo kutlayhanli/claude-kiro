@@ -990,7 +990,7 @@ set of the record really collected from `seeded_home` (both kinds), so the pure 
 ---
 
 ### Task 27: Integration tests for role attribution and the label contract
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.1, 5.2, 6.2
 **Description:** Implements TC-32 and TC-33 (TC-34, the label corpus check, is Task 54). TC-32: agents labelled with every template in design.md's grammar
@@ -1009,9 +1009,9 @@ template meaning. TC-33: labels `triage invoices` and `tasks 3` (labels no templ
 **Verifies:** Task 31
 
 **Acceptance:**
-- [ ] TC-32/33 drive the real `ck stats collect`/`show` over a fake Claude home
-- [ ] Tests fail before the implementation exists for the right reason (no `roles` module / no role fields)
-- [ ] No mocks of the project's own code
+- [x] TC-32/33 drive the real `ck stats collect`/`show` over a fake Claude home
+- [x] Tests fail before the implementation exists for the right reason (no `roles` module / no role fields)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake Claude home)
 **Complexity:** Medium
