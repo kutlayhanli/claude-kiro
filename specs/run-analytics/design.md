@@ -9,7 +9,7 @@ new per-task result field.
 
 How the PLAN.md decisions shape it:
 
-- **D1 (post-hoc + `resolves`).** The collector reads Claude Code's run file
+- **D1 (post-hoc + `resolves`; D10 for a deleted run file).** The collector reads Claude Code's run file
   (`<home>/projects/<proj>/<sid>/workflows/<run_id>.json`) and the agent transcripts
   (`<sid>/subagents/workflows/<run_id>/agent-<id>.jsonl` + `.meta.json`) after the run has finished. It
   parses them with `bench.scan_transcript` and prices them with `bench.price_usage` / `PRICING` /
@@ -113,13 +113,15 @@ CLI layer (`cli/stats.py`) does I/O and calls those functions. It never re-imple
   `agents.ensure_salt()` and the machine label as the resolved `run.machine_label`; it keeps no settings
   file of its own. Covers 1.1, 1.8, 1.9, 7.8, 10.3 and the NFR on local record protection.
 - `src/claude_kiro/analytics/runfile.py` (new): locate run files, read a workflow name without
-  processing anything else, recognise the format, decide finished/unfinished, and classify access to the
-  Claude home. Covers 1.10, 1.11, 1.13, 1.14 and 2.1-2.3.
+  processing anything else, recognise the format, decide finished/unfinished, classify access to the
+  Claude home, and, for a run whose run file is gone, find its agent directory and recover its workflow
+  name from the session transcript's Workflow launch (S28). Covers 1.10, 1.11, 1.13, 1.14, 1.15 and 2.1-2.3.
 - `src/claude_kiro/analytics/roles.py` (new): the label grammar for both workflows, current and legacy
   templates. It maps labels to role, task, attempt/round and step. Covers 5.1-5.3.
 - `src/claude_kiro/analytics/collect.py` (new): build a `LocalRecord` from a run file, its transcripts
   and its result, including per-agent/model/role/phase/task tokens and cost, spec-implement and
-  spec-create metrics, the pseudonym and the stack hint. Covers 1.2-1.9, 1.12 and 4.1-4.4.
+  spec-create metrics, the pseudonym and the stack hint, and the transcripts-only partial record of 1.15.
+  Covers 1.2-1.9, 1.12, 1.15 and 4.1-4.4.
 - `src/claude_kiro/analytics/show.py` (new): breakdowns, trends, filters and duration coverage notes,
   with text and JSON renderers. Covers 6.1-6.8.
 - `src/claude_kiro/analytics/share.py` (new): `SHAREABLE_SCHEMA`, enum mapping, model aliasing,
@@ -176,7 +178,11 @@ ck stats label [SLUG | --clear]                                                #
 - `collect --run RUN_ID`: exit 0 when a record is written (`✓ <run_id>: wrote <path>`) or when the run is
   unfinished (`ℹ️ <run_id> has not finished; nothing written`). Exit 1 for not found (names the Claude
   home searched), unrecognised format (including a run file that is not valid JSON), not allowlisted
-  (message without the name), or sandbox-blocked. The id printed is the one I typed (2.2, 2.3).
+  (message without the name), or sandbox-blocked. The id printed is the one I typed (2.2, 2.3). When the
+  run file is gone but `subagents/workflows/<run_id>/` remains, collect takes the 1.15 path: S28 recovers
+  the workflow name from the session transcript; an allowlisted name gives a partial record (`✓`, exit 0,
+  `missing` holds `runfile` and `result`), anything else is reported exactly like not found (1.10), and an
+  unknown name is never printed.
   Exit 2 when `RUN_ID` does not match `^wf_[A-Za-z0-9_-]{1,128}$`, which keeps glob characters out of
   path lookups.
 - `collect --all`: prints the `CollectSummary` counts (4.2). Exit 1 iff `failed > 0` (4.3). With no
@@ -194,13 +200,15 @@ ck stats label [SLUG | --clear]                                                #
   record exported to this checkout but unsubmitted whose files are missing from it (10.10, new record id),
   plus each `--re-export RUN_ID` (7.1, 7.8). A re-export of a record whose earlier export to this checkout
   is unsubmitted first removes those earlier files (this machine's own pending files), so the batch never
-  holds two records for one run (10.11). `--note` asks for an issues note per exported record (8.2).
+  holds two records for one run (7.8, 10.10). `--note` asks for an issues note per exported record (8.2).
   `--yes`, or no TTY on stdin/stdout, means non-interactive (8.4); then no drafter subprocess starts
   (7.12).
 - `submit`: as `export`, then the submit flow (10.1-10.11). `--yes` skips confirmation only when the batch
-  has no free text (10.5). A batch holding an approved `.md` note from an earlier export always asks, and
-  with no TTY refuses (10.11). That refusal is decided from the checkout's pending `.md` files before the
-  export step runs, so it writes, restores and removes nothing in the checkout.
+  has no free text (10.5). A batch holding an approved `.md` note from an earlier export always asks at a
+  terminal, even with `--yes` (10.11). With no TTY and `--yes`, the notes are left out of the commit (they
+  stay untracked in the checkout), the rest is submitted, and the note is reported as withheld (10.5,
+  10.11, 8.4). With no TTY and no `--yes`, submit refuses (10.1); that refusal is decided before the export
+  step runs, so it writes, restores and removes nothing in the checkout.
 - `label SLUG` is an alias of `ck agents set run.machine_label SLUG`: it stores the label through
   `agents.write_setting` after S13 (7.6). `--clear` is `ck agents set run.machine_label none`. With no
   argument it prints the current label, or `(none)`.
@@ -236,16 +244,25 @@ def iter_run_files(home: Path) -> Iterator[Path]                         # proje
 def peek_workflow_name(path: Path) -> Optional[str]                     # parses the file, returns only workflowName (any string; None when
                                                                         # unreadable); nothing else is kept. Callers other than
                                                                         # leak.non_ck_workflow_names discard a non-allowlisted name at once
-def session_run_ids(home: Path, session_id: str, since_ms: Optional[int]) -> List[str]   # allowlisted runs of one session (ck run)
+def session_run_ids(home: Path, session_id: str, since_ms: Optional[int]) -> Tuple[List[str], int]
+                                                                        # (allowlisted runs of one session, count of its run files whose
+                                                                        # workflow name cannot be read); used by ck run, never names those
+def find_orphan_run(home: Path, run_id: str) -> Optional[OrphanRun]     # run file absent, projects/<proj>/<sid>/subagents/workflows/<run_id>/
+                                                                        # present: (agent dir, session transcript <proj>/<sid>.jsonl or None)
+def workflow_launches(session_jsonl: Path) -> List[Tuple[dict, str]]    # each Workflow tool_use input paired with its tool_result text
+                                                                        # (joined by tool_use_id); in memory only, [] if unreadable
+def recover_workflow_name(launches: Sequence[Tuple[Mapping, str]], run_id: str) -> Optional[str]   # S28
 
 # analytics/collect.py
 def collect_run(home: Path, run_id: str, *, now: datetime, pricing: Optional[dict] = None,
-                fresh: bool = False) -> CollectOutcome                  # fresh: True for --auto (ck run, skills); S27 input
+                fresh: bool = False) -> CollectOutcome                  # fresh: True for --auto (ck run, skills); S27 input;
+                                                                        # no run file + find_orphan_run -> the 1.15 path
 def collect_all(home: Path, *, now: datetime, workers: int = 8) -> CollectSummary
 def write_outcome(outcome: CollectOutcome, env=None) -> Optional[Path]  # replace-by-run-id (1.9); returns path or None
 def derive_outcome(result: object) -> Tuple[Optional[str], bool]        # S26: (outcome, inferred)
 def tie_ck_version(manifest_version: Optional[str], manifest_mtime_ms: Optional[int], installed: str,
-                   run_start_ms: Optional[int], fresh: bool) -> Optional[str]   # S27
+                   run_start_ms: Optional[int], fresh: bool,
+                   previous: Optional[str] = None) -> Optional[str]     # S27; previous = ckVersion of the record being replaced
 
 # analytics/show.py
 def list_runs(records: Sequence[LocalRecord], filters: ShowFilters) -> ShowList
@@ -284,7 +301,7 @@ TARGET_REPO = "kutlayhanli/claude-kiro"
 def remote_urls(checkout: Path) -> List[Tuple[str, str]]                # (remote name, configured url) from `git config --get-regexp`
                                                                         # over remote.*.url: the raw configured URL, so an insteadOf
                                                                         # rewrite (used by the tests' bare remote) never hides it
-def branch_name(token: str) -> str                                       # "analytics/runs-<token>", token = secrets.token_hex(4)
+def branch_name(token: str) -> str                                       # "ck-stats-batch-<token>", token = secrets.token_hex(4)
 def pr_text(records: Sequence[dict], machine_label: Optional[str],
             token: Optional[str] = None) -> dict                        # {branch, commit, title, body}; token None -> a fresh token
 def commit_message(summary: BatchSummary) -> str
@@ -327,7 +344,7 @@ arguments. Callers never re-implement the rule.
 | # | Seam (module) | Inputs -> Output | Decides | Owner |
 |---|---|---|---|---|
 | S1 | `runfile.is_allowlisted(name: object) -> bool` | any JSON value -> True only for an exact string in `ALLOWLISTED_WORKFLOWS` | whether anything past the name is read (2.1), written (2.2), or refused for `--run` (2.3) | `analytics/runfile.py` |
-| S2 | `runfile.check_format(data: object) -> FormatCheck` | parsed run file -> `FormatCheck(ok, problems: Tuple[str, ...])` | recognised format: a dict with `workflowName: str`, `status: str`, `startTime: int\|str`, `workflowProgress: list` whose `workflow_agent` entries are dicts. Extra keys allowed, missing optional keys allowed (1.13, 12.1) | `analytics/runfile.py` |
+| S2 | `runfile.check_format(data: object) -> FormatCheck` | parsed run file -> `FormatCheck(ok, problems: Tuple[str, ...])` | recognised format: a dict with `workflowName: str`, `status: str`, `startTime: int\|str` and `workflowProgress: list`. A missing or non-list `workflowProgress` is unrecognised (1.13). Entries inside the list are not checked here: the collector skips a non-dict entry and lists it in `missing`, and odd fields inside a dict entry or a missing or non-dict `result` give a partial record (1.12). Extra keys allowed, missing optional keys allowed (1.13, 12.1) | `analytics/runfile.py` |
 | S3 | `runfile.run_state(data: Mapping) -> RunState` | recognised run file -> `"finished" \| "unfinished"` | unfinished when `status` is in `{"running", "pending", "queued", "starting"}`, or when `status` is not in the terminal set `{"completed", "failed", "killed", "cancelled", "error", "stopped"}` and `durationMs` is absent (1.11) | `analytics/runfile.py` |
 | S4 | `runfile.classify_home(exists: bool, listable: bool, sandbox_flag: bool) -> HomeAccess` | -> `"ok" \| "sandboxed" \| "missing"` | `sandboxed` when not listable, or when missing while `sandbox_flag` is set. Otherwise `missing` or `ok`. Picks between 1.14 and 1.10 | `analytics/runfile.py` |
 | S5 | `roles.parse_label(label: object, workflow: str) -> LabelMatch` | label + workflow kind -> role/task/attempt/round/step/escalated_to/matched | role attribution. No match gives `role="other", matched=False`, never a guess (5.1, 5.2) | `analytics/roles.py` |
@@ -346,13 +363,14 @@ arguments. Callers never re-implement the rule.
 | S18 | `leak.decide(hits: Sequence[LeakHit]) -> Gate` | -> `Gate(allowed: bool, hits)` | any hit blocks (9.2) | `analytics/leak.py` |
 | S19 | `export.plan_export(records, ledger, reexport, checkout_id, present) -> ExportPlan` | -> run ids to export, re-exports, `restore` (exported to this checkout, unsubmitted, files missing from `present`), and `nothing_new` | not-yet-exported, plus `restore` ids (re-exported with a new record id, 10.10), plus explicit re-exports only (7.1, 7.8, 7.10). A run is restored when any of its ledger files is missing; its earlier files that are still present go into `replace`, so a restore never leaves two records (or an orphan `.md`) for one run. Submitted records are never restored: their files live on the PR branch, not in the checkout's branch | `analytics/export.py` |
 | S20 | `submit.target_remote(remotes: Sequence[Tuple[str, str]]) -> Optional[str]` (and `is_target_repo(url: str) -> bool` for one URL) | (name, configured url) pairs -> the name of the first remote whose URL normalises to `github.com/kutlayhanli/claude-kiro` (https, ssh, `git@`, optional `.git`, case-insensitive owner/name), else None | the only allowed target and the remote that submit fetches from and pushes to (7.9, 10.9) | `analytics/submit.py` |
-| S21 | `submit.decide_preflight(porcelain: Sequence[str], own_pending: FrozenSet[str], tracked_destinations: FrozenSet[str], target_ok: bool) -> Preflight` | `git status --porcelain=v1` lines, paths of this machine's exported-but-unsubmitted files, destination paths already tracked at HEAD -> `Preflight(ok, reason)` | refuse on a wrong repo, on any change outside `own_pending`, or on any destination that already exists in the tree other than an `own_pending` file (10.7, 10.9) | `analytics/submit.py` |
+| S21 | `submit.decide_preflight(porcelain: Sequence[str], own_pending: FrozenSet[str], tracked_destinations: FrozenSet[str], target_ok: bool) -> Preflight` | `git status --porcelain=v1` lines, paths of this machine's exported-but-unsubmitted files and of notes withheld by an earlier `skip_withhold_notes` submit (`Ledger.submitted[].withheld`), destination paths already tracked at HEAD -> `Preflight(ok, reason)` | refuse on a wrong repo, on any change outside `own_pending`, or on any destination that already exists in the tree other than an `own_pending` file (10.7, 10.9) | `analytics/submit.py` |
 | S22 | `submit.select_batch(ledger: Ledger, checkout_id: str) -> List[str]` | -> record ids exported to this checkout and not submitted | one PR per batch. Submitted ids are never reselected (10.3, 10.8) | `analytics/submit.py` |
-| S23 | `submit.decide_confirmation(yes: bool, interactive: bool, has_free_text: bool) -> ConfirmMode` | -> `"ask" \| "skip" \| "refuse_noninteractive"` | `has_free_text` is true when the batch holds any `.md` note file, which can only be one I approved interactively (in an earlier export, or in this submit's own export step with `--note` at a TTY): a note drafted in this run without a TTY or with `--yes` is withheld by S16 first. Every input is known before submit's export step, so a `refuse_noninteractive` result is decided before anything is written to the checkout. `skip` only for `yes and not has_free_text`. `ask` when interactive (also when `yes and has_free_text`, 10.11). `refuse_noninteractive` when there is no TTY and either no `--yes` or free text; with free text the refusal names `ck stats export --re-export <run id> --yes` as the way to drop the note (10.1, 10.5, 10.11) | `analytics/submit.py` |
-| S24 | `submit.branch_name / commit_message / pr_title / pr_body(BatchSummary)` and `pr_text(records, machine_label, token=None)` | `BatchSummary` (record count, workflow-kind counts, months, machine label) and a token -> strings | built only from allowlisted values. The branch is `analytics/runs-<token>`, token a fresh `secrets.token_hex(4)` unless one is passed, so two submits never share a branch; with the token held fixed the four strings depend only on the summary (10.2, 10.3) | `analytics/submit.py` |
+| S23 | `submit.decide_confirmation(yes: bool, interactive: bool, has_free_text: bool) -> ConfirmMode` | -> `"ask" \| "skip" \| "skip_withhold_notes" \| "refuse_noninteractive"` | `has_free_text` is true when the batch holds any `.md` note file, which can only be one I approved interactively (in an earlier export, or in this submit's own export step with `--note` at a TTY): a note drafted in this run without a TTY or with `--yes` is withheld by S16 first. Every input is known before submit's export step, so a `refuse_noninteractive` result is decided before anything is written to the checkout. `skip` only for `yes and not has_free_text`. `ask` when interactive in every other case, so a note at a terminal is always confirmed, even with `--yes` (10.11). `skip_withhold_notes` when there is no TTY, `--yes` is given and the batch holds a note: no prompt, every `.md` is left out of the commit (it stays untracked in the checkout as this machine's own file), the records and issue codes are submitted, and `⚠ issues note withheld: needs interactive approval` is printed (10.5, 10.11, 8.4). `refuse_noninteractive` when there is no TTY and no `--yes` (10.1) | `analytics/submit.py` |
+| S24 | `submit.branch_name / commit_message / pr_title / pr_body(BatchSummary)` and `pr_text(records, machine_label, token=None)` | `BatchSummary` (record count, workflow-kind counts, months, machine label) and a token -> strings | built only from allowlisted values. The branch is `ck-stats-batch-<token>`, token a fresh `secrets.token_hex(4)` unless one is passed, so two submits never share a branch; with the token held fixed the four strings depend only on the summary (10.2, 10.3). The fixed template words are chosen to be unlikely confidential terms (no common directory or file names such as `analytics` or `runs`): the commit message and PR title are `ck-stats-batch: <count> (<kind> <n>, ...) <yyyy-mm>[ <yyyy-mm>...][ <machine>]`, and the PR body is the lines `count: <n>`, `kinds: <kind> <n>, ...`, `months: <yyyy-mm> ...` and, when a label is set, `machine: <label>`. The leak check still scans all of this text in full (9.1) | `analytics/submit.py` |
 | S25 | `health.decide(newest: Optional[FormatCheck], auto_collect: bool, uncollected: int) -> List[DoctorFinding]` | -> warning / info findings | the 12.1 warning, the 12.2 info, the 12.3 count and suggestion | `analytics/health.py` |
 | S26 | `collect.derive_outcome(result: object) -> Tuple[Optional[str], bool]` | spec-implement result -> `(outcome, inferred)` | `result.outcome` when it is a string (`inferred=False`). Otherwise, as spec-implement.js decides it today: `refused` when `refused` is true, `halted` when `halted` is true, `blocked` when `failed` or `notStarted` is a non-empty list, else `complete`, with `inferred=True`. A result that is not a dict gives `(None, False)` and `result` in `missing` (1.2, 1.12) | `analytics/collect.py` |
-| S27 | `collect.tie_ck_version(manifest_version, manifest_mtime_ms, installed, run_start_ms, fresh) -> Optional[str]` | the project's `.claude/ck-manifest.json` `version` and file mtime, the installed `manifest.ck_version()`, the run start, and whether this collect runs right after the run (`--auto` from `ck run` or a skill) -> a version or None | the ck version the run used, only when it can be tied to the run: the manifest version when the manifest predates the run start; else, for a fresh collect, the manifest version or else the installed version; else None, and `ckVersion` goes into `missing`. A backfill never credits an old run to the installed release (1.2, 1.12) | `analytics/collect.py` |
+| S27 | `collect.tie_ck_version(manifest_version, manifest_mtime_ms, installed, run_start_ms, fresh, previous=None) -> Optional[str]` | the project's `.claude/ck-manifest.json` `version` and file mtime, the installed `manifest.ck_version()`, the run start, whether this collect runs right after the run (`--auto` from `ck run` or a skill), and the `ckVersion` of the local record this collect replaces -> a version or None | the ck version the run used (`ckVersion`), only when it can be tied to the run: the manifest version when the manifest predates the run start; else, for a fresh collect, the manifest version or else the installed version; else `previous` when an earlier collect tied one (so a later `--all` re-collect of an `--auto`-collected run keeps it); else None, and `ckVersion` goes into `missing`. A backfill never credits an old run to the installed release. Separately, every record carries `collectorVersion` = the installed version that wrote it; it is never used where a ck version is reported or grouped (show, trends, shareable `ck_version`) (1.2, 1.12) | `analytics/collect.py` |
+| S28 | `runfile.recover_workflow_name(launches, run_id) -> Optional[str]` | (Workflow tool_use input, tool_result text) pairs from the main session transcript `<home>/projects/<proj>/<sid>.jsonl`, and the run id -> an allowlisted workflow name or None | the launch tied to the run is the one whose tool_result text contains the run id. Its name is `input.name` with a leading `spec:` plugin prefix removed (`spec:spec-implement` -> `spec-implement`, `spec:spec-create` -> `spec-create`), else, when `input.scriptPath` ends in `/spec-implement.js` or `/spec-create.js`, that basename without `.js`. The result is returned only when S1 accepts it; no tied launch, no name, or a name S1 rejects gives None, and the rejected name is dropped at once (1.15, 2.1, 2.2) | `analytics/runfile.py` |
 
 `leak.scan` matching rule (S17, documented in `analytics/SCHEMA.md`, 9.3):
 
@@ -381,6 +399,12 @@ arguments. Callers never re-implement the rule.
   A `.json` file that does not parse as a `ck-run-analytics` record is free text.
 - Path-like terms are split into segments. Each segment is added under the same strong/weak rule, and
   the whole path is added as a strong term.
+- **Digit-only terms are dropped.** A candidate term made only of decimal digits (`1`, `80`, `2026`) or only
+  of hexadecimal digits (`[0-9a-f]+`, case-insensitive: `cafe`, `beef`, `0a1b`) is not added, whatever it
+  came from (path segment, spec name, branch, task id). Such a term identifies no project, and it would
+  otherwise hit a version (`2.1.80`), a `month` (`2026-10`) or a random 16-hex `id`. Run, session and agent
+  ids are the exception and are kept whole, because they identify a run and are too long to collide by
+  chance. Every position is still scanned for the remaining terms (9.3).
 - **Generic patterns** (always on, all compiled with `re.IGNORECASE`, matched in all text except the fixed
   tokens and format-validated values above):
   - email `[\w.+-]+@[\w-]+\.[\w.-]+`
@@ -393,10 +417,10 @@ arguments. Callers never re-implement the rule.
   - key and token shapes `(?:sk-|sk-ant-|ghp_|gho_|github_pat_|xox[abp]-|AKIA)[A-Za-z0-9_-]{8,}` and any
     `[A-Za-z0-9_\-]{32,}` run
 
-  `record_id` (16 hex) and `month` (`yyyy-mm`) are designed to match none of these patterns. Because fixed
-  tokens are skipped, an enum member longer than 32 characters (`review_blocking_contract_mismatch` is 33)
-  never blocks an export; a property test still checks that no field name, enum member or template word
-  matches any generic pattern, so the exemption is a second guard and not the only one (P-24).
+  `record_id` (16 hex) and `month` (`yyyy-mm`) are designed to match none of these patterns. No field
+  name, enum member or template word is 32 characters or longer (the longest issue code,
+  `review_contract_mismatch`, is 24), and a property test checks that none of them matches any generic
+  pattern (P-24), so fixed-token skipping is a second guard and not the only one.
 
 `roles.parse_label` grammar (S5). It is matched anchored, on the label exactly as given (a label with
 surrounding whitespace is `other`). `N` is a task id `[0-9A-Za-z_]+`, the rule spec-implement.js uses for
@@ -534,7 +558,8 @@ class LocalRecord(TypedDict):
     session_id: Optional[str]
     workflow: WorkflowKind
     workflow_name: str              # exact allowlisted name (e.g. spec-implement-iso)
-    ck_version: Optional[str]       # S27 tie_ck_version: the version the run used, or None ("ckVersion" in missing)
+    ck_version: Optional[str]       # S27 tie_ck_version: the version the run used, or None ("ckVersion" in missing); on disk "ckVersion"
+    collector_version: str          # installed ck that wrote this record, always set; never used per version (on disk "collectorVersion")
     claude_code_version: Optional[str]   # most common "version" in the run's transcripts
     status: str                     # run file status
     outcome: Optional[str]
@@ -555,12 +580,14 @@ class LocalRecord(TypedDict):
     other_role: Bucket              # 5.2 summary
     implement: Optional[ImplementMetrics]
     create: Optional[CreateMetrics]
-    missing: List[str]              # e.g. "result", "transcripts:3/250", "transcript-unparseable:2", "meta"
+    missing: List[str]              # e.g. "result", "runfile" (1.15), "agent_entry:4" (a non-dict workflowProgress entry, 1.12),
+                                    # "transcripts:3/250", "transcript-unparseable:2", "meta"
     terms: List[str]                # extra confidential strings seen (task titles, labels, paths, branch, lens keys) for leak.build_terms
 
 class Ledger(TypedDict):
     exported: Dict[str, dict]       # run_id -> {record_id, month, checkout_id, files: [rel paths], note: bool, exported_at}
-    submitted: Dict[str, dict]      # record_id -> {pr_url, branch, submitted_at}
+    submitted: Dict[str, dict]      # record_id -> {pr_url, branch, submitted_at, withheld: [rel paths of .md notes left
+                                    #  out of the commit by S23 skip_withhold_notes; they count as own_pending for S21]}
 # checkout_id = sha256 of the checkout's resolved path (local only).
 
 class ShareableRecord(TypedDict, total=False):   # ck-run-analytics/1; every path listed in analytics/SCHEMA.md
@@ -591,7 +618,7 @@ class ShareableRecord(TypedDict, total=False):   # ck-run-analytics/1; every pat
     cost: dict                      # {usd, source: priced_from_transcripts | estimate, pricing_date, estimated: bool,
                                     #  by_model: {alias: usd}, by_role: {Role: usd}}  (the session-wide claude_total is not exported)
     issues: List[str]               # ISSUE_CODES members, sorted (Harness Contract); an approved note is <id>.md next to the record
-    missing: List[str]              # enum: result | transcripts | meta | timing | ck_version
+    missing: List[str]              # enum: result | runfile | agent_entries | transcripts | meta | timing | ck_version
 
 ISSUE_CODES = frozenset({
     # spec-implement
@@ -601,7 +628,7 @@ ISSUE_CODES = frozenset({
     "resolver_rounds_exceeded",       # a task reason starts "merge failed: still conflicting after"
     "conflict_not_resolved",          # "merge failed: conflict not resolved"
     "review_blocking_unresolved",     # an impl-track task failed on "review: blocking findings remain"
-    "review_blocking_contract_mismatch",  # the same, on a test-track task (contract check against design.md)
+    "review_contract_mismatch",       # the same, on a test-track task (contract check against design.md)
     "cross_test_blocking",            # a crossTests entry with a blocking finding
     "planning_failed",                # stats.planFailures > 0 or reason == "planning step failed"
     "plan_cycle",                     # result.refused
@@ -668,7 +695,11 @@ class NoteDraft:
     text: Optional[str]; error: Optional[str]
 
 NoteDecision = Literal["include", "withhold_noninteractive", "discarded", "blocked_by_leak", "none"]
-ConfirmMode = Literal["ask", "skip", "refuse_noninteractive"]
+ConfirmMode = Literal["ask", "skip", "skip_withhold_notes", "refuse_noninteractive"]
+
+@dataclass(frozen=True)
+class OrphanRun:                    # 1.15: run file gone, agent transcripts remain
+    agent_dir: Path; session_jsonl: Optional[Path]
 
 @dataclass(frozen=True)
 class ExportPlan:
@@ -761,7 +792,7 @@ sequenceDiagram
 
     U->>CLI: ck stats submit --to ~/claude-kiro
     CLI->>SB: remote_urls, target_remote (-> remote name R), decide_preflight
-    CLI->>SB: decide_confirmation (S23) from pending approved .md notes; refuse_noninteractive -> exit 1 before any write (10.11)
+    CLI->>SB: decide_confirmation (S23) from pending approved .md notes; refuse_noninteractive (no TTY, no --yes) -> exit 1 before any write (10.1)
     CLI->>X: plan_export(records, ledger) then build_shareable + derive_issue_codes
     opt --notes and interactive
         X->>X: draft_note (claude -p) then L.scan then edit/accept/discard then L.scan then decide_note
@@ -774,8 +805,8 @@ sequenceDiagram
         CLI-->>U: unified diff of every file
         CLI->>SB: decide_confirmation (S23, counts approved .md notes), gh preflight (gh --version, gh auth status)
         U->>CLI: confirm
-        SB->>G: git fetch R master, git switch -c analytics/runs-<hex> R/master (untracked batch files carry over), add only the batch files, commit
-        SB->>G: git push R analytics/runs-<hex>, gh pr create --draft --repo kutlayhanli/claude-kiro --base master --head analytics/runs-<hex>
+        SB->>G: git fetch R master, git switch -c ck-stats-batch-<hex> R/master (untracked batch files carry over), add only the batch files (no .md under skip_withhold_notes), commit
+        SB->>G: git push R ck-stats-batch-<hex>, gh pr create --draft --repo kutlayhanli/claude-kiro --base master --head ck-stats-batch-<hex>
         alt any step fails
             SB->>G: switch back, delete local branch, rewrite files untracked
             CLI-->>U: error, files left for manual commit, exit 1
@@ -797,8 +828,12 @@ failure (10.6).
 `ck run` after-exit flow: `subprocess.call` returns, `spend_report`, then `auto_collect_after_run`. That
 checks S10, finds the session, calls `runfile.session_run_ids(home, sid, since_ms=started*1000 - 5000)`,
 then for each run `collect_run` + `write_outcome`, and writes a log line like `stats: wf_x collected ->
-<path>` or `stats: wf_x not collected (<reason>); retry: ck stats collect --run wf_x`. The exit code is
-the `claude` exit code, whatever happens.
+<path>` or `stats: wf_x not collected (<reason>); retry: ck stats collect --run wf_x`. When the session
+holds run files whose workflow name cannot be read (for example truncated JSON), it prints one count-only
+line to stdout and the `ck run` log, `stats: <n> run file(s) in this session could not be read; retry: ck
+stats collect --all` (for one file: `stats: 1 run file in this session could not be read; retry: ck stats
+collect --all`), with no run id (2.2, 3.3), and appends `<utc iso> - unrecognised` to the collect log once
+per such file. The exit code is the `claude` exit code, whatever happens.
 
 ## Error Handling
 
@@ -806,10 +841,11 @@ the `claude` exit code, whatever happens.
 |---|---|---|
 | 1.10 | `find_run_file` returns None and S4 = `ok`/`missing` | `❌ run wf_x not found under <home>` (the resolved `bench.claude_home()`), nothing written, exit 1 |
 | 1.11 | S3 = `unfinished` | `ℹ️ wf_x has not finished; nothing written`, exit 0. `--all` counts it as `unfinished` |
-| 1.12 | readable allowlisted run file whose `result` is missing or not a dict or whose agent entries are malformed, some `agent-*.jsonl` or `.meta.json` absent, unparseable lines, truncated transcript JSON | record written with the parts that could be read. `missing` lists what is absent. Agents without transcripts get `cost.source="estimate"` (context tokens at the input rate, as `bench.collect_agents` does), and the run cost becomes `estimate` (S7). Fields that cannot be computed are `None`, never 0. `scan_transcript` already skips undecodable lines; an `OSError` on a file marks it `unparseable` |
-| 1.13 | S2 not ok, or the run file is not valid JSON | With `--run`: `❌ wf_x: run-file format not recognised (<problems>)`, where `wf_x` is the id I typed. The workflow name appears only when S1 is true. Nothing written, exit 1. During `--all` and `ck doctor`: an allowlisted run that fails S2 is `failed` with its id; a run file whose name cannot be read is counted in `skipped_non_ck`, never named (2.2). A run file that is missing while its transcripts remain is the open decision recorded in requirements.md Assumptions; until it is settled the collector never writes a record whose kind was not read from an allowlisted name |
+| 1.12 | readable allowlisted run file that passes S2 (so `workflowProgress` is a list) whose `result` is missing or not a dict, whose list holds non-dict entries or dict entries with missing or malformed fields, some `agent-*.jsonl` or `.meta.json` absent, unparseable lines, truncated transcript JSON | record written with the parts that could be read. A non-dict entry is skipped and listed in `missing` (`agent_entry:<index>`). `missing` lists what is absent. Agents without transcripts get `cost.source="estimate"` (context tokens at the input rate, as `bench.collect_agents` does), and the run cost becomes `estimate` (S7). Fields that cannot be computed are `None`, never 0. `scan_transcript` already skips undecodable lines; an `OSError` on a file marks it `unparseable` |
+| 1.13 | S2 not ok (including a missing or non-list `workflowProgress`), or the run file is not valid JSON | With `--run`: `❌ wf_x: run-file format not recognised (<problems>)`, where `wf_x` is the id I typed. The workflow name appears only when S1 is true. Nothing written, exit 1. During `--all` and `ck doctor`: an allowlisted run that fails S2 is `failed` with its id; a run file whose name cannot be read is counted in `skipped_non_ck`, never named (2.2). A run file that is missing while its transcripts remain is 1.15 |
+| 1.15 | `find_run_file` is None, `find_orphan_run` finds `subagents/workflows/<run_id>/` | S28 over `workflow_launches(<sid>.jsonl)`. Allowlisted name: a partial record from `agent-*.jsonl` (usage, models, cost, per-agent `duration_ms` = last minus first transcript `timestamp`) and `agent-*.meta.json` (`description` = label -> role, `workflowPhase` -> phase); `start_ms` = earliest timestamp, `wall_ms` = latest minus earliest; `status` and `outcome` None; S27 with that start; `missing` holds `runfile` and `result` (Harness Contract `{agentId: null, what: "runfile"}` and `what: "result"`); `✓ wf_x: wrote <path> (partial: run file missing)`, exit 0. No tied launch, no session transcript, or a name S1 rejects: the 1.10 message and exit 1, nothing written, the name never printed or kept |
 | 1.14 | S4 = `sandboxed` | `❌ ck stats collect must run outside the sandbox: <home> is not readable here`, exit 1, nothing written. With `--auto` under `ck run`: an info line, exit 0 |
-| 2.2 | non-allowlisted (or unreadable-name) run met during `--all`, `doctor`, `ck run` or leak-term gathering | only a counter goes up. The name and id never reach records, logs or console. `CollectOutcome.reason` and `FormatCheck.problems` are built without the name |
+| 2.2 | non-allowlisted (or unreadable-name) run met during `--all`, `doctor`, `ck run` or leak-term gathering | only a counter goes up. The name and id never reach records, logs or console. `CollectOutcome.reason` and `FormatCheck.problems` are built without the name. Under `ck run` an unreadable-name run file in the session is a collection failure (3.3) reported by count only: `stats: <n> run file(s) in this session could not be read; retry: ck stats collect --all` on stdout and in the `ck run` log, and `<utc iso> - unrecognised` in the collect log |
 | 2.3 | `--run` names a non-allowlisted run | `❌ wf_x is not a ck spec workflow run; not collected` (the id was typed by me, the name is never printed), exit 1 |
 | 3.3 | any exception in `auto_collect_after_run` or `collect --auto` | caught (`except Exception`, like `spend_report`), one log line plus `ck stats collect --run <id>` printed, exit status and report unchanged. The skills quote the line and change nothing else |
 | 3.6 | `ck agents set run.analytics maybe` | `❌ run.analytics must be true or false (also yes/no, on/off)`, exit 2, file untouched (`_coerce` raises before `write_setting` writes) |
@@ -829,9 +865,9 @@ the `claude` exit code, whatever happens.
 | 9.2 | S18 not allowed | each hit as `<file>: <field> (<rule>)`, `❌ leak check failed; nothing written or committed`, exit 1. Export writes nothing because files are built in memory first. Submit's second check (branch, commit and PR text) runs before any git mutation |
 | 10.4 | I answer no | `ℹ️ not submitted`. No branch, commit or PR. Exported files stay untracked in the checkout as from `export`, and the ledger does not mark them submitted. A later submit accepts them as `own_pending` (10.7) |
 | 10.6 | `gh` missing (`shutil.which`), `gh auth status` non-zero, or `git push` / `gh pr create` fails | preflight failures stop before any git change. A later failure rolls back: `git switch <original>`, `git branch -D <new>`, the files are rewritten untracked, and a pushed remote branch is named in the message. Nothing marked submitted, exit 1 |
-| 10.7 | S21 not ok | `❌ <checkout> has uncommitted changes (<n> paths)` or `destination <path> already exists`. Changes that are this machine's own exported-but-unsubmitted files do not count. Working tree untouched, exit 1 |
+| 10.7 | S21 not ok | `❌ <checkout> has uncommitted changes (<n> paths)` or `destination <path> already exists`. Changes that are this machine's own exported-but-unsubmitted files, or notes withheld by an earlier submit (10.11), do not count. Working tree untouched, exit 1 |
 | 10.10 | ledger says exported to this checkout and unsubmitted, but its files are gone, or one of them is (I deleted them, or cleaned the checkout) | S19 lists the run in `restore` and any of its files still present in `replace`; export/submit removes those, builds the run again with a new record id and updates the ledger entry. `ℹ️ re-exported <n> record(s) whose files were missing` |
-| 10.11 | the batch holds an approved `.md` note from an earlier export | S23 `ask` even with `--yes`. With no TTY: `❌ the batch holds an approved issues note; confirm in a terminal, or drop it with ck stats export --re-export <run id> --yes`, exit 1, no branch. The refusal comes before submit's export step, so no file in the checkout is written, restored or removed, even when other records are not yet exported |
+| 10.5 / 10.11 | the batch holds an approved `.md` note from an earlier export | With a TTY: S23 `ask` even with `--yes`; confirming commits the note with its record. With no TTY and `--yes`: S23 `skip_withhold_notes`: the `.md` files are left out of the commit and stay untracked in the checkout (S21 treats them as this machine's own files), the records and issue codes are submitted, and `⚠ issues note withheld: needs interactive approval` is printed; exit 0 when the PR opens. With no TTY and no `--yes`: `refuse_noninteractive` (10.1), decided before submit's export step, so nothing in the checkout is written, restored or removed |
 | 12.1 | newest allowlisted run fails S2 | doctor warning `Run-file format of the newest ck run is not recognised (<problems>): ck stats cannot collect it - update ck` |
 | 12.2 | `run.analytics` false | `ℹ️ Automatic run analytics is off (ck agents set run.analytics true)`. Not a warning |
 | 12.3 | finished allowlisted runs without local records | warning `<n> finished ck run(s) not collected - run ck stats collect --all` |
@@ -890,8 +926,9 @@ the `claude` exit code, whatever happens.
 - Older spec-implement results also lack `outcome`. S26 derives it with the script's own rule and marks it
   `outcome_inferred`, so backfilled runs are `complete`/`blocked`/`halted`/`refused`, not `other`.
 - Backfilled runs are credited to a ck version only when S27 can tie one to the run (the project manifest
-  predates the run); otherwise `ck_version` is None locally and `other` in shareable records, never the
-  installed version.
+  predates the run, or an earlier collect tied one); otherwise `ck_version` is None locally and `other` in
+  shareable records, never the installed version. The installed version is kept apart as
+  `collector_version`.
 - Older runs carry labels from earlier label templates (`merge N`, path-shaped task ids). The grammar's legacy
   rows and the pinned legacy corpus keep them out of `other`.
 - Schema versions are `ck-run-local/1` and `ck-run-analytics/1`. Later fields are optional, and readers
@@ -902,7 +939,7 @@ the `claude` exit code, whatever happens.
 | Criterion | Design element |
 |---|---|
 | 1.1 | `ck stats collect --run`. `store.data_dir`/`record_path`/`write_private_json`. Prints the path |
-| 1.2 | `LocalRecord` fields: schema, ck_version (S27), claude_code_version, workflow, outcome (S26), start_ms, wall_ms, config |
+| 1.2 | `LocalRecord` fields: schema, ck_version (S27, keeps an earlier tied value), collector_version, claude_code_version, workflow, outcome (S26), start_ms, wall_ms, config |
 | 1.3 | `collect_run` with `bench.scan_transcript` per agent and `bench.aggregate_usage`. `by_model`/`by_role`/`by_phase`/`by_task` `Bucket`s |
 | 1.4 | `Cost.source` + `pricing_date`. S7 `collect.cost_label`; session `claude_total` figure kept apart |
 | 1.5 | `ImplementTask`, `ImplementMetrics` |
@@ -912,15 +949,16 @@ the `claude` exit code, whatever happens.
 | 1.9 | `write_outcome` replaces `runs/<run_id>.json`. `unchanged`/`updated` outcome kinds |
 | 1.10 | S4 + `find_run_file`. Error Handling 1.10 |
 | 1.11 | S3 `runfile.run_state`. Error Handling 1.11 |
-| 1.12 | `AgentRow.transcript`, `LocalRecord.missing`, S7 `estimate`, S26 `outcome_inferred`, S27 `None` ck version, `None` for unknowns |
+| 1.12 | S2 (list check only), skipped non-dict entries in `missing`, `AgentRow.transcript`, `LocalRecord.missing`, S7 `estimate`, S26 `outcome_inferred`, S27 `None` ck version, `None` for unknowns |
 | 1.13 | S2 `runfile.check_format`, `peek_workflow_name` returning None for invalid JSON. Error Handling 1.13 |
 | 1.14 | S4 `classify_home`. `CK_RUN_SANDBOXED` in `cli/run.py` |
+| 1.15 | `runfile.find_orphan_run`, `workflow_launches`, S28 `recover_workflow_name`, the transcripts-only path of `collect_run`. Error Handling 1.15 |
 | 2.1 | S1 `runfile.is_allowlisted`, `peek_workflow_name`, `ALLOWLISTED_WORKFLOWS` |
 | 2.2 | S1 + counters only in `CollectCounts.skipped_non_ck` (also unreadable-name run files). `CollectOutcome.reason` built without names; only an id I typed in `--run` is echoed |
 | 2.3 | S1 in `collect --run`. Error Handling 2.3 |
 | 3.1 | `cli/run.py: auto_collect_after_run`, `runfile.session_run_ids`, log lines |
 | 3.2 | `plugin/skills/implement/SKILL.md` step 9, `plugin/skills/create/SKILL.md` Close the loop, `plugin/skills/review/SKILL.md` step 4, `collect --auto` |
-| 3.3 | `auto_collect_after_run` / `--auto` catch-all, `store.append_collect_log`, retry command |
+| 3.3 | `auto_collect_after_run` / `--auto` catch-all, `store.append_collect_log`, retry command; the count-only line for unreadable run files from `session_run_ids` |
 | 3.4 | `agents.DEFAULTS["run"]["analytics"]`, S10 `collect.auto_collect_enabled` in `ck run` and `--auto` |
 | 3.5 | Default `True`. S10 treats unset as on |
 | 3.6 | S9 `agents._coerce` boolean branch, message naming accepted values |
@@ -964,13 +1002,13 @@ the `claude` exit code, whatever happens.
 | 10.2 | S24 `branch_name`/`commit_message`/`pr_title`/`pr_body`. `submit_batch` (branch from `R/master`, push to `R`, `gh pr create --draft --repo kutlayhanli/claude-kiro --base master --head <branch>`). Prints URL |
 | 10.3 | S22 `select_batch`. `Ledger.submitted` |
 | 10.4 | S23 `ask` + decline path. Error Handling 10.4 |
-| 10.5 | S23 + S16 |
+| 10.5 | S23 (`skip`, `skip_withhold_notes`) + S16 |
 | 10.6 | gh preflight + rollback in `submit_batch`. Error Handling 10.6 |
 | 10.7 | S21 `decide_preflight` with `own_pending` |
 | 10.8 | S22 empty. Error Handling 10.8 |
 | 10.9 | S20 |
 | 10.10 | S19 `restore`. Error Handling 10.10 |
-| 10.11 | S23 with `has_free_text` from approved `.md` files; `ExportPlan.replace` for the re-export that drops a note. Error Handling 10.11 |
+| 10.11 | S23 with `has_free_text` from approved `.md` files (`ask` at a TTY, `skip_withhold_notes` without one). Error Handling 10.5 / 10.11 |
 | 11.1 | `spec-implement.js` `rec.resolves` in `landTask`/`runTask`, `resolves` in `taskReport` |
 | 11.2 | Only those lines change. `.claude/workflows/spec-implement.js` regenerated by `ck vendor` |
 | 12.1 | S25 `health.decide` with S2 on the newest allowlisted run. Wired into `ck doctor` |

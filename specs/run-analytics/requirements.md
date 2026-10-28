@@ -17,7 +17,8 @@ leak-checked issues note that I approve (decision 4). It submits them as one dra
 `kutlayhanli/claude-kiro` (decisions 5 and 9). Collection runs automatically and stays local. Export and
 submission only happen when I run them (decision 7). spec:plan coverage is a stretch goal (decision 8).
 
-Decision record: [PLAN.md](PLAN.md). Its decisions 1-9 are binding on this document.
+Decision record: [PLAN.md](PLAN.md). Its decisions 1-9 and the review decisions D10-D17 are binding on this
+document.
 
 Terms used below:
 - **Run**: one execution of an allowlisted ck workflow (spec-implement or spec-create), identified by
@@ -30,7 +31,8 @@ Terms used below:
 - **Confidential term**: any project-identifying string known on this machine: spec names, task titles,
   task summaries, finding texts, verbatim agent labels, file paths and path segments, branch names, repo
   remote URLs and their owner/org/name parts, session, agent and run ids, emails, account and org ids,
-  exact timestamps, and names of non-ck workflows.
+  exact timestamps, and names of non-ck workflows. A string made only of decimal or hexadecimal digits is not a
+  confidential term (9.3).
 - **Role**: what a workflow agent did: implementer, test-writer, reviewer, fixer, resolver, plan, land,
   gate, cross-test, report, or `other`.
 
@@ -46,10 +48,12 @@ Terms used below:
   SYSTEM SHALL write exactly one local record for that run to the machine-local data store under my XDG
   data directory (`$XDG_DATA_HOME/claude-kiro`, falling back to the platform default) and print where it
   wrote it.
-- 1.2 WHEN a local record is written, THE SYSTEM SHALL include a schema version, the ck version, the
-  Claude Code version where the transcripts show one, the workflow kind, the run's outcome, its start time
-  and wall duration, the role-to-model/effort configuration the run used, and every field that criteria
-  1.3-1.8 call for.
+- 1.2 WHEN a local record is written, THE SYSTEM SHALL include a schema version, the ck version the run
+  used where it can be tied to the run (otherwise unknown; a re-collect keeps a version tied by an earlier
+  collect), the version of ck that wrote the record (always present), the Claude Code version where the
+  transcripts show one, the workflow kind, the run's outcome, its start time and wall duration, the
+  role-to-model/effort configuration the run used, and every field that criteria 1.3-1.8 call for. Anything
+  reported per ck version SHALL use the tied version only, never the collector's version.
 - 1.3 WHEN the run has agent transcripts, THE SYSTEM SHALL record tokens (input, output, cache read, cache
   write) and cost per agent, per model, per role, per phase and per task, pricing the usage counted once
   per request, the same way `ck cost` does.
@@ -74,16 +78,18 @@ Terms used below:
 - 1.9 WHEN `ck stats collect` runs again for a run it has already collected, THE SYSTEM SHALL replace that
   run's local record rather than add a second one. The local store SHALL then hold one record for the run.
 - 1.10 WHEN no run with the given id exists under the Claude configuration directory
-  (`$CLAUDE_CONFIG_DIR`, default `~/.claude`), THE SYSTEM SHALL print that the run was not found, name
-  the directory it searched, write nothing, and exit non-zero.
+  (`$CLAUDE_CONFIG_DIR`, default `~/.claude`), or 1.15 refuses a run whose run file is gone, THE SYSTEM
+  SHALL print that the run was not found, name the directory it searched, write nothing, and exit non-zero.
 - 1.11 WHEN the run is still in progress, THE SYSTEM SHALL write no record, say that the run has not
   finished, and exit zero.
-- 1.12 WHEN the run file is readable and allowlisted but its result or agent entries are missing or
-  malformed, or some transcripts or meta files are missing, truncated or unparseable, THE SYSTEM SHALL
-  write a record of what it could read. The record SHALL say which parts are missing. Any cost not backed
-  by transcripts SHALL carry an estimate label, and no missing number SHALL be shown as zero.
+- 1.12 WHEN the run file is readable and allowlisted and its agent list (`workflowProgress`) is a list, but
+  its result is missing or not an object, some agent entries are not objects, some agent entries have
+  missing or malformed fields, or some transcripts or meta files are missing, truncated or unparseable, THE
+  SYSTEM SHALL write a record of what it could read. Agent entries that are not objects SHALL be skipped and
+  listed as missing. The record SHALL say which parts are missing. Any cost not backed by transcripts SHALL
+  carry an estimate label, and no missing number SHALL be shown as zero.
 - 1.13 WHEN the run file's format is not one the collector recognises, including a run file that is not
-  valid JSON, THE SYSTEM SHALL write no record, report that the format is unrecognised, and exit non-zero.
+  valid JSON and a run file whose agent list (`workflowProgress`) is missing or not a list, THE SYSTEM SHALL write no record, report that the format is unrecognised, and exit non-zero.
   The report SHALL name the run id only when I named that run with `--run` or its workflow name is known
   to be allowlisted, and SHALL name the workflow name only when it is allowlisted. During `--all` and
   `ck doctor`, a run file whose workflow name cannot be read is never named; it is counted with the
@@ -91,6 +97,14 @@ Terms used below:
 - 1.14 WHEN collect is invoked from a sandboxed shell that cannot read the Claude configuration directory,
   THE SYSTEM SHALL say that it must run outside the sandbox and exit non-zero, without writing a partial
   record.
+- 1.15 WHEN `ck stats collect --run <id>` names a run whose run file is missing but whose agent transcripts
+  remain, THE SYSTEM SHALL recover the workflow name from the Workflow launch in the main session transcript
+  that is tied to that run id (the launch whose result names the id). WHEN the recovered name is
+  allowlisted, it SHALL write a partial record from the agent transcripts and meta files alone (usage,
+  models, cost, roles from the agent labels, phases, per-agent durations and the wall time from transcript
+  timestamps) whose missing parts include the run file and the result. WHEN no name can be recovered or the
+  name is not allowlisted, it SHALL treat the run as not found (1.10), write nothing, and never print the
+  name.
 
 ### Story 2: Collect only ck workflows
 
@@ -124,7 +138,9 @@ lost to transcript pruning and I never have to remember a command
   reporting step, and report where the record was written.
 - 3.3 WHEN automatic collection fails for any reason, THE SYSTEM SHALL log the failure, leave the run's
   outcome, report and exit status exactly as they would be without collection, and print the manual
-  collect command to retry.
+  collect command to retry. WHEN `ck run` finds run files in its session whose workflow name cannot be read,
+  it SHALL report them with one count-only line that names no run id (2.2) and gives `ck stats collect --all`
+  as the retry command.
 - 3.4 WHEN the auto-collect setting is turned off with `ck agents set`, THE SYSTEM SHALL skip automatic
   collection after `ck run` and in the skills of 3.2. Manual `ck stats collect` SHALL keep working.
 - 3.5 WHEN the auto-collect setting has never been set, THE SYSTEM SHALL treat automatic collection as on.
@@ -236,7 +252,7 @@ repository data explains slow or failed runs, not just measures them
 **Acceptance Criteria:**
 - 8.1 WHEN a shareable record is built, THE SYSTEM SHALL derive issue codes deterministically from the
   local record's result fields, using a fixed, documented code set (for example `gate_red_after_merge`,
-  `resolver_rounds_exceeded`, `review_blocking_contract_mismatch`, `planning_failed`,
+  `resolver_rounds_exceeded`, `review_contract_mismatch`, `planning_failed`,
   `retry_no_commits`, `escalated_to_opus`). The same local record SHALL always yield the same codes.
 - 8.2 WHEN I ask for an issues note during an interactive export, THE SYSTEM SHALL provide a draft written
   by an agent in ck-level terms from the local record and its failure reasons. It SHALL run the leak
@@ -264,7 +280,10 @@ repository data explains slow or failed runs, not just measures them
   file and field, write and commit nothing, and exit non-zero.
 - 9.3 WHEN a confidential term is too short or too generic to match safely (for example a one-letter path
   segment or a common English word used as a spec name), THE SYSTEM SHALL check it as a whole word, so
-  ordinary text and field names do not produce false hits. The matching rule SHALL be documented.
+  ordinary text and field names do not produce false hits. A term made only of decimal or hexadecimal digits
+  (for example a path segment `1`, `80`, `2026` or `cafe`) identifies no project and SHALL NOT be a
+  confidential term, so it never blocks an export or submission by matching a version, month or record id.
+  Every position of every file is still scanned. The matching rule SHALL be documented.
 - 9.4 WHEN fixture runs seeded with confidential strings go through collect, export and submit (spec
   names, task titles, paths, repo URL, emails, branch names, non-ck workflow names), THE SYSTEM SHALL
   produce shareable records, PR branch name, commit message, PR title and PR body that contain none of
@@ -291,12 +310,14 @@ same way from every machine
   leave the records not submitted.
 - 10.5 WHEN `--yes` is given and the batch contains no free-text issues notes, THE SYSTEM SHALL skip the
   confirmation prompt but still print the diff and run the leak check. WHEN the batch contains free text,
-  THE SYSTEM SHALL ignore `--yes` for that text, following 8.4.
+  THE SYSTEM SHALL ignore `--yes` for that text: with a terminal it SHALL ask (10.11); without one it SHALL
+  leave the notes out of the commit, submit the rest, and say that the notes were withheld for lack of
+  interactive approval, following 8.4.
 - 10.6 WHEN `gh` is missing, not logged in, or fails, THE SYSTEM SHALL report the error and leave the
   exported files in the checkout so I can commit them myself. It SHALL mark nothing as submitted and exit
   non-zero.
 - 10.7 WHEN the claude-kiro checkout has uncommitted changes other than this machine's own
-  exported-but-unsubmitted shareable files, or a destination file already exists in the checkout other
+  exported-but-unsubmitted shareable files (a note withheld by 10.11 counts as one of them), or a destination file already exists in the checkout other
   than as one of those same files, THE SYSTEM SHALL refuse to submit and leave my working tree untouched.
 - 10.8 WHEN there is nothing new to submit, THE SYSTEM SHALL say so and exit zero without creating a branch
   or PR.
@@ -304,10 +325,12 @@ same way from every machine
 - 10.10 WHEN a record is marked exported to this checkout but not submitted, and its files are missing from
   the checkout, THE SYSTEM SHALL re-export that record (with a new record id) on the next export or submit,
   instead of skipping it or committing nothing.
-- 10.11 WHEN the submit batch includes an issues note I approved during an earlier interactive export, THE
-  SYSTEM SHALL require interactive confirmation of the PR, ignoring `--yes`. With no terminal it SHALL
-  refuse to submit that batch, exit non-zero, leave the files untouched, and name the way to drop the note
-  (re-exporting that record without a note with `ck stats export --re-export <run id> --yes`).
+- 10.11 WHEN the submit batch includes an issues note I approved during an earlier interactive export and
+  a terminal is available, THE SYSTEM SHALL require interactive confirmation of the PR, ignoring `--yes`.
+  With no terminal and `--yes` given, it SHALL leave the note out of the commit, submit the structured
+  records and issue codes of the batch, and say that the note was withheld for lack of interactive approval
+  (10.5, 8.4). The withheld note file stays uncommitted in the checkout as one of this machine's own files
+  (10.7).
 
 ### Story 11: Conflict-resolution count in the spec-implement result
 
@@ -402,10 +425,10 @@ Claude Code's file format or a disabled setting does not lose data silently
   current batch, because one machine may hold records from several projects.
 - The issues-note draft is written by the agent in the interactive session (or one it starts), using the
   same Claude access as the run itself. No project data goes to any other service.
-- Open decision (not settled here): when a run's run file has been deleted but its agent transcripts
-  remain, whether `ck stats collect --run <id>` refuses (the workflow name cannot be checked against the
-  allowlist) or writes a partial record from the transcripts alone. Until it is decided, the only fixed rule
-  is that no record ever claims a workflow kind that was not read from an allowlisted name (2.1).
+- A run whose run file has been deleted but whose agent transcripts remain is collected only through 1.15
+  (review decision D10): its workflow name is recovered from the main session transcript, and no record ever
+  claims a workflow kind that was not read from an allowlisted name (2.1). `--all` walks run files, so it
+  does not find such runs.
 - `gh` is installed and logged in on machines that submit. Machines without it use export and commit by
   hand (10.6).
 - The auto-collect setting lives in the existing layered agent configuration and is changed with
