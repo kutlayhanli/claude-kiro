@@ -1946,7 +1946,7 @@ must be byte-identical to the plugin copy.
 ---
 
 ### Task 54: Label corpus check for the role parser (TC-34)
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 5.1, 5.3
 **Description:** Implements TC-34 against the Harness Contract seam `parse_label(label, workflow)` from
