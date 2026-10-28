@@ -676,27 +676,22 @@ def _workflow_metrics(kind: str, workflow_name: str, result: Any, rows: List[dic
     """The spec-implement / spec-create metrics, `outcome` and `agentsConfig` (1.2, 1.5, 1.6, 1.7)."""
     out: Dict[str, Any] = {"outcome": None, "outcomeInferred": False, "agentsConfig": None}
     if kind == "spec-create":
-        out.update({"review": None, "consistency": None, "phases": None})
+        out.update({"mode": None, "reviewResult": None, "openQuestions": None, "review": None,
+                    "consistency": None, "phases": None})
     else:
-        out.update({"tasks": None, "landings": None, "fullGates": None, "finalGate": None, "crossTests": None,
-                    "fixerEscalations": None, "phases": None})
+        out.update({"reportSource": None, "taskSpanMinutes": None, "tasks": None, "landings": None, "fullGates": None, "finalGate": None, "crossTests": None,
+                    "fixerEscalations": None, "phases": None, "stats": None})
     if not isinstance(result, Mapping):
         return out
     if kind == "spec-create":
-        cm = _create_metrics(result, rows)
-        out["outcome"] = cm.pop("reviewResult")
-        for k in ("mode", "openQuestions"):
-            cm.pop(k, None)  # not Harness Contract keys of the local record
-        out.update(cm)
+        out.update(_create_metrics(result, rows))
+        out["outcome"] = out["reviewResult"]
         out["outcomeInferred"] = False
     else:
         out["outcome"], out["outcomeInferred"] = derive_outcome(result)
         args = run_data.get("args") if run_data else None
         tracks = args.get("tracks") if isinstance(args, dict) and isinstance(args.get("tracks"), dict) else {}
-        im = _implement_metrics(result, rows, workflow_name, {str(k): v for k, v in tracks.items()})
-        for k in ("reportSource", "taskSpanMinutes", "stats"):
-            im.pop(k, None)  # not Harness Contract keys of the local record
-        out.update(im)
+        out.update(_implement_metrics(result, rows, workflow_name, {str(k): v for k, v in tracks.items()}))
     return out
 
 

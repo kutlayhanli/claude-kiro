@@ -897,13 +897,13 @@ These suites also verify the criteria of foundation Tasks 14, 15 and 18 and the 
 **Complexity:** High
 **Risk:** normal
 
----
+**Implementation notes:** Collector fix-ups found by this gate: a truncated transcript reports 0 figures as null; S28
+matches the run id on token boundaries. The record keeps `reportSource`, `stats`, `taskSpanMinutes` (implement) and `mode`,
+`openQuestions` (create) as design.md specifies; `tests/stats_helpers.seeded_local_record` (Task 1) lacks these five keys,
+so Task 26's key-set equality needs the helper and the test-plan Harness Contract 'Local record keys' list to gain them
+(escalated). `ck stats collect --run BAD --auto` goes through `collect_auto` and exits 0. `analytics/runfile.py` is in the listed files.
 
-**Implementation notes:** Collector fix-ups found by this gate: the record no longer carries `reportSource`, `stats`,
-`taskSpanMinutes` (implement) or `mode`, `openQuestions` (create), which are not Harness Contract keys (the
-`seeded_local_record` key-set check requires equality); a truncated transcript reports 0 figures as null; S28 matches the
-run id on token boundaries. Outside the listed files: `cli/bench.py` (`ck cost` exits 1 when nothing could be priced, as the
-P-16 test expects) and `analytics/runfile.py` (listed).
+---
 
 ### Task 25: Implement show breakdowns, trends and renderers (show.py)
 **Status:** Done

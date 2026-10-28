@@ -109,15 +109,15 @@ def collect_auto(run_id: str, *, home: Optional[Path] = None) -> int:
     except Exception as e:  # noqa: BLE001 - auto collection must never change the caller's result
         msg = f"{type(e).__name__}: {str(e)[:200]}"
         try:
-            _log_failure(home or Path(""), run_id, "error", msg)
+            _log_failure(home, run_id, "error", msg)
         except Exception:  # noqa: BLE001
             pass
         click.echo(f"⚠ could not collect {run_id}: {msg}; retry: {retry}")
     return 0
 
 
-def _log_failure(home: Path, run_id: str, kind: str, message: str) -> None:
-    known = _known_allowlisted(home, run_id) if str(home) else False
+def _log_failure(home: Optional[Path], run_id: str, kind: str, message: str) -> None:
+    known = _known_allowlisted(home, run_id) if home is not None else False
     if known:
         line = f"{_utc_iso()} {run_id} {kind}: {message}"
     else:
@@ -144,7 +144,7 @@ def collect_cmd(run_id: Optional[str], collect_everything: bool, auto: bool, as_
     if bool(run_id) == bool(collect_everything):
         click.echo("❌ give exactly one of --run RUN_ID or --all")
         sys.exit(2)
-    if run_id is not None and not RUN_ID_RE.match(run_id):
+    if run_id is not None and not auto and not RUN_ID_RE.match(run_id):
         click.echo("❌ RUN_ID must look like wf_ followed by letters, digits, - or _")
         sys.exit(2)
     if auto:
