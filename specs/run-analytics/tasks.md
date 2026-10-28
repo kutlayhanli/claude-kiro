@@ -1472,7 +1472,7 @@ submitted records, are not.
 ---
 
 ### Task 40: Pty tests for the interactive issues note
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 8.2, 8.3, 8.4, 8.5, 7.12
 **Description:** Implements TC-55, TC-56, TC-57, TC-58. Use `run_tty` (real pty) with `fake_claude_drafter` on PATH and
