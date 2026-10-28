@@ -409,7 +409,7 @@ generators locally (do not import from Task 9's file). Declare `PROPERTIES`.
 ---
 
 ### Task 11: Implement the shareable-record builder and validator (share.py)
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 7.2, 7.3, 7.4, 7.5, 7.6, 7.7
 **Description:** Create `share.py` with `SHAREABLE_SCHEMA` (every allowed dotted path of `ck-run-analytics/1` with its
