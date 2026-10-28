@@ -14,7 +14,7 @@ from claude_kiro.properties import map_ids
 
 TEST_DEF = re.compile(
     r"^\s*(?:async\s+)?def\s+test\w*\s*\("  # pytest / unittest
-    r"|^\s*(?:it|test|specify)(?:\.each\s*\(.*?\))?\s*\("  # jest / vitest / mocha
+    r"|^\s*(?:await\s+)?(?:it|test|specify)(?:\.each\s*\(.*?\))?\s*\("  # jest / vitest / mocha / node:test
     r"|^\s*it\s+['\"]"  # rspec
     r"|^\s*func\s+Test\w+\s*\("  # go
     r"|#\[(?:tokio::)?test\]"  # rust

@@ -107,6 +107,7 @@ def _test_files_present(task: SpecTask, project_dir: Path, config: Dict[str, Any
     if not test_files:
         return Check(name, False, "a test-track task must list its test files under **Files:**")
     problems = []
+    empty = []  # helpers (harnesses, fakes, plugins) under a test dir hold no test cases themselves
     for rel in test_files:
         path = project_dir / rel
         if not path.is_file():
@@ -114,7 +115,9 @@ def _test_files_present(task: SpecTask, project_dir: Path, config: Dict[str, Any
         elif rel.endswith("conftest.py") or "fixtures" in rel:
             continue
         elif measure(path.read_text(errors="replace")).tests == 0:
-            problems.append(f"{rel}: no test cases found")
+            empty.append(rel)
+    if empty and len(empty) == len([f for f in test_files if not (f.endswith("conftest.py") or "fixtures" in f)]):
+        problems += [f"{rel}: no test cases found" for rel in empty]
     return Check(name, not problems, "\n".join(problems))
 
 
