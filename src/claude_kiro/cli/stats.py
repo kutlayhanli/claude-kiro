@@ -136,7 +136,66 @@ def stats(ctx: click.Context):
     """Run analytics: what each ck run cost and how it went."""
     if ctx.invoked_subcommand:
         return
-    click.echo(ctx.get_help())
+    ctx.invoke(show_cmd, run_id=None, kind=None, since=None, until=None, project=None, as_json=False)
+
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}(-\d{2})?$")
+
+
+def _date_arg(name: str, value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    ok = bool(_DATE_RE.match(value))
+    if ok:
+        try:
+            datetime.strptime(value + ("-01" if len(value) == 7 else ""), "%Y-%m-%d")
+        except ValueError:
+            ok = False
+    if not ok:
+        click.echo(f"❌ {name} must look like YYYY-MM or YYYY-MM-DD")
+        sys.exit(2)
+    return value
+
+
+@stats.command("show")
+@click.argument("run_id", required=False)
+@click.option("--kind", default=None, help="Only runs of this workflow kind")
+@click.option("--since", default=None, help="From YYYY-MM or YYYY-MM-DD")
+@click.option("--until", default=None, help="Up to YYYY-MM or YYYY-MM-DD")
+@click.option("--project", default=None, help="Only runs of this project pseudonym")
+@click.option("--json", "as_json", is_flag=True)
+def show_cmd(run_id: Optional[str], kind: Optional[str], since: Optional[str], until: Optional[str],
+             project: Optional[str], as_json: bool):
+    """List collected runs, or break one run down."""
+    from ..analytics import show as sh
+
+    since = _date_arg("--since", since)
+    until = _date_arg("--until", until)
+    records, unreadable = store.load_records_counted()
+    if run_id is not None:
+        rec = next((r for r in records if r.get("runId") == run_id), None)
+        if rec is None:
+            click.echo(f"❌ no local record for {run_id} (ck stats collect --run {run_id})")
+            sys.exit(1)
+        view = sh.run_breakdown(rec)
+        if as_json:
+            click.echo(json.dumps(sh.run_json(view), indent=2, default=str))
+        else:
+            click.echo("\n".join(sh.render_run(view)))
+        return
+    if not records and not unreadable:
+        if as_json:
+            click.echo(json.dumps(sh.list_json({"runs": [], "trends": [], "unreadable": 0}), indent=2))
+        else:
+            click.echo("ℹ️ no runs collected yet; run ck stats collect --all")
+        return
+    view = sh.list_runs(records, sh.ShowFilters(kind=kind, since=since, until=until, project=project), unreadable)
+    if as_json:
+        click.echo(json.dumps(sh.list_json(view), indent=2, default=str))
+    else:
+        click.echo("\n".join(sh.render_list(view)))
+        if unreadable:
+            click.echo(f"⚠ {unreadable} record file(s) could not be read")
 
 
 @stats.command("collect")

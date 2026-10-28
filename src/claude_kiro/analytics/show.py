@@ -527,6 +527,7 @@ def render_run(view: Mapping[str, Any]) -> List[str]:
     miss = view.get("missing") or []
     if miss:
         lines.append("missing: " + ", ".join(_missing_text(m) for m in miss))
+        lines.append(f"figures for the missing items are {UNKNOWN} (shown as {UNKNOWN} or estimated, never zero)")
     return lines
 
 

@@ -1129,7 +1129,7 @@ counted in its `other` summary.
 ---
 
 ### Task 31: Add ck stats show to the command group
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8
 **Description:** In `cli/stats.py`, add `show [RUN_ID] [--kind] [--since] [--until] [--project] [--json]` and make the
@@ -1146,9 +1146,9 @@ records with `store.load_records`, build views with `show.py`, render text or JS
 These suites also verify the criteria of foundation Task 25 and the CLI-reached role criteria of Task 6.
 
 **Acceptance:**
-- [ ] `ck stats` and `ck stats show` list runs newest first, followed by trends when two or more runs of a kind match
-- [ ] `ck stats show <id>` prints the breakdown with coverage notes; `--json` prints the Harness Contract JSON shape
-- [ ] Empty store exits 0 with the suggestion; an unknown id exits non-zero
+- [x] `ck stats` and `ck stats show` list runs newest first, followed by trends when two or more runs of a kind match
+- [x] `ck stats show <id>` prints the breakdown with coverage notes; `--json` prints the Harness Contract JSON shape
+- [x] Empty store exits 0 with the suggestion; an unknown id exits non-zero
 
 **Dependencies:** Task 24 (edits cli/stats.py, which Task 24 creates), Task 25 (calls show builders), Task 27 (its tests are the oracle), Task 28 (its tests are the oracle), Task 30 (its tests are the oracle)
 **Complexity:** Low
