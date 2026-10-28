@@ -17,6 +17,7 @@ import copy
 import json
 import os
 import re
+import secrets
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -82,7 +83,10 @@ DEFAULTS: Dict[str, Dict[str, Any]] = {
     # budget_usd: `ck run`'s spend cap (null = $40, or budget_per_task_usd x the tasks not Done
     # when that is set); `ck run --budget` overrides both for one run.
     "run": {"max_concurrent": None, "allowed_domains": list(DEFAULT_ALLOWED_DOMAINS), "budget_usd": None,
-            "budget_per_task_usd": None},
+            "budget_per_task_usd": None,
+            # analytics: record each `ck run` into the local stats database. machine_label: a slug
+            # naming this machine in exports (null = unset).
+            "analytics": True, "machine_label": None},
 }
 
 ROLE_KEYS = {
@@ -93,7 +97,7 @@ ROLE_KEYS = {
     "fixer": {"model", "effort", "escalate"},
     "orchestrator": {"model", "effort"},
     "resolver": {"model", "effort"},
-    "run": {"max_concurrent", "allowed_domains", "budget_usd", "budget_per_task_usd"},
+    "run": {"max_concurrent", "allowed_domains", "budget_usd", "budget_per_task_usd", "analytics", "machine_label"},
 }
 UNLIMITED = "unlimited"
 
@@ -129,6 +133,17 @@ def _valid_effort(value: Any, allow_inherit: bool = True) -> bool:
     return value is None or value in EFFORTS or (allow_inherit and value == INHERIT)
 
 
+_MACHINE_LABEL = re.compile(r"[a-z0-9-]{1,32}")
+MACHINE_LABEL_ERROR = "machine label must be 1-32 lowercase letters, digits or hyphens"
+
+
+def valid_machine_label(value: Any) -> bool:
+    return isinstance(value, str) and _MACHINE_LABEL.fullmatch(value) is not None
+
+
+validate_machine_label = valid_machine_label
+
+
 def _coerce(role: str, key: str, value: Any) -> Any:
     """Validate one setting; strings from the command line are converted."""
     if key not in ROLE_KEYS.get(role, set()):
@@ -137,15 +152,21 @@ def _coerce(role: str, key: str, value: Any) -> Any:
         value = []  # an explicit "no escalation", so it can switch off a list saved in a lower layer
     if key == "allowed_domains" and isinstance(value, str) and value.strip().lower() in ("none", "off", "[]", ""):
         value = []  # no network for sandboxed commands
+    if key == "machine_label" and role == "run":
+        if value is None or value in ("none", "default"):
+            return None
+        if not valid_machine_label(value):
+            raise AgentConfigError(MACHINE_LABEL_ERROR)
+        return value
     if isinstance(value, str) and value.lower() in ("null", "none", "default"):
         value = None
-    if key in ("ask", "enabled", "complexity_routing", "cross_test"):
+    if key in ("ask", "enabled", "complexity_routing", "cross_test", "analytics"):
         if isinstance(value, str):
             if value.lower() not in ("true", "false", "yes", "no", "on", "off"):
-                raise AgentConfigError(f"{role}.{key} must be true or false")
+                raise AgentConfigError(f"{role}.{key} must be true or false (also yes/no, on/off)")
             value = value.lower() in ("true", "yes", "on")
         if not isinstance(value, bool):
-            raise AgentConfigError(f"{role}.{key} must be true or false")
+            raise AgentConfigError(f"{role}.{key} must be true or false (also yes/no, on/off)")
         return value
     if key == "escalate":
         if value is None:
@@ -221,7 +242,9 @@ def parse_override(text: str) -> Tuple[str, str, str]:
         raise AgentConfigError(f"override {text!r} must look like role.key=value, e.g. implementer.model=haiku")
     path, value = text.split("=", 1)
     role, key = path.split(".", 1)
-    return role.strip(), key.strip(), value.strip()
+    key = key.strip()
+    # Whitespace is part of a machine label or boolean word, so it must be rejected, not trimmed away.
+    return role.strip(), key, value if key in ("machine_label", "analytics") else value.strip()
 
 
 def resolve(project_dir: Path, overrides: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -266,8 +289,82 @@ def write_setting(path: Path, role: str, key: str, value: str) -> Dict[str, Any]
     else:
         settings[key] = coerced
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n")
+    try:
+        private = (path.stat().st_mode & 0o777) == 0o600
+    except OSError:
+        private = False
+    if private:
+        _write_private(path, data)
+    else:
+        path.write_text(json.dumps(data, indent=2) + "\n")
     return data
+
+
+def _write_private(path: Path, data: Dict[str, Any]) -> None:
+    """Write JSON through a temp file at 0600, then replace; the result is 0600."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
+    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(data, indent=2) + "\n")
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+    os.chmod(path, 0o600)
+
+
+def _decode_salt(value: Any) -> Optional[bytes]:
+    """The raw salt bytes for a stored hex string, or None if it is absent or not valid hex."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return bytes.fromhex(value)
+    except ValueError:
+        return None
+
+
+def read_salt() -> Optional[bytes]:
+    """The pseudonym salt (raw bytes, stored as hex) in the global config file, or None.
+
+    A stored value that is not valid hex counts as no salt.
+    """
+    return _decode_salt(_read_json(global_config_path()).get("stats_salt")) or None
+
+
+def _read_config_strict(path: Path) -> Dict[str, Any]:
+    """Like _read_json, but a file that exists and is not a readable JSON object is an error."""
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AgentConfigError(f"{path}: cannot read as JSON ({exc}); not overwriting it")
+    if not isinstance(data, dict):
+        raise AgentConfigError(f"{path}: must hold a JSON object; not overwriting it")
+    return data
+
+
+def ensure_salt() -> bytes:
+    """Return the pseudonym salt (32 random bytes), creating it once; stored as hex, file ends up 0600.
+
+    Raises AgentConfigError if the config file exists but cannot be parsed, rather than replacing it.
+    """
+    path = global_config_path()
+    data = _read_config_strict(path)
+    salt = _decode_salt(data.get("stats_salt"))
+    if salt:
+        return salt
+    salt = secrets.token_bytes(32)
+    # Re-read just before writing so a salt created meanwhile by another process wins.
+    data = _read_config_strict(path)
+    existing = _decode_salt(data.get("stats_salt"))
+    if existing:
+        return existing
+    data["stats_salt"] = salt.hex()
+    _write_private(path, data)
+    return salt
 
 
 def _rank(value: str, order: Tuple[str, ...]) -> Optional[int]:
