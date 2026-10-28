@@ -95,18 +95,25 @@ PERMISSION = [
     "the call was denied; auto mode classifier said no",
     "needs your approval to continue",
 ]
-# Matching rules follow design.md Data Models: resolver_rounds_exceeded is "starts" matching; the other
-# reason-driven codes are exact equality with the string the workflow emits, so those classes repeat
-# their one exemplar (a design-faithful matcher cannot be asked to treat other text as the same class).
-EXACT_CLASSES = {"conflict_not_resolved", "retry_no_commits", "review_blocking_unresolved", "planning_failed"}
+# Matching rules follow design.md Data Models: planning_failed ("reason == ...") and retry_no_commits
+# ("reason ... no commits") are exact equality with the string the workflow emits, so those two classes have one
+# exemplar (a design-faithful matcher cannot be asked to treat other text as the same class). The other reason-driven
+# codes are prefix classes; exemplars are shaped like the strings spec-implement.js emits.
+EXACT_CLASSES = {"retry_no_commits", "planning_failed"}
 REASON_CLASSES = {
     "resolver_rounds_exceeded": [
         "merge failed: still conflicting after 3 resolution(s): a.py",
         "merge failed: still conflicting after 12 resolution(s): src/b.py, c.py",
     ],
-    "conflict_not_resolved": ["merge failed: conflict not resolved"],
+    "conflict_not_resolved": [
+        "merge failed: conflict not resolved: no result",
+        "merge failed: conflict not resolved: resolver gave up",
+    ],
     "retry_no_commits": ["merge failed: no commits"],
-    "review_blocking_unresolved": ["review: blocking findings remain"],
+    "review_blocking_unresolved": [
+        "review: blocking findings remain after 1 revision(s): missing test for x",
+        "review: blocking findings remain after 3 revision(s): wrong field read",
+    ],
     "planning_failed": ["planning step failed"],
     "permission": PERMISSION,
     "unclassified": ["gave up", "something odd happened", "retry later", "x"],
@@ -120,11 +127,11 @@ def _reason_class(reason: Any) -> str:
         return "none"
     if reason.startswith("merge failed: still conflicting after"):
         return "resolver_rounds_exceeded"
-    if reason == "merge failed: conflict not resolved":
+    if reason.startswith("merge failed: conflict not resolved"):
         return "conflict_not_resolved"
     if reason == "merge failed: no commits":
         return "retry_no_commits"
-    if reason == "review: blocking findings remain":
+    if reason.startswith("review: blocking findings remain"):
         return "review_blocking_unresolved"
     if reason == "planning step failed":
         return "planning_failed"
@@ -134,7 +141,7 @@ def _reason_class(reason: Any) -> str:
 
 
 def test_reason_table_is_well_formed():
-    """Each prefix/free-text class has >= 2 exemplars (exact-match classes may have one); non-permission exemplars never match REFUSAL_RE; each exemplar classifies to its class."""
+    """Each prefix class has >= 2 exemplars (exact-match classes may have one); non-permission exemplars never match REFUSAL_RE; each exemplar classifies to its class."""
     from claude_kiro import bench
 
     for name, ex in REASON_CLASSES.items():
