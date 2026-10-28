@@ -75,8 +75,12 @@ def run_once(env, fault: str, code: int, disable: bool):
     return root, log, out
 
 
-def norm(text: str, root: Path, log: Path) -> str:
-    text = text.replace(str(log), "<LOG>").replace(str(root), "<PROJECT>")
+def norm(text: str, root: Path, log: Path, env) -> str:
+    text = text.replace(str(log), "<LOG>")
+    for r in (root.resolve(), root):
+        text = text.replace(str(r), "<PROJECT>")
+    for r in (Path(env.root).resolve(), Path(env.root)):
+        text = text.replace(str(r), "<ROOT>")
     return "\n".join(l for l in text.splitlines() if not l.startswith("stats:") and "ck stats collect" not in l)
 
 
@@ -88,13 +92,13 @@ def test_p23_a_failing_collection_never_changes_ck_run(fault, code):
         root_b, log_b, b = run_once(env_b, fault, code, disable=True)
         assert a.exit_code == code and b.exit_code == code, (a.output, b.output)
         assert "Traceback" not in a.output and "Traceback" not in log_a.read_text()
-        assert norm(a.stdout, root_a, log_a) == norm(b.stdout, root_b, log_b)
-        assert norm(log_a.read_text(), root_a, log_a) == norm(log_b.read_text(), root_b, log_b)
+        assert norm(a.stdout, root_a, log_a, env_a) == norm(b.stdout, root_b, log_b, env_b)
+        assert norm(log_a.read_text(), root_a, log_a, env_a) == norm(log_b.read_text(), root_b, log_b, env_b)
         a_log_text = log_a.read_text()
         assert not any("stats" in l for l in b.stdout.splitlines()) and "stats:" not in log_b.read_text()
         if fault == "truncated":
-            assert COUNT_LINE in a.stdout.splitlines()
-            assert COUNT_LINE in a_log_text.splitlines()
+            assert [l for l in a.stdout.splitlines() if l.startswith("stats:")] == [COUNT_LINE]
+            assert [l for l in a_log_text.splitlines() if l.startswith("stats:")] == [COUNT_LINE]
             assert RUN_ID not in "".join(l for l in a.stdout.splitlines() if l.startswith("stats:"))
             collect_log = (env_a.xdg / "claude-kiro" / "collect.log").read_text()
             assert re.search(r"^\S+ - unrecognised$", collect_log, re.M), collect_log

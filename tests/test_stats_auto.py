@@ -91,7 +91,7 @@ def test_tc21_two_ck_runs_are_collected_and_the_foreign_run_is_not():
         assert load_record(env.xdg, CK_RUN_B)["runId"] == CK_RUN_B
         text = log.read_text()
         for rid in (CK_RUN_A, CK_RUN_B):
-            lines = [l for l in text.splitlines() if rid in l and "collected" in l]
+            lines = [l for l in text.splitlines() if f"stats: {rid} collected -> " in l]
             assert len(lines) == 1, (rid, text)
         assert FOREIGN not in text and FOREIGN not in out.output
         assert not any(FOREIGN in p.name for p in store_files(env.xdg))
@@ -178,6 +178,7 @@ def test_tc27_auto_collect_failure_exits_zero_and_prints_the_retry_command():
         out = ck_sub("stats", "collect", "--run", CK_RUN_A, "--auto", env={**env, "XDG_DATA_HOME": str(blocker)}, cwd=project)
         assert out.exit_code == 0, out.output
         assert f"ck stats collect --run {CK_RUN_A}" in out.output
+        assert f"could not collect {CK_RUN_A}" in out.output
         assert "Traceback" not in out.output
 
 
