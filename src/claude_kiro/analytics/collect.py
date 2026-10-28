@@ -442,14 +442,177 @@ def _costs(rows: List[dict], infos: List[dict], pricing: dict, session_usd: Opti
 # ---------------------------------------------------------------- the workflow-specific hook
 
 
+def _num(v: Any) -> Optional[float]:
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or abs(v) == float("inf"):
+        return None
+    return v
+
+
+def _lst(v: Any) -> list:
+    return v if isinstance(v, list) else []
+
+
+def _dicts(v: Any) -> List[dict]:
+    return [x for x in _lst(v) if isinstance(x, dict)]
+
+
+def conflict_count(result_task: Mapping, resolver_labels: Sequence[roles.LabelMatch]) -> Tuple[Optional[int], bool]:
+    """S6: `(count, inferred)`. `resolves` from the result is used as is; otherwise the resolver agents
+    that name the task are counted and the figure is marked inferred (1.7)."""
+    given = _int(result_task.get("resolves")) if isinstance(result_task, Mapping) else None
+    if given is not None:
+        return given, False
+    task = result_task.get("task") if isinstance(result_task, Mapping) else None
+    if task is None:
+        return None, True
+    key = str(task)
+    n = sum(1 for m in resolver_labels if m.role == "resolver" and m.task is not None and str(m.task) == key)
+    return n, True
+
+
+def derive_outcome(result: object) -> Tuple[Optional[str], bool]:
+    """S26: `(outcome, inferred)`. `result.outcome` when present, else the rule spec-implement.js applies."""
+    if not isinstance(result, Mapping):
+        return None, False
+    given = result.get("outcome")
+    if isinstance(given, str) and given:
+        return given, False
+    if result.get("refused"):
+        return "refused", True
+    if result.get("halted"):
+        return "halted", True
+    if result.get("failed") or result.get("notStarted"):
+        return "blocked", True
+    return "complete", True
+
+
+def _split_config(value: Any) -> Optional[dict]:
+    if not isinstance(value, str) or not value or value == "off":
+        return None
+    model, _, effort = value.partition("/")
+    return {"model": model or None, "effort": effort or None}
+
+
+def _implement_metrics(result: Mapping, rows: List[dict], workflow_name: str) -> dict:
+    resolver_labels = [roles.match_label(r["label"], workflow_name) for r in rows if r["role"] == "resolver"]
+    tasks: List[dict] = []
+    for t in _dicts(result.get("tasks")):
+        key = str(t.get("task"))
+        attempts = _int(t.get("attempts"))
+        escs = [e for e in _lst(t.get("escalations"))]
+        retry_esc = sum(1 for e in escs if isinstance(e, dict) and e.get("stage") == "retry")
+        review = t.get("review") if isinstance(t.get("review"), dict) else {}
+        resolves, inferred = conflict_count(t, resolver_labels)
+        merged_ms, finished_ms = _to_ms(t.get("mergedAt")), _to_ms(t.get("finishedAt"))
+        tasks.append({
+            "task": t.get("task"), "wave": _int(t.get("wave")), "ok": t.get("ok") if isinstance(t.get("ok"), bool) else None,
+            "attempts": attempts,
+            "retries": max(0, attempts - 1 - retry_esc) if attempts is not None else None,
+            "escalations": len(escs),
+            "reviewRounds": _int(review.get("rounds")),
+            "verdict": review.get("verdict") if isinstance(review.get("verdict"), str) else None,
+            "resolves": resolves, "resolvesInferred": inferred,
+            "fixes": sum(1 for r in rows if r["role"] == "fixer" and r["step"] == "landing" and r["task"] is not None
+                         and str(r["task"]) == key),
+            "agentMinutes": _num(t.get("agentMinutes")), "toMergedMinutes": _num(t.get("toMergedMinutes")),
+            "riskTag": t.get("riskTag") if isinstance(t.get("riskTag"), str) else None,
+            "idleBeforeMergeMs": (merged_ms - finished_ms) if merged_ms is not None and finished_ms is not None else None,
+        })
+    landings = [{"size": _int(l.get("size")), "merged": len(_lst(l.get("merged"))), "red": len(_lst(l.get("red"))),
+                 "conflict": len(_lst(l.get("conflict"))), "bisected": bool(l.get("bisected")),
+                 "minutes": _num(l.get("minutes"))} for l in _dicts(result.get("landings"))]
+    full_gates = [{"afterMerges": _int(g.get("afterMerges")), "green": g.get("green") if isinstance(g.get("green"), bool) else None}
+                  for g in _dicts(result.get("fullGates"))]
+    fg = result.get("finalGate")
+    final_gate = None
+    if isinstance(fg, dict):
+        fix = fg.get("fix")
+        final_gate = {"green": fg.get("green") if isinstance(fg.get("green"), bool) else None,
+                      "fixed": bool(fix) if fix is not None else False}
+    cross = [{"wave": _int(c.get("wave")),
+              "tasks": len(_lst(c.get("tasks"))) if isinstance(c.get("tasks"), list) else _int(c.get("tasks")),
+              "verdict": c.get("verdict") if isinstance(c.get("verdict"), str) else None,
+              "blocking": sum(1 for f in _dicts(c.get("findings")) if f.get("severity") == "blocking")}
+             for c in _dicts(result.get("crossTests"))]
+    fixer_esc = [{"model": f.get("model") if isinstance(f.get("model"), str) else None,
+                  "green": f.get("green") if isinstance(f.get("green"), bool) else None}
+                 for f in _dicts(result.get("fixerEscalations"))]
+    timing = result.get("timing") if isinstance(result.get("timing"), dict) else {}
+    phases = [{"group": p.get("group") if isinstance(p.get("group"), str) else None, "tasks": _int(p.get("tasks")),
+               "minutes": _num(p.get("minutes"))} for p in _dicts(timing.get("phases"))]
+    stats = result.get("stats")
+    agents = result.get("agents") if isinstance(result.get("agents"), dict) else None
+    config = None
+    if agents is not None:
+        config = {k: c for k, c in ((k, _split_config(v)) for k, v in agents.items()) if c is not None}
+    return {
+        "tasks": tasks, "landings": landings, "fullGates": full_gates, "finalGate": final_gate, "crossTests": cross,
+        "fixerEscalations": fixer_esc, "phases": phases,
+        "stats": {k: _int(v) for k, v in stats.items()} if isinstance(stats, dict) else None,
+        "agentsConfig": config,
+    }
+
+
+def _create_metrics(result: Mapping, rows: List[dict]) -> dict:
+    review = result.get("review") if isinstance(result.get("review"), dict) else None
+    cons = result.get("consistency") if isinstance(result.get("consistency"), dict) else None
+    spans: Dict[str, List[int]] = {}
+    for r in rows:
+        ph, s, ms = r["phase"], r["startedAtMs"], r["ms"]
+        if not isinstance(ph, str) or s is None:
+            continue
+        end = s + (ms or 0)
+        lo, hi = spans.get(ph, (s, end))
+        spans[ph] = [min(lo, s), max(hi, end)]
+    by_role: Dict[str, Dict[str, int]] = {}
+    for r in rows:
+        if r["model"]:
+            by_role.setdefault(r["role"], Counter())[r["model"]] += 1
+    config = {role: {"model": c.most_common(1)[0][0], "effort": None} for role, c in by_role.items()} or None
+    return {
+        "review": None if review is None else {
+            "fixed": len(_lst(review.get("fixed"))), "notFixed": len(_lst(review.get("notFixed"))),
+            "escalated": len(_lst(review.get("escalated"))), "refuted": _int(review.get("refutedCount")),
+            "lensesLost": len(_lst(review.get("lensesLost")))},
+        "consistency": None if cons is None else {"passes": _int(cons.get("passes")), "fixed": len(_lst(cons.get("fixed")))},
+        "phases": {p: hi - lo for p, (lo, hi) in spans.items()} or None,
+        "agentsConfig": config,
+    }
+
+
+def _result_terms(result: Any) -> set:
+    """Task titles, reasons and summaries stay local; the leak guard needs them as terms."""
+    out: set = set()
+    if not isinstance(result, Mapping):
+        return out
+    for t in _dicts(result.get("tasks")):
+        for k in ("title", "reason", "summary"):
+            if isinstance(t.get(k), str) and t[k]:
+                out.add(t[k])
+    for k in ("reason",):
+        if isinstance(result.get(k), str) and result[k]:
+            out.add(result[k])
+    for f in _dicts(result.get("failed")):
+        if isinstance(f.get("reason"), str) and f["reason"]:
+            out.add(f["reason"])
+    return out
+
+
 def _workflow_metrics(kind: str, workflow_name: str, result: Any, rows: List[dict], run_data: Optional[Mapping]) -> dict:
-    """The single hook for the spec-implement / spec-create metrics, `outcome` and `agentsConfig` (Task 18)."""
+    """The spec-implement / spec-create metrics, `outcome` and `agentsConfig` (1.2, 1.5, 1.6, 1.7)."""
     out: Dict[str, Any] = {"outcome": None, "outcomeInferred": False, "agentsConfig": None}
     if kind == "spec-create":
         out.update({"review": None, "consistency": None, "phases": None})
     else:
         out.update({"tasks": None, "landings": None, "fullGates": None, "finalGate": None, "crossTests": None,
-                    "fixerEscalations": None, "phases": None})
+                    "fixerEscalations": None, "phases": None, "stats": None})
+    if not isinstance(result, Mapping):
+        return out
+    if kind == "spec-create":
+        out.update(_create_metrics(result, rows))
+    else:
+        out["outcome"], out["outcomeInferred"] = derive_outcome(result)
+        out.update(_implement_metrics(result, rows, workflow_name))
     return out
 
 
@@ -524,6 +687,7 @@ def _build_record(*, run_id: str, workflow_name: str, run_data: Optional[Mapping
         terms.update(s for s in re.split(r"[/:@]", _normalise_remote(remote)) if len(s) > 2)
     terms.update(r["label"] for r in rows if isinstance(r["label"], str) and r["label"])
     terms.update(r["phase"] for r in rows if isinstance(r["phase"], str) and r["phase"])
+    terms.update(_result_terms(result))
 
     record: Dict[str, Any] = {
         "schema": SCHEMA_LOCAL,
