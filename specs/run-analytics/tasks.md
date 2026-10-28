@@ -485,7 +485,7 @@ another. Declare `PROPERTIES`.
 ---
 
 ### Task 13: Add run.analytics and run.machine_label settings and the salt helper to the agent config
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.8, 3.4, 3.5, 3.6, 7.6
 **Description:** In `src/claude_kiro/agents.py`: add `"analytics": True` and `"machine_label": None` to
@@ -511,11 +511,11 @@ seam `valid_machine_label`, which the package map of Task 4 exports from `claude
 The auto-collect default and salt criteria (1.8, 3.4, 3.5) are verified at Tasks 24 (Task 26: TC-10, TC-79) and 49.
 
 **Acceptance:**
-- [ ] `valid_machine_label` accepts exactly the strings matching `^[a-z0-9-]{1,32}$`
-- [ ] An unset `run.analytics` resolves to true; `ck agents set run.analytics false` turns it off
-- [ ] `ck agents set run.analytics maybe` fails naming the accepted values and leaves the config file byte-identical
-- [ ] `ck agents set run.machine_label Bad_Label` (and `NONE`) is rejected; a valid slug is stored; exactly `none` or `default` unsets it
-- [ ] The salt is created once, kept on later calls, stored with mode 0600 (an existing 0644 `config.json` becomes 0600 and keeps its other keys; a later `ck agents set` leaves it 0600), and absent from `ck agents --json`
+- [x] `valid_machine_label` accepts exactly the strings matching `^[a-z0-9-]{1,32}$`
+- [x] An unset `run.analytics` resolves to true; `ck agents set run.analytics false` turns it off
+- [x] `ck agents set run.analytics maybe` fails naming the accepted values and leaves the config file byte-identical
+- [x] `ck agents set run.machine_label Bad_Label` (and `NONE`) is rejected; a valid slug is stored; exactly `none` or `default` unsets it
+- [x] The salt is created once, kept on later calls, stored with mode 0600 (an existing 0644 `config.json` becomes 0600 and keeps its other keys; a later `ck agents set` leaves it 0600), and absent from `ck agents --json`
 
 **Dependencies:** Task 4 (P-8 reaches valid_machine_label through the package export map Task 4 writes), Task 12 (its tests are the oracle)
 **Complexity:** Medium
@@ -550,7 +550,7 @@ Foundation task: its smoke check is the existing cost and bench suites; the agre
 ---
 
 ### Task 15: Implement the local data store (store.py)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.1, 1.8, 1.9, 7.8, 10.3
 **Description:** Create `store.py` per design.md "analytics/store.py": `data_dir(env)` (`$CK_DATA_HOME`, else
@@ -569,10 +569,10 @@ Harness Contract Files interface for the local store (`$XDG_DATA_HOME/claude-kir
 Foundation task: smoke Verify only; its criteria are verified at Task 24 (Task 26: TC-9, TC-10, TC-79), which also lists `store.py` for fix-ups, and Task 42 (Task 39: ledger).
 
 **Acceptance:**
-- [ ] Records land under `$XDG_DATA_HOME/claude-kiro/runs/<run_id>.json` (fallback `~/.local/share/claude-kiro`) with mode 0600, directory 0700 when created
-- [ ] Writing the same run twice leaves exactly one file
-- [ ] `load_records` returns records of an older schema version and counts unreadable files instead of failing
-- [ ] The ledger round-trips `exported` and `submitted` entries
+- [x] Records land under `$XDG_DATA_HOME/claude-kiro/runs/<run_id>.json` (fallback `~/.local/share/claude-kiro`) with mode 0600, directory 0700 when created
+- [x] Writing the same run twice leaves exactly one file
+- [x] `load_records` returns records of an older schema version and counts unreadable files instead of failing
+- [x] The ledger round-trips `exported` and `submitted` entries
 
 **Dependencies:** Task 4 (module lives in the package whose `__init__.py` Task 4 creates), Task 13 (calls the salt helper and reads run.machine_label)
 **Complexity:** Medium
@@ -610,7 +610,7 @@ Declare `PROPERTIES`. Pure: no CLI.
 ---
 
 ### Task 17: Implement the collector core (collect.py)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.8, 1.9, 1.12, 1.15, 2.1, 2.2, 3.4, 3.5, 4.1, 4.2, 4.3, 4.4
 **Description:** Create `collect.py` with `collect_run(home, run_id, *, now, pricing=None, fresh=False) ->
@@ -656,16 +656,16 @@ Task 18 (keep a single hook function that Task 18 fills).
 The collection criteria reached through `ck stats collect` are verified at Task 24 (Tasks 19-23, 26, 29), which also lists `collect.py` for fix-ups.
 
 **Acceptance:**
-- [ ] Transcript-priced total equals `ck cost --run <id>` to the cent on the same fixture
-- [ ] Usage is counted once per requestId; tokens and cost are present per agent, model, role, phase and task
-- [ ] Every cost carries its source label and pricing date; missing transcripts make it `estimate`, never 0; the run figure is never `claude_total`, and a `budget_usd` total is a separate session-scoped figure
-- [ ] A backfilled run is never credited to the installed ck version unless S27 ties it to the run; a re-collect keeps a version tied earlier; `collectorVersion` is always the installed version
-- [ ] A run whose run file is gone gets a partial record only when S28 recovers an allowlisted name, else the not-found outcome
-- [ ] A non-dict `workflowProgress` entry is skipped and listed in `missing`, never a reason to refuse the run
-- [ ] A non-allowlisted run leaves no name or id in any record, outcome reason or summary (count only)
-- [ ] `collect_all` continues past a failing run, returns counts in input order, and reports failures
-- [ ] `pseudonym` is stable for equal inputs, keyed by the salt and contains no part of the remote
-- [ ] A 250-agent fixture run collects in under 10 s
+- [x] Transcript-priced total equals `ck cost --run <id>` to the cent on the same fixture
+- [x] Usage is counted once per requestId; tokens and cost are present per agent, model, role, phase and task
+- [x] Every cost carries its source label and pricing date; missing transcripts make it `estimate`, never 0; the run figure is never `claude_total`, and a `budget_usd` total is a separate session-scoped figure
+- [x] A backfilled run is never credited to the installed ck version unless S27 ties it to the run; a re-collect keeps a version tied earlier; `collectorVersion` is always the installed version
+- [x] A run whose run file is gone gets a partial record only when S28 recovers an allowlisted name, else the not-found outcome
+- [x] A non-dict `workflowProgress` entry is skipped and listed in `missing`, never a reason to refuse the run
+- [x] A non-allowlisted run leaves no name or id in any record, outcome reason or summary (count only)
+- [x] `collect_all` continues past a failing run, returns counts in input order, and reports failures
+- [x] `pseudonym` is stable for equal inputs, keyed by the salt and contains no part of the remote
+- [x] A 250-agent fixture run collects in under 10 s
 
 **Dependencies:** Task 14 (calls aggregate_usage), Task 4 (calls runfile seams), Task 6 (calls the label parser), Task 15 (calls ensure_salt and write_private_json), Task 16 (its tests are the oracle)
 **Complexity:** High
@@ -674,7 +674,7 @@ The collection criteria reached through `ck stats collect` are verified at Task 
 ---
 
 ### Task 18: Add spec-implement and spec-create metrics to the collector
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.2, 1.5, 1.6, 1.7
 **Description:** In `collect.py`, fill the metrics hook from Task 17. For spec-implement (result shape at
@@ -698,11 +698,11 @@ adds `result` to `missing`. Task titles, reasons and summaries stay local and ar
 Foundation task: smoke Verify only; its criteria (TC-7, TC-8, TC-9, TC-11, TC-83) are verified at Task 24 (Task 26), which also lists `collect.py` for fix-ups.
 
 **Acceptance:**
-- [ ] Every per-task and per-run field of 1.5 is recorded from a spec-implement result
-- [ ] Review counts, consistency passes/fixes and phase durations of 1.6 are recorded from a spec-create run
-- [ ] With `resolves` in the result the count is used as is; without it the count comes from resolver labels and `resolvesInferred` is true
-- [ ] A pre-0.10 result without `outcome` gets `complete`/`blocked`/`halted`/`refused` from S26 with `outcomeInferred` true
-- [ ] Absent values are null, never 0
+- [x] Every per-task and per-run field of 1.5 is recorded from a spec-implement result
+- [x] Review counts, consistency passes/fixes and phase durations of 1.6 are recorded from a spec-create run
+- [x] With `resolves` in the result the count is used as is; without it the count comes from resolver labels and `resolvesInferred` is true
+- [x] A pre-0.10 result without `outcome` gets `complete`/`blocked`/`halted`/`refused` from S26 with `outcomeInferred` true
+- [x] Absent values are null, never 0
 
 **Dependencies:** Task 17 (edits collect.py, which Task 17 creates)
 **Complexity:** High
@@ -1924,7 +1924,7 @@ before any implementation change); and the existing
 ---
 
 ### Task 53: Return the per-task conflict-resolution count from spec-implement
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 11.1, 11.2
 **Description:** In `plugin/workflows/spec-implement.js`: in `runTask` (:646) initialise `rec.resolves = 0`; in
@@ -1940,8 +1940,8 @@ must be byte-identical to the plugin copy.
 **Verified by:** Task 52
 
 **Acceptance:**
-- [ ] Every `result.tasks` entry has an integer `resolves`, 0 when no conflict
-- [ ] All existing workflow tests pass unchanged; the vendored copy matches the plugin source
+- [x] Every `result.tasks` entry has an integer `resolves`, 0 when no conflict
+- [x] All existing workflow tests pass unchanged; the vendored copy matches the plugin source
 
 **Dependencies:** Task 52 (its tests are the oracle)
 **Complexity:** Low
