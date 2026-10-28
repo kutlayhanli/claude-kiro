@@ -396,6 +396,8 @@ arguments. Callers never re-implement the rule.
   - format-validated values (`month`, `id`, version strings, `machine`) are skipped for generic patterns
     only, because their format is fixed and short enough that a 32-character `machine` slug would
     otherwise trip the 32+ run pattern.
+  - The machine label on the `machine:` line of the PR body, and at the end of the commit message and PR title
+    line, is exempt from generic patterns in the same way (it stays scanned for terms) (D19, 2026-10-28).
   A `.json` file that does not parse as a `ck-run-analytics` record is free text.
 - Path-like terms are split into segments. Each segment is added under the same strong/weak rule, and
   the whole path is added as a strong term.

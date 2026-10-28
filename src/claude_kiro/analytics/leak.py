@@ -260,8 +260,10 @@ class _Matcher:
         alt = cls._alt(terms)
         return re.compile(r"(?<![A-Za-z0-9])(?:" + alt + r")(?![A-Za-z0-9])", _I) if alt else None
 
-    def text(self, text: str, generic: bool = True) -> List[Tuple[str, str]]:
-        """(kind, rule) pairs found in `text`, de-duplicated, in a fixed order."""
+    def text(self, text: str, generic: bool = True, exempt: Optional[Tuple[int, int]] = None) -> List[Tuple[str, str]]:
+        """(kind, rule) pairs found in `text`, de-duplicated, in a fixed order.
+
+        `exempt` is a span (the machine label of a PR/commit line, D19) skipped for generic patterns only."""
         out: List[Tuple[str, str]] = []
         if self.id_strong is not None and self.id_strong.search(text):
             out.append(("identity", "strong"))
@@ -272,8 +274,9 @@ class _Matcher:
         if self.weak is not None and self.weak.search(text):
             out.append(("term", "weak"))
         if generic:
+            gtext = text if exempt is None else text[:exempt[0]] + " " + text[exempt[1]:]
             for name, kind, rx in GENERIC_PATTERNS:
-                if rx.search(text):
+                if rx.search(gtext):
                     out.append((kind, name))
         return out
 
@@ -290,6 +293,18 @@ def _parse_record(text: str) -> Optional[_Pairs]:
     if isinstance(data, _Pairs) and any(k == "schema" and v == SCHEMA_SHARED for k, v in data):
         return data
     return None
+
+
+# D19: the machine label on the "machine:" line of the PR body, or at the end of the commit message / PR title
+# line, is a format-validated slug (S13/S14); it is exempt from generic patterns (never from terms).
+_MACHINE_LINE = re.compile(
+    r"^(?:machine: |ck-stats-batch: \d+ \([^()]*\)(?: \d{4}-\d{2})* )(?P<label>[a-z0-9-]{1,32})$"
+)
+
+
+def _machine_span(line: str) -> Optional[Tuple[int, int]]:
+    m = _MACHINE_LINE.match(line)
+    return m.span("label") if m else None
 
 
 def _join(path: str, key: str) -> str:
@@ -341,7 +356,7 @@ def scan(files: Mapping[str, str], terms: Union[TermSet, Iterable[str]], identit
             _walk(matcher, name, _share._TREE, record, "", hits)
             continue
         for number, line in enumerate(text.splitlines(), 1):
-            for kind, rule in matcher.text(line):
+            for kind, rule in matcher.text(line, True, _machine_span(line)):
                 hits.append(LeakHit(name, f"line {number}", kind, rule))
     return hits
 
