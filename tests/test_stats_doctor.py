@@ -66,9 +66,9 @@ def test_doctor_mentions_auto_collect_off_as_information_not_a_warning(ck_projec
     s = _session(ck_project)
     _implement(s, "wf_one", "2026-10-12T09:00:00Z")
     _implement(s, "wf_two", "2026-10-13T09:00:00Z")
-    ck_sub("stats", "collect", "--all")
+    assert ck_sub("stats", "collect", "--all", cwd=ck_project.project).exit_code == 0
     on = doctor(ck_project)
-    assert ck_sub("agents", "set", "run.analytics", "false").exit_code == 0
+    assert ck_sub("agents", "set", "run.analytics", "false", cwd=ck_project.project).exit_code == 0
     off = doctor(ck_project)
     off_text = off.output.lower()
     assert "automatic run analytics is off" in off_text, off.output
@@ -87,12 +87,12 @@ def test_doctor_counts_finished_runs_not_collected_and_suggests_collect_all(ck_p
     _implement(s, "wf_a", "2026-10-12T09:00:00Z")
     _implement(s, "wf_b", "2026-10-13T09:00:00Z")
     _implement(s, "wf_c", "2026-10-14T09:00:00Z")
-    assert ck_sub("stats", "collect", "--run", "wf_a").exit_code == 0
+    assert ck_sub("stats", "collect", "--run", "wf_a", cwd=ck_project.project).exit_code == 0
     out = doctor(ck_project).output
     warnings = "\n".join(_bullets(out, "Warnings:"))
-    assert re.search(r"\b2 finished ck runs? not collected", warnings), out
+    assert re.search(r"\b2 finished ck run(?:s|\(s\))? not collected", warnings), out
     assert "ck stats collect --all" in warnings, out
-    assert ck_sub("stats", "collect", "--all").exit_code == 0
+    assert ck_sub("stats", "collect", "--all", cwd=ck_project.project).exit_code == 0
     after = doctor(ck_project).output
     assert "not collected" not in after
     assert "ck stats collect --all" not in after
