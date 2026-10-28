@@ -524,7 +524,7 @@ The auto-collect default and salt criteria (1.8, 3.4, 3.5) are verified at Tasks
 ---
 
 ### Task 14: Extract per-model usage summing in bench.py into aggregate_usage
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.3
 **Description:** `bench.session_spend` (src/claude_kiro/bench.py:354) sums the per-model usage of its transcript scans
@@ -540,8 +540,8 @@ agree to the cent (NFR "Agreement with existing numbers").
 Foundation task: its smoke check is the existing cost and bench suites; the agreement criterion (1.3) is verified at Task 24 (Tasks 26, 29).
 
 **Acceptance:**
-- [ ] `aggregate_usage` returns per-model sums of input/output/cacheRead/cacheCreation over the given scans
-- [ ] `session_spend` output is unchanged for every existing test fixture (test_cost.py and test_bench.py pass unchanged)
+- [x] `aggregate_usage` returns per-model sums of input/output/cacheRead/cacheCreation over the given scans
+- [x] `session_spend` output is unchanged for every existing test fixture (test_cost.py and test_bench.py pass unchanged)
 
 **Dependencies:** None
 **Complexity:** Low
