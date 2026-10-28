@@ -1619,7 +1619,7 @@ the PR title and body (from the gh log) contain none of the seeded strings in an
 ---
 
 ### Task 44: End-to-end tests for submitting a batch as a draft PR
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9, 10.10, 10.11
 **Description:** Implements TC-63, TC-64, TC-65, TC-66, TC-67, TC-68, TC-69, TC-70, TC-71, TC-82. TC-63 (pty): before the
@@ -1653,10 +1653,10 @@ exits non-zero, no branch, gh not called, files unchanged and no file added for 
 **Verifies:** Task 45
 
 **Acceptance:**
-- [ ] Branch, commit and push are real git into a local bare repo; only `gh` is faked; prompts run under a real pty
-- [ ] Every refusal and decline asserts no branch (local and bare), no commit and an empty gh log
-- [ ] Tests fail before the implementation exists for the right reason (no submit command)
-- [ ] No mocks of the project's own code; no network
+- [x] Branch, commit and push are real git into a local bare repo; only `gh` is faked; prompts run under a real pty
+- [x] Every refusal and decline asserts no branch (local and bare), no commit and an empty gh log
+- [x] Tests fail before the implementation exists for the right reason (no submit command)
+- [x] No mocks of the project's own code; no network
 
 **Dependencies:** Task 1 (kiro checkout, fake gh, path_without_gh, run_tty)
 **Complexity:** High
