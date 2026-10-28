@@ -581,7 +581,7 @@ Foundation task: smoke Verify only; its criteria are verified at Task 24 (Task 2
 ---
 
 ### Task 16: Property test for the project pseudonym (P-22)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.8, 7.3
 **Description:** Implements P-22 against the Harness Contract seam `pseudonym(remote, salt) -> str` from
@@ -597,11 +597,11 @@ Declare `PROPERTIES`. Pure: no CLI.
 **Verifies:** Task 17
 
 **Acceptance:**
-- [ ] Generators cover every remote form and salt length listed in the P-22 row
-- [ ] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
-- [ ] The test calls the decision seam `pseudonym`, not the CLI
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] `PROPERTIES` map names the test for P-22
+- [x] Generators cover every remote form and salt length listed in the P-22 row
+- [x] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
+- [x] The test calls the decision seam `pseudonym`, not the CLI
+- [x] Tests fail before the implementation exists for the right reason
+- [x] `PROPERTIES` map names the test for P-22
 
 **Dependencies:** Task 1 (hypothesis, `CONFIDENTIAL`)
 **Complexity:** Low
