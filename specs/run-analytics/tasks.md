@@ -485,7 +485,7 @@ another. Declare `PROPERTIES`.
 ---
 
 ### Task 13: Add run.analytics and run.machine_label settings and the salt helper to the agent config
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.8, 3.4, 3.5, 3.6, 7.6
 **Description:** In `src/claude_kiro/agents.py`: add `"analytics": True` and `"machine_label": None` to
@@ -511,11 +511,11 @@ seam `valid_machine_label`, which the package map of Task 4 exports from `claude
 The auto-collect default and salt criteria (1.8, 3.4, 3.5) are verified at Tasks 24 (Task 26: TC-10, TC-79) and 49.
 
 **Acceptance:**
-- [ ] `valid_machine_label` accepts exactly the strings matching `^[a-z0-9-]{1,32}$`
-- [ ] An unset `run.analytics` resolves to true; `ck agents set run.analytics false` turns it off
-- [ ] `ck agents set run.analytics maybe` fails naming the accepted values and leaves the config file byte-identical
-- [ ] `ck agents set run.machine_label Bad_Label` (and `NONE`) is rejected; a valid slug is stored; exactly `none` or `default` unsets it
-- [ ] The salt is created once, kept on later calls, stored with mode 0600 (an existing 0644 `config.json` becomes 0600 and keeps its other keys; a later `ck agents set` leaves it 0600), and absent from `ck agents --json`
+- [x] `valid_machine_label` accepts exactly the strings matching `^[a-z0-9-]{1,32}$`
+- [x] An unset `run.analytics` resolves to true; `ck agents set run.analytics false` turns it off
+- [x] `ck agents set run.analytics maybe` fails naming the accepted values and leaves the config file byte-identical
+- [x] `ck agents set run.machine_label Bad_Label` (and `NONE`) is rejected; a valid slug is stored; exactly `none` or `default` unsets it
+- [x] The salt is created once, kept on later calls, stored with mode 0600 (an existing 0644 `config.json` becomes 0600 and keeps its other keys; a later `ck agents set` leaves it 0600), and absent from `ck agents --json`
 
 **Dependencies:** Task 4 (P-8 reaches valid_machine_label through the package export map Task 4 writes), Task 12 (its tests are the oracle)
 **Complexity:** Medium

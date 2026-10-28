@@ -17,6 +17,7 @@ import copy
 import json
 import os
 import re
+import secrets
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -82,7 +83,10 @@ DEFAULTS: Dict[str, Dict[str, Any]] = {
     # budget_usd: `ck run`'s spend cap (null = $40, or budget_per_task_usd x the tasks not Done
     # when that is set); `ck run --budget` overrides both for one run.
     "run": {"max_concurrent": None, "allowed_domains": list(DEFAULT_ALLOWED_DOMAINS), "budget_usd": None,
-            "budget_per_task_usd": None},
+            "budget_per_task_usd": None,
+            # analytics: record each `ck run` into the local stats database. machine_label: a slug
+            # naming this machine in exports (null = unset).
+            "analytics": True, "machine_label": None},
 }
 
 ROLE_KEYS = {
@@ -93,7 +97,7 @@ ROLE_KEYS = {
     "fixer": {"model", "effort", "escalate"},
     "orchestrator": {"model", "effort"},
     "resolver": {"model", "effort"},
-    "run": {"max_concurrent", "allowed_domains", "budget_usd", "budget_per_task_usd"},
+    "run": {"max_concurrent", "allowed_domains", "budget_usd", "budget_per_task_usd", "analytics", "machine_label"},
 }
 UNLIMITED = "unlimited"
 
@@ -129,6 +133,17 @@ def _valid_effort(value: Any, allow_inherit: bool = True) -> bool:
     return value is None or value in EFFORTS or (allow_inherit and value == INHERIT)
 
 
+_MACHINE_LABEL = re.compile(r"[a-z0-9-]{1,32}")
+MACHINE_LABEL_ERROR = "machine label must be 1-32 lowercase letters, digits or hyphens"
+
+
+def valid_machine_label(value: Any) -> bool:
+    return isinstance(value, str) and _MACHINE_LABEL.fullmatch(value) is not None
+
+
+validate_machine_label = valid_machine_label
+
+
 def _coerce(role: str, key: str, value: Any) -> Any:
     """Validate one setting; strings from the command line are converted."""
     if key not in ROLE_KEYS.get(role, set()):
@@ -137,15 +152,21 @@ def _coerce(role: str, key: str, value: Any) -> Any:
         value = []  # an explicit "no escalation", so it can switch off a list saved in a lower layer
     if key == "allowed_domains" and isinstance(value, str) and value.strip().lower() in ("none", "off", "[]", ""):
         value = []  # no network for sandboxed commands
+    if key == "machine_label" and role == "run":
+        if value is None or value in ("none", "default"):
+            return None
+        if not valid_machine_label(value):
+            raise AgentConfigError(MACHINE_LABEL_ERROR)
+        return value
     if isinstance(value, str) and value.lower() in ("null", "none", "default"):
         value = None
-    if key in ("ask", "enabled", "complexity_routing", "cross_test"):
+    if key in ("ask", "enabled", "complexity_routing", "cross_test", "analytics"):
         if isinstance(value, str):
             if value.lower() not in ("true", "false", "yes", "no", "on", "off"):
-                raise AgentConfigError(f"{role}.{key} must be true or false")
+                raise AgentConfigError(f"{role}.{key} must be true or false (also yes/no, on/off)")
             value = value.lower() in ("true", "yes", "on")
         if not isinstance(value, bool):
-            raise AgentConfigError(f"{role}.{key} must be true or false")
+            raise AgentConfigError(f"{role}.{key} must be true or false (also yes/no, on/off)")
         return value
     if key == "escalate":
         if value is None:
@@ -266,8 +287,49 @@ def write_setting(path: Path, role: str, key: str, value: str) -> Dict[str, Any]
     else:
         settings[key] = coerced
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n")
+    try:
+        private = (path.stat().st_mode & 0o777) == 0o600
+    except OSError:
+        private = False
+    if private:
+        _write_private(path, data)
+    else:
+        path.write_text(json.dumps(data, indent=2) + "\n")
     return data
+
+
+def _write_private(path: Path, data: Dict[str, Any]) -> None:
+    """Write JSON through a temp file at 0600, then replace; the result is 0600."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
+    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(data, indent=2) + "\n")
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+    os.chmod(path, 0o600)
+
+
+def read_salt() -> Optional[str]:
+    """The pseudonym salt (hex) in the global config file, or None if there is none."""
+    salt = _read_json(global_config_path()).get("stats_salt")
+    return salt if isinstance(salt, str) and salt else None
+
+
+def ensure_salt() -> str:
+    """Return the pseudonym salt, creating it (32 random bytes, hex) once. The file ends up 0600."""
+    path = global_config_path()
+    salt = read_salt()
+    if salt:
+        return salt
+    data = _read_json(path)
+    salt = secrets.token_bytes(32).hex()
+    data["stats_salt"] = salt
+    _write_private(path, data)
+    return salt
 
 
 def _rank(value: str, order: Tuple[str, ...]) -> Optional[int]:
