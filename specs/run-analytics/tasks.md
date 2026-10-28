@@ -1234,7 +1234,7 @@ hit. Define the generators locally. Declare `PROPERTIES`.
 ---
 
 ### Task 34: Implement the leak check (leak.py)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 9.1, 9.2, 9.3, 9.4
 **Description:** Create `leak.py` per design S17/S18 and the "leak.scan matching rule": `COMMON_WORDS` (about 300
@@ -1264,13 +1264,13 @@ email, url, secret, path, id, timestamp`.
 The end-to-end leak criteria are verified at Task 42 (Task 39) and Task 45 (Task 43).
 
 **Acceptance:**
-- [ ] Every seeded confidential string and the git identity are found wherever they are planted
-- [ ] Short or common terms match only as whole words, in free text and in non-enum JSON string values; schema field names and enum or const members in their positions never hit
-- [ ] A confidential path segment such as `analytics` or `transcripts` never blocks an export through `ck-run-analytics/1` or `priced_from_transcripts`, and no `ISSUE_CODES` member (such as `review_contract_mismatch`) trips the 32+ run pattern
-- [ ] Digit-only and hex-only strings (`1`, `80`, `2026`, `cafe`) are never terms, so they never hit a version, `month` or `id`; run, session and agent ids stay terms
-- [ ] A machine label that is a confidential term is still a hit; a 32-character valid machine label is not
-- [ ] `record_id` (16 hex) and `month` (`yyyy-mm`) match no generic pattern
-- [ ] Hits report file and field without echoing the matched text; any hit makes `decide` block
+- [x] Every seeded confidential string and the git identity are found wherever they are planted
+- [x] Short or common terms match only as whole words, in free text and in non-enum JSON string values; schema field names and enum or const members in their positions never hit
+- [x] A confidential path segment such as `analytics` or `transcripts` never blocks an export through `ck-run-analytics/1` or `priced_from_transcripts`, and no `ISSUE_CODES` member (such as `review_contract_mismatch`) trips the 32+ run pattern
+- [x] Digit-only and hex-only strings (`1`, `80`, `2026`, `cafe`) are never terms, so they never hit a version, `month` or `id`; run, session and agent ids stay terms
+- [x] A machine label that is a confidential term is still a hit; a 32-character valid machine label is not
+- [x] `record_id` (16 hex) and `month` (`yyyy-mm`) match no generic pattern
+- [x] Hits report file and field without echoing the matched text; any hit makes `decide` block
 
 **Dependencies:** Task 4 (calls peek_workflow_name), Task 11 (reads the schema vocabulary), Task 32 (its tests are the oracle), Task 33 (its tests are the oracle)
 **Complexity:** High
