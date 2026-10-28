@@ -900,7 +900,7 @@ These suites also verify the criteria of foundation Tasks 14, 15 and 18 and the 
 ---
 
 ### Task 25: Implement show breakdowns, trends and renderers (show.py)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 6.1, 6.2, 6.3, 6.4, 6.7, 6.8
 **Description:** Create `show.py` with `ShowFilters`, `COVERAGE` (the four duration coverage strings in design.md),
@@ -923,10 +923,10 @@ functions only.
 Foundation task: smoke Verify only; its criteria are verified at Task 31 (Tasks 27, 28, 30).
 
 **Acceptance:**
-- [ ] The list is newest first with every 6.1 column
-- [ ] A run breakdown has every 6.2 item and coverage notes for every printed duration
-- [ ] Trends appear only for kinds with two or more filtered runs and honour all three filters
-- [ ] Fields missing from an older record show `unknown` in text and `null` in JSON
+- [x] The list is newest first with every 6.1 column
+- [x] A run breakdown has every 6.2 item and coverage notes for every printed duration
+- [x] Trends appear only for kinds with two or more filtered runs and honour all three filters
+- [x] Fields missing from an older record show `unknown` in text and `null` in JSON
 
 **Dependencies:** Task 4 (module lives in the package whose `__init__.py` Task 4 creates)
 **Complexity:** Medium
