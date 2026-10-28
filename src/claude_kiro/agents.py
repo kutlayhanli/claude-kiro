@@ -315,21 +315,54 @@ def _write_private(path: Path, data: Dict[str, Any]) -> None:
     os.chmod(path, 0o600)
 
 
-def read_salt() -> Optional[str]:
-    """The pseudonym salt (hex) in the global config file, or None if there is none."""
-    salt = _read_json(global_config_path()).get("stats_salt")
-    return salt if isinstance(salt, str) and salt else None
+def _decode_salt(value: Any) -> Optional[bytes]:
+    """The raw salt bytes for a stored hex string, or None if it is absent or not valid hex."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return bytes.fromhex(value)
+    except ValueError:
+        return None
 
 
-def ensure_salt() -> str:
-    """Return the pseudonym salt, creating it (32 random bytes, hex) once. The file ends up 0600."""
+def read_salt() -> Optional[bytes]:
+    """The pseudonym salt (raw bytes, stored as hex) in the global config file, or None.
+
+    A stored value that is not valid hex counts as no salt.
+    """
+    return _decode_salt(_read_json(global_config_path()).get("stats_salt")) or None
+
+
+def _read_config_strict(path: Path) -> Dict[str, Any]:
+    """Like _read_json, but a file that exists and is not a readable JSON object is an error."""
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AgentConfigError(f"{path}: cannot read as JSON ({exc}); not overwriting it")
+    if not isinstance(data, dict):
+        raise AgentConfigError(f"{path}: must hold a JSON object; not overwriting it")
+    return data
+
+
+def ensure_salt() -> bytes:
+    """Return the pseudonym salt (32 random bytes), creating it once; stored as hex, file ends up 0600.
+
+    Raises AgentConfigError if the config file exists but cannot be parsed, rather than replacing it.
+    """
     path = global_config_path()
-    salt = read_salt()
+    data = _read_config_strict(path)
+    salt = _decode_salt(data.get("stats_salt"))
     if salt:
         return salt
-    data = _read_json(path)
-    salt = secrets.token_bytes(32).hex()
-    data["stats_salt"] = salt
+    salt = secrets.token_bytes(32)
+    # Re-read just before writing so a salt created meanwhile by another process wins.
+    data = _read_config_strict(path)
+    existing = _decode_salt(data.get("stats_salt"))
+    if existing:
+        return existing
+    data["stats_salt"] = salt.hex()
     _write_private(path, data)
     return salt
 
