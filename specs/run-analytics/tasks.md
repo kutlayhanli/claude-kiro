@@ -342,7 +342,7 @@ The note drafting and decision criteria (8.2-8.5) are verified at Task 42 (Task 
 ---
 
 ### Task 9: Property tests for the shareable record builder (P-6, P-17, P-18, P-21)
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 7.1, 7.2, 7.3, 9.4
 **Description:** Implements P-6, P-17, P-18, P-21 against the Harness Contract seams `build_shareable(local, *,
