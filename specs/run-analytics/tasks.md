@@ -210,7 +210,7 @@ The CLI-level criteria (1.10, 1.11, 1.13, 1.14, 1.15, 2.2) are verified at Task 
 ---
 
 ### Task 5: Property tests for the label grammar (P-3, P-4)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.1, 5.2
 **Description:** Implements P-3 and P-4 against the Harness Contract seam `parse_label(label, workflow) -> dict` (keys
@@ -229,11 +229,11 @@ labels with leading/trailing whitespace or a suffix such as `task 3 extra`, and 
 **Verifies:** Task 6
 
 **Acceptance:**
-- [ ] Generators cover every template and every near miss listed in the P-3 and P-4 rows
-- [ ] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
-- [ ] Tests call the decision seam `parse_label`, not the CLI
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] `PROPERTIES` map names the test for each P-id
+- [x] Generators cover every template and every near miss listed in the P-3 and P-4 rows
+- [x] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
+- [x] Tests call the decision seam `parse_label`, not the CLI
+- [x] Tests fail before the implementation exists for the right reason
+- [x] `PROPERTIES` map names the test for each P-id
 
 **Dependencies:** Task 1 (hypothesis, `CONFIDENTIAL`)
 **Complexity:** Medium
