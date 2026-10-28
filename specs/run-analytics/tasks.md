@@ -1375,9 +1375,9 @@ The git/gh flow criteria are verified at Task 45 (Tasks 43, 44), which also list
 - [x] Preflight refuses on uncommitted changes outside this machine's pending files or on an existing destination path
 - [x] The PR branch starts from `<target remote>/master`, is pushed to that remote only, and the PR is opened with `--base master --head <branch>`
 - [x] An approved note is committed only after interactive confirmation; without a TTY and with `--yes` it is left out of the commit and the rest is submitted
-- [ ] Branch name, commit message, PR title and body contain only allowlisted values
-- [ ] gh missing, not logged in or failing leaves no branch or commit, keeps the files, and reports the error
-- [ ] Submitted record ids are never reselected
+- [x] Branch name, commit message, PR title and body contain only allowlisted values
+- [x] gh missing, not logged in or failing leaves no branch or commit, keeps the files, and reports the error
+- [x] Submitted record ids are never reselected
 
 **Dependencies:** Task 4 (module lives in the package whose `__init__.py` Task 4 creates), Task 11 (the batch summary reads the shareable record's workflow and month fields that share defines), Task 36 (its tests are the oracle)
 **Complexity:** High
