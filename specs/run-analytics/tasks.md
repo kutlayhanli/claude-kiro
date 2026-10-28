@@ -739,7 +739,7 @@ exits non-zero, refuses, does not print the name, writes nothing. CLI runs go th
 ---
 
 ### Task 20: Integration tests for backfilling past runs
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 4.1, 4.2, 4.3, 4.4
 **Description:** Implements TC-28, TC-29, TC-30, TC-31. TC-28: two projects with completed `spec-implement`,
@@ -755,10 +755,10 @@ an empty home: says no ck runs were found, exit 0.
 **Verifies:** Task 24
 
 **Acceptance:**
-- [ ] Tests drive the real `ck stats collect --all` over real fake Claude homes across several projects
-- [ ] Summary assertions match the counts and the failure line format in the Harness Contract
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] No mocks of the project's own code
+- [x] Tests drive the real `ck stats collect --all` over real fake Claude homes across several projects
+- [x] Summary assertions match the counts and the failure line format in the Harness Contract
+- [x] Tests fail before the implementation exists for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake Claude home)
 **Complexity:** Medium
