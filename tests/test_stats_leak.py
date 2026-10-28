@@ -8,9 +8,8 @@ ck code is imported only inside test bodies (the ISSUE_CODES check).
 import json
 import os
 import re
-import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Tuple
 
 import pytest
 
@@ -18,6 +17,8 @@ from stats_helpers import (
     CK, CONFIDENTIAL, SEEDED_RUN_IDS, AgentSpec, FakeClaudeHome, TaskSpec, all_bytes, ck_sub, create_result, fake_claude_drafter,
     fake_gh, gh_calls, git, git_project, implement_result, kiro_checkout, run_tty, seeded_home,
 )
+
+pytestmark = pytest.mark.usefixtures("no_network")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 # The per-hit line the design specifies: the file (`<record_id>.md`, or a note pseudo-path) and `line N`.
@@ -102,7 +103,7 @@ def _segment_world(tmp: Path, segs_a: List[str], spec_a: str = "ui", spec_b: str
     return home, ra.run_id, rb.run_id
 
 
-def _export_b_then_note_a(world: World, a_run: str, b_run: str, note: str) -> tuple:
+def _export_b_then_note_a(world: World, a_run: str, b_run: str, note: str) -> Tuple[int, str]:
     """Export B (non-interactive), then export A with `--note` under a pty whose fake drafter writes `note`.
 
     Returns (exit_code, transcript). A answers `accept` at the first (and only) prompt.
@@ -197,7 +198,7 @@ def test_machine_label_that_is_a_confidential_term_blocks_export_and_submit(tmp_
 
 
 def test_whole_word_rule_normal_export_has_no_hit_but_a_note_naming_the_spec_does(tmp_path):
-    home, a_run, b_run = _segment_world(tmp_path / "w1", ["analytics", "transcripts", "permission", "1", "80", "2026", "cafe"])
+    home, _, _ = _segment_world(tmp_path / "w1", ["analytics", "transcripts", "permission", "1", "80", "2026", "cafe"])
     world = World(tmp_path / "w1", home)
     world.collect("--all")
     out = world.export("--yes")
@@ -268,7 +269,7 @@ def _issue_world_runs(home: FakeClaudeHome) -> None:
 def test_issue_codes_never_trip_the_leak_check(tmp_path):
     from claude_kiro.analytics.issues import ISSUE_CODES
 
-    home, a_run, b_run = _segment_world(tmp_path, ["analytics", "transcripts", "permission"])
+    home, _, _ = _segment_world(tmp_path, ["analytics", "transcripts", "permission"])
     _issue_world_runs(home)
     world = World(tmp_path, home)
     world.collect("--all")
@@ -316,7 +317,7 @@ def test_submit_passes_the_leak_check_with_ck_words_in_the_records_and_opens_the
 
 def test_ck_vocabulary_segments_are_not_terms_but_other_segments_still_are(tmp_path):
     segs = ["spec", "ck", "stats", "batch", "orchard"]
-    home, a_run, b_run = _segment_world(tmp_path / "w1", segs)
+    home, _, _ = _segment_world(tmp_path / "w1", segs)
     world = World(tmp_path / "w1", home)
     world.collect("--all")
     out = world.submit("--yes")
