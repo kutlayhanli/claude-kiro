@@ -18,7 +18,7 @@ imports reach only the analytics modules it verifies.
 ## Task Breakdown
 
 ### Task 1: Build the Python test infrastructure for ck stats
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.10, 2.1, 3.1, 7.9, 9.4, 10.2, 10.6
 **Description:** Build the shared, test-owned harness from test-plan.md "Test Infrastructure / To add" items 1-4.
@@ -79,13 +79,13 @@ runs in Verify because the autouse fixtures change the environment of every exis
 suites `test_worktree_land.py`, `test_gate.py`, `test_upgrade.py`, `test_plugin_modes.py`).
 
 **Acceptance:**
-- [ ] `hypothesis` importable under `uv run`
-- [ ] Fake run files and transcripts use the real keys (`runId, workflowName, status, startTime, durationMs, args, result, workflowProgress[]`; agent `agentId, label, phaseTitle, model, startedAt, durationMs, attempt, tokens, state, promptPreview, resultPreview, lastToolSummary`; transcript `cwd, gitBranch, sessionId, version, requestId, timestamp`; the session transcript's `Workflow` tool_use and tool_result pair) and are readable by the existing `bench` code and `ck cost`
-- [ ] Harness exercises the real boundaries named in the test plan: real temp dirs, real git with a local bare remote, a real pty; only `claude`, `gh`, `$EDITOR` and the network are faked; no ck module is mocked
-- [ ] The whole existing suite (`uv run pytest -q`) still passes with the new autouse fixtures, and `test_run.py`, `test_cost.py`, `test_bench.py` never write outside `tmp_path`
-- [ ] The `no_network` guard is proven to reach child processes by a self-check
-- [ ] `seeded_home` and `seeded_local_record` plant every `CONFIDENTIAL` string in every free-text slot listed in test-plan.md item 4
-- [ ] `tests/stats_helpers.py` contains no import of `claude_kiro.cli`
+- [x] `hypothesis` importable under `uv run`
+- [x] Fake run files and transcripts use the real keys (`runId, workflowName, status, startTime, durationMs, args, result, workflowProgress[]`; agent `agentId, label, phaseTitle, model, startedAt, durationMs, attempt, tokens, state, promptPreview, resultPreview, lastToolSummary`; transcript `cwd, gitBranch, sessionId, version, requestId, timestamp`; the session transcript's `Workflow` tool_use and tool_result pair) and are readable by the existing `bench` code and `ck cost`
+- [x] Harness exercises the real boundaries named in the test plan: real temp dirs, real git with a local bare remote, a real pty; only `claude`, `gh`, `$EDITOR` and the network are faked; no ck module is mocked
+- [x] The whole existing suite (`uv run pytest -q`) still passes with the new autouse fixtures, and `test_run.py`, `test_cost.py`, `test_bench.py` never write outside `tmp_path`
+- [x] The `no_network` guard is proven to reach child processes by a self-check
+- [x] `seeded_home` and `seeded_local_record` plant every `CONFIDENTIAL` string in every free-text slot listed in test-plan.md item 4
+- [x] `tests/stats_helpers.py` contains no import of `claude_kiro.cli`
 
 **Dependencies:** None
 **Complexity:** High
