@@ -376,7 +376,7 @@ generators in this file. Declare `PROPERTIES`.
 ---
 
 ### Task 10: Property test for enum mapping (P-7)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.4, 7.5
 **Description:** Implements P-7 against the Harness Contract seams `enum_value(field, value)`, `model_family(model)`,
@@ -396,11 +396,11 @@ generators locally (do not import from Task 9's file). Declare `PROPERTIES`.
 **Verifies:** Task 11
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the P-7 row
-- [ ] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
-- [ ] Tests call the decision seams (`enum_value`, `model_family`, `build_shareable`), not the CLI
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] `PROPERTIES` map names the test for P-7
+- [x] Generators cover every surface form and negative listed in the P-7 row
+- [x] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
+- [x] Tests call the decision seams (`enum_value`, `model_family`, `build_shareable`), not the CLI
+- [x] Tests fail before the implementation exists for the right reason
+- [x] `PROPERTIES` map names the test for P-7
 
 **Dependencies:** Task 1 (hypothesis, `seeded_local_record`, `CONFIDENTIAL`)
 **Complexity:** Medium
