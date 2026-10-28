@@ -451,7 +451,7 @@ The no-confidential-term property P-5 needs the leak term builder and is verifie
 ---
 
 ### Task 12: Property tests for settings validation (P-8, P-9)
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 3.6, 7.6
 **Description:** Implements P-8 and P-9. P-8 pure half: for any string, `valid_machine_label(s)` from
