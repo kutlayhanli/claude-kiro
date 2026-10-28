@@ -10,7 +10,10 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 from datetime import datetime, timezone
 
 COVERAGE: Dict[str, str] = {
-    "task_minutes": "agent minutes per task: the sum of that task's agent durations (attempts, reviews, fixes)",
+    "task_minutes": (
+        "task started to finished (elapsed); includes waits between its agents; "
+        "excludes the landing queue, landing and landing fixes"
+    ),
     "wall": "run file durationMs: from workflow start to return; includes plan, final gate and report",
     "task_span": "first task start to last merge or finish; excludes plan, final gate and report",
     "role_phase_minutes": (
@@ -86,8 +89,9 @@ def _merged_ids(rec: Mapping[str, Any]) -> Optional[set]:
     ids = set()
     for x in ls:
         m = x.get("merged")
-        if isinstance(m, list):
-            ids.update(str(i) for i in m)
+        if not isinstance(m, list):
+            return None  # counts only: which tasks merged is unknown
+        ids.update(str(i) for i in m)
     return ids
 
 
@@ -307,12 +311,13 @@ def _int(v: Any) -> int:
 
 
 def _task_span_minutes(record: Mapping[str, Any]) -> Optional[float]:
-    """First task start to last merge or finish, from the record's `phases` when it carries them."""
-    phases = record.get("phases")
-    if not isinstance(phases, list):
-        return None
-    mins = [p["minutes"] for p in phases if isinstance(p, Mapping) and _num(p.get("minutes"))]
-    return max(mins) if mins else None
+    """result.timing.minutes as stored by the collector (`taskSpanMinutes`); unknown when absent.
+
+    Never derived from per-wave `phases`, whose longest entry is one wave, not the span;
+    spec-create records carry no task span.
+    """
+    v = record.get("taskSpanMinutes")
+    return float(v) if _num(v) else None
 
 
 def run_breakdown(record: Mapping[str, Any]) -> Dict[str, Any]:
@@ -396,7 +401,7 @@ def run_breakdown(record: Mapping[str, Any]) -> Dict[str, Any]:
             "conflict": _rate(tasks, _field_count("resolves")),
             "fix": _rate(tasks, _field_count("fixes")),
         },
-        "idle_before_merge": idle,
+        "idle_before_merge": idle,  # ms; render_run converts to minutes (design.md says minutes)
         "landings": landings,
         "other_role": other,
         "coverage": dict(COVERAGE),
@@ -430,11 +435,14 @@ def render_list(view: Mapping[str, Any]) -> List[str]:
     runs = view.get("runs") or []
     if not runs:
         return ["no runs match; try: ck stats collect --all"]
-    lines.append("date        workflow        outcome   wall (run file)  cost            tasks (merged/failed/total)  run")
+    lines.append("date        workflow        outcome   wall (run file)  cost            tasks  run")
     for r in runs:
         src = r.get("cost_source")
         cost = _usd(r.get("cost_usd")) + (f" ({src})" if src else "")
-        tasks = f"{_fmt(r.get('tasks_merged'))}/{_fmt(r.get('tasks_failed'))}/{_fmt(r.get('tasks_total'))}"
+        tasks = (
+            f"{_fmt(r.get('tasks_merged'))}/{_fmt(r.get('tasks_total'))} merged, "
+            f"{_fmt(r.get('tasks_failed'))} failed"
+        )
         lines.append(
             f"{_fmt(r.get('date'))}  {_fmt(r.get('workflow'))}  {_fmt(r.get('outcome'))}  "
             f"{_min(r.get('wall_minutes'))}  {cost}  {tasks}  {_fmt(r.get('run_id'))}"
