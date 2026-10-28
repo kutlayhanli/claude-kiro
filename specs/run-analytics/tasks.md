@@ -1089,7 +1089,7 @@ transcripts deleted or truncated at any byte offset of the last line: no affecte
 ---
 
 ### Task 30: Red-team the role parser's no-guess rule (Story 5)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.2, 6.2
 **Description:** Try to break each SHALL NOT clause of Story 5 with adversarial inputs: unusual surface forms,
@@ -1109,10 +1109,10 @@ counted in its `other` summary.
 **Verifies:** Task 31
 
 **Acceptance:**
-- [ ] Each adversarial case is a separate named test or parametrized id describing the trick
-- [ ] Cases exercise the real CLI over a fake Claude home as well as the seam
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] No mocks of the project's own code
+- [x] Each adversarial case is a separate named test or parametrized id describing the trick
+- [x] Cases exercise the real CLI over a fake Claude home as well as the seam
+- [x] Tests fail before the implementation exists for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake Claude home)
 **Complexity:** Medium
