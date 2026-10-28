@@ -351,6 +351,17 @@ def latest_session(home: Path, cwd: Path, since: Optional[float] = None) -> Opti
     return max(found)[1] if found else None
 
 
+def aggregate_usage(scans: Iterable[Dict[str, Any]]) -> Dict[str, Dict[str, int]]:
+    """Per-model USAGE_KEYS totals over transcript scans (requestId dedup is done by scan_transcript)."""
+    by_model: Dict[str, Dict[str, int]] = {}
+    for s in scans:
+        for model, u in s["usage_by_model"].items():
+            acc = by_model.setdefault(model, dict.fromkeys(USAGE_KEYS, 0))
+            for k in USAGE_KEYS:
+                acc[k] += u[k]
+    return by_model
+
+
 def session_spend(home: Path, session_id: str, run_id: Optional[str] = None, pricing: Optional[dict] = None) -> Dict[str, Any]:
     """Spend of a session (or of one workflow run in it), from its transcripts.
 
@@ -367,7 +378,7 @@ def session_spend(home: Path, session_id: str, run_id: Optional[str] = None, pri
     else:
         files = main + [f for d in sdirs for f in sorted(d.glob("subagents/**/agent-*.jsonl"))]
         wf_files = [f for d in sdirs for f in d.glob("workflows/*.json")]
-    by_model: Dict[str, Dict[str, int]] = {}
+    scans: List[Dict[str, Any]] = []
     claude_usd: Optional[float] = None
     budget: Optional[float] = None
     wf_tx_tokens = 0
@@ -378,12 +389,10 @@ def session_spend(home: Path, session_id: str, run_id: Optional[str] = None, pri
             budget = s["budget_total"] if s["budget_total"] is not None else budget
         if f not in files:
             continue
-        for model, u in s["usage_by_model"].items():
-            acc = by_model.setdefault(model, dict.fromkeys(USAGE_KEYS, 0))
-            for k in USAGE_KEYS:
-                acc[k] += u[k]
+        scans.append(s)
         if "/subagents/workflows/" in f.as_posix():
             wf_tx_tokens += sum(sum(u.values()) for u in s["usage_by_model"].values())
+    by_model = aggregate_usage(scans)
     workflow_tokens = 0
     for wf in wf_files:
         try:
