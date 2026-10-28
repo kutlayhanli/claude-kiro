@@ -1833,7 +1833,7 @@ the same code path as `ck stats collect --auto`".
 ---
 
 ### Task 50: Static contract test for the skills' end-of-run collect step
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 3.2, 3.3, 3.4
 **Description:** Implements TC-26. `plugin/skills/implement/SKILL.md` step 9, `plugin/skills/create/SKILL.md` "Close
