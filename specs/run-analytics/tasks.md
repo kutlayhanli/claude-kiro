@@ -242,7 +242,7 @@ labels with leading/trailing whitespace or a suffix such as `task 3 extra`, and 
 ---
 
 ### Task 6: Implement the label grammar (roles.py)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 5.1, 5.2, 5.3
 **Description:** Create `roles.py` with `ROLES` (implementer, test-writer, reviewer, fixer, resolver, plan, land, gate,
@@ -267,9 +267,9 @@ and legacy labels (5.3) is test-owned (Task 54).
 **Verified by:** Task 5, Task 54
 
 **Acceptance:**
-- [ ] Every row of the design grammar table parses to its role, task, attempt/round, step and escalated_to
-- [ ] Every label template in both workflow scripts is matched (`matched=True`), and every label of the legacy corpus
-- [ ] An unknown label, or a template label with surrounding whitespace, gives `other` with `matched=False`
+- [x] Every row of the design grammar table parses to its role, task, attempt/round, step and escalated_to
+- [x] Every label template in both workflow scripts is matched (`matched=True`), and every label of the legacy corpus
+- [x] An unknown label, or a template label with surrounding whitespace, gives `other` with `matched=False`
 
 **Dependencies:** Task 4 (module lives in the package whose `__init__.py` Task 4 creates), Task 5 (its tests are the oracle), Task 54 (its tests are the oracle)
 **Complexity:** Medium
