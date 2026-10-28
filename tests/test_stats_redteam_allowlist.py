@@ -55,16 +55,30 @@ def _foreign_kwargs(name_label: str = "scan " + PAYLOAD) -> dict:
     return dict(args={"topic": PAYLOAD}, result={"summary": PAYLOAD}, agents=[AgentSpec(name_label)])
 
 
+ALLOWLISTED = ("spec-implement", "spec-implement-iso", "spec-create")
+
+
+def _forbidden_name(name: str) -> list:
+    """The name must stay out of every byte, unless it is (a substring of) an allowlisted name a ck run legitimately stores."""
+    core = name.strip("\x00\n ​‍‮﻿/")
+    if core == "" or any(core in a for a in ALLOWLISTED):
+        return []
+    return [name]
+
+
 def _scan(env, results, *, forbidden=(), allow_id_echo=()):
-    """Nothing forbidden in the store, the log, any ck-runs log, or the outputs of `results`."""
+    """Nothing forbidden in the store, the log, any ck-runs log, or the outputs of `results`.
+
+    The foreign run id may be echoed on stdout/stderr only when typed in `--run` (`allow_id_echo`); it never reaches the store.
+    """
     blobs = [all_bytes(env.xdg)]
     blobs += [r.stdout.encode("utf-8", "surrogateescape") + r.stderr.encode("utf-8", "surrogateescape") for r in results]
     data = b"".join(blobs)
     for bad in (PAYLOAD, *forbidden):
         assert bad.encode("utf-8", "surrogateescape") not in data, f"{bad!r} leaked"
-    outputs = b"".join(blobs[1:]) + all_bytes(env.xdg)
+    assert FOREIGN_ID.encode() not in blobs[0], "foreign run id leaked into the store or logs"
     if FOREIGN_ID not in allow_id_echo:
-        assert FOREIGN_ID.encode() not in outputs, "foreign run id leaked"
+        assert FOREIGN_ID.encode() not in b"".join(blobs[1:]), "foreign run id leaked to the console"
 
 
 def _stored_run_ids(env):
@@ -84,7 +98,7 @@ def test_all_ignores_near_miss_name(trick):
         r = stats("collect", "--all", env=env)
         assert r.exit_code == 0, r.output
         assert _stored_run_ids(env) == [CK_ID]
-        _scan(env, [r], forbidden=[name] if name.strip("\x00\n ​‍‮﻿/") not in ("", "spec-implement", "spec-create") else [])
+        _scan(env, [r], forbidden=_forbidden_name(name))
 
 
 @pytest.mark.parametrize("trick", sorted(NON_STRING_NAMES))
@@ -181,12 +195,15 @@ def test_foreign_run_sharing_id_with_ck_run_in_another_session_leaks_nothing():
         _scan(env, [r, r2], forbidden=["competitor-teardown-q4"])
 
 
-def test_foreign_run_sharing_id_with_ck_run_in_the_same_session_leaks_nothing():
+def test_foreign_run_file_overwriting_a_ck_run_file_in_the_same_session_leaks_nothing():
+    """Same id, same session: the foreign run file replaces the ck one (one path), so no run is allowlisted any more."""
     with fresh_env() as env:
         _, s = _home(env)
         s.implement_run(CK_ID)
         s.foreign_run(CK_ID, name="competitor-teardown-q4", **_foreign_kwargs())
         r = stats("collect", "--all", env=env)
+        assert r.exit_code == 0, r.output
+        assert _stored_run_ids(env) == []
         _scan(env, [r], forbidden=["competitor-teardown-q4"])
 
 
@@ -278,7 +295,7 @@ def test_run_refuses_near_miss_name_without_naming_it(trick):
         r = stats("collect", "--run", FOREIGN_ID, env=env)
         assert r.exit_code != 0, r.output
         assert store_files(env.xdg) == [] or _stored_run_ids(env) == []
-        _scan(env, [r], allow_id_echo=[FOREIGN_ID], forbidden=[name] if name.strip("\x00\n ​‍‮﻿/") not in ("", "spec-implement", "spec-create", "spec-") else [])
+        _scan(env, [r], allow_id_echo=[FOREIGN_ID], forbidden=_forbidden_name(name))
 
 
 @pytest.mark.parametrize("trick", sorted(NON_STRING_NAMES))
@@ -361,6 +378,19 @@ def test_run_refuses_foreign_with_unparseable_run_file_without_naming_it():
         _scan(env, [r], allow_id_echo=[FOREIGN_ID], forbidden=["competitor-teardown-q4"])
 
 
+def test_run_dropped_run_file_is_not_tied_to_a_ck_launch_whose_run_id_merely_contains_it():
+    """1.15: the launch whose result names the id. Run id `<foreign>2` of a ck launch must not name the foreign run."""
+    with fresh_env() as env:
+        _, s = _home(env)
+        s.implement_run(FOREIGN_ID + "2")
+        f = s.foreign_run(FOREIGN_ID, name="competitor-teardown-q4", launch=False, **_foreign_kwargs())
+        f.drop_run_file()
+        r = stats("collect", "--run", FOREIGN_ID, env=env)
+        assert r.exit_code != 0, r.output
+        assert _stored_run_ids(env) == []
+        _scan(env, [r], allow_id_echo=[FOREIGN_ID], forbidden=["competitor-teardown-q4"])
+
+
 def test_run_with_id_shared_across_sessions_never_stores_the_foreign_one():
     with fresh_env() as env:
         home = FakeClaudeHome(env.claude)
@@ -369,7 +399,7 @@ def test_run_with_id_shared_across_sessions_never_stores_the_foreign_one():
         b.foreign_run(CK_ID, name="competitor-teardown-q4", **_foreign_kwargs())
         a.implement_run(CK_ID)
         r = stats("collect", "--run", CK_ID, env=env)
-        _scan(env, [r], allow_id_echo=[CK_ID], forbidden=["competitor-teardown-q4"])
+        _scan(env, [r], forbidden=["competitor-teardown-q4"])
 
 
 def test_run_refusal_message_is_identical_for_two_different_foreign_names():
@@ -407,6 +437,7 @@ def test_auto_on_foreign_run_does_not_write_its_name_or_contents_to_collect_log(
         log = Path(env.xdg) / "claude-kiro" / "collect.log"
         text = log.read_text() if log.exists() else ""
         assert "competitor-teardown-q4" not in text and PAYLOAD not in text
+        assert FOREIGN_ID not in text  # 2.2: a typed id is echoed to the console only, never logged
         _scan(env, [r], allow_id_echo=[FOREIGN_ID], forbidden=["competitor-teardown-q4"])
 
 
