@@ -405,6 +405,13 @@ arguments. Callers never re-implement the rule.
   otherwise hit a version (`2.1.80`), a `month` (`2026-10`) or a random 16-hex `id`. Run, session and agent
   ids are the exception and are kept whole, because they identify a run and are too long to collide by
   chance. Every position is still scanned for the remaining terms (9.3).
+- **ck-vocabulary terms are dropped.** A candidate term that equals a whole word of `leak.VOCABULARY`
+  (split on `-`, `_`, `/`, `:` and spaces: `spec`, `implement`, `create`, `ck`, `stats`, `batch`, `count`,
+  `kinds`, `months`, `machine`, ...) is not added, for the same reason as digit-only terms: it is one of
+  ck's own published words, so it identifies no project, and as a weak term it would hit the fixed
+  template words and substituted enum values (`ck-stats-batch-<hex>`, `kinds: spec-implement`) in every
+  branch name, commit message and PR text, blocking every submit from a machine whose projects use a
+  common folder such as Ruby's `spec/` (PLAN D18). Free text is still scanned in full for every other term (9.3).
 - **Generic patterns** (always on, all compiled with `re.IGNORECASE`, matched in all text except the fixed
   tokens and format-validated values above):
   - email `[\w.+-]+@[\w-]+\.[\w.-]+`
