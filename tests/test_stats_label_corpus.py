@@ -24,7 +24,7 @@ def _unmatched(entries):
     bad = []
     for workflow, label in entries:
         m = parse_label(label, workflow)
-        if _get(m, "role") == "other":
+        if not _get(m, "matched") or _get(m, "role") == "other":
             bad.append(label)
     return bad
 
