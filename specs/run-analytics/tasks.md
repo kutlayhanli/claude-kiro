@@ -767,7 +767,7 @@ an empty home: says no ck runs were found, exit 0.
 ---
 
 ### Task 21: Performance tests for collect
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 4.1
 **Description:** Implements TC-77 and TC-78 (NFR Performance). TC-77: one fixture run with 250 agents, 3 requests
@@ -780,10 +780,10 @@ the measurement). Mark the module `slow` if the repo has such a marker, otherwis
 **Verifies:** Task 24
 
 **Acceptance:**
-- [ ] Timed through the real CLI, not by calling internals
-- [ ] Bounds are exactly the NFR's (10 s, 120 s)
-- [ ] Tests fail before the implementation exists for the right reason (no command), not timeouts in fixture setup
-- [ ] No mocks of the project's own code
+- [x] Timed through the real CLI, not by calling internals
+- [x] Bounds are exactly the NFR's (10 s, 120 s)
+- [x] Tests fail before the implementation exists for the right reason (no command), not timeouts in fixture setup
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake Claude home)
 **Complexity:** Low
