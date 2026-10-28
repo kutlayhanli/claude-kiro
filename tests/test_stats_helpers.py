@@ -190,10 +190,11 @@ def test_no_network_raises_in_process_and_reaches_children(no_network):
 
 def test_two_fresh_envs_are_disjoint():
     with fresh_env() as a:
-        a.xdg.mkdir()
+        assert len({a.claude, a.xdg, a.config, a.home}) == 4 and a.root.is_dir()
+        assert all(d.is_dir() and d.parent == a.root for d in (a.claude, a.xdg, a.config, a.home))
         (a.xdg / "marker").write_text("x")
         with fresh_env() as b2:
-            assert not b2.xdg.exists()
+            assert not (b2.xdg / "marker").exists() and b2.root != a.root
             assert {v for v in a.values() if v.startswith('/')}.isdisjoint({v for v in b2.values() if v.startswith('/')})
         assert (a.xdg / "marker").exists()
     assert not a.root.exists()
@@ -260,7 +261,7 @@ def test_seeded_home_plants_every_confidential_string(tmp_path):
 def test_seeded_local_record_has_the_contract_keys_and_plants_strings(kind):
     rec = seeded_local_record(kind)
     common = {"schema", "runId", "workflow", "outcome", "ckVersion", "collectorVersion", "claudeCodeVersion", "startTime", "wallMs",
-              "agentsConfig", "projectPseudonym", "outcomeInferred", "costs", "byModel", "byRole", "byPhase", "byTask", "agents", "missing"}
+              "agentsConfig", "projectPseudonym", "outcomeInferred", "sessionId", "workflowName", "status", "project", "terms", "costs", "byModel", "byRole", "byPhase", "byTask", "agents", "missing"}
     extra = ({"tasks", "landings", "fullGates", "finalGate", "crossTests", "fixerEscalations", "phases"} if kind == "spec-implement"
              else {"review", "consistency", "phases"})
     assert set(rec) == common | extra and rec["workflow"] == kind
@@ -270,7 +271,7 @@ def test_seeded_local_record_has_the_contract_keys_and_plants_strings(kind):
     blob = json.dumps(rec)
     assert [t for t in CONFIDENTIAL if t not in blob] == []
     if kind == "spec-implement":
-        assert set(rec["tasks"][0]) == {"task", "attempts", "retries", "escalations", "reviewRounds", "verdict", "resolves",
+        assert set(rec["tasks"][0]) == {"task", "title", "reason", "attempts", "retries", "escalations", "reviewRounds", "verdict", "resolves",
                                         "resolvesInferred", "fixes", "agentMinutes", "toMergedMinutes", "riskTag", "idleBeforeMergeMs"}
 
 

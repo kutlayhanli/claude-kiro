@@ -258,9 +258,9 @@ def create_result(
             "openQuestions": [],
             "refutedCount": refuted,
             "unverified": [],
-            "lensesLost": [f"lens{i}" for i in range(lenses_lost)],
+            "lensesLost": lenses_lost,
         },
-        "consistency": {"passes": consistency_passes, "fixed": [{"id": f"C{i}"} for i in range(consistency_fixed)], "decisions": []},
+        "consistency": {"passes": consistency_passes, "fixed": [{"id": f"C{i}"} for i in range(consistency_fixed)], "decisions": [], "lost": False},
         "schedule": None,
     }
 
@@ -724,10 +724,12 @@ def fresh_env() -> Iterator[Env]:
     with tempfile.TemporaryDirectory(prefix="ck-fresh-") as td:
         root = Path(td)
         env = Env()
-        env.root, env.claude, env.xdg, env.config, env.home = (root / "claude-home", root / "xdg-data", root / "ck-config", root / "home", root / "home")
+        env.root = root
+        env.claude, env.xdg, env.config, env.home = root / "claude-home", root / "xdg-data", root / "ck-config", root / "home"
         env.claude.mkdir()
+        env.xdg.mkdir()
         env.config.mkdir()
-        env.home.mkdir(exist_ok=True)
+        env.home.mkdir()
         gitconfig = root / "gitconfig"
         gitconfig.write_text("[user]\n\tname = Test User\n\temail = test@example.com\n")
         env.update({
@@ -947,8 +949,8 @@ def seeded_home(tmp: Path) -> Tuple[FakeClaudeHome, List[str]]:
 def seeded_local_record(kind: str) -> dict:
     """A local record (Harness Contract shape) for `spec-implement` or `spec-create` with CONFIDENTIAL strings in every free-text slot.
 
-    Free-text slots: agent ids and labels, phase names, task ids, model names, the verdict and risk tag, config values,
-    `missing` entries, gate / landing / cross-test text, the project pseudonym and the run id. Property tests of pure
+    Free-text slots: agent ids and labels, phase names, task ids, model names, the verdict and risk tag, config values (role -> {model, effort}),
+    `missing` entries, task titles and reasons, project slots, terms, gate / landing text, the project pseudonym and the run id. Property tests of pure
     seams start their `local_record()` generator from it; Task 26 checks that its key set matches a collected record.
     """
     if kind not in ("spec-implement", "spec-create"):
@@ -972,16 +974,23 @@ def seeded_local_record(kind: str) -> dict:
     rec: Dict[str, Any] = {
         "schema": "ck-run-local/1",
         "runId": pick(17),
+        "sessionId": pick(15),
         "workflow": kind,
-        "outcome": "complete",
+        "workflowName": kind,
+        "status": "completed",
+        "outcome": "complete" if kind == "spec-implement" else "Ready",
         "outcomeInferred": False,
         "ckVersion": "0.10.0",
         "collectorVersion": "0.10.0",
         "claudeCodeVersion": "2.1.80",
         "startTime": SEEDED_TIMESTAMP,
         "wallMs": 720_000,
-        "agentsConfig": {"implementer": f"sonnet/{pick(0)}", "reviewer": pick(1), **{f"setting{i}": t for i, t in enumerate(c)}},
+        "project": {"root": pick(4), "spec": pick(0), "branch": pick(7), "remote": ACME_REMOTE, "pseudonym": "p" + _hex(pick(7)),
+                    "stack": "python"},
+        "agentsConfig": {"implementer": {"model": f"sonnet-{pick(0)}", "effort": pick(1)},
+                         "reviewer": {"model": pick(2), "effort": pick(3)}},
         "projectPseudonym": "p" + _hex(pick(7)),
+        "terms": list(c),
         "costs": [
             {"usd": 3.75, "source": "priced_from_transcripts", "pricingDate": "2026-10", "scope": "run"},
             {"usd": 7.5, "source": "claude_total", "pricingDate": None, "scope": "session"},
@@ -994,25 +1003,27 @@ def seeded_local_record(kind: str) -> dict:
         "missing": [{"agentId": pick(21), "what": "transcript"}, {"agentId": pick(22), "what": pick(5)}],
     }
     if kind == "spec-implement":
+        reasons = ["merge failed: conflict not resolved", f"permission denied: {pick(4)}"]
         rec.update({
             "tasks": [
-                {"task": pick(1 + i), "attempts": 2, "retries": 1, "escalations": 1, "reviewRounds": 1, "verdict": pick(3 + i),
+                {"task": pick(1 + i), "title": pick(i), "reason": f"{reasons[i % 2]} {pick(i + 8)}", "attempts": 2, "retries": 1,
+                 "escalations": [f"opus-{pick(i)}"], "reviewRounds": 1, "verdict": pick(3 + i),
                  "resolves": 1, "resolvesInferred": False, "fixes": 0, "agentMinutes": 5.0, "toMergedMinutes": 6.0,
                  "riskTag": pick(6 + i), "idleBeforeMergeMs": 60_000}
                 for i in range(2)
             ],
             "landings": [{"tasks": [pick(1), pick(4)], "size": 2, "window": 2, "merged": [pick(1)], "red": [pick(4)], "conflict": [],
                           "deferred": [], "other": [], "gates": 1, "bisected": True, "minutes": 1.0}],
-            "fullGates": [{"afterMerges": 2, "green": False, "summary": pick(8)}],
+            "fullGates": [{"afterMerges": 2, "green": False}],
             "finalGate": {"green": True, "summary": f"{pick(8)} {_SUMMARY}"},
-            "crossTests": [{"wave": 1, "tasks": [pick(1)], "verdict": pick(9), "findings": [{"issue": _SUMMARY}], "summary": _PREVIEW}],
-            "fixerEscalations": [{"what": f"landing Task {pick(1)}", "model": model, "green": True}],
+            "crossTests": [{"wave": 1, "tasks": 2, "verdict": pick(9), "blocking": 1}],
+            "fixerEscalations": [{"model": model, "green": True}],
             "phases": [{"group": pick(2), "tasks": 2, "start": SEEDED_TIMESTAMP, "end": SEEDED_TIMESTAMP, "minutes": 12.0}],
         })
     else:
         rec.update({
             "review": {"fixed": 3, "notFixed": 1, "escalated": 1, "refuted": 2, "lensesLost": 1},
             "consistency": {"passes": 2, "fixed": 1},
-            "phases": [{"group": pick(2), "ms": 100_000}, {"group": pick(3), "ms": 200_000}],
+            "phases": {pick(2): 1.7, pick(3): 3.3},
         })
     return rec
