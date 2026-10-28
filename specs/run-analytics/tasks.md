@@ -1054,7 +1054,7 @@ exclude.
 ---
 
 ### Task 29: Property tests for collection idempotence, cost conservation and missing data (P-11, P-15, P-16)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.3, 1.9, 1.12, 4.1, 4.2
 **Description:** Implements P-11, P-15, P-16 through the CLI (`max_examples=25`). Every example builds its fake home,
@@ -1076,11 +1076,11 @@ transcripts deleted or truncated at any byte offset of the last line: no affecte
 **Verifies:** Task 24
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the P-11, P-15, P-16 rows
-- [ ] Settings are deterministic (`derandomize=True`, `database=None`, `deadline=None`, `max_examples=25`)
-- [ ] The properties use the real collector over real temp homes, one `fresh_env()` per example; none mocks ck code
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] `PROPERTIES` map names the test for each P-id
+- [x] Generators cover every surface form and negative listed in the P-11, P-15, P-16 rows
+- [x] Settings are deterministic (`derandomize=True`, `database=None`, `deadline=None`, `max_examples=25`)
+- [x] The properties use the real collector over real temp homes, one `fresh_env()` per example; none mocks ck code
+- [x] Tests fail before the implementation exists for the right reason
+- [x] `PROPERTIES` map names the test for each P-id
 
 **Dependencies:** Task 1 (hypothesis, fake Claude home, git_project)
 **Complexity:** High
