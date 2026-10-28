@@ -1299,7 +1299,7 @@ Foundation task: smoke Verify only; TC-49 (Task 39) verifies it at Task 42 and T
 ---
 
 ### Task 36: Property tests for the submit target and PR text (P-19, P-20)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.9, 9.4, 10.2, 10.9
 **Description:** Implements P-19 and P-20 against the Harness Contract seams `is_target_repo(url)` and
@@ -1322,11 +1322,11 @@ give different branches. Declare `PROPERTIES`.
 **Verifies:** Task 37
 
 **Acceptance:**
-- [ ] Generators cover every accept form and every near miss listed in the P-19 and P-20 rows
-- [ ] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
-- [ ] Tests call the decision seams `is_target_repo` and `pr_text`, not GitHub
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] `PROPERTIES` map names the test for each P-id
+- [x] Generators cover every accept form and every near miss listed in the P-19 and P-20 rows
+- [x] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
+- [x] Tests call the decision seams `is_target_repo` and `pr_text`, not GitHub
+- [x] Tests fail before the implementation exists for the right reason
+- [x] `PROPERTIES` map names the test for each P-id
 
 **Dependencies:** Task 1 (hypothesis, `seeded_local_record`, `CONFIDENTIAL`)
 **Complexity:** Medium
