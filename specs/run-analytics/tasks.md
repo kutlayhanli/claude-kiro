@@ -821,7 +821,7 @@ runs are stored and foreign runs refused. Define the generators locally. Declare
 ---
 
 ### Task 23: Red-team the non-ck workflow prohibition (Story 2)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.2, 2.3
 **Description:** Try to break each SHALL NOT clause of Story 2 with adversarial inputs: unusual surface forms,
@@ -841,10 +841,10 @@ corrupt foreign run next to a corrupt ck run in `--all`.
 **Verifies:** Task 24
 
 **Acceptance:**
-- [ ] Each adversarial case is a separate named test or parametrized id describing the trick
-- [ ] Cases run the real `ck stats collect` CLI over real temp homes
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] No mocks of the project's own code
+- [x] Each adversarial case is a separate named test or parametrized id describing the trick
+- [x] Cases run the real `ck stats collect` CLI over real temp homes
+- [x] Tests fail before the implementation exists for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake Claude home, foreign runs)
 **Complexity:** Medium
