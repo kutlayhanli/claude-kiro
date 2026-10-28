@@ -94,7 +94,7 @@ suites `test_worktree_land.py`, `test_gate.py`, `test_upgrade.py`, `test_plugin_
 ---
 
 ### Task 2: Add the label-corpus and conflict-round hooks to the Node workflow harness
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.3, 11.1
 **Description:** Test-plan.md "To add" items 5-6. In `tests/js/load_workflow.mjs`, record every `opts.label` (with the
@@ -115,10 +115,10 @@ unchanged.
 Test infrastructure for Tasks 54 and 52; it asserts no TC.
 
 **Acceptance:**
-- [ ] `node tests/js/emit_labels.mjs` prints labels from both real workflow scripts, including every template family in design.md's grammar table
-- [ ] `CK_DUMP_LABELS` writes the corpus when the existing suites run
-- [ ] Every existing JS test passes unchanged
-- [ ] The real workflow scripts run; only `agent` is stubbed (as today)
+- [x] `node tests/js/emit_labels.mjs` prints labels from both real workflow scripts, including every template family in design.md's grammar table
+- [x] `CK_DUMP_LABELS` writes the corpus when the existing suites run
+- [x] Every existing JS test passes unchanged
+- [x] The real workflow scripts run; only `agent` is stubbed (as today)
 
 **Dependencies:** None
 **Complexity:** Medium
