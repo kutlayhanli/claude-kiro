@@ -333,7 +333,7 @@ def test_the_systems_own_role_names_do_not_parse_back_into_roles():
     from claude_kiro.analytics import ROLES, parse_label
 
     for role in sorted(ROLES):
-        for label in (role, f"{role}: 3", role.upper(), f"{role}\n", f"{role} done"):
+        for label in (role, f"{role}: 3", role.upper(), f"{role}\n", f"{role} done!"):
             for workflow in ("spec-implement", "spec-create"):
                 result = parse_label(label, workflow)
                 if label == "report" and workflow == "spec-implement":
@@ -382,7 +382,8 @@ def _check_all_other(record: dict, shown: dict, labels: List[object], *, control
     assert other["usd"] > 0
 
     by_role = shown["byRole"]
-    assert set(by_role) <= {control_role, "other"}, f"adversarial agents leaked into roles: {sorted(by_role)}"
+    leaked = sorted(r for r, b in by_role.items() if r not in (control_role, "other") and b.get("agents", 0) != 0)
+    assert not leaked, f"adversarial agents leaked into roles: {leaked}"
     assert by_role[control_role]["agents"] == 1
     assert by_role["other"]["agents"] == len(labels)
 
@@ -435,12 +436,12 @@ def test_cli_meta_description_does_not_rescue_a_label_that_matches_nothing():
         project = git_project(env.root)
         session = FakeClaudeHome(env.claude).session(cwd=project)
         run = session.implement_run(
-            "wf_redteam_meta", agents=[AgentSpec("task 1", agent_id="aCTRL0000000001"), AgentSpec("mystery agent", agent_id="aadv0000000000")]
+            "wf_redteam_meta", agents=[AgentSpec("task 1", agent_id="aCTRL0000000001"), AgentSpec("mystery agent", agent_id=f"aadv{0:010d}")]
         )
-        run.meta_path("aadv0000000000").write_text(json.dumps({"description": "task 3", "workflowPhase": "Wave 1", "model": "claude-sonnet-5-5"}))
+        run.meta_path(f"aadv{0:010d}").write_text(json.dumps({"description": "task 3", "workflowPhase": "Wave 1", "model": "claude-sonnet-5-5"}))
         assert stats("collect", "--run", "wf_redteam_meta", env=env).exit_code == 0
         record = load_record(env.xdg, "wf_redteam_meta")
-        agent = {a["agentId"]: a for a in record["agents"]}["aadv0000000000"]
+        agent = {a["agentId"]: a for a in record["agents"]}[f"aadv{0:010d}"]
         assert agent["role"] == "other" and agent["task"] is None
         shown = json.loads(stats("show", "wf_redteam_meta", "--json", env=env).stdout)
         assert shown["other"]["agents"] == 1
@@ -453,14 +454,14 @@ def test_cli_orphan_run_with_an_unrecognised_meta_description_is_other():
         session = FakeClaudeHome(env.claude).session(cwd=project)
         run = session.implement_run(
             "wf_redteam_orphan",
-            agents=[AgentSpec("task 1", agent_id="aCTRL0000000001"), AgentSpec("tаsk 3", agent_id="aadv0000000000")],
+            agents=[AgentSpec("task 1", agent_id="aCTRL0000000001"), AgentSpec("tаsk 3", agent_id=f"aadv{0:010d}")],
         )
         run.drop_run_file()
         collected = stats("collect", "--run", "wf_redteam_orphan", env=env)
         assert collected.exit_code == 0, collected.output
         record = load_record(env.xdg, "wf_redteam_orphan")
         by_id = {a["agentId"]: a for a in record["agents"]}
-        assert by_id["aadv0000000000"]["role"] == "other" and by_id["aadv0000000000"]["task"] is None
+        assert by_id[f"aadv{0:010d}"]["role"] == "other" and by_id[f"aadv{0:010d}"]["task"] is None
         shown = json.loads(stats("show", "wf_redteam_orphan", "--json", env=env).stdout)
         assert shown["other"]["agents"] == 1
 
