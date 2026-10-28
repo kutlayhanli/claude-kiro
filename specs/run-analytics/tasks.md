@@ -451,7 +451,7 @@ The no-confidential-term property P-5 needs the leak term builder and is verifie
 ---
 
 ### Task 12: Property tests for settings validation (P-8, P-9)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.6, 7.6
 **Description:** Implements P-8 and P-9. P-8 pure half: for any string, `valid_machine_label(s)` from
@@ -472,11 +472,11 @@ another. Declare `PROPERTIES`.
 **Verifies:** Task 13
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the P-8 and P-9 rows
-- [ ] Settings are deterministic (`derandomize=True`, `database=None`, `deadline=None`; 200 for the pure half, 25 for CLI halves)
-- [ ] The pure half calls `valid_machine_label`; CLI halves run the real `ck agents set` against real config files
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] `PROPERTIES` map names the test for each P-id
+- [x] Generators cover every surface form and negative listed in the P-8 and P-9 rows
+- [x] Settings are deterministic (`derandomize=True`, `database=None`, `deadline=None`; 200 for the pure half, 25 for CLI halves)
+- [x] The pure half calls `valid_machine_label`; CLI halves run the real `ck agents set` against real config files
+- [x] Tests fail before the implementation exists for the right reason
+- [x] `PROPERTIES` map names the test for each P-id
 
 **Dependencies:** Task 1 (hypothesis, isolated config home, `ck_sub`)
 **Complexity:** Medium
