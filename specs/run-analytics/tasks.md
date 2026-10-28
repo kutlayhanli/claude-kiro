@@ -278,7 +278,7 @@ and legacy labels (5.3) is test-owned (Task 54).
 ---
 
 ### Task 7: Property test for issue codes (P-10)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 8.1
 **Description:** Implements P-10 against the Harness Contract seam `issue_codes(local) -> list[str]` and `ISSUE_CODES`
@@ -297,11 +297,11 @@ same class from the P-10 reason-class table (each class at least two exemplars; 
 **Verifies:** Task 8
 
 **Acceptance:**
-- [ ] Generators cover every surface form and permutation listed in the P-10 row
-- [ ] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
-- [ ] The test calls the decision seam `issue_codes`, not the CLI
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] `PROPERTIES` map names the test for P-10
+- [x] Generators cover every surface form and permutation listed in the P-10 row
+- [x] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
+- [x] The test calls the decision seam `issue_codes`, not the CLI
+- [x] Tests fail before the implementation exists for the right reason
+- [x] `PROPERTIES` map names the test for P-10
 
 **Dependencies:** Task 1 (hypothesis, `seeded_local_record`, `CONFIDENTIAL`)
 **Complexity:** Medium
@@ -739,7 +739,7 @@ exits non-zero, refuses, does not print the name, writes nothing. CLI runs go th
 ---
 
 ### Task 20: Integration tests for backfilling past runs
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 4.1, 4.2, 4.3, 4.4
 **Description:** Implements TC-28, TC-29, TC-30, TC-31. TC-28: two projects with completed `spec-implement`,
@@ -755,10 +755,10 @@ an empty home: says no ck runs were found, exit 0.
 **Verifies:** Task 24
 
 **Acceptance:**
-- [ ] Tests drive the real `ck stats collect --all` over real fake Claude homes across several projects
-- [ ] Summary assertions match the counts and the failure line format in the Harness Contract
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] No mocks of the project's own code
+- [x] Tests drive the real `ck stats collect --all` over real fake Claude homes across several projects
+- [x] Summary assertions match the counts and the failure line format in the Harness Contract
+- [x] Tests fail before the implementation exists for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake Claude home)
 **Complexity:** Medium
@@ -900,7 +900,7 @@ These suites also verify the criteria of foundation Tasks 14, 15 and 18 and the 
 ---
 
 ### Task 25: Implement show breakdowns, trends and renderers (show.py)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 6.1, 6.2, 6.3, 6.4, 6.7, 6.8
 **Description:** Create `show.py` with `ShowFilters`, `COVERAGE` (the four duration coverage strings in design.md),
@@ -923,10 +923,10 @@ functions only.
 Foundation task: smoke Verify only; its criteria are verified at Task 31 (Tasks 27, 28, 30).
 
 **Acceptance:**
-- [ ] The list is newest first with every 6.1 column
-- [ ] A run breakdown has every 6.2 item and coverage notes for every printed duration
-- [ ] Trends appear only for kinds with two or more filtered runs and honour all three filters
-- [ ] Fields missing from an older record show `unknown` in text and `null` in JSON
+- [x] The list is newest first with every 6.1 column
+- [x] A run breakdown has every 6.2 item and coverage notes for every printed duration
+- [x] Trends appear only for kinds with two or more filtered runs and honour all three filters
+- [x] Fields missing from an older record show `unknown` in text and `null` in JSON
 
 **Dependencies:** Task 4 (module lives in the package whose `__init__.py` Task 4 creates)
 **Complexity:** Medium
@@ -1191,7 +1191,7 @@ none of them from `confidential_terms`, so a record with `claudeCodeVersion` `2.
 ---
 
 ### Task 33: Property test for a shareable record holding no confidential term (P-5)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.2, 7.3, 9.4, 9.3, 8.1
 **Description:** Implements P-5 and P-24 against `build_shareable`, `SHAREABLE_FIELDS`, `confidential_terms` and
@@ -1213,11 +1213,11 @@ hit. Define the generators locally. Declare `PROPERTIES`.
 **Verifies:** Task 34
 
 **Acceptance:**
-- [ ] Generators cover every string leaf and surface form listed in the P-5 row, and every fixed set named in the P-24 row
-- [ ] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
-- [ ] Tests call the decision seams `build_shareable`, `confidential_terms` and `leak_scan`, not the CLI
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] `PROPERTIES` map names the test for P-5 and P-24
+- [x] Generators cover every string leaf and surface form listed in the P-5 row, and every fixed set named in the P-24 row
+- [x] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
+- [x] Tests call the decision seams `build_shareable`, `confidential_terms` and `leak_scan`, not the CLI
+- [x] Tests fail before the implementation exists for the right reason
+- [x] `PROPERTIES` map names the test for P-5 and P-24
 
 **Dependencies:** Task 1 (hypothesis, `seeded_local_record`, `CONFIDENTIAL`)
 **Complexity:** Medium
