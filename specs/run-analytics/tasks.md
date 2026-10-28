@@ -711,7 +711,7 @@ Foundation task: smoke Verify only; its criteria (TC-7, TC-8, TC-9, TC-11, TC-83
 ---
 
 ### Task 19: Integration tests for collecting only ck workflows
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.1, 2.2, 2.3
 **Description:** Implements TC-18, TC-19, TC-20. TC-18: a session holding two ck runs and foreign runs
@@ -727,10 +727,10 @@ exits non-zero, refuses, does not print the name, writes nothing. CLI runs go th
 **Verifies:** Task 24
 
 **Acceptance:**
-- [ ] Tests run the real `ck stats collect` over a real fake Claude home with real file permissions
-- [ ] Scans cover every file under `$XDG_DATA_HOME` plus captured stdout and stderr, using `all_bytes`
-- [ ] Tests fail before the implementation exists for the right reason (missing command/allowlist), not broken fixtures
-- [ ] No mocks of the project's own code
+- [x] Tests run the real `ck stats collect` over a real fake Claude home with real file permissions
+- [x] Scans cover every file under `$XDG_DATA_HOME` plus captured stdout and stderr, using `all_bytes`
+- [x] Tests fail before the implementation exists for the right reason (missing command/allowlist), not broken fixtures
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (fake Claude home with foreign runs)
 **Complexity:** Medium
