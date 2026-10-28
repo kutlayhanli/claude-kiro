@@ -201,7 +201,7 @@ The CLI-level criteria (1.10, 1.11, 1.13, 1.14, 1.15, 2.2) are verified at Task 
 - [x] `classify_home` returns `sandboxed` when the home is not listable, or missing while the sandbox flag is set
 - [x] `peek_workflow_name` returns only `workflowName` (any value) and keeps no other field; callers other than `leak.non_ck_workflow_names` discard non-allowlisted names immediately
 - [x] `session_run_ids` never returns or retains a non-allowlisted run's name or id, and returns unreadable-name run files as a count only
-- [ ] `recover_workflow_name` returns an allowlisted name only from the launch whose result names the run id (`spec:spec-implement`, `spec:spec-create`, or a `scriptPath` ending in `spec-implement.js` / `spec-create.js`), and None for anything else
+- [x] `recover_workflow_name` returns an allowlisted name only from the launch whose result names the run id (`spec:spec-implement`, `spec:spec-create`, or a `scriptPath` ending in `spec-implement.js` / `spec-create.js`), and None for anything else
 
 **Dependencies:** Task 3 (its tests are the oracle)
 **Complexity:** Medium
