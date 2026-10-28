@@ -1577,7 +1577,7 @@ These suites also verify the criteria of foundation Tasks 35 and 38 and the CLI-
 ---
 
 ### Task 43: Integration tests for the leak check blocking export and submit
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 9.1, 9.2, 9.3, 9.4, 10.2
 **Description:** Implements TC-59, TC-60, TC-61, TC-62. TC-59 (pty, `--note`): local records from projects A and B;
@@ -1602,11 +1602,11 @@ the PR title and body (from the gh log) contain none of the seeded strings in an
 **Verifies:** Task 45
 
 **Acceptance:**
-- [ ] Tests run the real CLI end to end: real git with a local bare remote, fake `gh` on PATH, real pty for notes
-- [ ] Every scanned artifact (files, branch, commit, PR text) is read from git or the gh log, not from ck internals
-- [ ] Blocked cases assert nothing was written, committed, pushed or sent to gh
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] No mocks of the project's own code; no network
+- [x] Tests run the real CLI end to end: real git with a local bare remote, fake `gh` on PATH, real pty for notes
+- [x] Every scanned artifact (files, branch, commit, PR text) is read from git or the gh log, not from ck internals
+- [x] Blocked cases assert nothing was written, committed, pushed or sent to gh
+- [x] Tests fail before the implementation exists for the right reason
+- [x] No mocks of the project's own code; no network
 
 **Dependencies:** Task 1 (seeded home, kiro checkout, fake gh, run_tty)
 **Complexity:** High
