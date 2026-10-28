@@ -342,7 +342,7 @@ The note drafting and decision criteria (8.2-8.5) are verified at Task 42 (Task 
 ---
 
 ### Task 9: Property tests for the shareable record builder (P-6, P-17, P-18, P-21)
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 7.1, 7.2, 7.3, 9.4
 **Description:** Implements P-6, P-17, P-18, P-21 against the Harness Contract seams `build_shareable(local, *,
@@ -363,11 +363,11 @@ generators in this file. Declare `PROPERTIES`.
 **Verifies:** Task 11
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the P-6, P-17, P-18, P-21 rows
-- [ ] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
-- [ ] Tests call the decision seams (`build_shareable`, `month_of`), not the CLI
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] `PROPERTIES` map names the test for each P-id
+- [x] Generators cover every surface form and negative listed in the P-6, P-17, P-18, P-21 rows
+- [x] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
+- [x] Tests call the decision seams (`build_shareable`, `month_of`), not the CLI
+- [x] Tests fail before the implementation exists for the right reason
+- [x] `PROPERTIES` map names the test for each P-id
 
 **Dependencies:** Task 1 (hypothesis, `seeded_local_record`, `CONFIDENTIAL`)
 **Complexity:** High
