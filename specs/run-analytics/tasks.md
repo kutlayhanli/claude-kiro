@@ -1226,7 +1226,7 @@ hit. Define the generators locally. Declare `PROPERTIES`.
 ---
 
 ### Task 34: Implement the leak check (leak.py)
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 9.1, 9.2, 9.3, 9.4
 **Description:** Create `leak.py` per design S17/S18 and the "leak.scan matching rule": `COMMON_WORDS` (about 300
