@@ -933,3 +933,121 @@ await test('planning: a plan step that keeps failing halts only if it left a rea
   assert.equal(b.result.reason, 'planning step failed')
   assert.deepEqual(b.result.notStarted, ['2'])
 })
+
+// Recursive key paths of a result: objects by key, arrays by their elements merged under "[]".
+// Pinned from the script before tasks[].resolves existed, plus that one key.
+const SNAPSHOT_KEYS = [
+  "agents",
+  "agents.fixer",
+  "agents.implementer",
+  "agents.orchestrator",
+  "agents.resolver",
+  "agents.reviewer",
+  "agents.reviewer_risky",
+  "agents.test_writer",
+  "blocked",
+  "blockedOn",
+  "crossTests",
+  "escalated",
+  "failed",
+  "finalGate",
+  "finalGate.green",
+  "fixerEscalations",
+  "fullGates",
+  "halted",
+  "head",
+  "into",
+  "landings",
+  "landings[].bisected",
+  "landings[].conflict",
+  "landings[].deferred",
+  "landings[].gates",
+  "landings[].merged",
+  "landings[].minutes",
+  "landings[].other",
+  "landings[].red",
+  "landings[].size",
+  "landings[].tasks",
+  "landings[].window",
+  "merged",
+  "notStarted",
+  "outcome",
+  "reason",
+  "reportSource",
+  "stats",
+  "stats.bisected",
+  "stats.failed",
+  "stats.fixes",
+  "stats.initiallyDone",
+  "stats.landings",
+  "stats.merged",
+  "stats.notStarted",
+  "stats.planFailures",
+  "stats.planSteps",
+  "targetGreen",
+  "taskAgents",
+  "taskAgents.effort",
+  "taskAgents.model",
+  "tasks",
+  "tasks[].agentMinutes",
+  "tasks[].attempts",
+  "tasks[].deviations",
+  "tasks[].escalations",
+  "tasks[].finishedAt",
+  "tasks[].fixedAfterMerge",
+  "tasks[].mergedAt",
+  "tasks[].ok",
+  "tasks[].outsideFiles",
+  "tasks[].reason",
+  "tasks[].resolves",
+  "tasks[].review",
+  "tasks[].review.effort",
+  "tasks[].review.findings",
+  "tasks[].review.model",
+  "tasks[].review.riskTag",
+  "tasks[].review.rounds",
+  "tasks[].review.summary",
+  "tasks[].review.verdict",
+  "tasks[].reviewModel",
+  "tasks[].riskTag",
+  "tasks[].startModel",
+  "tasks[].startedAt",
+  "tasks[].summary",
+  "tasks[].task",
+  "tasks[].title",
+  "tasks[].toMergedMinutes",
+  "tasks[].wave",
+  "tasks[].wrongTests",
+  "timing",
+  "timing.end",
+  "timing.minutes",
+  "timing.phases",
+  "timing.phases[].end",
+  "timing.phases[].group",
+  "timing.phases[].minutes",
+  "timing.phases[].start",
+  "timing.phases[].tasks",
+  "timing.start"
+]
+const keyPaths = (v, prefix = '') => {
+  if (Array.isArray(v)) return v.flatMap(x => keyPaths(x, prefix + '[]'))
+  if (v && typeof v === 'object') return Object.keys(v).flatMap(k => [prefix ? `${prefix}.${k}` : k, ...keyPaths(v[k], prefix ? `${prefix}.${k}` : k)])
+  return []
+}
+
+await test('TC-72: every result.tasks[i].resolves is the count of resolver rounds, failed tasks included', async () => {
+  // 1: no conflict; 2: one conflict; 3: two conflict rounds; 4: conflicts past MAX_RESOLVES (3) and fails.
+  const p = project({ deps: { 1: [], 2: [], 3: [], 4: [] }, conflicts: ['2'], conflictRounds: { 3: 2, 4: 99 } })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES, maxRetries: 0 } })
+  const resolvesOf = n => result.tasks.find(t => t.task === n).resolves
+  assert.deepEqual(['1', '2', '3', '4'].map(resolvesOf), [0, 1, 2, 3])
+  for (const t of result.tasks) assert.ok(Number.isInteger(t.resolves), `Task ${t.task} resolves is an integer`)
+  assert.ok(result.failed.includes('4') || result.tasks.find(t => t.task === '4').ok === false, 'task 4 failed')
+})
+
+await test('TC-73: the result key set is today\'s plus tasks[].resolves', async () => {
+  const p = project({ deps: { 1: [], 2: ['1'] }, conflicts: ['2'] })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })
+  const keys = [...new Set(keyPaths(result))].sort()
+  assert.deepEqual(keys, SNAPSHOT_KEYS)
+})

@@ -1891,7 +1891,7 @@ before the open questions (`/spec:review` runs spec-create in review mode). Use 
 ---
 
 ### Task 52: Workflow tests for the per-task conflict-resolution count
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 11.1, 11.2
 **Description:** Implements TC-72 and TC-73 in the existing stubbed-agent suite. TC-72: with the stubbed project having
@@ -1908,10 +1908,10 @@ before any implementation change); and the existing
 **Verifies:** Task 53
 
 **Acceptance:**
-- [ ] Tests run the real `plugin/workflows/spec-implement.js` with only `agent` stubbed
-- [ ] The key-set snapshot is taken from today's script, so any other result change fails
-- [ ] TC-72 tests fail before the implementation exists because `resolves` is absent, not because of harness errors
-- [ ] No mocks of the project's own code
+- [x] Tests run the real `plugin/workflows/spec-implement.js` with only `agent` stubbed
+- [x] The key-set snapshot is taken from today's script, so any other result change fails
+- [x] TC-72 tests fail before the implementation exists because `resolves` is absent, not because of harness errors
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 2 (`conflictRounds` in the fake project; both edit tests/js/spec_implement.test.mjs)
 **Complexity:** Medium
