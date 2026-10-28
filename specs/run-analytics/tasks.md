@@ -1734,7 +1734,7 @@ completed allowlisted runs, 1 collected with `ck stats collect --run`: reports 2
 ---
 
 ### Task 47: Report collection health in ck doctor (health.py)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 12.1, 12.2, 12.3
 **Description:** Create `health.py` with S25 `decide(newest, auto_collect, uncollected) -> List[DoctorFinding]` and
@@ -1750,9 +1750,9 @@ Wire it into `doctor()` in `cli/main.py`: warnings go into the existing `warning
 **Verified by:** Task 46
 
 **Acceptance:**
-- [ ] An unrecognised newest ck run file gives a warning naming the problem
-- [ ] Auto-collect off is reported as information only
-- [ ] Uncollected finished runs are counted with the `ck stats collect --all` suggestion
+- [x] An unrecognised newest ck run file gives a warning naming the problem
+- [x] Auto-collect off is reported as information only
+- [x] Uncollected finished runs are counted with the `ck stats collect --all` suggestion
 
 **Dependencies:** Task 15 (reads local records), Task 24 (both edit cli/main.py; the tests collect with `ck stats collect`), Task 46 (its tests are the oracle)
 **Complexity:** Low
