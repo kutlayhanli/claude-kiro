@@ -278,7 +278,7 @@ and legacy labels (5.3) is test-owned (Task 54).
 ---
 
 ### Task 7: Property test for issue codes (P-10)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 8.1
 **Description:** Implements P-10 against the Harness Contract seam `issue_codes(local) -> list[str]` and `ISSUE_CODES`
@@ -297,11 +297,11 @@ same class from the P-10 reason-class table (each class at least two exemplars; 
 **Verifies:** Task 8
 
 **Acceptance:**
-- [ ] Generators cover every surface form and permutation listed in the P-10 row
-- [ ] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
-- [ ] The test calls the decision seam `issue_codes`, not the CLI
-- [ ] Tests fail before the implementation exists for the right reason
-- [ ] `PROPERTIES` map names the test for P-10
+- [x] Generators cover every surface form and permutation listed in the P-10 row
+- [x] Settings are deterministic (`derandomize=True`, `max_examples=200`, `database=None`, `deadline=None`)
+- [x] The test calls the decision seam `issue_codes`, not the CLI
+- [x] Tests fail before the implementation exists for the right reason
+- [x] `PROPERTIES` map names the test for P-10
 
 **Dependencies:** Task 1 (hypothesis, `seeded_local_record`, `CONFIDENTIAL`)
 **Complexity:** Medium
