@@ -935,7 +935,7 @@ Foundation task: smoke Verify only; its criteria are verified at Task 31 (Tasks 
 ---
 
 ### Task 26: Integration tests for collecting a run's local record
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 1.10, 1.11, 1.12, 1.13, 1.14, 1.15, 2.2
 **Description:** Implements TC-1, TC-2, TC-3, TC-4, TC-5, TC-6, TC-7, TC-8, TC-9, TC-10, TC-11, TC-12, TC-13, TC-14,
@@ -976,12 +976,12 @@ set of the record really collected from `seeded_home` (both kinds), so the pure 
 **Verifies:** Task 24
 
 **Acceptance:**
-- [ ] Each TC listed above has at least one test whose name or docstring cites its TC id
-- [ ] Tests exercise the real boundary named in the test plan: the real `ck` CLI over real temp `CLAUDE_CONFIG_DIR`/`XDG_DATA_HOME`/`CK_CONFIG_HOME` trees and real git repos
-- [ ] Tests fail before the implementation exists for the right reason (no `ck stats` command / missing record fields), not because of broken fixtures
-- [ ] No mocks of the project's own code; `bench`, the store and config are used for real
-- [ ] No unknown number is accepted as 0 in any assertion (1.12)
-- [ ] Every test runs under `no_network`
+- [x] Each TC listed above has at least one test whose name or docstring cites its TC id
+- [x] Tests exercise the real boundary named in the test plan: the real `ck` CLI over real temp `CLAUDE_CONFIG_DIR`/`XDG_DATA_HOME`/`CK_CONFIG_HOME` trees and real git repos
+- [x] Tests fail before the implementation exists for the right reason (no `ck stats` command / missing record fields), not because of broken fixtures
+- [x] No mocks of the project's own code; `bench`, the store and config are used for real
+- [x] No unknown number is accepted as 0 in any assertion (1.12)
+- [x] Every test runs under `no_network`
 
 **Dependencies:** Task 1 (fake Claude home, store helpers, no_network)
 **Complexity:** High
