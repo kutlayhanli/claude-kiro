@@ -1476,7 +1476,7 @@ does not depend on the submit command.
 ---
 
 ### Task 40: Pty tests for the interactive issues note
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 8.2, 8.3, 8.4, 8.5, 7.12
 **Description:** Implements TC-55, TC-56, TC-57, TC-58. Use `run_tty` (real pty) with `fake_claude_drafter` on PATH and
@@ -1495,10 +1495,10 @@ without `.md`.
 **Verifies:** Task 42
 
 **Acceptance:**
-- [ ] Interaction runs under a real pseudo-terminal, not a patched `isatty`
-- [ ] Only `claude` and `$EDITOR` are faked; export, leak check and file writes are real
-- [ ] Tests fail before the implementation exists for the right reason (no `--note` flow)
-- [ ] No mocks of the project's own code
+- [x] Interaction runs under a real pseudo-terminal, not a patched `isatty`
+- [x] Only `claude` and `$EDITOR` are faked; export, leak check and file writes are real
+- [x] Tests fail before the implementation exists for the right reason (no `--note` flow)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (run_tty, fake drafter, fake editor, kiro checkout)
 **Complexity:** High
