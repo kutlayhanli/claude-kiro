@@ -176,6 +176,13 @@ def test_cost_is_conserved(plans, dup):
 
         agents = rec["agents"]
         assert len(agents) == len(plans)
+        # every transcript exists, so nothing is unknown: no null usd on an agent or a bucket
+        for a in agents:
+            assert a["usd"] is not None, a
+        for group in ("byModel", "byRole", "byPhase", "byTask"):
+            for name, cell in rec[group].items():
+                assert cell.get("usd") is not None, (group, name)
+        assert run_cost(rec)["usd"] is not None
         total = {k: sum(num(a[k]) for a in agents) for k in TOKEN_KEYS}
         total_usd = sum(num(a["usd"]) for a in agents)
         # each token kind agrees with what the transcripts hold, counting a request once
@@ -251,11 +258,19 @@ def test_missing_data_is_null_never_zero(case):
 
         after = collect_run(env, run.run_id)
         missing_ids = {m.get("agentId") for m in after["missing"]}
+        idx = {aid: i for i, aid in enumerate(run.agent_ids)}
+
+        def run_tokens(aid):  # the run file's own context-token count for the agent (input + output)
+            return sum(r[0] + r[1] for r in plans[idx[aid]]["reqs"])
+
         for a in after["agents"]:
             aid = a["agentId"]
             if aid in deleted:
-                for key in (*TOKEN_KEYS, "usd"):
+                # design 1.12 / AgentRow: no transcript means no usage (null); the cost is an estimate from the
+                # run-file context tokens at the input rate, so usd is null or a positive estimate, never 0
+                for key in TOKEN_KEYS:
                     assert a[key] is None, (aid, key, a[key])
+                assert a["usd"] is None or a["usd"] > 0 or run_tokens(aid) == 0, (aid, a["usd"])
                 assert aid in missing_ids, (aid, after["missing"])
             elif aid in orig:
                 for key in (*TOKEN_KEYS, "usd"):
@@ -263,5 +278,32 @@ def test_missing_data_is_null_never_zero(case):
                         raise AssertionError(f"{aid}.{key} went from {orig[aid][key]} to 0 after truncation")
                     if a[key] is None:
                         assert aid in missing_ids, (aid, key, after["missing"])
-        # metamorphic: deleting transcripts never raises the priced total
+                # an unsplit agent's only usage-bearing line was cut: the record says the transcript is damaged
+                if ops.get(idx[aid]) == "truncate" and not plans[idx[aid]]["split"]:
+                    assert aid in missing_ids or a.get("transcript") == "truncated", (aid, after["missing"])
+
+        # buckets whose every agent lost its transcript hold null, never 0 (1.12)
+        for group, field in (("byModel", "model"), ("byRole", "role"), ("byPhase", "phase"), ("byTask", "task")):
+            members = {}
+            for a in after["agents"]:
+                if a.get(field) is not None:
+                    members.setdefault(str(a[field]), []).append(a)
+            for name, cell in after[group].items():
+                group_agents = members.get(str(name), [])
+                if group_agents and all(a["agentId"] in deleted for a in group_agents):
+                    for key in TOKEN_KEYS:
+                        assert cell.get(key) is None, (group, name, key, cell.get(key))
+                    zero_run = all(run_tokens(a["agentId"]) == 0 for a in group_agents)
+                    assert cell.get("usd") is None or cell["usd"] > 0 or zero_run, (group, name, cell.get("usd"))
+
+        # the run cost is an estimate once any transcript is gone (1.12, S7), and never rises or drops to 0
+        if deleted:
+            assert run_cost(after)["source"] == "estimate", run_cost(after)
+        usd_before, usd_after = run_cost(before)["usd"], run_cost(after)["usd"]
+        if usd_after is not None:
+            assert usd_after <= num(usd_before) + 1e-9, (usd_before, usd_after)
+            survivors = sum(num(a["usd"]) for a in after["agents"] if a["agentId"] not in deleted)
+            if survivors > 0:
+                assert usd_after > 0, (usd_before, usd_after)
+        # metamorphic: deleting transcripts never raises the priced total (also through `ck cost`)
         assert cost_json(env, run.run_id, allow_none=True)["priced_usd"] <= base_priced + 1e-9
