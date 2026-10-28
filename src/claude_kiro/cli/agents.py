@@ -40,6 +40,10 @@ def agents(ctx: click.Context, as_json: bool, overrides: tuple):
     click.echo("Spec workflow agents:")
     for role, settings in roles.items():
         def shown(key, value):
+            if key == "analytics":
+                return "on" if value else "off"
+            if key == "machine_label":
+                return value or "(none)"
             if isinstance(value, list):
                 if key == "allowed_domains":
                     return ",".join(value) or "none"
