@@ -550,7 +550,7 @@ Foundation task: its smoke check is the existing cost and bench suites; the agre
 ---
 
 ### Task 15: Implement the local data store (store.py)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.1, 1.8, 1.9, 7.8, 10.3
 **Description:** Create `store.py` per design.md "analytics/store.py": `data_dir(env)` (`$CK_DATA_HOME`, else
@@ -569,10 +569,10 @@ Harness Contract Files interface for the local store (`$XDG_DATA_HOME/claude-kir
 Foundation task: smoke Verify only; its criteria are verified at Task 24 (Task 26: TC-9, TC-10, TC-79), which also lists `store.py` for fix-ups, and Task 42 (Task 39: ledger).
 
 **Acceptance:**
-- [ ] Records land under `$XDG_DATA_HOME/claude-kiro/runs/<run_id>.json` (fallback `~/.local/share/claude-kiro`) with mode 0600, directory 0700 when created
-- [ ] Writing the same run twice leaves exactly one file
-- [ ] `load_records` returns records of an older schema version and counts unreadable files instead of failing
-- [ ] The ledger round-trips `exported` and `submitted` entries
+- [x] Records land under `$XDG_DATA_HOME/claude-kiro/runs/<run_id>.json` (fallback `~/.local/share/claude-kiro`) with mode 0600, directory 0700 when created
+- [x] Writing the same run twice leaves exactly one file
+- [x] `load_records` returns records of an older schema version and counts unreadable files instead of failing
+- [x] The ledger round-trips `exported` and `submitted` entries
 
 **Dependencies:** Task 4 (module lives in the package whose `__init__.py` Task 4 creates), Task 13 (calls the salt helper and reads run.machine_label)
 **Complexity:** Medium
