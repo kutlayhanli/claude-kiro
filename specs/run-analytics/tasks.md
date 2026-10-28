@@ -792,7 +792,7 @@ the measurement). Mark the module `slow` if the repo has such a marker, otherwis
 ---
 
 ### Task 22: Property test for keeping foreign workflows out of every output (P-2)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.2, 2.3
 **Description:** Implements P-2 through the CLI (`max_examples=25`, other settings as P-1; each example builds its
@@ -808,11 +808,11 @@ runs are stored and foreign runs refused. Define the generators locally. Declare
 **Verifies:** Task 24
 
 **Acceptance:**
-- [ ] Generators cover every foreign name form listed in the P-2 row
-- [ ] Settings are deterministic (`derandomize=True`, `max_examples=25`, `database=None`, `deadline=None`)
-- [ ] The property runs the real CLI over real temp homes
-- [ ] Tests fail before the implementation exists for the right reason (missing command)
-- [ ] `PROPERTIES` map names the test for P-2
+- [x] Generators cover every foreign name form listed in the P-2 row
+- [x] Settings are deterministic (`derandomize=True`, `max_examples=25`, `database=None`, `deadline=None`)
+- [x] The property runs the real CLI over real temp homes
+- [x] Tests fail before the implementation exists for the right reason (missing command)
+- [x] `PROPERTIES` map names the test for P-2
 
 **Dependencies:** Task 1 (hypothesis, fake Claude home, `CONFIDENTIAL`)
 **Complexity:** Medium
