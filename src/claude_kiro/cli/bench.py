@@ -160,4 +160,7 @@ def cost(session_id: str, run_id: str, as_json: bool):
     if not s["transcripts"]:
         click.echo(f"❌ No transcripts found for session {session_id}{' run ' + run_id if run_id else ''} under {home}")
         sys.exit(1)
+    if s["priced_usd"] is None and s["claude_usd"] is None:
+        click.echo(f"❌ No usable transcripts for session {session_id}{' run ' + run_id if run_id else ''} under {home}")
+        sys.exit(1)
     click.echo(json.dumps(s, indent=2) if as_json else "\n".join(b.spend_lines(s)))

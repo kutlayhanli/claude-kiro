@@ -392,6 +392,11 @@ def _build_agent(a: _Agent, workflow_name: str, pricing: dict, missing: List[dic
         "cacheRead": usage["cacheRead"] if usage else None, "cacheCreation": usage["cacheCreation"] if usage else None,
         "transcript": status,
     }
+    if status == "truncated":
+        # a cut file cannot show that a figure is really 0: report it as unknown
+        for k in ("usd", "input", "output", "cacheRead", "cacheCreation"):
+            if row[k] == 0:
+                row[k] = None
     info = {"scan": scan, "usage_by_model": usage_by_model, "usage": usage, "match": match,
             "first_ts": first_ts, "last_ts": last_ts}
     return row, info
@@ -671,22 +676,27 @@ def _workflow_metrics(kind: str, workflow_name: str, result: Any, rows: List[dic
     """The spec-implement / spec-create metrics, `outcome` and `agentsConfig` (1.2, 1.5, 1.6, 1.7)."""
     out: Dict[str, Any] = {"outcome": None, "outcomeInferred": False, "agentsConfig": None}
     if kind == "spec-create":
-        out.update({"mode": None, "reviewResult": None, "openQuestions": None, "review": None,
-                    "consistency": None, "phases": None})
+        out.update({"review": None, "consistency": None, "phases": None})
     else:
-        out.update({"reportSource": None, "taskSpanMinutes": None, "tasks": None, "landings": None, "fullGates": None, "finalGate": None, "crossTests": None,
-                    "fixerEscalations": None, "phases": None, "stats": None})
+        out.update({"tasks": None, "landings": None, "fullGates": None, "finalGate": None, "crossTests": None,
+                    "fixerEscalations": None, "phases": None})
     if not isinstance(result, Mapping):
         return out
     if kind == "spec-create":
-        out.update(_create_metrics(result, rows))
-        out["outcome"] = out["reviewResult"]
+        cm = _create_metrics(result, rows)
+        out["outcome"] = cm.pop("reviewResult")
+        for k in ("mode", "openQuestions"):
+            cm.pop(k, None)  # not Harness Contract keys of the local record
+        out.update(cm)
         out["outcomeInferred"] = False
     else:
         out["outcome"], out["outcomeInferred"] = derive_outcome(result)
         args = run_data.get("args") if run_data else None
         tracks = args.get("tracks") if isinstance(args, dict) and isinstance(args.get("tracks"), dict) else {}
-        out.update(_implement_metrics(result, rows, workflow_name, {str(k): v for k, v in tracks.items()}))
+        im = _implement_metrics(result, rows, workflow_name, {str(k): v for k, v in tracks.items()})
+        for k in ("reportSource", "taskSpanMinutes", "stats"):
+            im.pop(k, None)  # not Harness Contract keys of the local record
+        out.update(im)
     return out
 
 
