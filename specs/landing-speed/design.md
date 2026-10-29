@@ -168,7 +168,7 @@ def suggestion(verify: Sequence[str]) -> Optional[str]:
 Hint text (both commands):
 
 ```
-pytest runs serially in "verify": pytest-xdist can run it in parallel (add pytest-xdist as a dev dependency and "-n auto" to the command). Check first that test ids are stable: unstable ids make xdist fail with "Different tests were collected between gw0 and gw1". One-line check: PYTHONHASHSEED=1 <cmd> --collect-only -q > /tmp/ids1 && PYTHONHASHSEED=2 <cmd> --collect-only -q > /tmp/ids2 && diff /tmp/ids1 /tmp/ids2
+pytest runs serially in "verify": pytest-xdist can run it in parallel (add pytest-xdist as a dev dependency and "-n auto" to the command). Check first that test ids are stable: unstable ids make xdist fail with "Different tests were collected between gw0 and gw1". One-line check: PYTHONHASHSEED=1 <cmd> --collect-only -q | grep :: > /tmp/ids1 && PYTHONHASHSEED=2 <cmd> --collect-only -q | grep :: > /tmp/ids2 && diff /tmp/ids1 /tmp/ids2 (<cmd> must not already contain -q: two -q make pytest print per-file counts instead of ids)
 ```
 
 Here `<cmd>` is the pytest prefix of the first pytest command without `-n` (as in `config.collect_command`).

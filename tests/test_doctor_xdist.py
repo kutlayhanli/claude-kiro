@@ -2,6 +2,7 @@
 
 import json
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -11,7 +12,7 @@ import pytest
 
 from stats_helpers import ck_sub
 
-PYTEST_CMD = f"{sys.executable} -m pytest -q"
+PYTEST_CMD = f"{shlex.quote(sys.executable)} -m pytest"  # no -q: a second -q makes --collect-only print per-file counts, not ids
 HINT_VERIFY = ["uv run pytest -q"]
 NO_HINT_VERIFIES = [
     ["uv run pytest -q -n auto"],
@@ -23,7 +24,8 @@ NO_HINT_VERIFIES = [
 
 
 def _bullets(output, heading):
-    """The bullet lines under a doctor section heading (`Warnings:` or `Issues found:`)."""
+    """(Local on purpose: tests/test_stats_doctor.py has no shared parser to import.)
+    The bullet lines under a doctor section heading (`Warnings:` or `Issues found:`)."""
     m = re.search(rf"{re.escape(heading)}\n((?:  - .*\n?)*)", output)
     return m.group(1).splitlines() if m else []
 
@@ -119,7 +121,24 @@ def test_hint_names_the_pitfall_and_its_check_command_discriminates(inited, stab
     ok = subprocess.run(["sh", "-c", cmd], cwd=stable_suite, capture_output=True, text=True, timeout=300)
     assert ok.returncode == 0, ok.stdout + ok.stderr
     bad = subprocess.run(["sh", "-c", cmd], cwd=pid_suite, capture_output=True, text=True, timeout=300)
-    assert bad.returncode != 0 or bad.stdout.strip(), "pid-parametrized suite should show a difference"
+    assert bad.returncode != 0, "pid-parametrized suite should fail the check"
+    assert "test_pid.py::test_a[" in bad.stdout, bad.stdout + bad.stderr
+
+
+# TC-50 (7.2): the design's own check command, hand-written, proves the stable-suite assertion is satisfiable
+# (pytest's trailing "N tests collected in 0.xxs" line must not reach the diff).
+HAND_WRITTEN_CHECK = (
+    "PYTHONHASHSEED=1 {cmd} --collect-only -q | grep :: > ids1 && "
+    "PYTHONHASHSEED=2 {cmd} --collect-only -q | grep :: > ids2 && diff ids1 ids2"
+)
+
+
+def test_design_check_command_passes_stable_and_fails_pid_suite(stable_suite, pid_suite):
+    cmd = HAND_WRITTEN_CHECK.format(cmd=PYTEST_CMD)
+    ok = subprocess.run(["sh", "-c", cmd], cwd=stable_suite, capture_output=True, text=True, timeout=300)
+    assert ok.returncode == 0, ok.stdout + ok.stderr
+    bad = subprocess.run(["sh", "-c", cmd], cwd=pid_suite, capture_output=True, text=True, timeout=300)
+    assert bad.returncode != 0 and "test_pid.py::test_a[" in bad.stdout, bad.stdout + bad.stderr
 
 
 # TC-51 (7.3)
@@ -154,7 +173,6 @@ def test_init_gives_no_suggestion_for_a_package_json_only_repo(tmp_path):
     assert "xdist" not in r.output.lower()
 
 
-
 # TC-53 (7.5)
 @pytest.mark.parametrize("break_it", [False, True], ids=["healthy", "issue"])
 def test_doctor_exit_code_is_unchanged_by_the_hint(inited, break_it):
@@ -183,31 +201,32 @@ def test_doctor_hint_iff_seam_suggests(inited, verify):
         assert got == [f"  - {expected}"]
 
 
-# P-20 (7.5)
-def _state_healthy(p):
-    pass
-
-
-def _state_no_claude(p):
+# P-20 (7.5): exit status is the same with and without the hint, in each project state.
+# "no-verify" contrasts a missing verify key with the hint's verify in a project without specs/ck.json
+# (nothing to flag for a missing config; the hint must not change the exit status either way).
+def _no_claude(p):
     shutil.rmtree(p / ".claude")
 
 
-def _state_no_verify(p):
-    pass  # verify is removed by the case itself
+def _no_config(p):
+    (p / "specs" / "ck.json").unlink()
 
 
-STATES = {"healthy": _state_healthy, "no-claude": _state_no_claude, "no-verify": _state_no_verify}
+STATES = {"healthy": None, "no-claude": _no_claude, "no-verify": _no_config}
 
 
 @pytest.mark.parametrize("state", sorted(STATES))
 def test_p20_doctor_exit_status_ignores_the_hint(inited, state):
+    if STATES[state]:
+        STATES[state](inited)
     codes = {}
     for name, verify in (("hint", HINT_VERIFY), ("no-hint", ["uv run pytest -q -n auto"])):
-        set_verify(inited, None if state == "no-verify" else verify)
-        if not (inited / ".claude").exists() and state != "no-claude":
-            pytest.fail("fixture lost .claude")
-        if state == "no-claude" and (inited / ".claude").exists():
-            STATES[state](inited)
+        if state == "no-verify":
+            (inited / "specs").mkdir(exist_ok=True)
+            cfg = inited / "specs" / "ck.json"
+            cfg.write_text(json.dumps({"verify": verify}) + "\n") if name == "hint" else cfg.unlink(missing_ok=True)
+        else:
+            set_verify(inited, verify)
         code, warnings, _ = doctor(inited)
         if state != "no-verify":
             assert bool(xdist_bullets(warnings)) == (name == "hint")
