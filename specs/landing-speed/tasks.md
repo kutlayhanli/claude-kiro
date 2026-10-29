@@ -181,12 +181,19 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 **Verifies:** Task 12
 
 **Acceptance:**
-- [ ] Tests run the real `plugin/workflows/spec-implement.js` under the fake runtime; agents are the only fakes
-- [ ] Assertions use observable behaviour only (labels, order, prompts, result, log), never script internals
-- [ ] Before implementation the suite fails for missing behaviour (e.g. plan requested after every finished task, plan prompt still creates worktrees, no `worktree` outcome handling, no `deps` arg in the skill), not from harness errors
-- [ ] TC-18 checks all four BUSY clauses (reason, one agent, worktree untouched, others merge) under both `onFailure` values
-- [ ] TC-1 checks `agentSlots` and `finishFirst` in the skill args as well as `deps`/`remaining`, and that the real `ck agents --json` emits the key paths the skill names
-- [ ] TC-9/TC-10/TC-11 show cycle refusal, verify-order handling under both `onFailure` values, and planning-failure stop behave as today
+- [x] Tests run the real `plugin/workflows/spec-implement.js` under the fake runtime; agents are the only fakes
+- [x] Assertions use observable behaviour only (labels, order, prompts, result, log), never script internals
+- [x] Before implementation the suite fails for missing behaviour (e.g. plan requested after every finished task, plan prompt still creates worktrees, no `worktree` outcome handling, no `deps` arg in the skill), not from harness errors
+- [x] TC-18 checks all four BUSY clauses (reason, one agent, worktree untouched, others merge) under both `onFailure` values
+- [x] TC-1 checks `agentSlots` and `finishFirst` in the skill args as well as `deps`/`remaining`, and that the real `ck agents --json` emits the key paths the skill names
+- [x] TC-9/TC-10/TC-11 show cycle refusal, verify-order handling under both `onFailure` values, and planning-failure stop behave as today
+
+**Implementation notes (Task 6):**
+- Pre-implementation run: TC-4, TC-5, TC-6, TC-13, TC-14, TC-20 (both), TC-55 (a, b), TC-62 and TC-1's args checks fail for missing behaviour (plan after every freed slot, no idle plan, no create step in the task prompt, ERROR retried, no decisions block, no `deps` in the skill). TC-2, TC-7-TC-12, TC-17, TC-18, TC-21, TC-22 already hold today (as-today and guard cases).
+- Idle plans are recognised by the design's log line `plan <n> (idle): …`; plan labels are matched as `plan <k>` / `plan <k> retry`.
+- TC-8 deviation: the row's deps `{1:[],2:[],3:[],4:['3']}` put task 3 first in chain order at the start, so "never requests task 3" cannot hold for any correct scheduler. The test uses `{1:[],2:[],3:['1'],4:['3']}` with task 2 holding the only slot (100 ms), so 3 can only become ready through plan 2 (after landing 1), which reports it Done. The Done-not-merged check reads the fake `ck worktree report` output (the script's `result.merged` folds git's `done` into merged).
+- TC-22 deviation: with `checkRed: ['2']` the `fix 1 …` agent is today's red-landing fixer (`landFixPrompt`), which works in the task worktree and never creates `fix1`. The `worktree create demo fix1 --install --base integrate/demo` assertion is made on the fixer after a red full gate (`fullRed`, `fullGateEvery: 1`), which is where today's script creates the fix worktree; the `checkRed: ['2']` fixer is checked to stay in `demo-task-2` without creating a worktree, as today.
+- TC-4 gives task 2 a 50 ms duration and TC-55 (b) gives task 2's merge 50 ms, so the asserted orders are deterministic; TC-5 / TC-12 use 10 ms merges so landings batch.
 
 **Dependencies:** Task 1 (fake_project.mjs options, runWorkflow, load_decisions.mjs)
 **Complexity:** High
