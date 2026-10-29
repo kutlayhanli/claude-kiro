@@ -340,7 +340,7 @@ No property uses a wall-clock tolerance. Settings `@settings(derandomize=True, m
 ---
 
 ### Task 11: Red-team the SHALL NOT clauses of Stories 1-3 (no idle-plan storm, no start on a guess, no touching a BUSY worktree, no new task while a finish-type agent is queued)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.5, 1.10, 2.3, 3.1, 3.8
 **Description:** Try to break each SHALL NOT clause of Stories 1, 2 and 3 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Write from requirements.md only, through `bridge.run` / `bridge.ready` (real script) and, for Story 2, the real CLI. One file per story:
@@ -355,10 +355,16 @@ No property uses a wall-clock tolerance. Settings `@settings(derandomize=True, m
 **Verifies:** Task 12
 
 **Acceptance:**
-- [ ] Every workflow case drives the real script (or the real `readyTasks` seam) via the bridge and reads only `trace`, result, prompts and log; CLI cases use real `ck` on real git
-- [ ] Each test fails before implementation for missing behaviour, not test code errors
-- [ ] Cases include near-miss ids, the plan's own output fed back, and prototype-key tricks
-- [ ] A BUSY worktree's files and claim are unchanged in every CLI case
+- [x] Every workflow case drives the real script (or the real `readyTasks` seam) via the bridge and reads only `trace`, result, prompts and log; CLI cases use real `ck` on real git
+- [x] Each test fails before implementation for missing behaviour, not test code errors
+- [x] Cases include near-miss ids, the plan's own output fed back, and prototype-key tricks
+- [x] A BUSY worktree's files and claim are unchanged in every CLI case
+
+**Implementation notes:**
+- Answers the fake project cannot produce (BUSY next to `status:'done'`/`gatePassed:true`, BUSY only in `blocker` text) and prototype-named Done ids (the fake's own `chainLengths` crashes on `d in dependents` for `constructor`/`__proto__`) go through `run_driver` in `tests/test_worktree_redteam.py`: a one-shot Node driver written to a temp dir that runs the real script with the same `load_workflow.mjs` / `fake_project.mjs`, replacing only the first task agent's answer (`override`) or merging extra `deps`/`done` into every plan answer (`plan_patch`, exactly what `ck plan` would print for those ids). No harness file was changed.
+- Before Task 12, 96 of 129 cases fail for missing behaviour (no decisions block, no create/claim lines in the task prompt, no load-time validation of `finishFirst`/`agentSlots`, BUSY not recognised in the result, idle-plan back-to-back, tasks started on dangling deps, task starts while a review/land queues). The other 33 cover SHALL NOT clauses today's script already happens to satisfy (for example an upper-case BUSY from the fake under `continue`, or pressure scenarios where today's per-event plan agents keep the queue short); they stay as regression guards.
+- 1.10 oracle: near-miss string ids (`"02"`, `"2 "`, `"Task 2"`, `"２"`, `""`, worktree-path forms…) are unknown and never started; a numeric `2` (not a string, never emitted by `ck plan`) is only required never to start before task 2 merges.
+- 1.5 oracle: a plan request with no `land … end` since the previous plan request is an idle plan; consecutive idle plans need a `land … end` or `task … end` between them.
 
 **Dependencies:** Task 1 (bridge, fake_project `worktree` option, runWorkflow `slots`/`trace`)
 **Complexity:** High
