@@ -66,11 +66,13 @@ Settings: `@settings(derandomize=True, max_examples=200, database=None, deadline
 **Verifies:** Task 3
 
 **Acceptance:**
-- [ ] P-1 compares the script's real `readyTasks` (from the real script source) against the real `ck plan` CLI on a real git repo, over at least 200 derandomized examples
-- [ ] Generators cover every surface form in the P-1..P-5 rows: non-contiguous multi-digit ids, empty dep lists, diamonds, long chains, duplicate deps, deps on Done or excluded tasks, dangling deps, Done/exclude subsets including absent ids
-- [ ] Properties call the decision seam through the bridge, not the whole workflow
-- [ ] Before implementation every test fails because `readyTasks`/the decision markers are missing, not because of test code errors
-- [ ] No mocks of `claude_kiro` code
+- [x] P-1 compares the script's real `readyTasks` (from the real script source) against the real `ck plan` CLI on a real git repo, over at least 200 derandomized examples
+- [x] Generators cover every surface form in the P-1..P-5 rows: non-contiguous multi-digit ids, empty dep lists, diamonds, long chains, duplicate deps, deps on Done or excluded tasks, dangling deps, Done/exclude subsets including absent ids
+- [x] Properties call the decision seam through the bridge, not the whole workflow
+- [x] Before implementation every test fails because `readyTasks`/the decision markers are missing, not because of test code errors
+- [x] No mocks of `claude_kiro` code
+
+**Notes (Task 2):** Before Task 3, all five tests fail with the bridge's `decision marker missing ... "// --- decisions (pure; loaded by tests) ---"`. To check the test logic, I ran them once against a throwaway reference decisions block (not committed), loaded through the bridge's `script` hook: all five passed. Two mutations of it were caught: treating a dependency missing from the `deps` keys as met (P-2 fails), and ordering ids as strings (P-1 fails on `{'2', '100'}`). P-2 also checks that t *would* be ready without d, so the property cannot pass vacuously. P-5 lifts the exclusions when the drawn ready list is empty.
 
 **Dependencies:** Task 1 (bridge, `dags()`, `write_spec`, `ck_plan`)
 **Complexity:** Medium
