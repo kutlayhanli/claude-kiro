@@ -585,7 +585,8 @@ def _implement_metrics(result: Mapping, rows: List[dict], workflow_name: str, tr
             start = r["queuedAtMs"] if r["queuedAtMs"] is not None else r["startedAtMs"]
             end = r["startedAtMs"] + r["ms"] if r["startedAtMs"] is not None and r["ms"] is not None else None
             ivs.append((start, end))
-        review_wait, landing_wait = wait_split(finished_ms, merged_ms, ivs)        tasks.append({
+        review_wait, landing_wait = wait_split(finished_ms, merged_ms, ivs)
+        tasks.append({
             "task": t.get("task"), "title": t.get("title") if isinstance(t.get("title"), str) else None,
             "track": track, "reason": t.get("reason") if isinstance(t.get("reason"), str) else None,
             "wave": _int(t.get("wave")), "ok": t.get("ok") if isinstance(t.get("ok"), bool) else None,

@@ -427,13 +427,13 @@ View (`src/claude_kiro/analytics/show.py`):
 **Verified by:** Task 13
 
 **Acceptance:**
-- [ ] A run file with `queuedAt`/`startedAt` yields rows with `queueMs` = start − queued (0 when equal) (4.1)
-- [ ] Missing, null, non-numeric, bool or inverted times yield `queueMs: null`, collection exits 0, other row fields unchanged (4.2)
-- [ ] `ck stats show <run>` lists count, median, p90 and total queue wait per kind present (4.3)
+- [x] A run file with `queuedAt`/`startedAt` yields rows with `queueMs` = start − queued (0 when equal) (4.1)
+- [x] Missing, null, non-numeric, bool or inverted times yield `queueMs: null`, collection exits 0, other row fields unchanged (4.2)
+- [x] `ck stats show <run>` lists count, median, p90 and total queue wait per kind present (4.3)
 - [ ] Each task's finish-to-merge wait splits into review and landing time, with medians and totals shown next to idle-before-merge, overlapping review intervals not double-counted (4.4)
 - [ ] A run without queue data shows `not recorded` and every existing text and JSON figure is identical (4.5)
 - [ ] `--json` carries the same queue-wait and split values as the text view (4.6)
-- [ ] A record collected before this change displays without re-collection (4.7)
+- [x] A record collected before this change displays without re-collection (4.7)
 
 **Dependencies:** Task 13 (its tests are the oracle)
 **Complexity:** Medium
