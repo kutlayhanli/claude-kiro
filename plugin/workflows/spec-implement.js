@@ -620,7 +620,7 @@ function maybeCrossTest(n, atEnd = false) {
   crossTestRuns.push((async () => {
     let r = null
     try {
-      r = await call('cross', crossTestPrompt(merged), { label: `cross-test wave ${w}`, phase: phaseOf(merged[0]), schema: REVIEW_SCHEMA, ...RISKY_REVIEW })
+      r = await call('cross-test', crossTestPrompt(merged), { label: `cross-test wave ${w}`, phase: phaseOf(merged[0]), schema: REVIEW_SCHEMA, ...RISKY_REVIEW })
     } catch (e) {
       r = null
     }
@@ -692,6 +692,7 @@ let fallbackReady = []      // without args.deps: the ready list of the plan tha
 let planRun = null          // the plan agent in flight, if any
 let queuedTrigger = null    // a trigger that arrived while one was in flight: one follow-up
 let idleArmed = true
+let recordSeq = 0           // task records seen so far: a landing plan disarms the idle plan only if none arrived while it ran
 let deferring = false
 const excluded = () => new Set([...running.keys(), ...failed.keys(), ...mergedInRun])
 function planContext() {
@@ -708,6 +709,7 @@ function planContext() {
 // tasks start and finish while the plan agent runs.
 async function runPlan(trigger) {
   refills++
+  const seqAtPrompt = recordSeq
   for (let attempt = 0; attempt < 2; attempt++) {
     const label = `plan ${refills}${attempt ? ' retry' : ''}`
     const exclude = [...excluded()]
@@ -721,15 +723,16 @@ async function runPlan(trigger) {
         if (p.error) log(`${label}: the planning agent left a note (not a failure): ${trim(p.error, 300)}`)
         current = n
         view = applyPlanView(n, mergedInRun)
-        for (const b of n.busy) {
+        // Task agents own BUSY detection; a busy list from the plan agent is ignored in script-readiness mode.
+        for (const b of SCRIPT_READINESS ? [] : n.busy) {
           if (!failed.has(b.task) && !running.has(b.task)) {
             failed.set(b.task, `worktree busy: ${b.detail}`)
             records[b.task] = { task: b.task, wave: waveOf(b.task), ok: false, reason: `worktree busy: ${b.detail}` }
           }
         }
-        applyLint(n)
+        if (trigger !== 'start') applyLint(n)  // the start plan's cycle refusal is explicit, below
         fallbackReady = n.ready
-        if (trigger === 'landing') idleArmed = false  // this plan just re-read tasks.md after a landing
+        if (trigger === 'landing' && recordSeq === seqAtPrompt) idleArmed = false  // this plan just re-read tasks.md after a landing
         return n
       }
       planFailures++
@@ -781,6 +784,7 @@ function finishTask(n, rec) {
   releaseSlot(n)
   running.delete(n)
   records[n] = rec
+  recordSeq++
   maybeCrossTest(n)
   if (!rec.ok) idleArmed = true  // a merged task was already followed by its landing plan; a failed one may change what is ready
   if (!rec.ok) {
@@ -896,7 +900,7 @@ async function landBatch(batch) {
   if (entry.bisected || entry.red.length) log(`Landing ${tasks.join(' ')}: red, bisected; ${entry.red.length ? `culprit(s) ${entry.red.join(', ')}` : 'no culprit (flaky?)'}; window now ${batchWindow}`)
 
   if (entry.merged.length && FULL_EVERY > 0 && Math.floor(mergedCount / FULL_EVERY) > Math.floor(before / FULL_EVERY)) {
-    let v = await call('full', verifyPrompt(`full gate after ${mergedCount} merges`), { label: `full gate @${mergedCount}`, phase: phaseOf(tasks[0]), schema: VERIFY, ...ORCH })
+    let v = await call('gate', verifyPrompt(`full gate after ${mergedCount} merges`), { label: `full gate @${mergedCount}`, phase: phaseOf(tasks[0]), schema: VERIFY, ...ORCH })
     if (!v || !v.green) {
       log(`Full gate red after ${mergedCount} merges, one fix attempt`)
       const f = await fixAndRecheck(`full gate after ${mergedCount} merges`, v)
@@ -1003,6 +1007,11 @@ async function runTask(n) {
       rec.escalations.push({ stage: 'retry', model })
       rec.startedAt = rec.startedAt || (r && r.startedAt)
     }
+    if (!ok(r) && busy(r)) {
+      const bo = worktreeOutcome(r)
+      rec.busy = true
+      rec.reason = bo.reason
+    }
     releaseSlot(n)
     if (ok(r) && REVIEW_ON) {
       let review = await call('review', reviewPrompt(n, r), { label: `review ${n}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
@@ -1039,7 +1048,7 @@ async function runTask(n) {
     rec.result = r
     rec.finishedAt = r && r.finishedAt
     if (!ok(r)) {
-      rec.reason = r ? r.blocker || `gate not passed (status ${r.status})` : 'agent died without a report'
+      if (!rec.busy) rec.reason = r ? r.blocker || `gate not passed (status ${r.status})` : 'agent died without a report'
       return rec
     }
     const m = await landTask(n, rec)
@@ -1082,7 +1091,8 @@ poked = false
 // Wakes on a settled agent call, a freed slot, a plan result or a finished task. The wake-up waits a few
 // microtask hops, so the continuation of the call that settled makes its own follow-up request (a review
 // after an implementer, a land after an approval) before free slots are counted (3.9).
-while (running.size || planRun) {
+// A held start with agents still in flight stays alive too: any of them settling re-runs the start decision (NFR-6).
+while (running.size || planRun || (deferring && inFlight.length)) {
   await signal()
   poked = false
   for (let i = 0; i < 10; i++) await null
@@ -1096,7 +1106,7 @@ await Promise.all(crossTestRuns)
 let finalGate = null
 if (mergedCount && !redTarget) {
   phase('Final gate')
-  finalGate = await call('full', verifyPrompt('final'), { label: 'final gate', phase: 'Final gate', schema: VERIFY, ...ORCH })
+  finalGate = await call('gate', verifyPrompt('final'), { label: 'final gate', phase: 'Final gate', schema: VERIFY, ...ORCH })
   if (!finalGate || !finalGate.green) {
     log(`Final gate red, one fix attempt`)
     const f = await fixAndRecheck('final gate', finalGate)
