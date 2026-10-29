@@ -556,7 +556,7 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 ---
 
 ### Task 19: Write `ck doctor` / `ck init` xdist hint tests (Story 7)
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 7.1, 7.2, 7.3, 7.4, 7.5
 **Properties:** P-20
