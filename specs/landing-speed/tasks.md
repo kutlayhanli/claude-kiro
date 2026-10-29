@@ -548,10 +548,10 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 **Verified by:** Task 15
 
 **Acceptance:**
-- [ ] `pyproject.toml` dev group includes pytest-xdist and `uv.lock` is in sync (`uv lock --check`) (5.1)
-- [ ] `specs/ck.json` verify runs pytest with `-n auto` (5.2)
-- [ ] Collecting the suite with two different `PYTHONHASHSEED` values gives identical ids (5.3)
-- [ ] The suite gives the same (nodeid, outcome) set under `-n auto` as serially, with no test skipped, deselected or lost relative to serial (TC-41 compare run) (5.4)
+- [x] `pyproject.toml` dev group includes pytest-xdist and `uv.lock` is in sync (`uv lock --check`) (5.1)
+- [x] `specs/ck.json` verify runs pytest with `-n auto` (5.2)
+- [x] Collecting the suite with two different `PYTHONHASHSEED` values gives identical ids (5.3)
+- [x] The suite gives the same (nodeid, outcome) set under `-n auto` as serially, with no test skipped, deselected or lost relative to serial (TC-41 compare run) (5.4)
 
 **Dependencies:** Task 15 (its tests are the oracle)
 **Complexity:** Low
