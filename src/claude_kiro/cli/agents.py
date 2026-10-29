@@ -34,13 +34,13 @@ def agents(ctx: click.Context, as_json: bool, overrides: tuple):
     except ag.AgentConfigError as e:
         _fail(e)
     if as_json:
-        click.echo(json.dumps(resolved, indent=2))
+        click.echo(json.dumps({**resolved, "runtime": ag.runtime_info()}, indent=2))
         return
     roles, sources = resolved["roles"], resolved["sources"]
     click.echo("Spec workflow agents:")
     for role, settings in roles.items():
         def shown(key, value):
-            if key == "analytics":
+            if key in ("analytics", "finish_first"):
                 return "on" if value else "off"
             if key == "machine_label":
                 return value or "(none)"

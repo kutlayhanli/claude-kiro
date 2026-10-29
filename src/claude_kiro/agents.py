@@ -19,7 +19,7 @@ import os
 import re
 import secrets
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from claude_kiro.paths import CONFIG_FILE
 
@@ -84,6 +84,9 @@ DEFAULTS: Dict[str, Dict[str, Any]] = {
     # when that is set); `ck run --budget` overrides both for one run.
     "run": {"max_concurrent": None, "allowed_domains": list(DEFAULT_ALLOWED_DOMAINS), "budget_usd": None,
             "budget_per_task_usd": None,
+            # finish_first: true = a task whose agent is done may land before the others still running
+            # (landing order follows finish order); off = land in task order.
+            "finish_first": True,
             # analytics: record each `ck run` into the local stats database. machine_label: a slug
             # naming this machine in exports (null = unset).
             "analytics": True, "machine_label": None},
@@ -97,13 +100,37 @@ ROLE_KEYS = {
     "fixer": {"model", "effort", "escalate"},
     "orchestrator": {"model", "effort"},
     "resolver": {"model", "effort"},
-    "run": {"max_concurrent", "allowed_domains", "budget_usd", "budget_per_task_usd", "analytics", "machine_label"},
+    "run": {"max_concurrent", "allowed_domains", "budget_usd", "budget_per_task_usd", "finish_first", "analytics", "machine_label"},
 }
 UNLIMITED = "unlimited"
 
 
 class AgentConfigError(ValueError):
     pass
+
+
+def core_count() -> Optional[int]:
+    """CPUs this process may use: the affinity mask where the platform has one, else os.cpu_count()."""
+    if hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(0))
+    return os.cpu_count()
+
+
+def runtime_agent_slots(cpus: Optional[int], env: Mapping[str, str]) -> int:
+    """How many agent slots this machine runs at once: CK_AGENT_SLOTS if it is a positive int,
+    else min(16, cpus - 2), at least 1. This is the one place the runtime cap is computed."""
+    override = (env.get("CK_AGENT_SLOTS") or "").strip()
+    if override.isdigit() and int(override) >= 1:
+        return int(override)
+    if cpus is None:
+        return 1
+    return max(1, min(16, cpus - 2))
+
+
+def runtime_info(env: Optional[Mapping[str, str]] = None) -> Dict[str, int]:
+    """The machine facts `ck agents --json` reports under "runtime"."""
+    cpus = core_count() or 1
+    return {"cpus": cpus, "agentSlots": runtime_agent_slots(cpus, os.environ if env is None else env)}
 
 
 def global_config_path() -> Path:
@@ -160,7 +187,9 @@ def _coerce(role: str, key: str, value: Any) -> Any:
         return value
     if isinstance(value, str) and value.lower() in ("null", "none", "default"):
         value = None
-    if key in ("ask", "enabled", "complexity_routing", "cross_test", "analytics"):
+    if key in ("ask", "enabled", "complexity_routing", "cross_test", "analytics", "finish_first"):
+        if value is None and key == "finish_first":
+            return None  # reset: the key is removed and the default (true) applies
         if isinstance(value, str):
             if value.lower() not in ("true", "false", "yes", "no", "on", "off"):
                 raise AgentConfigError(f"{role}.{key} must be true or false (also yes/no, on/off)")
