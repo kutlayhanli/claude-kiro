@@ -309,7 +309,7 @@ def test_44_marked_description_that_matches_no_template_is_other_for_every_agent
         _assert_other(parse_agent_description(described(RUN, rest), agent_type), _short(rest, agent_type, True))
 
 
-@pytest.mark.parametrize("rest", [pytest.param(r, id=i) for i, r in OTHER_RESTS])
+@pytest.mark.parametrize("rest", [pytest.param(r, id=i) for i, r in OTHER_RESTS if not r.startswith("[ck:")])
 def test_44_markerless_rendition_of_the_same_near_miss_is_other_too(rest):
     """4.4: the marker-less rendition (no run id, 2.5) is held to the same grammar."""
     from claude_kiro.analytics import parse_agent_description

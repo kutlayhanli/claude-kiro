@@ -194,7 +194,10 @@ def test_36_near_miss_kind_is_a_malformed_manifest_not_a_guess(kind):
         log.unlink(missing_ok=True)
         out = _collect(envp, run_id, repo)
         assert out.exit_code == 1, out.output
-        assert "run manifest not recognised" in out.output, out.output
+        assert json.loads(out.stdout) == {"run_id": run_id, "result": "failed", "error": "malformed"}, out.output
+        plain = stats("collect", "--agents", run_id, env=envp, cwd=repo)
+        assert plain.exit_code == 1, plain.output
+        assert "run manifest not recognised" in plain.output, plain.output
         assert _runs(env) == []
         assert _report_calls(log) == [], "a malformed kind must not reach the report"
         assert manifest.read_bytes() == before, "a malformed manifest is left untouched"
@@ -321,8 +324,10 @@ def test_317_unmarked_and_foreign_marked_general_purpose_agents_are_in_no_record
 
         out = _collect(envp, run_id, repo)
         assert out.exit_code == 0, out.output
-        assert json.loads(out.stdout)["result"] == "unchanged", f"3.17: an adversarial agent changed the record: {out.output}"
+        assert json.loads(out.stdout)["result"] in ("unchanged", "updated"), f"3.17: unexpected result: {out.output}"
         rec = load_record(env.xdg, run_id)
+        # 3.15 may record unreadable metas as gaps; nothing else may change
+        assert all(m.get("what") == "meta" and m.get("agentId") is None for m in rec.get("missing", [])), rec.get("missing")
         assert _agent_ids(rec) == [LEGIT], f"3.17: foreign agents in the record: {_agent_ids(rec)}"
         if kind == "create":
             assert _report_calls(log) == []
@@ -355,7 +360,10 @@ def test_317_run_with_only_adversarial_agents_has_no_agents_and_writes_nothing()
         before = manifest.read_bytes()
         out = _collect(envp, run_id, repo)
         assert out.exit_code == 1, out.output
-        assert "no agents carry the marker" in out.output, out.output
+        assert json.loads(out.stdout) == {"run_id": run_id, "result": "failed", "error": "no_agents"}, out.output
+        plain = stats("collect", "--agents", run_id, env=envp, cwd=repo)
+        assert plain.exit_code == 1, plain.output
+        assert "no agents carry the marker" in plain.output, plain.output
         assert _runs(env) == []
         assert manifest.read_bytes() == before and manifest.parent.name == "runs-open"
 

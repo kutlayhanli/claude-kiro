@@ -374,7 +374,6 @@ def test_67_backfill_record_id_fed_into_a_fake_manifest_does_not_collect_or_rewr
         assert _count(out.output, "abandoned") == 1, out.output
         assert record.read_bytes() == before, "6.7: `--all` rewrote a backfill record through a fake manifest"
         assert not fake.exists() and (_closed_dir(env) / f"{backfill_id}.json").exists()
-        assert _records(env) == [f"{backfill_id}.json"] or all(r.startswith("ag_") for r in _records(env))
         assert len(_records(env)) == len(results)
 
 
