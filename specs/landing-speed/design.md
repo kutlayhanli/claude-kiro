@@ -146,7 +146,8 @@ def registry_dir(env: Mapping[str, str]) -> Path:
     Never TMPDIR or tempfile.gettempdir(): sandboxed commands get their own writable TMPDIR while
     /tmp is read-only, and gettempdir() can fall back to the cwd (a task worktree)."""
 @contextmanager
-def gate_slot(registry: Optional[Path] = None) -> Iterator[Optional[Path]]:
+def gate_slot(registry: Optional[Path] = None, errors: Optional[List[str]] = None) -> Iterator[Optional[Path]]:
+    # errors: when given, receives the reason a registration failed (for run_gate's one-line note)
     """Register this gate atomically: create <registry>/.reg-<pid>-<random>, take LOCK_EX on it,
     then os.rename it to <registry>/gate-<pid>-<random>.lock (the flock stays with the inode), and
     hold the lock until exit, when it unlinks its own file. A gate-*.lock name therefore never

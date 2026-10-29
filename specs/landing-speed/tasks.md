@@ -515,23 +515,28 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 **Files:**
 - `src/claude_kiro/xdist.py` - new module: registry, worker cap, env, core count, doctor/init hint
 - `src/claude_kiro/gate.py` - `gate_slot` around `run_gate`; `_run` env parameter; `verify_env` per verify command
-**Verify:** `uv run pytest -q tests/test_gate_xdist.py tests/test_xdist_hint.py tests/test_gate_xdist_redteam.py` and, for the command-position rule, the `has_pytest_without_n` cases of `tests/test_doctor_xdist_redteam.py`
+**Verify:** `uv run pytest -q tests/test_gate_xdist.py tests/test_xdist_hint.py tests/test_gate_xdist_redteam.py` `uv run pytest -q tests/test_doctor_xdist_redteam.py -k no_hint_for_near_miss`
 **Verified by:** Task 15, Task 16, Task 20
 
 **Acceptance:**
-- [ ] With `PYTEST_XDIST_AUTO_NUM_WORKERS` unset and one other live gate, a verify command sees `str(max(1, cores // 2))`; alone it sees `str(cores)`; with more gates than cores it sees `"1"` (6.1, 6.3, 6.4)
-- [ ] A preset value (including the empty string) passes through unchanged (6.2)
-- [ ] A gate that passed, failed, timed out or was SIGKILLed is no longer counted by the next gate (6.5)
-- [ ] With the registry path pointing at a regular file or an unreadable directory, the gate still runs its verify commands, counts only itself, prints one line naming the unusable registry, and its result follows the command's exit code (6.6)
-- [ ] Gates with different `TMPDIR` values count each other through the default registry, and no registry file is ever written under `TMPDIR`, `/tmp` or the cwd (6.1, TC-60)
+- [x] With `PYTEST_XDIST_AUTO_NUM_WORKERS` unset and one other live gate, a verify command sees `str(max(1, cores // 2))`; alone it sees `str(cores)`; with more gates than cores it sees `"1"` (6.1, 6.3, 6.4)
+- [x] A preset value (including the empty string) passes through unchanged (6.2)
+- [x] A gate that passed, failed, timed out or was SIGKILLed is no longer counted by the next gate (6.5)
+- [x] With the registry path pointing at a regular file or an unreadable directory, the gate still runs its verify commands, counts only itself, prints one line naming the unusable registry, and its result follows the command's exit code (6.6)
+- [x] Gates with different `TMPDIR` values count each other through the default registry, and no registry file is ever written under `TMPDIR`, `/tmp` or the cwd (6.1, TC-60)
 - [ ] A gate is counted from the moment its `gate-*.lock` exists; a concurrent counter never removes a live gate's file (6.1, TC-61)
-- [ ] Verify argv and the gate report's command strings are verbatim (no `-n` added/removed) (6.7)
-- [ ] `running_gates` never deletes a file that does not match `gate-*.lock`
-- [ ] `suggestion` returns the hint for pytest commands without `-n` and None for `-n`/`--numprocesses` forms, non-pytest commands and empty lists, independent of command order; the hint names the collection-mismatch error and contains the PYTHONHASHSEED one-line check (7.1, 7.2, 7.3)
+- [x] Verify argv and the gate report's command strings are verbatim (no `-n` added/removed) (6.7)
+- [x] `running_gates` never deletes a file that does not match `gate-*.lock`
+- [x] `suggestion` returns the hint for pytest commands without `-n` and None for `-n`/`--numprocesses` forms, non-pytest commands and empty lists, independent of command order; the hint names the collection-mismatch error and contains the PYTHONHASHSEED one-line check (7.1, 7.2, 7.3)
 
 **Dependencies:** Task 15, Task 16 (its tests are the oracle)
 **Complexity:** Medium
 **Risk:** safety (deletes registry lock files; must remove only ended `gate-*.lock` files in the registry dir)
+
+**Implementation notes (Task 17):**
+- Verify line: the original line put prose in backticks (`has_pytest_without_n`, `tests/test_doctor_xdist_redteam.py`), which the gate ran as shell commands (exit 127/126). It now runs the doctor red-team's near-miss (command-position) cases as a real command.
+- `gate_slot(registry=None, errors=None)`: the optional `errors` list receives the reason when registration fails, for `run_gate`'s one-line note. `run_gate` wraps a private `_run_gate`; the note goes to stderr (stdout of the done-verify hook may be parsed).
+- Blocked on TC-61 (`test_counter_never_removes_live_or_in_progress_registrations`): see the task report. Its counter subprocess is never awaited before the 30 registrations run (~8 ms here), so the counter's loop runs 0 times and `int(out.split()[0]) > 0` fails. All registry assertions in the test hold.
 
 ---
 
