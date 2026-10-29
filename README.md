@@ -257,8 +257,13 @@ ck stats show wf_…                 # one run: wall time, cost by role/phase/mo
 ck stats label work                # name this machine in shared records (personal, work, ...); optional
 ck stats export --to ~/claude-kiro # write shareable records into a claude-kiro checkout (asks first)
 ck stats submit --to ~/claude-kiro # open one draft PR per batch against kutlayhanli/claude-kiro (asks first)
+ck stats begin --kind implement --spec NAME --into BRANCH --json  # agent-mode run: open a run, print its run id
+ck stats collect --agents RUN_ID --auto                          # agent-mode run: collect it (the skills run this)
+ck stats collect --agents-backfill --dry-run                     # older implement runs: list what backfill would record
 ```
 
+- **Agent mode.** `/spec:implement`, `/spec:create` and `/spec:review`, and `/spec:spawn-worktree` when it runs agents directly, open a run with `ck stats begin`, which prints a run id that every agent's description carries. At the end of the run, `ck stats collect --agents <run_id> --auto` writes its record. Create and review runs from before this feature cannot be recovered. Runs whose `ck stats begin` failed cannot be recovered either, because their agents carry no marker.
+- **Backfill.** `ck stats collect --agents-backfill` (with `--dry-run` to list the groups first, and `--gap MINUTES` to change how far apart agents may be and still form one run) records implement runs from before this feature out of their agent transcripts. It covers only those runs.
 - **Collection is local and automatic.** After `ck run` and at the end of `/spec:implement`, `/spec:create` and `/spec:review`, the finished run is collected from Claude Code's run file and agent transcripts into `$XDG_DATA_HOME/claude-kiro/runs/` (`CK_DATA_HOME` overrides; never inside a project). Only ck workflows are collected; other workflows on the machine are counted, never named. `ck agents set run.analytics false` turns automatic collection off. `ck doctor` reports uncollected runs.
 - **Costs** are priced from the transcripts with the same code as `ck cost`, and each figure says where it came from.
 - **Sharing is opt-in and leak-checked.** Shared records hold only allowlisted fields (counts, durations, costs, model aliases, enums, the month); no spec names, task titles, paths, branches, ids, prompts or exact dates (schema: `analytics/SCHEMA.md`). Before export and submit, a leak check scans every file, the branch name, commit message and PR text for terms taken from your local records and git identity, plus generic secret patterns; any hit blocks. `--note` drafts a short ck-level issues note that you approve or edit in the terminal; it is never exported without that approval.

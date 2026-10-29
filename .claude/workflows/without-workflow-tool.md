@@ -19,6 +19,49 @@ Each role has an agent type, and each Agent call carries the role's `model` and 
 
 If these types are unknown to this session, use `general-purpose` with the same `model` and `effort`, and tell me once.
 
+## Run id and Agent descriptions
+
+Agent-mode analytics groups a run's agents by a run id that goes into each Agent call's `description`. Before the first Agent call of a run, run `ck stats begin --kind <kind> --spec <spec> --into <into> --json` outside the sandbox. `<kind>` is `implement` for /spec:implement and /spec:spawn-worktree, `create` for /spec:create and `review` for /spec:review. `<into>` is the target branch (leave `--into` out when there is none). The JSON object's `run_id` is the id that replaces `<run_id>` below.
+
+Write each description exactly as one of these templates, with only `<run_id>`, `<N>` (a task number) and `<k>` (a positive number) filled in:
+
+| Agent type | Description | Used for |
+|---|---|---|
+| `ck-implementer` or `ck-test-writer` | `[ck:<run_id>] implement task <N>` | first attempt at a task |
+| same | `[ck:<run_id>] implement task <N> retry <k>` | retry or escalation number `k` (attempt `k + 1`) |
+| same | `[ck:<run_id>] revise task <N> round <k>` | revision after review round `k` |
+| `ck-reviewer` | `[ck:<run_id>] review task <N> round <k>` | review of a task's diff |
+| `ck-resolver` | `[ck:<run_id>] resolve task <N>` or `[ck:<run_id>] resolve task <N> round <k>` | merge conflict |
+| `ck-fixer` | `[ck:<run_id>] fix <k>` | red target branch, attempt `k` |
+| `ck-fixer` | `[ck:<run_id>] fix task <N> attempt <k>` | task red on landing, attempt `k` |
+| `general-purpose` | one of the create templates below | spec-create and spec-review agents |
+
+The create templates, one per step of the spec-create workflow (use the step literal after the marker):
+
+- `[ck:<run_id>] create requirements`
+- `[ck:<run_id>] create design`
+- `[ck:<run_id>] create test-plan`
+- `[ck:<run_id>] create impl-track`
+- `[ck:<run_id>] create test-track`
+- `[ck:<run_id>] create link`
+- `[ck:<run_id>] create review fidelity`
+- `[ck:<run_id>] create review grounding`
+- `[ck:<run_id>] create review implementability`
+- `[ck:<run_id>] create review verification`
+- `[ck:<run_id>] create refute fidelity`
+- `[ck:<run_id>] create refute grounding`
+- `[ck:<run_id>] create refute implementability`
+- `[ck:<run_id>] create refute verification`
+- `[ck:<run_id>] create snapshot`
+- `[ck:<run_id>] create revise`
+- `[ck:<run_id>] create consistency 1`
+- `[ck:<run_id>] create consistency 2`
+- `[ck:<run_id>] create cleanup`
+
+If `begin` failed or printed no id, use the same descriptions without the `[ck:<run_id>] ` prefix (for example `implement task <N>`) and never stop or retry the run because of it. Such agents carry no marker, so ck never collects that run. Backfill does not cover it either: backfill reads only runs from before agent-mode analytics existed.
+
+When the report is composed, the last step of the run is the collect, outside the sandbox: run `ck stats collect --agents <run_id> --auto` and quote the line it prints (where the record went, or why it was skipped; if it failed, quote the retry command it gives). Never let its result change what you report about the run. If `begin` failed, there is no collect: end the report with this line in place of the collect step: `⚠ ck stats begin failed: this run is not recorded in ck stats`
+
 ## Translating a script
 
 | In the script | With the Agent tool |
@@ -34,14 +77,14 @@ Long-running agents (task agents, gates) go in the background (`run_in_backgroun
 
 ## /spec:create and /spec:review
 
-Follow `.claude/workflows/spec-create.js` from top to bottom with the args the command gave you (`mode` is `create` or `review`). In order: requirements; design and test plan in parallel; the two task tracks in parallel; the link step; the four review lenses in parallel, each lens's refuter as soon as that lens returns; the snapshot of the spec files into `<specDir>/.pre-revision/`; the revision; the consistency check (a second pass only if the first fixed something); removing the snapshot. Copy each prompt from the script verbatim, apart from the substitutions; they hold the rules that make the spec work (the test plan never sees the design, refuters default to refuting, and so on). Then return to the command's "close the loop" step with the result the script would have returned.
+Follow `.claude/workflows/spec-create.js` from top to bottom with the args the command gave you (`mode` is `create` or `review`). In order: requirements; design and test plan in parallel; the two task tracks in parallel; the link step; the four review lenses in parallel, each lens's refuter as soon as that lens returns; the snapshot of the spec files into `<specDir>/.pre-revision/`; the revision; the consistency check (a second pass only if the first fixed something); removing the snapshot. Copy each prompt from the script verbatim, apart from the substitutions; they hold the rules that make the spec work (the test plan never sees the design, refuters default to refuting, and so on). Then return to the command's "close the loop" step with the result the script would have returned. Start the run with `ck stats begin --kind create` (`--kind review` for /spec:review) and give each agent the create description of its step (see Run id and Agent descriptions).
 
 ## /spec:implement (whole spec)
 
 You are the scheduler that `.claude/workflows/spec-implement.js` would be. The task prompts are `taskPrompt`, `retryPrompt`, `reviewPrompt`, `revisePrompt`, `resolvePrompt`, `landFixPrompt` and `fixPrompt` in that script; build them with the same values (`spec`, `root`, `into`, `targetDir`, the worktree `<worktreeDir>/<spec>-task-<N>` on branch (`worktreeDir` from `ck plan <spec> --json`; default `<root>/.ck/worktrees`) `feat/<spec>-task-<N>`, the brief `.claude/workflows/spec-implement-brief.md`). Run the landings and gates yourself instead of through orchestrator agents.
 
 1. **Task list.** One item per remaining task: `Task N: <title> [track]`. Mark each as it moves: running, reviewing, merging, merged, or failed (with the reason).
-2. **Launch.** `ck plan <spec> --json --exclude <running and failed tasks>`. Take its `ready` tasks, keeping at most `run.max_concurrent` from `ck agents --json` (null means no cap) tasks with an implementing agent at work (fewer if I said the tests are memory-heavy). A task in review or waiting to merge doesn't count, so start the next ready task as soon as one moves on to review or the merge queue. From the main checkout: `ck worktree create <spec> <ready…> --install --base <into> --json`. For each CREATED or EXISTS entry, start a background Agent with the track's type (`ck-test-writer` or `ck-implementer`), description `implement <spec>: task <N>`, and the task prompt. Route by `ck plan`'s `risk` and `complexity` as the script's `codeOpts` does: a `safety` task starts at the implementer's `risky_model` (unset: the last model of its `escalate` list), and with `complexity_routing` a `high` task starts at the first `escalate` model; pass that as the Agent call's `model`, never one below the role's own. Its escalation then uses only the `escalate` models above that start. Start them all in one message. BUSY and ERROR entries: report them, don't spawn into them. `create` has already released stale claims (idle past `claim_stale_minutes`), so a BUSY claim is a live agent's; don't judge one by the process ID it names.
+2. **Launch.** Before the first launch, run `ck stats begin --kind implement --spec <spec> --into <into> --json` (see Run id and Agent descriptions). `ck plan <spec> --json --exclude <running and failed tasks>`. Take its `ready` tasks, keeping at most `run.max_concurrent` from `ck agents --json` (null means no cap) tasks with an implementing agent at work (fewer if I said the tests are memory-heavy). A task in review or waiting to merge doesn't count, so start the next ready task as soon as one moves on to review or the merge queue. From the main checkout: `ck worktree create <spec> <ready…> --install --base <into> --json`. For each CREATED or EXISTS entry, start a background Agent with the track's type (`ck-test-writer` or `ck-implementer`), description `[ck:<run_id>] implement task <N>`, and the task prompt. Route by `ck plan`'s `risk` and `complexity` as the script's `codeOpts` does: a `safety` task starts at the implementer's `risky_model` (unset: the last model of its `escalate` list), and with `complexity_routing` a `high` task starts at the first `escalate` model; pass that as the Agent call's `model`, never one below the role's own. Its escalation then uses only the `escalate` models above that start. Start them all in one message. BUSY and ERROR entries: report them, don't spawn into them. `create` has already released stale claims (idle past `claim_stale_minutes`), so a BUSY claim is a live agent's; don't judge one by the process ID it names.
 3. **When a task agent finishes,** read its JSON report.
    - Not `done` with `gatePassed: true`: start one retry (retry prompt, same type, `--takeover`). If the retry fails too and the role has an `escalate` list (from `ck agents --json`), start one more retry per model in it, in order, passing that model as the Agent call's `model` (same type and effort). If those fail too, the task fails. Its dependents never start. With `"onFailure": "halt"` (I asked to stop at the first failure), stop launching.
    - Done and the reviewer is enabled: start `ck-reviewer` in the background with the review prompt. For a task `ck plan` lists as `safety` in `risk`, pass the reviewer's `risky_model` as the Agent call's `model` and its `risky_effort` as the `effort`. On `changes`, send the revise prompt to the same implementer with SendMessage (it keeps its context), or start a new agent of its type with the revise prompt if SendMessage isn't available. Then review again, up to the reviewer's `rounds`, then one more revision per `escalate` model (a new agent of its type with the Agent call's `model` set to it). If blocking findings remain, the task fails: "review: blocking findings remain after N revision(s)".

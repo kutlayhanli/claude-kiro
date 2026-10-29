@@ -404,7 +404,7 @@ In `health.py`, extend `decide(newest, auto_collect, uncollected, stale_manifest
 ---
 
 ### Task 15: Update the agent-mode instructions, skills, README and their vendored `.claude/` copies (lands by hand)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.6, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 5.1, 5.4, 7.9
 **Description:** Edit the packaged sources, then regenerate the vendored copies in the same task, so the dogfood-copy test never sees them out of step. The vendored files are protected `.claude/**` paths: this is the only task touching them and it is landed by hand outside the sandbox.
@@ -429,13 +429,13 @@ Use invented project names only; no template may carry a spec, feature, title, s
 **Verify:** `uv run pytest -q tests/test_stats_agents_docs.py` `uv run pytest -q -n auto tests/test_plugin.py tests/test_stats_skills.py tests/test_plugin_modes.py`
 **Verified by:** Task 14 (docs, template and P-6 tests)
 **Acceptance:**
-- [ ] The instructions list at least `[ck:<run_id>] implement task <N>`, `... implement task <N> retry <k>`, `... review task <N> round <k>`, `... fix <k>`, `... resolve task <N>`, and every `CREATE_STEPS` entry written out as `[ck:<run_id>] create <literal step>`
-- [ ] Every `[ck:<run_id>]` template in these docs uses only `<run_id>`, `<N>`, `<k>` and renders to a description `parse_agent_description` parses to a known role
-- [ ] The begin step, the marker-less fallback (never stop or retry) and the final `--agents ... --auto` collect step appear in the agent-mode instructions and spawn-worktree
-- [ ] The implement/create/review skills keep their workflow collect line verbatim and add the agent-mode line
-- [ ] README documents agent-mode usage, the create/review backfill limitation and that runs whose `begin` failed are not recoverable
-- [ ] The marker-less path ends its report with the `begin` failed line instead of the collect step
-- [ ] `tests/test_plugin.py::test_dogfood_copies_in_this_repo_match_the_plugin_source` passes; each vendored copy contains the packaged `begin` and `collect --agents` lines (with `ck-*` agent types where the source says `spec:*`)
+- [x] The instructions list at least `[ck:<run_id>] implement task <N>`, `... implement task <N> retry <k>`, `... review task <N> round <k>`, `... fix <k>`, `... resolve task <N>`, and every `CREATE_STEPS` entry written out as `[ck:<run_id>] create <literal step>`
+- [x] Every `[ck:<run_id>]` template in these docs uses only `<run_id>`, `<N>`, `<k>` and renders to a description `parse_agent_description` parses to a known role
+- [x] The begin step, the marker-less fallback (never stop or retry) and the final `--agents ... --auto` collect step appear in the agent-mode instructions and spawn-worktree
+- [x] The implement/create/review skills keep their workflow collect line verbatim and add the agent-mode line
+- [x] README documents agent-mode usage, the create/review backfill limitation and that runs whose `begin` failed are not recoverable
+- [x] The marker-less path ends its report with the `begin` failed line instead of the collect step
+- [x] `tests/test_plugin.py::test_dogfood_copies_in_this_repo_match_the_plugin_source` passes; each vendored copy contains the packaged `begin` and `collect --agents` lines (with `ck-*` agent types where the source says `spec:*`)
 **Dependencies:** Task 3 (templates must parse with `parse_agent_description` and use `AGENT_CREATE_STEPS` / `CREATE_LENSES`), Task 14 (its tests are the oracle)
 **Complexity:** Medium
 **Risk:** normal
