@@ -393,11 +393,11 @@ No property uses a wall-clock tolerance. Settings `@settings(derandomize=True, m
 **Verifies:** Task 14
 
 **Acceptance:**
-- [ ] Example tests go through the real `ck stats` CLI over real run files (FakeClaudeHome); no `claude_kiro` module is mocked
-- [ ] The fixture record is produced by the pre-change collector and committed before implementation
-- [ ] Property generators cover every surface form and negative listed in P-13..P-16; settings deterministic; properties call the seams directly
-- [ ] Before implementation the tests fail because `queuedAt` is not collected and the seams/sections do not exist, not from helper bugs
-- [ ] Existing stats suites still pass with the helper additions (defaults unchanged)
+- [x] Example tests go through the real `ck stats` CLI over real run files (FakeClaudeHome); no `claude_kiro` module is mocked
+- [x] The fixture record is produced by the pre-change collector and committed before implementation
+- [x] Property generators cover every surface form and negative listed in P-13..P-16; settings deterministic; properties call the seams directly
+- [x] Before implementation the tests fail because `queuedAt` is not collected and the seams/sections do not exist, not from helper bugs
+- [x] Existing stats suites still pass with the helper additions (defaults unchanged)
 
 **Dependencies:** None
 **Complexity:** High
