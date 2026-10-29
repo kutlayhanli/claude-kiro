@@ -164,7 +164,7 @@ Add self-checks to `tests/test_stats_helpers.py` that exercise only the harness 
 ---
 
 ### Task 6: Add run-manifest storage next to the local record store
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.1, 1.2, 3.8, 6.6
 **Description:** Foundation task. Extend `store.py` with the manifest locations and I/O from design.md "Python entry points": `open_manifests_dir` (`<data_dir>/runs-open`), `closed_manifests_dir` (`<data_dir>/runs-closed`), `manifest_path(run_id)` (open first, then closed, else None), `write_manifest(manifest)` (into runs-open, through the existing `write_private_json` so files are 0600 and created directories 0700), `read_manifest(run_id) -> (data, "open"|"closed"|"missing"|"malformed")` (unparseable JSON is `malformed`; never echo contents in errors), `iter_open_manifests()`, `close_manifest(run_id, closed_at)` (sets `closedAt`, then `os.replace` into runs-closed; no deletion), `taken_run_ids()` (file stems in runs-open, runs-closed and runs). Format checks beyond JSON parsing are left to callers (`agentrun.check_manifest`), so this task has no dependency on Task 3. All functions take the existing `env=None` argument for the data directory, like the rest of `store.py`.
