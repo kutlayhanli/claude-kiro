@@ -404,7 +404,7 @@ In `health.py`, extend `decide(newest, auto_collect, uncollected, stale_manifest
 ---
 
 ### Task 15: Update the agent-mode instructions, skills, README and their vendored `.claude/` copies (lands by hand)
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 1.6, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 5.1, 5.4, 7.9
 **Description:** Edit the packaged sources, then regenerate the vendored copies in the same task, so the dogfood-copy test never sees them out of step. The vendored files are protected `.claude/**` paths: this is the only task touching them and it is landed by hand outside the sandbox.
