@@ -270,7 +270,7 @@ Foundation task: Task 10 reaches this code only through the CLI of Task 13, so i
 ---
 
 ### Task 10: Test open manifests (`ck doctor`, `collect --all`) and `--agents-backfill`
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8, 7.9
 **Description:** Implement the two recovery flows through the real CLI in `fresh_env()` with `no_network`.
@@ -284,10 +284,10 @@ Age is controlled by backdating whole hours (5 h vs 7 h); the clock is not faked
 **Verify:** `uv run pytest -q tests/test_stats_agents_open.py` `uv run pytest -q -n auto tests/test_stats_agents_backfill.py` `uv run pytest -q tests/test_stats_perf.py`
 **Verifies:** Task 13 (the doctor, `collect --all` and `--agents-backfill` CLI these tests drive, built on Tasks 7 and 8)
 **Acceptance:**
-- [ ] Tests run the real `ck doctor` and `ck stats collect --all` / `--agents-backfill` CLI over fake Claude homes, a real store and real git repos (`spec_repo`), the boundary named in the test plan; no mocks of project code
-- [ ] Dry-run tests compare `store_files(xdg)` before and after to prove nothing was written
-- [ ] Doctor and failure output are scanned for every `CONFIDENTIAL` term
-- [ ] Before the implementation exists the tests fail for the right reason (missing doctor warning, unknown `--agents-backfill` option), not broken fixtures
+- [x] Tests run the real `ck doctor` and `ck stats collect --all` / `--agents-backfill` CLI over fake Claude homes, a real store and real git repos (`spec_repo`), the boundary named in the test plan; no mocks of project code
+- [x] Dry-run tests compare `store_files(xdg)` before and after to prove nothing was written
+- [x] Doctor and failure output are scanned for every `CONFIDENTIAL` term
+- [x] Before the implementation exists the tests fail for the right reason (missing doctor warning, unknown `--agents-backfill` option), not broken fixtures
 **Dependencies:** Task 1 (uses `begin`, `backdate_manifest`, `spec_repo`, `land`, `fail`, `backfill_home`, `tool_agents`), Task 9 (both add to `tests/test_stats_perf.py`; append after it to avoid an edit conflict)
 **Complexity:** High
 **Risk:** safety (oracle for `collect --all` closing stale manifests and backfill writing records; a wrong close or a wrong group loses or corrupts run history)
