@@ -3,124 +3,13 @@ import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { runWorkflow, sleep } from './load_workflow.mjs'
+import { project } from './fake_project.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const SCRIPT = path.join(here, '../../plugin/workflows/spec-implement.js')
 
 const baseArgs = { spec: 'demo', root: '/repo', into: 'integrate/demo', targetDir: '/repo/.ck/worktrees/demo-integration' }
 
-// A fake project: `ck plan` semantics over deps/done, task durations, failures, timestamps.
-function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [], gitReport = null, conflictRounds = {} }) {
-  let rechecksLeftRed = recheckRed
-  // RED landings left per task: checkRed tasks are red on their first landing, redLands sets a count.
-  const redLeft = { ...Object.fromEntries(checkRed.map(n => [n, 1])), ...redLands }
-  const state = { deps: { ...deps }, done: new Set(done), merged: new Set(), events: [], prompts: {}, opts: {}, reviewCount: {}, attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0, landings: [], resolved: new Set(), conflictsHit: {} }
-  let clock = Date.parse('2026-10-04T10:00:00Z')
-  const stamp = () => new Date((clock += 60000)).toISOString().replace('.000', '')
-  const ready = exclude =>
-    Object.keys(state.deps).filter(n => !state.done.has(n) && !exclude.includes(n) && !verifyCycles.some(v => v.task === n) && state.deps[n].every(d => state.done.has(d)))
-  const agent = async (prompt, opts) => {
-    const l = opts.label
-    state.events.push(l)
-    state.prompts[l] = prompt
-    state.opts[l] = opts
-    if (l.startsWith('plan')) {
-      state.plans++
-      if (relink && state.plans === relink.atPlan) Object.assign(state.deps, relink.deps)
-      const exclude = ((prompt.match(/--exclude ([\d,]+)/) || [])[1] || '').split(',').filter(Boolean)
-      const slotsMatch = prompt.match(/Take the first (\d+|all) task/)
-      let r = ready(exclude)
-      if (slotsMatch && slotsMatch[1] !== 'all') r = r.slice(0, Number(slotsMatch[1]))
-      return {
-        done: [...state.done],
-        ready: r.filter(n => !busy.includes(n)),
-        busy: r.filter(n => busy.includes(n)).map(n => ({ task: n, detail: 'claimed: someone' })),
-        remaining: Object.keys(state.deps).filter(n => !state.done.has(n)),
-        cycles,
-        verifyCycles: state.plans === 1 && !verifyCyclesFromStart ? [] : verifyCycles,
-      }
-    }
-    if (l.startsWith('task')) {
-      const n = l.match(/task (\d+)/)[1]
-      state.attempts[n] = (state.attempts[n] || 0) + 1
-      state.running++
-      state.maxRunning = Math.max(state.maxRunning, state.running)
-      const startedAt = stamp()
-      await sleep(durations[n] ?? 5)
-      state.running--
-      state.events.push(`${l} end`)
-      if (noCommitsFirst.includes(n) && state.attempts[n] === 1) {
-        return { task: n, status: 'blocked', gatePassed: false, summary: 'answered the wave question', commits: '', blocker: 'user asked a question', startedAt, finishedAt: stamp() }
-      }
-      const pass = state.attempts[n] > (failUntil[n] || 0)
-      return { task: n, status: pass ? 'done' : 'in_progress', gatePassed: pass, summary: `attempt ${state.attempts[n]}`, commits: 'abc123', startedAt, finishedAt: stamp() }
-    }
-    if (l.startsWith('land ')) {
-      // `ck worktree land`: precheck (conflicts, pairwise deferral), one gate, bisect a red batch.
-      const tasks = l.slice(5).split(' ')
-      state.landings.push(tasks)
-      state.merging++
-      state.maxMerging = Math.max(state.maxMerging, state.merging)
-      const startedAt = stamp()
-      await sleep(Math.max(...tasks.map(n => mergeDurations[n] ?? 2)))
-      state.merging--
-      state.events.push(`${l} end`)
-      const out = []
-      const landing = []
-      for (const n of tasks) {
-        if (protectedTasks.includes(n)) { out.push({ task: n, state: 'PROTECTED', detail: 'a human must merge it', files: ['.claude/settings.json'] }); continue }
-        if (conflictRounds[n] && (state.conflictsHit[n] || 0) < conflictRounds[n]) { state.conflictsHit[n] = (state.conflictsHit[n] || 0) + 1; out.push({ task: n, state: 'CONFLICT', files: ['specs/demo/tasks.md'] }); continue }
-        if (conflicts.includes(n) && !state.resolved.has(n)) { out.push({ task: n, state: 'CONFLICT', files: ['specs/demo/tasks.md'] }); continue }
-        const mate = pairConflicts.find(([a, b]) => b === n && landing.includes(a))
-        if (mate) { out.push({ task: n, state: 'DEFERRED', detail: `conflicts with Task ${mate[0]} in this batch`, files: ['x.py'] }); continue }
-        landing.push(n)
-      }
-      const red = landing.filter(n => (redLeft[n] || 0) > 0)
-      const gates = landing.length ? [{ tasks: landing, green: !red.length }] : []
-      if (red.length && landing.length > 1) gates.push({ tasks: landing.slice(0, 1), green: true })
-      for (const n of landing) {
-        if (red.includes(n)) { redLeft[n]--; out.push({ task: n, state: 'RED', checkGreen: false, checkTail: `red: task ${n}` }) }
-        else { state.done.add(n); state.merged.add(n); out.push({ task: n, state: 'MERGED', checkGreen: true, mergedAt: stamp() }) }
-      }
-      return { tasks: out, gates, bisected: gates.length > 1, startedAt, finishedAt: stamp() }
-    }
-    if (l.startsWith('resolve')) {
-      const n = l.match(/resolve (\d+)/)[1]
-      state.resolved.add(n)
-      return { resolved: true, conflicts: 'specs/demo/tasks.md: kept both task sections' }
-    }
-    if (l.startsWith('review')) {
-      const n = l.match(/review (\d+)/)[1]
-      state.reviewCount[n] = (state.reviewCount[n] || 0) + 1
-      await sleep(reviewDurations[n] ?? 0)
-      state.events.push(`${l} end`)
-      const verdict = (reviews[n] || [])[state.reviewCount[n] - 1] || 'approve'
-      return { verdict, findings: verdict === 'changes' ? [{ severity: 'blocking', issue: reviewIssue || 'contradicts design.md' }] : [], summary: verdict }
-    }
-    if (l.startsWith('cross-test')) return { verdict: 'changes', findings: [{ severity: 'blocking', file: 'tests/test_b.py', issue: 'reads "state" where tests/test_a.py and design.md say "status"' }], summary: 'one drift' }
-    if (l === 'report') {
-      // `ck worktree report`: merge commits on the target plus tasks.md there, never agent claims.
-      const out = { head: 'f00d', merged: [], done: [], failed: [], blocked: [], unstarted: [] }
-      for (const n of Object.keys(state.deps)) {
-        if (state.merged.has(n)) out.merged.push({ task: n, commit: `m${n}`, mergedAt: '2026-10-04T11:00:00Z' })
-        else if (state.done.has(n)) out.done.push({ task: n })
-        else if (state.attempts[n]) out.failed.push({ task: n, branch: `feat/demo-task-${n}`, ahead: 1 })
-        else {
-          const on = state.deps[n].filter(d => !state.done.has(d))
-          if (on.length) out.blocked.push({ task: n, on })
-          else out.unstarted.push({ task: n })
-        }
-      }
-      return gitReport ? gitReport(out, state) : out
-    }
-    if (l.startsWith('fix')) return { green: true }
-    if (l.startsWith('re-check')) return { green: rechecksLeftRed-- <= 0 }
-    if (l.startsWith('full gate')) return { green: !fullRed }
-    if (l === 'final gate') return { green: true }
-    throw new Error('unexpected agent ' + l)
-  }
-  return { agent, state }
-}
 
 async function test(name, fn) {
   try { await fn(); console.log('ok  ', name) } catch (e) { console.log('FAIL', name); console.log(e); process.exitCode = 1 }

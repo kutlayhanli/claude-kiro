@@ -13,7 +13,7 @@ Test tasks follow design.md where it renames a test-plan Harness Contract name. 
 ## Task Breakdown
 
 ### Task 1: Build the workflow test harness (fake project module, queued fake runtime, decision loader, Node bridge, Hypothesis strategies)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.2, 1.4, 2.1, 3.1, NFR-1, NFR-2
 **Description:** Build the shared infrastructure from test-plan.md "Test Infrastructure / To add" items 1-6 (Harness Contract items 12 and 13), which Tasks 2, 6, 7, 8, 10 and 11 depend on. No TC of its own; it must leave every existing suite green.
@@ -36,11 +36,11 @@ Test tasks follow design.md where it renames a test-plan Harness Contract name. 
 **Verify:** `node tests/js/spec_implement.test.mjs` `uv run pytest -q tests/test_workflow_scripts.py tests/test_landing_harness.py`
 
 **Acceptance:**
-- [ ] `spec_implement.test.mjs` passes unchanged on top of `fake_project.mjs` (behaviour-preserving move)
-- [ ] The fake runtime with `slots` enforces the cap and FIFO order, shown by the smoke test on `trace`
-- [ ] `load_decisions.mjs` fails on today's script with an error naming the missing decision marker (the right reason), and the bridge reports it as `{ok:false, error}`
-- [ ] `write_spec`/`ck_plan` drive the real `ck plan` CLI on a real git repo (no mocks of `claude_kiro`)
-- [ ] Strategies are usable with `@settings(derandomize=True, database=None, deadline=None)`; no function-scoped fixture inside `@given`
+- [x] `spec_implement.test.mjs` passes unchanged on top of `fake_project.mjs` (behaviour-preserving move)
+- [x] The fake runtime with `slots` enforces the cap and FIFO order, shown by the smoke test on `trace`
+- [x] `load_decisions.mjs` fails on today's script with an error naming the missing decision marker (the right reason), and the bridge reports it as `{ok:false, error}`
+- [x] `write_spec`/`ck_plan` drive the real `ck plan` CLI on a real git repo (no mocks of `claude_kiro`)
+- [x] Strategies are usable with `@settings(derandomize=True, database=None, deadline=None)`; no function-scoped fixture inside `@given`
 
 **Dependencies:** None
 **Complexity:** High
