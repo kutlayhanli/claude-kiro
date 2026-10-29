@@ -321,7 +321,7 @@ Age is controlled by backdating whole hours (5 h vs 7 h); the clock is not faked
 ---
 
 ### Task 12: Red-team the SHALL NOT clauses of Stories 3, 4 and 6
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.3, 3.4, 3.6, 3.9, 3.17, 4.4, 6.2, 6.7
 **Description:** Try to break each SHALL NOT clause with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Written from requirements.md only, never from the implementation. Every case cites the clause it attacks in its test id or docstring.
@@ -335,10 +335,10 @@ Age is controlled by backdating whole hours (5 h vs 7 h); the clock is not faked
 **Verify:** `uv run pytest -q -n auto tests/test_stats_redteam_agents_collect.py tests/test_stats_redteam_agents_roles.py tests/test_stats_redteam_agents_open.py`
 **Verifies:** Task 13 (every file drives the CLI built on Tasks 3, 7 and 8, which implement these SHALL NOT clauses)
 **Acceptance:**
-- [ ] Each case runs the real `ck` CLI over a fake Claude home, a real store and real git; forbidden calls are observed with a logging wrapper, not by mocking project code
-- [ ] Every role case asserts `role == "other"`, `matched` false, and no task, attempt or round, at the seam and in the CLI record and `ck stats show`
-- [ ] Every case cites the clause it attacks
-- [ ] Before the implementation exists the tests fail for the right reason (unknown `--agents` option / `begin` command, `AttributeError` for the seam, missing open-manifest behaviour), not broken fixtures
+- [x] Each case runs the real `ck` CLI over a fake Claude home, a real store and real git; forbidden calls are observed with a logging wrapper, not by mocking project code
+- [x] Every role case asserts `role == "other"`, `matched` false, and no task, attempt or round, at the seam and in the CLI record and `ck stats show`
+- [x] Every case cites the clause it attacks
+- [x] Before the implementation exists the tests fail for the right reason (unknown `--agents` option / `begin` command, `AttributeError` for the seam, missing open-manifest behaviour), not broken fixtures
 **Dependencies:** Task 1 (uses `tool_agents`, `described`, `begin`, `spec_repo`, `logging_git`, `set_manifest`, `backdate_manifest`, `backfill_home`, `SPEC_TYPES`)
 **Complexity:** High
 **Risk:** safety (oracle for `collect --all` closing manifests and writing records; collecting the wrong agents corrupts run history)
