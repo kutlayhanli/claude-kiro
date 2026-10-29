@@ -18,12 +18,30 @@ function hookDump() {
   })
 }
 
-export async function runWorkflow(scriptPath, { agent, args }) {
+// With a positive integer `slots`, at most `slots` agent calls run at once and the rest wait FIFO,
+// like the runtime queue. `trace` records request/start/end per call (performance.now()).
+export async function runWorkflow(scriptPath, { agent, args, slots }) {
   hookDump()
   const workflow = path.basename(scriptPath).replace(/\.js$/, '')
+  const trace = []
+  const capped = Number.isInteger(slots) && slots > 0
+  let active = 0
+  const waiting = []
+  const run = async (prompt, opts) => {
+    const label = opts && typeof opts.label === 'string' ? opts.label : ''
+    trace.push({ t: performance.now(), ev: 'request', label })
+    if (capped && active >= slots) await new Promise(resolve => waiting.push(resolve))
+    active++
+    trace.push({ t: performance.now(), ev: 'start', label })
+    try { return await agent(prompt, opts) } finally {
+      active--
+      trace.push({ t: performance.now(), ev: 'end', label })
+      if (waiting.length) waiting.shift()()
+    }
+  }
   const recordingAgent = (prompt, opts) => {
     if (opts && typeof opts.label === 'string') labelCorpus.push({ workflow, label: opts.label, phase: opts.phase ?? null })
-    return agent(prompt, opts)
+    return run(prompt, opts)
   }
   const src = fs.readFileSync(scriptPath, 'utf8').replace(/^export const meta/m, 'const meta')
   const logs = []
@@ -38,7 +56,24 @@ export async function runWorkflow(scriptPath, { agent, args }) {
     }))
   const fn = new Function('agent', 'pipeline', 'parallel', 'phase', 'log', 'args', `return (async () => {${src}})()`)
   const result = await fn(recordingAgent, pipeline, parallel, () => {}, m => logs.push(m), args)
-  return { result, logs }
+  return { result, logs, trace }
+}
+
+// Extract a top-level `function <name>(...) {...}` declaration by brace matching and evaluate it alone.
+export function loadFunction(scriptPath, name) {
+  const src = fs.readFileSync(scriptPath, 'utf8')
+  const m = new RegExp(`^(?:async\\s+)?function\\s+${name}\\s*\\(`, 'm').exec(src)
+  if (!m) throw new Error(`function ${name} not found in ${scriptPath}`)
+  const open = src.indexOf('{', src.indexOf(')', m.index))
+  let depth = 0
+  let end = -1
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === '{') depth++
+    else if (src[i] === '}' && --depth === 0) { end = i + 1; break }
+  }
+  if (end < 0) throw new Error(`function ${name}: unbalanced braces`)
+  const body = src.slice(m.index, end)
+  try { return new Function(`${body}\nreturn ${name}`)() } catch (e) { throw new Error(`function ${name} cannot be evaluated alone: ${e.message}`) }
 }
 
 export const sleep = ms => new Promise(r => setTimeout(r, ms))

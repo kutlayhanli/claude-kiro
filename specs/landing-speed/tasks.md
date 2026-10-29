@@ -13,7 +13,7 @@ Test tasks follow design.md where it renames a test-plan Harness Contract name. 
 ## Task Breakdown
 
 ### Task 1: Build the workflow test harness (fake project module, queued fake runtime, decision loader, Node bridge, Hypothesis strategies)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.2, 1.4, 2.1, 3.1, NFR-1, NFR-2
 **Description:** Build the shared infrastructure from test-plan.md "Test Infrastructure / To add" items 1-6 (Harness Contract items 12 and 13), which Tasks 2, 6, 7, 8, 10 and 11 depend on. No TC of its own; it must leave every existing suite green.
@@ -36,11 +36,11 @@ Test tasks follow design.md where it renames a test-plan Harness Contract name. 
 **Verify:** `node tests/js/spec_implement.test.mjs` `uv run pytest -q tests/test_workflow_scripts.py tests/test_landing_harness.py`
 
 **Acceptance:**
-- [ ] `spec_implement.test.mjs` passes unchanged on top of `fake_project.mjs` (behaviour-preserving move)
-- [ ] The fake runtime with `slots` enforces the cap and FIFO order, shown by the smoke test on `trace`
-- [ ] `load_decisions.mjs` fails on today's script with an error naming the missing decision marker (the right reason), and the bridge reports it as `{ok:false, error}`
-- [ ] `write_spec`/`ck_plan` drive the real `ck plan` CLI on a real git repo (no mocks of `claude_kiro`)
-- [ ] Strategies are usable with `@settings(derandomize=True, database=None, deadline=None)`; no function-scoped fixture inside `@given`
+- [x] `spec_implement.test.mjs` passes unchanged on top of `fake_project.mjs` (behaviour-preserving move)
+- [x] The fake runtime with `slots` enforces the cap and FIFO order, shown by the smoke test on `trace`
+- [x] `load_decisions.mjs` fails on today's script with an error naming the missing decision marker (the right reason), and the bridge reports it as `{ok:false, error}`
+- [x] `write_spec`/`ck_plan` drive the real `ck plan` CLI on a real git repo (no mocks of `claude_kiro`)
+- [x] Strategies are usable with `@settings(derandomize=True, database=None, deadline=None)`; no function-scoped fixture inside `@given`
 
 **Dependencies:** None
 **Complexity:** High
@@ -442,7 +442,7 @@ View (`src/claude_kiro/analytics/show.py`):
 ---
 
 ### Task 15: Write parallel-suite, gate worker-cap and xdist hint seam tests (Stories 5-6, Story 7 seam)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.1, 5.2, 5.3, 5.4, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 7.1, 7.2, 7.3, NFR-4
 **Properties:** P-17, P-18, P-19
@@ -461,11 +461,13 @@ Each file declares its `PROPERTIES` map (`P-17`, `P-18` in `test_gate_xdist.py`;
 **Verifies:** Task 17, Task 18
 
 **Acceptance:**
-- [ ] Gate tests run real `ck gate` subprocesses with real verify commands and real signals; only the core count is varied, and only at the seam
-- [ ] P-17 and P-19 generators cover every form and near-miss in their rows; settings deterministic; they call `worker_cap`/`verify_env`/`suggestion`, not a gate or doctor
-- [ ] Before implementation the tests fail because `ck gate` sets no `PYTEST_XDIST_AUTO_NUM_WORKERS`, `claude_kiro.xdist` is missing and pyproject/ck.json lack xdist, not from fixture bugs
-- [ ] Holding gates always get released and process groups killed in teardown (no stray processes)
-- [ ] TC-41 is skipped without `CK_COMPARE_PARALLEL=1` and never recurses
+- [x] Gate tests run real `ck gate` subprocesses with real verify commands and real signals; only the core count is varied, and only at the seam
+- [x] P-17 and P-19 generators cover every form and near-miss in their rows; settings deterministic; they call `worker_cap`/`verify_env`/`suggestion`, not a gate or doctor
+- [x] Before implementation the tests fail because `ck gate` sets no `PYTEST_XDIST_AUTO_NUM_WORKERS`, `claude_kiro.xdist` is missing and pyproject/ck.json lack xdist, not from fixture bugs
+- [x] Holding gates always get released and process groups killed in teardown (no stray processes)
+- [x] TC-41 is skipped without `CK_COMPARE_PARALLEL=1` and never recurses
+
+**Implementation notes:** The probe project replaces `specs/calc/tasks.md` with one Done impl task (so `ck gate calc` runs the configured verify) and sets `"collect": ""` so only the probe commands run. Probe options are argv tokens (`HOLD=<file>`, `SLEEP=<s>`, `EXIT=<code>`) added only where a case needs them, so TC-48/P-18 argv stay exact. The tests were checked against a throwaway scratch `xdist.py` + `run_gate` wiring written from design.md (all 26 gate tests and the hint tests passed; the scratch code was not committed). TC-40 passes today (ids already stable); TC-43 passes today too (an inherited preset passes through without any cap), and must stay a pass.
 
 **Dependencies:** None
 **Complexity:** High
@@ -474,7 +476,7 @@ Each file declares its `PROPERTIES` map (`P-17`, `P-18` in `test_gate_xdist.py`;
 ---
 
 ### Task 16: Red-team Story 6's SHALL NOT clause (a gone gate is never counted)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.5
 **Description:** Try to break each SHALL NOT clause of Story 6 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Write from requirements.md only, with real `ck gate` subprocesses and a per-test `CK_GATE_REGISTRY` (set in the test's own fixture, not relying on Task 15's conftest). Ideas: a gate SIGKILLed mid-verify; a gate whose verify command forks a long-lived child that outlives it; leftover registry entries copied from a live gate's directory listing (the system's own files fed back) after that gate ends; stray non-gate files and subdirectories in the registry (must survive untouched); a registry entry file made read-only; two gates started in the same millisecond; a registry path containing spaces and unicode. After each, a fresh gate must see `PYTEST_XDIST_AUTO_NUM_WORKERS == str(core_count())` (or only live gates counted), and the gate must still run its verify commands.
@@ -484,9 +486,11 @@ Each file declares its `PROPERTIES` map (`P-17`, `P-18` in `test_gate_xdist.py`;
 **Verifies:** Task 17
 
 **Acceptance:**
-- [ ] Every case uses real `ck gate` processes and the real filesystem; no `claude_kiro` mocks
-- [ ] Each test fails before implementation for missing behaviour, not test code errors
-- [ ] Teardown kills every process group it started
+- [x] Every case uses real `ck gate` processes and the real filesystem; no `claude_kiro` mocks
+- [x] Each test fails before implementation for missing behaviour, not test code errors
+- [x] Teardown kills every process group it started
+
+**Implementation notes:** 11 cases in `tests/test_gate_xdist_redteam.py`: gate+verify SIGKILLed as a group (3 times; and 4 holding gates at once); only the gate process SIGKILLed while its verify child lives on; a verify command that forks a detached child outliving the gate; two gates started back to back; a live gate's registry entries copied and restored after it ends (two rounds with two different live gates, then both sets written back together); gate-shaped leftovers naming live non-gate PIDs (this test, pid 1, parent); a read-only leftover entry; a dangling gate-named symlink; stray files, near-miss names, `.reg-*`, a nested and a gate-named subdirectory (all must survive byte-identical); a registry path with spaces, unicode, a quote and `$HOME`. The probe's output directory and hold file travel through `PROBE_OUT` (relative names), because tmp paths contain "pytest" and `ck gate` would otherwise treat the probe as a pytest command and run it as the collection check. Before Task 17 every case fails with the probe seeing `None` for `PYTEST_XDIST_AUTO_NUM_WORKERS`. Because the 6.6 fallback also yields the full core count, every gate run asserts the output has no `gate registry ... unusable` line, and every case ends with `assert_counts_live`: with the planted entries still present (re-planted where a correct implementation removes them), a gate beside a live holding gate must see `cores // 2`, then `cores` once it ends. The module is skipped on machines with fewer than 2 cores, where `cores // 2 == cores`.
 
 **Dependencies:** None
 **Complexity:** Medium
@@ -505,14 +509,14 @@ Each file declares its `PROPERTIES` map (`P-17`, `P-18` in `test_gate_xdist.py`;
 - `core_count()`: `len(os.sched_getaffinity(0))` where available, else `os.cpu_count()`.
 - `worker_cap(preset, cores, running)`: None if `preset` is not None (key present, any value, including ""); else `str(max(1, c // r))` with c, r clamped to ≥ 1 (None/0/negative -> 1).
 - `verify_env(base, registry)`: `dict(base)` plus `PYTEST_XDIST_AUTO_NUM_WORKERS` from `worker_cap(...)` when not None; other keys untouched.
-- `has_pytest_without_n(verify)`: first command invoking pytest (a `pytest` token, path ending in `/pytest`, or `-m pytest`) with none of `-n`, `-n<x>`, `-n=<x>`, `--numprocesses`, `--numprocesses=<x>`; `shlex.split` with `str.split` fallback; handle chained commands (`&&`, `;`) per segment so `pytest -q && ruff check .` counts and `ruff check tests/test_pytest_plugin.py` / `pip install pytest-xdist` do not.
+- `has_pytest_without_n(verify)`: first command invoking pytest (pytest in command position: after chain separators, leading `VAR=value` assignments and wrappers such as `uv run` / `poetry run` / `env` / `python -m`; the token is `pytest`, a path ending in `/pytest`, or follows `-m`; so `pip install pytest` and `echo pytest` do not count; a leading `PYTEST_ADDOPTS=` value containing a `-n` form counts as parallel) with none of `-n`, `-n<x>`, `-n=<x>`, `--numprocesses`, `--numprocesses=<x>`; `shlex.split` with `str.split` fallback; handle chained commands (`&&`, `;`) per segment so `pytest -q && ruff check .` counts and `ruff check tests/test_pytest_plugin.py` / `pip install pytest-xdist` do not.
 - `suggestion(verify)`: the exact hint text from design.md with `<cmd>` = the pytest prefix of that command (as `config.collect_command` derives it), or None.
 In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole run (printing one line `ck gate: gate registry <path> unusable (<reason>); counting only this gate for xdist workers` when the slot or count is unavailable, at most once per gate run however many verify commands it has, 6.6), `_run(command, project_dir, timeout, env=None)` passes `env` to `subprocess.run`, and before each verify command `run_gate` builds the env with `xdist.verify_env(os.environ, registry)`. Commands are never rewritten (6.7). This covers `ck gate`, the in-process landing gate and the done-verify hook since all call `run_gate`.
 **Files:**
 - `src/claude_kiro/xdist.py` - new module: registry, worker cap, env, core count, doctor/init hint
 - `src/claude_kiro/gate.py` - `gate_slot` around `run_gate`; `_run` env parameter; `verify_env` per verify command
-**Verify:** `uv run pytest -q tests/test_gate_xdist.py tests/test_xdist_hint.py tests/test_gate_xdist_redteam.py`
-**Verified by:** Task 15, Task 16
+**Verify:** `uv run pytest -q tests/test_gate_xdist.py tests/test_xdist_hint.py tests/test_gate_xdist_redteam.py` and, for the command-position rule, the `has_pytest_without_n` cases of `tests/test_doctor_xdist_redteam.py`
+**Verified by:** Task 15, Task 16, Task 20
 
 **Acceptance:**
 - [ ] With `PYTEST_XDIST_AUTO_NUM_WORKERS` unset and one other live gate, a verify command sees `str(max(1, cores // 2))`; alone it sees `str(cores)`; with more gates than cores it sees `"1"` (6.1, 6.3, 6.4)
@@ -556,7 +560,7 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 ---
 
 ### Task 19: Write `ck doctor` / `ck init` xdist hint tests (Story 7)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.1, 7.2, 7.3, 7.4, 7.5
 **Properties:** P-20
@@ -567,9 +571,9 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 **Verifies:** Task 21
 
 **Acceptance:**
-- [ ] Tests run real `ck doctor` / `ck init` and execute the hint's command in a real shell against real pytest projects
-- [ ] P-20 covers every combination in its row with real subprocesses
-- [ ] Before implementation the tests fail because no hint is printed and `claude_kiro.xdist` is missing, not from fixture bugs
+- [x] Tests run real `ck doctor` / `ck init` and execute the hint's command in a real shell against real pytest projects
+- [x] P-20 covers every combination in its row with real subprocesses
+- [x] Before implementation the tests fail because no hint is printed and `claude_kiro.xdist` is missing, not from fixture bugs
 
 **Dependencies:** None
 **Complexity:** Medium
@@ -578,7 +582,7 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 ---
 
 ### Task 20: Red-team Story 7's SHALL NOT clauses (no false hint, init changes nothing, doctor exit unchanged)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.3, 7.4, 7.5
 **Description:** Try to break each SHALL NOT clause of Story 7 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Write from requirements.md only, through real `ck doctor` / `ck init`. Ideas: verify commands that already parallelise in odd forms (`-n0`, `-n=auto`, `--numprocesses auto`, `-n` inside `PYTEST_ADDOPTS=-n auto pytest`); commands that only mention pytest (`pip install pytest`, `echo pytest`, `ruff check tests/test_pytest_x.py`, `pytest-free`); unbalanced quotes that break `shlex`; the hint's own check command fed back as the verify command; verify not a list or containing non-strings; `ck init` run twice and on an existing `specs/ck.json` (verify, pyproject and lock files byte-identical); doctor exit codes compared with and without hint across healthy and broken states.
@@ -588,9 +592,11 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 **Verifies:** Task 21
 
 **Acceptance:**
-- [ ] Cases run the real CLI on real temp repos
-- [ ] Each test fails before implementation for missing behaviour (or documents a current pass that must stay a pass), not test code errors
-- [ ] Files `ck init` must not change are compared byte for byte
+- [x] Cases run the real CLI on real temp repos
+- [x] Each test fails before implementation for missing behaviour (or documents a current pass that must stay a pass), not test code errors
+- [x] Files `ck init` must not change are compared byte for byte
+
+**Notes:** Non-string verify items already crash ck doctor (main.py Verify commands line) independent of the hint, so those shapes are not asserted. Task 21 must decide whether `doctor` tolerates non-string verify items, since it will call `xdist.suggestion` on the same unvalidated list; the malformed-verify test covers str/dict/null only.
 
 **Dependencies:** None
 **Complexity:** Low
