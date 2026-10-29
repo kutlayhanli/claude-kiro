@@ -308,7 +308,7 @@ No property uses a wall-clock tolerance. Settings `@settings(derandomize=True, m
 ---
 
 ### Task 11: Red-team the SHALL NOT clauses of Stories 1-3 (no idle-plan storm, no start on a guess, no touching a BUSY worktree, no new task while a finish-type agent is queued)
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 1.5, 1.10, 2.3, 3.1, 3.8
 **Description:** Try to break each SHALL NOT clause of Stories 1, 2 and 3 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Write from requirements.md only, through `bridge.run` / `bridge.ready` (real script) and, for Story 2, the real CLI. One file per story:
