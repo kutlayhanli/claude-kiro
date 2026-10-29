@@ -41,6 +41,14 @@ def _isolated_git_identity(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
 
 
+@pytest.fixture(autouse=True)
+def _isolated_gate_registry(tmp_path_factory, monkeypatch):
+    """This suite itself runs under xdist inside a `ck gate`: never inherit the outer gate's
+    worker cap, and give every test its own gate registry so parallel workers' gates never count each other."""
+    monkeypatch.delenv("PYTEST_XDIST_AUTO_NUM_WORKERS", raising=False)
+    monkeypatch.setenv("CK_GATE_REGISTRY", str(tmp_path_factory.mktemp("gates")))
+
+
 NETGUARD_DIR = Path(__file__).parent / "netguard"
 
 
