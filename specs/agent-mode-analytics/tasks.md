@@ -382,7 +382,7 @@ In `health.py`, extend `decide(newest, auto_collect, uncollected, stale_manifest
 ---
 
 ### Task 14: Test the agent-mode instruction documents and their templates
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 1.6, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 5.1, 5.4, 7.9
 **Properties:** P-6
@@ -392,11 +392,11 @@ In `health.py`, extend `decide(newest, auto_collect, uncollected, stale_manifest
 **Verify:** `uv run pytest -q tests/test_stats_agents_docs.py`
 **Verifies:** Task 15 (owns the packaged docs and vendored copies these tests read)
 **Acceptance:**
-- [ ] Doc tests read both the packaged sources and the vendored renderings for implement, create, review, spawn-worktree and `without-workflow-tool.md`
-- [ ] The template checker's self-check proves it fails on a planted spec placeholder (a checker that passes everything is caught)
-- [ ] `PROPERTIES` lists P-6, pointing at an existing test name
-- [ ] Before the implementation exists the tests fail for the right reason (`AttributeError` for `parse_agent_description` / `AGENT_CREATE_STEPS`, missing templates in the docs), not import or fixture errors
-- [ ] No mocks of the project's own code
+- [x] Doc tests read both the packaged sources and the vendored renderings for implement, create, review, spawn-worktree and `without-workflow-tool.md`
+- [x] The template checker's self-check proves it fails on a planted spec placeholder (a checker that passes everything is caught)
+- [x] `PROPERTIES` lists P-6, pointing at an existing test name
+- [x] Before the implementation exists the tests fail for the right reason (`AttributeError` for `parse_agent_description` / `AGENT_CREATE_STEPS`, missing templates in the docs), not import or fixture errors
+- [x] No mocks of the project's own code
 **Dependencies:** Task 1 (uses `described`, `CONFIDENTIAL`, `SPEC_TYPES`)
 **Complexity:** Medium
 **Risk:** normal
