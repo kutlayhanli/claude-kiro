@@ -1,6 +1,7 @@
 # Upgrading
 
-- **From 0.9.1 to 0.10:** see the next section.
+- **From 0.10 to 0.10.1:** see the next section.
+- **From 0.9.1 to 0.10:** see [0.9.1 → 0.10](#091--010), then the 0.10.1 notes.
 - **From 0.9.0 to 0.9.1:** see [0.9.0 → 0.9.1](#090--091).
 - **From 0.8 to 0.9:** see [0.8 → 0.9](#08--09), then the 0.9.1 and 0.10 notes.
 - **From 0.7 to 0.8:** see [0.7 → 0.8](#07--08), then the 0.9 notes.
@@ -10,6 +11,28 @@
 - **From 0.3 to 0.4:** see [0.3 → 0.4](#03--04).
 - **From 0.2:** apply the 0.3 notes below as well; the steps are the same.
 - **From 0.1:** skip to [Upgrading to 0.2](#upgrading-to-02), then come back for the 0.3 and 0.4 notes (same commands).
+
+## 0.10 → 0.10.1
+
+Run analytics (`ck stats`) and faster landing. On each machine:
+
+```bash
+ck update                     # ck itself and the spec plugin
+# If a machine installed a 0.10.0 build after these features merged, its plugin
+# cache may still hold the old workflow (same version number). Refresh it once:
+claude plugin uninstall spec@claude-kiro --scope user && claude plugin install spec@claude-kiro --scope user
+ck stats label work           # optional: a label for this machine in shared records (personal, work, ...)
+ck stats collect --all        # optional: backfill this machine's past runs into the local store
+```
+
+Then restart Claude Code sessions, and run `ck upgrade` (or `ck update --project`) in vendored projects so their `.claude/workflows/` copies get the new scheduler. Check with `ck agents --json` (it now has `runtime.agentSlots`) and `ck stats --help`.
+
+- **Run analytics: `ck stats`.** `collect` writes one local record per finished ck run (`spec-implement`, `spec-implement-iso`, `spec-create`) to `$XDG_DATA_HOME/claude-kiro/runs/` (`CK_DATA_HOME` overrides), never into a project; other workflows are counted, never named. `show` breaks a run down by role, phase, model and task and shows cross-run trends; `export` writes allowlisted, leak-checked records into a claude-kiro checkout; `submit` opens one draft PR per batch against `kutlayhanli/claude-kiro`. Collection runs automatically after `ck run` and at the end of `/spec:implement`, `/spec:create` and `/spec:review` (`ck agents set run.analytics false` turns it off). See the README's [Run analytics](README.md#run-analytics).
+- **Fewer planning agents.** The workflow gets `deps` from `ck plan --json` and works out ready tasks itself; a planning agent runs only at start, after each landing, and when nothing is ready. Task agents create and claim their own worktree. Mid-run tasks.md edits are picked up at the next landing (or when the run goes idle) instead of after every task.
+- **Finish-first scheduling.** New tasks start only into free agent slots and never while a review, revision or landing is queued, so finished work isn't stuck behind new starts. The slot count is the Workflow runtime's documented cap, min(16, CPUs - 2); override it with `CK_AGENT_SLOTS`. `ck agents set run.finish_first false` restores the old behaviour.
+- **Queue waits in `ck stats show`:** per-agent wait to start (`queueMs`) and each task's wait before merge split into review and landing. Records collected before 0.10.1 show "not recorded".
+- **Parallel tests.** `ck gate` sets `PYTEST_XDIST_AUTO_NUM_WORKERS` so that concurrent gates on one machine share the cores (unless you set it), and `ck doctor` / `ck init` suggest `pytest-xdist` for pytest projects whose `verify` has no `-n`, with a check for test ids that differ between collections (they break xdist). This repo's own `verify` is now `uv run pytest -q -n auto`.
+- **Safety tasks and escalation.** With `implementer.escalate` set and `implementer.risky_model` unset, safety-tagged tasks start on the top of the escalation list (often Opus). To keep them on a mid-tier model while Opus still reviews them: `ck agents set implementer.risky_model sonnet`.
 
 ## 0.9.1 → 0.10
 
