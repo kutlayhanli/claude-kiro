@@ -62,7 +62,7 @@ Add self-checks to `tests/test_stats_helpers.py` that exercise only the harness 
 ---
 
 ### Task 2: Property tests for the pure agent-mode decision seams
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.2, 2.1, 3.1, 3.4, 3.13, 3.17, 4.1, 4.2, 4.3, 4.4, 6.1, 6.2, 6.3, 6.6, 7.1, 7.2, 7.3, 7.4, 7.5, 7.6
 **Properties:** P-1, P-2, P-3, P-4, P-5, P-7, P-8, P-9, P-10, P-11, P-12, P-18
@@ -72,11 +72,11 @@ Add self-checks to `tests/test_stats_helpers.py` that exercise only the harness 
 **Verify:** `uv run pytest -q tests/test_stats_properties_agents.py`
 **Verifies:** Task 3 (owns every seam these properties call)
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in each P-row (near-miss ids, marker variants, old-style descriptions, timezone forms)
-- [ ] Settings are deterministic (`derandomize=True`, `database=None`)
-- [ ] Tests call the decision seams directly, not the CLI, and mock nothing
-- [ ] `PROPERTIES` lists exactly P-1 to P-5, P-7 to P-12 and P-18, each pointing at an existing test name, so `ck gate` sees full coverage
-- [ ] Before the implementation exists each test fails with `AttributeError` from `claude_kiro.analytics` (missing seam), not a collection error
+- [x] Generators cover every surface form and negative listed in each P-row (near-miss ids, marker variants, old-style descriptions, timezone forms)
+- [x] Settings are deterministic (`derandomize=True`, `database=None`)
+- [x] Tests call the decision seams directly, not the CLI, and mock nothing
+- [x] `PROPERTIES` lists exactly P-1 to P-5, P-7 to P-12 and P-18, each pointing at an existing test name, so `ck gate` sees full coverage
+- [x] Before the implementation exists each test fails with `AttributeError` from `claude_kiro.analytics` (missing seam), not a collection error
 **Dependencies:** Task 1 (uses `SPEC_TYPES`, `OLD_DESCRIPTIONS`, `described`)
 **Complexity:** High
 **Risk:** normal
@@ -295,7 +295,7 @@ Age is controlled by backdating whole hours (5 h vs 7 h); the clock is not faked
 ---
 
 ### Task 11: Test agent-mode privacy end to end and the CLI-wide properties
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.2, 5.2, 8.1, 8.2, 8.5, 9.1, 9.2, 9.3, 9.4
 **Properties:** P-15, P-16, P-17
@@ -308,12 +308,12 @@ Age is controlled by backdating whole hours (5 h vs 7 h); the clock is not faked
 **Verify:** `uv run pytest -q -n auto tests/test_stats_agents_share.py` `uv run pytest -q -n auto tests/test_stats_properties_agents_cli.py`
 **Verifies:** Task 13 (the `begin` / `collect --agents` / export CLI these tests drive, built on Tasks 5 and 7)
 **Acceptance:**
-- [ ] Export tests run the real `ck stats collect` and `ck stats export` against a real git kiro checkout and a fake `gh`; the note test runs under a pty with the fake `claude` drafter
-- [ ] Leak assertions scan raw bytes of every exported file, not parsed fields only
-- [ ] Property generators cover every surface form and negative listed in the P-15 to P-17 rows; each example has its own isolated env
-- [ ] The decision is checked against `ck cost` and `confidential_terms`, not re-implemented in the test
-- [ ] `PROPERTIES` lists P-15, P-16, P-17, each pointing at an existing test name
-- [ ] Before the implementation exists the tests fail for the right reason (unknown `--agents` option, `worktreePath` not in terms), not broken fixtures or generators
+- [x] Export tests run the real `ck stats collect` and `ck stats export` against a real git kiro checkout and a fake `gh`; the note test runs under a pty with the fake `claude` drafter
+- [x] Leak assertions scan raw bytes of every exported file, not parsed fields only
+- [x] Property generators cover every surface form and negative listed in the P-15 to P-17 rows; each example has its own isolated env
+- [x] The decision is checked against `ck cost` and `confidential_terms`, not re-implemented in the test
+- [x] `PROPERTIES` lists P-15, P-16, P-17, each pointing at an existing test name
+- [x] Before the implementation exists the tests fail for the right reason (unknown `--agents` option, `worktreePath` not in terms), not broken fixtures or generators
 **Dependencies:** Task 1 (uses `ToolAgentSpec` with worktree keys, `AgentSpec.extra_meta`, `begin`, `set_manifest`, `read_only`, `kiro_checkout`)
 **Complexity:** High
 **Risk:** safety (guards confidential project names, paths and branches from leaving the machine in exported records and issue notes)
