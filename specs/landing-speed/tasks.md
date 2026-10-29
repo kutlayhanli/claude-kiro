@@ -218,7 +218,7 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 ---
 
 ### Task 8: Write tests that run the task prompt's worktree commands through the real CLI
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 2.1, 2.2, 2.3, 2.4
 **Description:** Implement TC-15, TC-16, TC-19 in `tests/test_landing_worktree_cli.py`. Set up a real git repo (shape of `tests/test_worktree_cli.py::repo`) with spec `demo` and branch `integrate/demo`. Get the `task 1` prompt the real script produces via `bridge.run` with `root`/`worktreeDir`/`into` pointing at that repo; extract the `worktree create` and `worktree claim` command lines from the prompt text; run them through the real `ck` CLI (`python -m claude_kiro.cli` subprocess, argv split with `shlex`).
