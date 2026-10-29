@@ -49,7 +49,7 @@ Test tasks follow design.md where it renames a test-plan Harness Contract name. 
 ---
 
 ### Task 2: Write the readiness contract property tests
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.2, 1.10, NFR-2
 **Properties:** P-1, P-2, P-3, P-4, P-5
@@ -66,11 +66,13 @@ Settings: `@settings(derandomize=True, max_examples=200, database=None, deadline
 **Verifies:** Task 3
 
 **Acceptance:**
-- [ ] P-1 compares the script's real `readyTasks` (from the real script source) against the real `ck plan` CLI on a real git repo, over at least 200 derandomized examples
-- [ ] Generators cover every surface form in the P-1..P-5 rows: non-contiguous multi-digit ids, empty dep lists, diamonds, long chains, duplicate deps, deps on Done or excluded tasks, dangling deps, Done/exclude subsets including absent ids
-- [ ] Properties call the decision seam through the bridge, not the whole workflow
-- [ ] Before implementation every test fails because `readyTasks`/the decision markers are missing, not because of test code errors
-- [ ] No mocks of `claude_kiro` code
+- [x] P-1 compares the script's real `readyTasks` (from the real script source) against the real `ck plan` CLI on a real git repo, over at least 200 derandomized examples
+- [x] Generators cover every surface form in the P-1..P-5 rows: non-contiguous multi-digit ids, empty dep lists, diamonds, long chains, duplicate deps, deps on Done or excluded tasks, dangling deps, Done/exclude subsets including absent ids
+- [x] Properties call the decision seam through the bridge, not the whole workflow
+- [x] Before implementation every test fails because `readyTasks`/the decision markers are missing, not because of test code errors
+- [x] No mocks of `claude_kiro` code
+
+**Notes (Task 2):** Before Task 3, all five tests fail with the bridge's `decision marker missing ... "// --- decisions (pure; loaded by tests) ---"`. To check the test logic, I ran them once against a throwaway reference decisions block (not committed), loaded through the bridge's `script` hook: all five passed. Two mutations of it were caught: treating a dependency missing from the `deps` keys as met (P-2 fails), and ordering ids as strings (P-1 fails on `{'2', '100'}`). P-2 also checks that t *would* be ready without d, so the property cannot pass vacuously. P-5 lifts the exclusions when the drawn ready list is empty.
 
 **Dependencies:** Task 1 (bridge, `dags()`, `write_spec`, `ck_plan`)
 **Complexity:** Medium
@@ -159,7 +161,7 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 ---
 
 ### Task 6: Write workflow example tests for script-side readiness and task-owned worktrees (Stories 1-2)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 1.10, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 3.1, 3.5, NFR-1, NFR-3
 **Description:** Create `tests/js/landing_speed.test.mjs` (runs the real script source under `runWorkflow` with `fake_project.mjs`; the glob in `test_workflow_scripts.py` picks it up). Implement TC-1, TC-2, TC-4, TC-5, TC-6, TC-7, TC-8, TC-9, TC-10, TC-11, TC-12, TC-13, TC-14, TC-17, TC-18, TC-20, TC-21, TC-22, TC-55 and TC-62 exactly as the test-plan rows describe, asserting only on requested labels, their order, prompts, `result` and the log. Pass `args.deps` and `args.remaining` (from the fake plan) except in TC-12, which omits both but keeps normal plan answers (1.9 is about args, not plan answers). Specifics:
@@ -181,12 +183,19 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 **Verifies:** Task 12
 
 **Acceptance:**
-- [ ] Tests run the real `plugin/workflows/spec-implement.js` under the fake runtime; agents are the only fakes
-- [ ] Assertions use observable behaviour only (labels, order, prompts, result, log), never script internals
-- [ ] Before implementation the suite fails for missing behaviour (e.g. plan requested after every finished task, plan prompt still creates worktrees, no `worktree` outcome handling, no `deps` arg in the skill), not from harness errors
-- [ ] TC-18 checks all four BUSY clauses (reason, one agent, worktree untouched, others merge) under both `onFailure` values
-- [ ] TC-1 checks `agentSlots` and `finishFirst` in the skill args as well as `deps`/`remaining`, and that the real `ck agents --json` emits the key paths the skill names
-- [ ] TC-9/TC-10/TC-11 show cycle refusal, verify-order handling under both `onFailure` values, and planning-failure stop behave as today
+- [x] Tests run the real `plugin/workflows/spec-implement.js` under the fake runtime; agents are the only fakes
+- [x] Assertions use observable behaviour only (labels, order, prompts, result, log), never script internals
+- [x] Before implementation the suite fails for missing behaviour (e.g. plan requested after every finished task, plan prompt still creates worktrees, no `worktree` outcome handling, no `deps` arg in the skill), not from harness errors
+- [x] TC-18 checks all four BUSY clauses (reason, one agent, worktree untouched, others merge) under both `onFailure` values
+- [x] TC-1 checks `agentSlots` and `finishFirst` in the skill args as well as `deps`/`remaining`, and that the real `ck agents --json` emits the key paths the skill names
+- [x] TC-9/TC-10/TC-11 show cycle refusal, verify-order handling under both `onFailure` values, and planning-failure stop behave as today
+
+**Implementation notes (Task 6):**
+- Pre-implementation run: TC-4, TC-5, TC-6, TC-13, TC-14, TC-20 (both), TC-55 (a, b), TC-62 and TC-1's args checks fail for missing behaviour (plan after every freed slot, no idle plan, no create step in the task prompt, ERROR retried, no decisions block, no `deps` in the skill). TC-2, TC-7-TC-12, TC-17, TC-18, TC-21, TC-22 already hold today (as-today and guard cases).
+- Idle plans are recognised by the design's log line `plan <n> (idle): …`; plan labels are matched as `plan <k>` / `plan <k> retry`.
+- TC-8 deviation: the row's deps `{1:[],2:[],3:[],4:['3']}` put task 3 first in chain order at the start, so "never requests task 3" cannot hold for any correct scheduler. The test uses `{1:[],2:[],3:['1'],4:['3']}` with task 2 holding the only slot (100 ms), so 3 can only become ready through plan 2 (after landing 1), which reports it Done. The Done-not-merged check reads the fake `ck worktree report` output (the script's `result.merged` folds git's `done` into merged).
+- TC-22 deviation: with `checkRed: ['2']` the `fix 1 …` agent is today's red-landing fixer (`landFixPrompt`), which works in the task worktree and never creates `fix1`. The `worktree create demo fix1 --install --base integrate/demo` assertion is made on the fixer after a red full gate (`fullRed`, `fullGateEvery: 1`), which is where today's script creates the fix worktree; the `checkRed: ['2']` fixer is checked to stay in `demo-task-2` without creating a worktree, as today.
+- TC-4 gives task 2 a 50 ms duration and TC-55 (b) gives task 2's merge 50 ms, so the asserted orders are deterministic; TC-5 / TC-12 use 10 ms merges so landings batch.
 
 **Dependencies:** Task 1 (fake_project.mjs options, runWorkflow, load_decisions.mjs)
 **Complexity:** High
@@ -218,7 +227,7 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 ---
 
 ### Task 8: Write tests that run the task prompt's worktree commands through the real CLI
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.1, 2.2, 2.3, 2.4
 **Description:** Implement TC-15, TC-16, TC-19 in `tests/test_landing_worktree_cli.py`. Set up a real git repo (shape of `tests/test_worktree_cli.py::repo`) with spec `demo` and branch `integrate/demo`. Get the `task 1` prompt the real script produces via `bridge.run` with `root`/`worktreeDir`/`into` pointing at that repo; extract the `worktree create` and `worktree claim` command lines from the prompt text; run them through the real `ck` CLI (`python -m claude_kiro.cli` subprocess, argv split with `shlex`).
@@ -237,10 +246,17 @@ Separately, in `tests/test_worktree_create_lock.py` (no script involved, so Task
 **Verifies:** Task 9, Task 12
 
 **Acceptance:**
-- [ ] Commands come from the prompt the real script produced, and run through the real `ck` CLI on real git; no string-only assertions stand in for execution
-- [ ] Before implementation the prompt tests fail because the task prompt has no create/claim lines, and TC-64 fails because a failed `git worktree add` prints no JSON ERROR entry, not from fixture errors; the concurrent case is red-before only if the collision was reproduced (its docstring says which)
-- [ ] TC-19 shows the BUSY worktree's contents are left untouched
-- [ ] No mocks of `claude_kiro`, git or the filesystem
+- [x] Commands come from the prompt the real script produced, and run through the real `ck` CLI on real git; no string-only assertions stand in for execution
+- [x] Before implementation the prompt tests fail because the task prompt has no create/claim lines, and TC-64 fails because a failed `git worktree add` prints no JSON ERROR entry, not from fixture errors; the concurrent case is red-before only if the collision was reproduced (its docstring says which)
+- [x] TC-19 shows the BUSY worktree's contents are left untouched
+- [x] No mocks of `claude_kiro`, git or the filesystem
+
+**Implementation notes (Task 8):**
+- Concurrent creates: 12 threads x 5 rounds (60 `ck worktree create --install --base main --json` subprocesses on one repo) did not reproduce a git lock-file collision without `create_lock`, so `test_concurrent_creates_all_succeed_and_installs_overlap` is a regression guard and passes before Task 9 (its docstring says so).
+- The prompt tests extract the whole `ck -C \S+ worktree create demo 1 ...` command and the first whole `ck -C \S+ worktree claim demo 1 ...` command after it, every flag included, up to the end of the command (newline, closing quote or backtick, sentence punctuation, a double space or a " (" aside), and run them as written; they also assert the create carries `--json` and runs from `root` with `--install --base integrate/demo`, and the claim targets `<worktreeDir>/demo-task-1` (test-plan Harness Contract 5). TC-19(b) also asserts the first-attempt claim carries no `--takeover`. TC-19(a) also asserts some paragraph of the prompt pairs BUSY with "stop" / "do not claim".
+- The install step in the fixture writes `.venv/installed-by-ck` (ignored), so a rerun still sees a clean worktree.
+- Extra case beyond the TC rows: `test_tc64_other_tasks_in_the_same_call_keep_their_own_outcome` (design: other tasks in the same call still get their own outcome).
+- Verified the command-running paths once against a synthetic design-shaped prompt (scratch test, not committed): all four prompt tests pass, so before Task 12 they fail only on the missing prompt lines.
 
 **Dependencies:** Task 1 (bridge)
 **Complexity:** Medium
