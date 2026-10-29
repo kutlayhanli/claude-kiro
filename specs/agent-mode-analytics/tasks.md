@@ -84,7 +84,7 @@ Add self-checks to `tests/test_stats_helpers.py` that exercise only the harness 
 ---
 
 ### Task 3: Add the pure agent-mode rules (role grammar, run ids, markers, outcome, backfill grouping)
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 1.1, 2.2, 2.3, 3.4, 3.7, 3.13, 3.14, 3.17, 4.1, 4.2, 4.3, 4.4, 4.6, 6.1, 6.2, 6.6, 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.8
 **Description:** Implement every pure Decision Seam of design.md except A15/A16. No I/O, no clock, no network; every input is an argument. This task owns the Harness Contract seams `SPEC_AGENT_TYPES`, `AGENT_CREATE_STEPS`, `is_agent_run_id`, `new_agent_run_id`, `parse_agent_description`, `implement_outcome`, `implement_summary`, `open_manifest_due`, `classify_manifest` and `group_backfill` (see the naming rule above) and adds all of them to `claude_kiro.analytics._EXPORTS`.
