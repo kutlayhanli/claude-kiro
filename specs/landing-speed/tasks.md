@@ -81,7 +81,7 @@ Settings: `@settings(derandomize=True, max_examples=200, database=None, deadline
 ---
 
 ### Task 3: Add the pure scheduling decisions block to the spec-implement workflow
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 1.2, 1.3, 1.4, 1.5, 1.6, 1.9, 1.10, 2.2, 2.3, 2.4, 3.1, 3.3, 3.5, 3.9
 **Description:** Foundation for Task 12. Owns Harness Contract item 2 (readiness seam, renamed by design to `readyTasks({...})` inside the decisions block) and the script side of items 12-13 (the marker-delimited block `tests/js/load_decisions.mjs` and the bridge cut out). In `plugin/workflows/spec-implement.js`, add a self-contained block between the exact marker lines `// --- decisions (pure; loaded by tests) ---` and `// --- end decisions ---` (design.md "Decision Seams"). Code inside the block uses no script globals, no `agent`/`log`/`args`, no clock and no I/O, so `tests/js/load_decisions.mjs` can cut it out and evaluate it with `new Function(...)`. Implement:
