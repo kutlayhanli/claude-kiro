@@ -26,8 +26,22 @@ INTO = "integrate/demo"
 # create still sees a clean worktree).
 INSTALL = f"{shlex.quote(sys.executable)} -c \"import pathlib; p = pathlib.Path('.venv'); p.mkdir(exist_ok=True); (p / 'installed-by-ck').write_text('ok')\""
 
-CREATE_RE = re.compile(r"ck -C \S+ worktree create " + SPEC + r" 1(?: \S+)*? --json")
-CLAIM_RE = re.compile(r"ck -C \S+ worktree claim " + SPEC + r" 1(?![\w-])")
+# Each pattern takes the WHOLE command, every flag included, up to the end of the command: a newline, a closing
+# quote or backtick, or the end of the sentence (". ", ", ", "; ", ": "), a "  " gap or " (" aside. Nothing is
+# dropped, so the test runs exactly what the prompt tells the agent to run (e.g. a `--takeover` on the claim is
+# run too, and TC-19b then catches it taking over another owner's live claim). A command that runs on into prose
+# without one of those ends gets the prose as extra argv, and the CLI rejects it: delimit commands in the prompt.
+_REST = r"(?![\w-])[^\n\"`]*"
+CREATE_RE = re.compile(r"ck -C \S+ worktree create " + SPEC + r" 1" + _REST)
+CLAIM_RE = re.compile(r"ck -C \S+ worktree claim " + SPEC + r" 1" + _REST)
+_COMMAND_END = re.compile(r"[.,;:](?=\s|$)|\s{2,}|\s+\(")
+
+
+def whole_command(match: "re.Match[str]") -> str:
+    """The matched command cut at the end of the command (see CREATE_RE), trailing whitespace trimmed."""
+    text = match.group(0)
+    end = _COMMAND_END.search(text)
+    return (text[:end.start()] if end else text).rstrip()
 
 
 @pytest.fixture
@@ -74,12 +88,16 @@ def prompt_commands(prompt: str, root: Path) -> Tuple[str, str]:
     assert create, f"the task prompt has no `ck -C <root> worktree create {SPEC} 1 ... --json` line:\n{prompt}"
     claim = CLAIM_RE.search(prompt, create.end())
     assert claim, f"the task prompt has no `worktree claim {SPEC} 1` after the create line:\n{prompt}"
-    create_argv, claim_argv = shlex.split(create.group(0)), shlex.split(claim.group(0))
-    # The create runs from the main checkout and installs onto the run's base; the claim targets the task worktree.
-    assert create_argv[:3] == ["ck", "-C", str(root)], create.group(0)
-    assert "--install" in create_argv and create_argv[create_argv.index("--base") + 1] == INTO, create.group(0)
-    assert claim_argv[:3] == ["ck", "-C", str(wt(root))], claim.group(0)
-    return create.group(0), claim.group(0)
+    create_cmd, claim_cmd = whole_command(create), whole_command(claim)
+    create_argv, claim_argv = shlex.split(create_cmd), shlex.split(claim_cmd)
+    # The create runs from the main checkout and installs onto the run's base, printing JSON; the claim targets
+    # the task worktree. All flags are kept and run as written.
+    assert create_argv[:3] == ["ck", "-C", str(root)], create_cmd
+    assert "--json" in create_argv, create_cmd
+    assert "--install" in create_argv and "--base" in create_argv, create_cmd
+    assert create_argv[create_argv.index("--base") + 1] == INTO, create_cmd
+    assert claim_argv[:3] == ["ck", "-C", str(wt(root))], claim_cmd
+    return create_cmd, claim_cmd
 
 
 def run_ck(command: str, cwd: Path) -> subprocess.CompletedProcess:
@@ -177,8 +195,10 @@ def test_tc19a_uncommitted_work_is_busy_and_left_untouched(bridge, repo, tmp_pat
     says to stop there, so the claim is not run: the worktree stays unlocked and the file unchanged."""
     prompt = task_prompt(bridge, repo)
     create, claim = prompt_commands(prompt, repo)
-    # The prompt tells the agent to stop on BUSY instead of going on to the claim.
-    assert re.search(r"BUSY[^\n]*\bstop|\bstop[^\n]*BUSY", prompt, re.I), prompt
+    # The prompt tells the agent to stop on BUSY instead of going on to the claim: some paragraph (lines may wrap)
+    # names BUSY together with "stop", "do not claim" or "don't claim".
+    paragraphs = re.split(r"\n\s*\n", prompt)
+    assert any("BUSY" in p and re.search(r"\bstop|\bdo not claim\b|\bdon't claim\b", p, re.I) for p in paragraphs), prompt
     first = run_steps(create, claim, tmp_path)
     assert first[0][2]["state"] == "CREATED", first
     assert run_ck(f"ck -C {shlex.quote(str(wt(repo)))} worktree release {SPEC} 1", tmp_path).returncode == 0
@@ -215,7 +235,9 @@ def test_tc19b_live_claim_by_another_owner_is_busy_and_kept(bridge, repo, tmp_pa
     assert proc.returncode == 3, proc.stdout + proc.stderr
     assert [name for name, _, _ in steps] == ["create"]
 
-    race = run_ck(claim, tmp_path)
+    # The first-attempt claim must not take over: a `--takeover` here would overwrite the other owner's claim.
+    assert "--takeover" not in shlex.split(claim), claim
+    race = run_ck(claim, tmp_path)  # the whole extracted command, every flag included
     assert race.returncode == 3, race.stdout + race.stderr
     assert re.search(r"^BUSY 1\b", race.stdout, re.M), race.stdout + race.stderr
     assert lock_reason(repo, path) == before  # the other owner's claim is still in place
