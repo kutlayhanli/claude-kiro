@@ -23,6 +23,7 @@ Used by `ck gate` and by the done-verify hook when a task is marked Done.
 
 import os
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,6 +31,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from claude_kiro import properties as props
 from claude_kiro import verified
+from claude_kiro import xdist
 from claude_kiro.config import collect_command, load_config
 from claude_kiro.hooks._shared import git_utils
 from claude_kiro.hooks._shared.spec_parser import SpecTask, parse_tasks
@@ -69,12 +71,13 @@ class GateResult:
         return "\n".join(lines)
 
 
-def _run(command: str, project_dir: Path, timeout: int) -> Check:
+def _run(command: str, project_dir: Path, timeout: int, env: Optional[Dict[str, str]] = None) -> Check:
     try:
         proc = subprocess.run(
             command,
             shell=True,
             cwd=project_dir,
+            env=env,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -293,7 +296,27 @@ def run_gate(
     `reuse`, a task-scoped gate whose tree already passed the same commands skips running them;
     acceptance, test-file, property and tamper checks always run. Whole-spec gates never reuse,
     and callers that gate merged trees (landing) leave `reuse` off.
+
+    The gate registers itself in the per-user gate registry for its whole run, and each verify
+    command gets PYTEST_XDIST_AUTO_NUM_WORKERS = cores // gates running unless it is already set
+    (see xdist.py). Commands are never rewritten.
     """
+    registry = xdist.registry_dir(os.environ)
+    errors: List[str] = []
+    with xdist.gate_slot(registry, errors) as slot:
+        return _run_gate(project_dir, spec_dir, task_nums, config, reuse, stamp_by, registry if slot else None, errors)
+
+
+def _run_gate(
+    project_dir: Path,
+    spec_dir: Path,
+    task_nums: Optional[List[str]],
+    config: Optional[Dict[str, Any]],
+    reuse: bool,
+    stamp_by: str,
+    registry: Optional[Path],
+    errors: List[str],
+) -> GateResult:
     config = config or load_config(project_dir)
     tasks = {t.num: t for t in parse_tasks(spec_dir / "tasks.md")}
     if task_nums is None:
@@ -439,8 +462,25 @@ def run_gate(
             name = f"Test collection succeeds (`{command}`)" if command == collect else f"`{command}`"
             result.checks.append(Check(name, True))
     else:
+        noted = [False]
+
+        def note_unusable(reason: str) -> None:
+            if not noted[0]:
+                noted[0] = True
+                print(
+                    f"ck gate: gate registry {xdist.registry_dir(os.environ)} unusable ({reason}); "
+                    "counting only this gate for xdist workers",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
+        if registry is None:
+            note_unusable(errors[0] if errors else "could not register this gate")
         for command in to_run:
-            check = _run(command, project_dir, timeout)
+            if registry is not None and xdist.running_gates(registry) is None:
+                note_unusable("could not read it")
+                registry = None
+            check = _run(command, project_dir, timeout, xdist.verify_env(os.environ, registry))
             if command == collect:
                 check.name = f"Test collection succeeds (`{collect}`)"
                 if not check.ok:
