@@ -56,6 +56,10 @@ How each mode applies them:
      "tracks": "<tracks from ck plan>",
      "risk": "<risk from ck plan>",
      "complexity": "<complexity from ck plan>",
+     "deps": "<deps from ck plan --json>",
+     "remaining": "<remaining from ck plan --json>",
+     "agentSlots": "<runtime.agentSlots from ck agents --json>",
+     "finishFirst": "<run.finish_first from ck agents --json>",
      "maxRetries": 1,
      "onFailure": "continue",
      "maxConcurrent": "<run.max_concurrent from ck agents --json>",
@@ -67,12 +71,15 @@ How each mode applies them:
    - **worktreeDir:** copy it from `ck plan` as is. It is where `ck worktree` puts this spec's task worktrees (`specs/ck.json` `worktree_dir`, default `.ck/worktrees`; outside `.claude/`, which Claude Code's Bash sandbox keeps read-only).
    - **agents:** see Agents above. Report the roles you passed (implementer, test_writer, reviewer) and the concurrency cap when you tell me it's running.
    - **risk / complexity:** copy them from `ck plan` as they are. Tell me how many tasks are safety (and which), since they run on the strong model and the risky reviewer. If `ck lint` warned about a task touching a risk path without `**Risk:** safety`, mention it: it is routed as safety anyway, but the tag belongs in tasks.md.
+   - **deps / remaining:** copy them from `ck plan <spec> --json` as they are. With `deps` the script decides which tasks are ready itself, instead of asking a planning agent after every task.
+   - **agentSlots / finishFirst:** `runtime.agentSlots` and `run.finish_first` from `ck agents --json`. While a review, revision or landing waits for a runtime slot, no new task starts (`finishFirst`); `agentSlots` is how many agents the runtime runs at once.
    - **onFailure:** by default a failed task doesn't stop the run. Tasks that don't depend on it keep starting, its dependents never start and are reported, and a red target branch always halts. Use `"onFailure": "halt"` if I asked to stop at the first failure.
    - **mergeBatch:** the most finished tasks landed together in one step (default 4). Pass 1 if I asked for one merge at a time, or if the target's gate is often red (each red batch costs extra gates to find the culprit).
    - **maxConcurrent:** how many tasks may have an implementing agent at work at once; review and the merge queue don't hold a slot. Pass `run.max_concurrent` from `ck agents --json` (null means no cap). If I said the test suite is memory-heavy or asked to go easy on usage, pass a lower number (for example 4) for this run, and mention `ck agents set run.max_concurrent N` to make it stick.
 7. **Tell me it's running:**
    - Each task starts as soon as its own dependencies are merged; waves only group the progress display.
-   - After every task, a cheap planning step re-reads the plan from tasks.md on the target. If we fix tasks.md mid-run (for example, removing a spurious dependency, committed to the target branch), it takes effect at the next step, with no restart.
+   - The plan is re-read from tasks.md on the target at the start, after each landing, and when nothing is ready and a slot is free (not after every task: the script already knows the dependency graph). If we fix tasks.md mid-run (for example, removing a spurious dependency, committed to the target branch), it takes effect at the next re-read, with no restart.
+   - Each task agent creates its own worktree (`ck worktree create`) and claims it; a worktree another agent holds is reported as `worktree busy`, never touched.
    - Finished tasks land in batches: when a landing ends, every task waiting to merge (up to `mergeBatch`) lands in one `ck worktree land` step. It prechecks each branch with `git merge-tree` (a conflict never touches the target and goes to the resolver), merges the batch, and runs the task gates of the whole batch once. A red batch is bisected by halving until the culprit is found; the culprit stays off the target and goes to the fixer, the rest merge. The batch size halves after a red batch and grows by one after a green one. The full `ck gate <spec>` runs every `fullGateEvery` merges and once at the end.
    - I can watch with `/workflows`.
 8. **Questions while it runs** are for you, the orchestrator. Task agents are told to ignore chat messages and stick to their task.

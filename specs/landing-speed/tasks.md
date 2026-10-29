@@ -379,7 +379,7 @@ No property uses a wall-clock tolerance. Settings `@settings(derandomize=True, m
 ---
 
 ### Task 12: Rewire the workflow scheduler, prompts, brief and implement skill for script-side readiness, task-owned worktrees and finish-first
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.1, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 1.10, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9
 **Description:** Owns Harness Contract items 1 (workflow args; design renames `args.agents.run.finish_first` to `args.finishFirst` and adds `remaining`, `agentSlots`), 3 (plan agent answer), 4 (queue observation: the `call` wrapper and in-flight list), 5 (task agent `RESULT.worktree` and first-prompt commands), 6 (labels unchanged) and 7 (deferral log). Wire Task 3's decisions into `plugin/workflows/spec-implement.js` as design.md "Existing Components to Modify" describes; Task 3's scheduling, finish-first and worktree-outcome criteria are verified here. Concretely:
@@ -402,21 +402,28 @@ No property uses a wall-clock tolerance. Settings `@settings(derandomize=True, m
 **Verified by:** Task 6, Task 7, Task 8, Task 10, Task 11
 
 **Acceptance:**
-- [ ] The skill's step 6 passes `deps` and `remaining` from `ck plan --json`, plus `agentSlots` and `finishFirst` from `ck agents --json`, and the vendored command says the same (1.1)
-- [ ] With `args.deps`, a freed implementing slot starts the next ready task without a plan agent; plan agents run only at start, after each landing attempt, and once per idle period (1.3, 1.4, 1.5, NFR-1)
-- [ ] A plan result replaces Done/remaining/deps/lint, and tasks merged in the run stay Done (1.6); cycles are handled as today (1.7); two failed plan attempts stop new launches with `planning step failed` while running tasks land (1.8)
-- [ ] Without `args.deps` the run completes using a plan per freed slot/finished task (1.9); a task with an unknown dependency is never started (1.10)
-- [ ] Every first task prompt contains the create command and claim; no plan prompt contains `worktree create`; retry/revise/review prompts reuse the existing worktree; fix prompts still create `fix<k>` (2.1, 2.5, 2.6)
-- [ ] BUSY records `worktree busy: <detail>` with exactly one agent for that task and no later prompt naming its worktree; ERROR records the creation error and applies `onFailure` (2.2, 2.3, 2.4)
-- [ ] While a review/revise/land agent is presumed queued no new task starts; new task starts never exceed the free runtime slots, so at saturation a finished implementer's review gets the next slot (3.9, TC-65); once none is queued and a slot is free, a ready task starts on the next poke; review/revise/land/gate/fix/re-check calls are never gated; one `finish-first` log line per deferral period; with finish-first off or nothing queued, behaviour is as today (3.1, 3.2, 3.3, 3.4, 3.5, 3.7)
-- [ ] Absent `finishFirst` means on; an invalid `finishFirst` or `agentSlots` throws at load naming the allowed values (3.6, 3.8)
-- [ ] Labels are unchanged; existing `tests/js/spec_implement.test.mjs` safety scenarios (bisection, red batches, protected paths, report) still pass; vendored copies are byte-identical (NFR-3)
-- [ ] `tests/js/spec_implement.test.mjs` "a task in review or waiting to merge does not hold a slot" (task starts while a land/review is in flight) still passes with `baseArgs` as written, without `agentSlots` (TC-63)
-- [ ] A plan whose `ready` lists a task with a dependency missing from the map is accepted, the task is not started, and other tasks keep launching (1.10, TC-13); a plan returning while tasks started meanwhile is accepted (TC-62)
+- [x] The skill's step 6 passes `deps` and `remaining` from `ck plan --json`, plus `agentSlots` and `finishFirst` from `ck agents --json`, and the vendored command says the same (1.1)
+- [x] With `args.deps`, a freed implementing slot starts the next ready task without a plan agent; plan agents run only at start, after each landing attempt, and once per idle period (1.3, 1.4, 1.5, NFR-1)
+- [x] A plan result replaces Done/remaining/deps/lint, and tasks merged in the run stay Done (1.6); cycles are handled as today (1.7); two failed plan attempts stop new launches with `planning step failed` while running tasks land (1.8)
+- [x] Without `args.deps` the run completes using a plan per freed slot/finished task (1.9); a task with an unknown dependency is never started (1.10)
+- [x] Every first task prompt contains the create command and claim; no plan prompt contains `worktree create`; retry/revise/review prompts reuse the existing worktree; fix prompts still create `fix<k>` (2.1, 2.5, 2.6)
+- [x] BUSY records `worktree busy: <detail>` with exactly one agent for that task and no later prompt naming its worktree; ERROR records the creation error and applies `onFailure` (2.2, 2.3, 2.4)
+- [x] While a review/revise/land agent is presumed queued no new task starts; new task starts never exceed the free runtime slots, so at saturation a finished implementer's review gets the next slot (3.9, TC-65); once none is queued and a slot is free, a ready task starts on the next poke; review/revise/land/gate/fix/re-check calls are never gated; one `finish-first` log line per deferral period; with finish-first off or nothing queued, behaviour is as today (3.1, 3.2, 3.3, 3.4, 3.5, 3.7)
+- [x] Absent `finishFirst` means on; an invalid `finishFirst` or `agentSlots` throws at load naming the allowed values (3.6, 3.8)
+- [x] Labels are unchanged; existing `tests/js/spec_implement.test.mjs` safety scenarios (bisection, red batches, protected paths, report) still pass; vendored copies are byte-identical (NFR-3)
+- [x] `tests/js/spec_implement.test.mjs` "a task in review or waiting to merge does not hold a slot" (task starts while a land/review is in flight) still passes with `baseArgs` as written, without `agentSlots` (TC-63)
+- [x] A plan whose `ready` lists a task with a dependency missing from the map is accepted, the task is not started, and other tasks keep launching (1.10, TC-13); a plan returning while tasks started meanwhile is accepted (TC-62)
 
 **Dependencies:** Task 3 (calls the decisions block in the same file), Task 5 (skill reads `runtime.agentSlots` and `run.finish_first` from `ck agents --json`), Task 9 (the task prompt relies on `ck worktree create --json` reporting a failed `git worktree add` as an ERROR entry), Task 6, Task 7, Task 8, Task 10, Task 11 (its tests are the oracle)
 **Complexity:** High
 **Risk:** safety (drives worktree claims and merges to the target branch; a wrong BUSY path could touch another agent's live worktree)
+
+**Implementation notes:**
+- The plan agent may still return a `busy` list (schema field kept per test-plan Harness Contract 3); those tasks are recorded as `worktree busy` and left out of the consistency check.
+- A task merged by this run counts as Done for the scheduler as soon as its landing resolves (not only after the plan that follows), so the freed dependents start at once (P-11).
+- Idle re-arm: a failed task record and a landing completion re-arm the idle plan; a landing plan that returns disarms it, and a merged task's record does not re-arm it (otherwise TC-5's plan count exceeds 12 tasks).
+- `worktreeOutcome` (Task 3 block): a BUSY `worktree.state` now gives exactly `worktree busy: <detail>` (empty detail stays empty); a busy blocker beside any non-ERROR state still counts as busy.
+- `plan.deps` is kept as printed (near-miss ids stay unknown, 1.10).
 
 ---
 
