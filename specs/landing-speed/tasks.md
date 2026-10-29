@@ -543,7 +543,7 @@ Each file declares its `PROPERTIES` map (`P-17`, `P-18` in `test_gate_xdist.py`;
 ---
 
 ### Task 17: Add the xdist module and cap pytest-xdist workers across concurrent ck gates
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 7.1, 7.2, 7.3
 **Description:** Owns Harness Contract item 10 (gate; design renames `gate.xdist_env`/`gate.machine_cores`/`CK_GATE_RUNDIR` to `xdist.worker_cap`/`verify_env`/`core_count`/`CK_GATE_REGISTRY`) and the seam of item 11 (`xdist.suggestion`, renamed from `config.xdist_suggestion`). Create `src/claude_kiro/xdist.py` per design.md "`ck gate` environment" and "Decision Seams":
@@ -568,7 +568,7 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 - [x] A gate that passed, failed, timed out or was SIGKILLed is no longer counted by the next gate (6.5)
 - [x] With the registry path pointing at a regular file or an unreadable directory, the gate still runs its verify commands, counts only itself, prints one line naming the unusable registry, and its result follows the command's exit code (6.6)
 - [x] Gates with different `TMPDIR` values count each other through the default registry, and no registry file is ever written under `TMPDIR`, `/tmp` or the cwd (6.1, TC-60)
-- [ ] A gate is counted from the moment its `gate-*.lock` exists; a concurrent counter never removes a live gate's file (6.1, TC-61)
+- [x] A gate is counted from the moment its `gate-*.lock` exists; a concurrent counter never removes a live gate's file (6.1, TC-61)
 - [x] Verify argv and the gate report's command strings are verbatim (no `-n` added/removed) (6.7)
 - [x] `running_gates` never deletes a file that does not match `gate-*.lock`
 - [x] `suggestion` returns the hint for pytest commands without `-n` and None for `-n`/`--numprocesses` forms, non-pytest commands and empty lists, independent of command order; the hint names the collection-mismatch error and contains the PYTHONHASHSEED one-line check (7.1, 7.2, 7.3)
@@ -580,7 +580,7 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 **Implementation notes (Task 17):**
 - Verify line: the original line put prose in backticks (`has_pytest_without_n`, `tests/test_doctor_xdist_redteam.py`), which the gate ran as shell commands (exit 127/126). It now runs the doctor red-team's near-miss (command-position) cases as a real command.
 - `gate_slot(registry=None, errors=None)`: the optional `errors` list receives the reason when registration fails, for `run_gate`'s one-line note. `run_gate` wraps a private `_run_gate`; the note goes to stderr (stdout of the done-verify hook may be parsed).
-- Blocked on TC-61 (`test_counter_never_removes_live_or_in_progress_registrations`): see the task report. Its counter subprocess is never awaited before the 30 registrations run (~8 ms here), so the counter's loop runs 0 times and `int(out.split()[0]) > 0` fails. All registry assertions in the test hold.
+- TC-61 was blocked on a test race (counter never awaited); fixed upstream (counter signals ready after its first count). Now passes.
 
 ---
 
