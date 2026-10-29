@@ -1,7 +1,7 @@
 # Plan: Agent-Mode Analytics
 
 **Created:** 2026-10-29
-**Status:** Pending Decision
+**Status:** Decisions Made
 
 ## Problem Statement
 
@@ -104,13 +104,13 @@
 
 ## Open Questions
 
-- [ ] Run id format: `ag_<8 hex>` (short, distinct from `wf_`) - confirm.
+- [x] Run id format: `ag_<8 hex>` (D4).
 - [ ] Gap threshold for backfill grouping (e.g. 2 h) - tune with `--dry-run` on a machine with old agent-mode runs.
 - [ ] Do my hand-run fixer agents (ck-* types without a `[ck:]` marker) belong in backfill? They are not spec runs; the gap/spec grouping may pick them up - `--dry-run` must make this visible.
 
 ## Recommended Direction
 
-**Approach:** Option A with decisions 2a, 3b, 4 yes, 5a, 6 as recommended.
+**Approach:** Option A with content-free descriptions (D4), privacy as today for shared records (D5), and decisions 3b, 4, 5a, 6 as recommended (D6-D9).
 
 **Rationale:**
 - Exact grouping and create/review coverage need a propagated id; research and Claude Code's own telemetry gap agree.
@@ -130,3 +130,9 @@
 | 1 | Shareable schema | Stay on `ck-run-analytics/1`; add optional `source: workflow \| agents` and a `cost.source` value `agent_transcripts` | Additive; existing readers and records unchanged | 2026-10-29 |
 | 2 | `ck stats begin` | Best-effort; never blocks a run; backfill is the safety net | Analytics must never cost a run | 2026-10-29 |
 | 3 | Grouping | By the run id in Agent descriptions; session + spec + time-gap heuristic only for backfill, shown with `--dry-run` | Exact for new runs; heuristic is labelled and previewed | 2026-10-29 |
+| 4 | Approach and description format | Option A. Every Agent description carries only the run id, role and task number (plus attempt/round): `[ck:<run_id>] implement task <N>`, `… retry <k>`, `[ck:<run_id>] review task <N> round <k>`, `[ck:<run_id>] fix <k>`, `[ck:<run_id>] resolve task <N>`, `[ck:<run_id>] create <step>`. No spec name, task title or path ever goes into a description. Role from `agentType` plus the verb. Run id `ag_<8 hex>` | User: full privacy on what is run; analytics need performance, not content | 2026-10-29 |
+| 5 | Where 'no content' applies | Shared records only (as today: allowlisted fields + leak check). Local records keep their detail for the leak check; the spec name and project root for an agent-mode run come from the local run manifest, not from descriptions | Leak check needs local terms; exports stay content-free by construction | 2026-10-29 |
+| 6 | Outcome source | `ck stats collect --agents` runs `ck worktree report <spec> --into <into>` itself from the manifest; outcome null when the repo or branch is gone | One fewer orchestrator step; same code for backfill | 2026-10-29 |
+| 7 | `general-purpose` create/review agents | Collected only when their description carries the `[ck:<id>]` of a known run | Without a marker they are indistinguishable from other work | 2026-10-29 (default, not contested) |
+| 8 | Backfill | v1 includes `ck stats collect --agents-backfill [--dry-run]`: spec agent types only (implement mode), grouped by session + spec parsed from old descriptions + time gap, `partial: true`; create/review runs not recoverable (documented) | Recovers past work-machine runs; preview guards the heuristic | 2026-10-29 |
+| 9 | Runs that never reach collect | `ck doctor` reports open manifests older than 6 h; `ck stats collect --all` collects them as partial records | Crashes and closed sessions still leave data | 2026-10-29 |
