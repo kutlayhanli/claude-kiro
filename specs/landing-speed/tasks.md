@@ -113,7 +113,7 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 ---
 
 ### Task 4: Write the `run.finish_first` setting and runtime agent-slot tests
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 3.5, 3.6, 3.8, NFR-6
 **Properties:** P-12
@@ -124,9 +124,9 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 **Verifies:** Task 5
 
 **Acceptance:**
-- [ ] CLI tests run real `ck agents` on real config files
-- [ ] P-12 generators cover every surface form and negative in its row; settings deterministic; the property calls the coercion seam, not a server
-- [ ] Before implementation the tests fail because `run.finish_first` is an unknown setting and `runtime` is absent, not from test bugs
+- [x] CLI tests run real `ck agents` on real config files
+- [x] P-12 generators cover every surface form and negative in its row; settings deterministic; the property calls the coercion seam, not a server
+- [x] Before implementation the tests fail because `run.finish_first` is an unknown setting and `runtime` is absent, not from test bugs
 
 **Dependencies:** None
 **Complexity:** Medium
