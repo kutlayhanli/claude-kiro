@@ -17,12 +17,13 @@ This feature gives agent-mode runs (ones run with the Agent tool) the same recor
   transcripts and meta files. It reuses the existing collector core and pricing. It takes the outcome
   from `ck worktree report`, which the collector runs itself.
 - Runs that never reached collect are reported by `ck doctor` and collected by `ck stats collect --all`.
-- Older implement-mode runs without a marker can be recovered, with a preview, by
-  `ck stats collect --agents-backfill`.
+- Implement-mode runs from before this feature (no marker) can be recovered, with a preview, by
+  `ck stats collect --agents-backfill`. A later run whose `ck stats begin` failed carries no marker and is not
+  recoverable (D10).
 - The shareable schema stays `ck-run-analytics/1`. It gains an optional `source` field and one new
   cost-source value.
 
-Decision record: [PLAN.md](PLAN.md). Decisions D1-D9 bind this document. Where this document and PLAN.md
+Decision record: [PLAN.md](PLAN.md). Decisions D1-D15 bind this document. Where this document and PLAN.md
 disagree, PLAN.md wins.
 
 Terms used below:
@@ -101,7 +102,10 @@ list, transcripts' metadata or analytics (D4)
   the run with `ck stats begin --kind implement` and to use the marker templates of 2.1 for every Agent
   call.
 - 2.5 WHEN `begin` gave no run id (1.6), THE SYSTEM SHALL instruct the orchestrator to use the same
-  templates without the marker, still with no spec name, title or path.
+  templates without the marker, still with no spec name, title or path, and, in place of the final collect
+  step (5.1), to end its report with the one line `⚠ ck stats begin failed: this run is not recorded in ck
+  stats`. Such a run's agents carry no marker, so no ck command collects it, then or later; backfill (Story
+  7) is for runs from before this feature and SHALL NOT be described as recovering it (D10).
 - 2.6 WHEN the vendored copies of the changed skills, commands and agent-mode instructions are compared
   with the packaged copies, THE SYSTEM SHALL find them identical apart from the existing plugin-only
   differences.
@@ -124,7 +128,11 @@ run **So that** its time, cost and outcome sit next to my workflow runs
   kind from the manifest, never from Agent descriptions (D5). It SHALL store them in the local record only.
 - 3.4 WHEN the kind is `implement`, THE SYSTEM SHALL run `ck worktree report` for the manifest's spec and
   target branch in the manifest's project root, and take tasks failed, blocked and not started, and the run
-  outcome, from that report (D6). Tasks merged SHALL count only this run's work: the tasks the report shows
+  outcome, from that report (D6), judged only over the tasks this run worked on: the task ids named by at
+  least one of the run's agent rows (D11). The outcome SHALL be `failed` if any such task failed, else
+  `blocked` if any such task is blocked or not started, else `complete`; tasks failed, blocked and not started
+  SHALL count only such tasks, and tasks of the spec that no agent of the run named SHALL NOT affect them.
+  When no agent row names a task, the outcome SHALL be unknown. Tasks merged SHALL count only this run's work: the tasks the report shows
   merged or done that were not Done when `begin` ran (1.2). When that set is unknown, tasks merged SHALL be
   the tasks merged at or after the run's start and no later than 30 minutes after its last agent finished.
 - 3.5 WHEN the project root no longer exists, is not a git repository, or the target branch is gone, or
@@ -208,9 +216,11 @@ lost to transcript pruning
 - 5.5 WHEN an agent-mode run happens inside a `ck run` session (sandboxed), THE SYSTEM SHALL have
   `ck stats collect --agents <run_id> --auto` print that `ck run` collects the run after the session exits
   (exit zero, manifest left open). After the session exits, `ck run` SHALL collect, as for workflow runs,
-  every agent-mode run of that session: each open manifest whose session id is that session or that started
-  after the session did, and each run id whose marker appears in that session's agent metas without a
-  manifest (a partial record, 3.10).
+  the agent-mode runs of that session that have a manifest: each open manifest whose session id is that
+  session, and each open manifest with no session id that started at or after the session began. It SHALL
+  NOT collect or close an open manifest whose session id is another session's (D13). It SHALL NOT collect a
+  marked run that has no manifest (3.17, 6.7); the deferral line SHALL name
+  `ck stats collect --agents <run_id>` for that case, which collects it as a partial record (3.10) (D14).
 
 ### Story 6: Open manifests: doctor and collect --all
 
@@ -254,11 +264,15 @@ after a preview **So that** my history is not empty before this feature (D8)
   the start of the next) exceeds the gap threshold. The default threshold is 2 hours, and `--gap` overrides it in minutes.
 - 7.4 WHEN an agent's description names no spec, THE SYSTEM SHALL put it in the group of its session whose
   time span contains or lies within the gap threshold of it. When there is no such group, it SHALL leave
-  the agent out and list it in the dry run as "no spec".
+  the agent out and list it in the dry run as "no spec". A group's time span is that of its spec-named
+  agents; a spec-less agent that joins SHALL NOT move it (7.5, D15).
 - 7.5 WHEN I run `ck stats collect --agents-backfill` without `--dry-run`, THE SYSTEM SHALL write each
   group as a partial record. The record SHALL be marked partial, list the manifest as missing, have source
   `agents`, and take its outcome from `ck worktree report` under the same rules as 3.4-3.5, with the group's
-  first agent's start and last agent's end standing for the run's, Done-at-begin unknown, and the 30-minute
+  first spec-named agent's start and last spec-named agent's end standing for the run's (spec-less agents
+  that joined under 7.4 add their cost and time to the record only, and never set the group's start, end,
+  merge window or spacing, D15), the tasks named by its spec-named agents standing for the tasks this run
+  worked on (3.4, D11), Done-at-begin unknown, and the 30-minute
   allowance cut to the gap threshold when that is smaller. The project root SHALL come from the session's
   working directory, and the target branch from the session's branch.
 - 7.6 WHEN backfill runs twice over the same transcripts, THE SYSTEM SHALL produce the same record ids and
@@ -269,7 +283,9 @@ after a preview **So that** my history is not empty before this feature (D8)
 - 7.7 WHEN no candidate agents exist, THE SYSTEM SHALL say so and exit zero.
 - 7.8 WHEN `--gap` is not a positive integer, THE SYSTEM SHALL reject it and exit with status 2.
 - 7.9 WHEN backfill finishes, THE SYSTEM SHALL print a summary of the counts. The documentation SHALL state
-  that create and review runs from before this feature cannot be recovered.
+  that create and review runs from before this feature cannot be recovered, and that runs whose
+  `ck stats begin` failed (no marker) cannot be recovered either: backfill covers only runs from before this
+  feature (D10).
 
 ### Story 8: Shareable records of agent-mode runs
 
@@ -365,6 +381,8 @@ transcripts **So that** I can compare the two without any project content leavin
 - Timing-only grouping of agents for new runs. Grouping is by marker. The time-gap heuristic is used only
   by backfill (D3).
 - Backfill of create and review runs, and of any `general-purpose` agent without a marker (D7, D8).
+- Recovering runs from after this feature whose `ck stats begin` failed: their agents carry no marker, and
+  backfill is for runs from before this feature only (D10). The run's report says it was not recorded (2.5).
 - A new shareable schema version, or any new required shareable field (D1).
 - Spec names, task titles or paths in Agent descriptions, in any form (D4).
 - Passing a `ck worktree report` file to collect. The collector runs the report itself (D6).
@@ -384,9 +402,9 @@ transcripts **So that** I can compare the two without any project content leavin
   `create <step>` names, and whether revisions, test-track work and land fixes get their own fixed verbs
   (for example `revise task <N> round <k>`), are design choices. Any such template must keep to D4's
   content rule and must parse (2.3).
-- Outcome mapping for implement runs from the git report: every task merged is `complete`. If no task
-  failed but some are blocked or not started, it is `blocked`. If any task failed, it is `failed`. The
-  design may refine this within the existing outcome set.
+- Outcome mapping for implement runs from the git report, over the tasks the run worked on (3.4, D11):
+  every such task merged is `complete`. If none of them failed but some are blocked or not started, it is
+  `blocked`. If any of them failed, it is `failed`. The design may refine this within the existing outcome set.
 - The backfill gap default of 2 hours is a starting value (PLAN open question). `--dry-run` exists to tune
   it. Hand-run fixer agents of spec agent types may land in backfill groups. The dry run's per-group agent
   list is how I see and avoid that (PLAN open question).

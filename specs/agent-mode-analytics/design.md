@@ -21,14 +21,14 @@ How the PLAN.md decisions shape it:
 | Decision | Effect on this design |
 |---|---|
 | D1 schema stays `/1` | `share.py` gains an optional `source` field (`workflow`/`agents`) and one `COST_SOURCES` member `agent_transcripts`. Nothing else in the shareable tree changes; local "manifest"/"outcome" missing kinds map onto the existing `runfile`/`result` members. |
-| D2 `begin` best-effort | `ck stats begin` prints a valid id even when the manifest cannot be written (exit 0, warning on stderr); the instructions say to go on without a marker if `begin` fails. Collect handles a missing manifest (partial record). |
+| D2 `begin` best-effort | `ck stats begin` prints a valid id even when the manifest cannot be written (exit 0, warning on stderr); the instructions say to go on without a marker if `begin` fails. Collect handles a missing manifest of a marked run (partial record, by id only, D14). A run whose `begin` failed has no marker and is not recoverable (D10): backfill is for runs from before this feature only, and the instructions end such a run's report with the line `⚠ ck stats begin failed: this run is not recorded in ck stats` (2.5). |
 | D3 grouping | New runs: marker only (`agentrun.select_marked`). Time-gap grouping exists only in `backfill.group_agents`. |
 | D4 content-free descriptions | A fixed template grammar (`roles.match_agent`). The docs write every template out with placeholders limited to `<run_id>`, `<N>`, `<k>` (each create step and lens written literally); `agentrun.template_violations` enforces it over the instruction docs. |
 | D5 local detail, shared content-free | Spec/root/branch come from the manifest into the local record and its `terms`; `build_shareable` is still allowlist-built and has no path for them. |
 | D6 collector runs the git report | `agentcollect` calls `claude_kiro.worktrees.report(root, spec, into=...)`, the function behind `ck worktree report`, in-process. Any failure gives outcome `None` and a `missing` entry. |
 | D7 `general-purpose` only with a marker | `select_marked` only admits descriptions starting with the exact marker of the run being collected; backfill admits spec agent types only. |
 | D8 backfill v1 | `ck stats collect --agents-backfill [--dry-run] [--gap MIN]`, spec agent types only, session -> spec -> gap grouping, `partial: true`, deterministic record ids. |
-| D9 open manifests | `ck doctor` counts open manifests older than 6 h; `ck stats collect --all` collects them as partial records, and closes a stale manifest whose run has no marked agent as `abandoned` (6.5). `ck run` collects a session's agent-mode runs after it exits (5.5). |
+| D9 open manifests | `ck doctor` counts open manifests older than 6 h; `ck stats collect --all` collects them as partial records, and closes a stale manifest whose run has no marked agent as `abandoned` (6.5). `ck run` collects a session's agent-mode runs that have a manifest after it exits (5.5, D13, D14). |
 
 ## Components
 
@@ -51,7 +51,8 @@ How the PLAN.md decisions shape it:
     `result` missing entry (today's `if not partial and not isinstance(result, dict)` branch is skipped: agent mode
     has no run file and reports a missing `manifest` or `outcome` instead); sets `start_ms` to the context's
     `start_ms` (parsed manifest `startTime`, or the earliest agent `first_ts` when there is no manifest) and `wall_ms`
-    to the latest agent `last_ts` minus that start (`None` only when no agent has a timestamp); adds the run id,
+    to the latest agent `last_ts` minus that start (`None` only when no agent has a timestamp; backfill: the group's
+    spec-named `end_ms` minus its `start_ms`, so a spec-less joiner never moves them, 7.5, D15); adds the run id,
     spec, root and target branch to `terms` (9.2); writes `source: "agents"`, `partial` and `agentRun` (see Data Models); and
     replaces `_workflow_metrics` with `agentcollect.agent_metrics` (outcome and task lists from the git report,
     3.4-3.6).
@@ -83,15 +84,15 @@ How the PLAN.md decisions shape it:
   `collect_agents_auto`, `_collect_agents_one`, `_collect_backfill`; `_collect_all` merges workflow outcomes with
   open-manifest outcomes in one summary; `_is_partial(record)` replaces the inline `missing == runfile` checks.
   `collect_agents_auto` follows `collect_auto`'s sandbox branch: when the home is unreadable and
-  `CK_RUN_SANDBOXED == "1"` it prints `ℹ️ <run_id>: ck run collects this run after the session exits`, leaves the
-  manifest open and returns 0 (5.5).
+  `CK_RUN_SANDBOXED == "1"` it prints `ℹ️ <run_id>: ck run collects this run after the session exits (without a run
+  manifest: ck stats collect --agents <run_id>)`, leaves the manifest open and returns 0 (5.5, D14).
 - `src/claude_kiro/cli/main.py` - the `doctor` analytics block passes `now_ms` to `health.doctor_findings` (no
   other change).
 - `src/claude_kiro/cli/run.py` - `auto_collect_after_run` also collects the session's agent-mode runs (5.5). After
-  the workflow ids it calls `agentcollect.session_agent_runs(home, sid, since_ms)`, which returns (a) the ids of
-  open manifests whose `sessionId` is `sid`, or whose `sessionId` is null and whose start is at or after
-  `since_ms`, and (b) the run ids whose marker appears in `sid`'s `subagents/agent-*.meta.json` and that have no
-  manifest (collected partial, 3.10). Each id goes through `stats.collect_agents_auto` with `CK_RUN_SANDBOXED`
+  the workflow ids it calls `agentcollect.session_agent_runs(home, sid, since_ms)`, which returns the ids of open
+  manifests whose `sessionId` is `sid`, or whose `sessionId` is null and whose start is at or after `since_ms`;
+  a manifest with another session's `sessionId` is never returned (D13). It never returns a marked run id that
+  has no manifest: such a run needs `ck stats collect --agents <run_id>` (3.17, 6.7, D14). Each id goes through `stats.collect_agents_auto` with `CK_RUN_SANDBOXED`
   unset for that call (the session has exited, so the home is readable), giving one `stats: ...` line per id as
   for workflow runs. Never raises.
 - `analytics/SCHEMA.md` - documents `source` (enum `agents`, `workflow`), `cost.source` with `agent_transcripts`, the
@@ -101,12 +102,14 @@ How the PLAN.md decisions shape it:
   `ck stats begin --kind <kind> --spec <name> --into <into> --json` outside the sandbox before the first Agent call;
   the template list (Public Interfaces), every template written out; "if `begin` failed or printed no id, use the same templates without the
   marker and never stop or retry the run because of it" (1.6, 2.5); the closing step
-  `ck stats collect --agents <run_id> --auto` outside the sandbox (5.1). Line 45's `implement <spec>: task <N>` and
+  `ck stats collect --agents <run_id> --auto` outside the sandbox (5.1), or, when `begin` gave no id, the
+  report's last line `⚠ ck stats begin failed: this run is not recorded in ck stats` instead, with no claim that
+  a later command or backfill recovers the run (2.5, D10). Line 45's `implement <spec>: task <N>` and
   every other role's description are replaced by the templates (2.1).
 - `plugin/skills/spawn-worktree/SKILL.md` - Phase 1 runs `ck stats begin --kind implement` when a spec is given and
   the Agent path is used (no Workflow tool, or every role `inherit` with review off); the Phase 3 JSON description
   becomes `[ck:<run_id>] implement task <N>`; reviewer/revision/fix descriptions use the templates; the final report
-  step runs the agent-mode collect line (2.4, 5.1). Ad-hoc batches (no spec) use `implement task <n>` without a
+  step runs the agent-mode collect line, or the `begin` failed line when there is no id (2.4, 2.5, 5.1). Ad-hoc batches (no spec) use `implement task <n>` without a
   marker and are not collected (out of scope).
 - `plugin/skills/implement/SKILL.md`, `plugin/skills/create/SKILL.md`, `plugin/skills/review/SKILL.md` - the
   reporting step that runs `ck stats collect --run <wf_id> --auto` adds: "In agent mode (no `wf_id`), run
@@ -118,7 +121,9 @@ How the PLAN.md decisions shape it:
   lines), so they stay identical apart from those differences (2.6). These are protected `.claude/**` paths: all of
   them are updated in a single task that lands by hand.
 - `README.md` - the `ck stats` section gains agent-mode usage (`begin`, `collect --agents`, `--agents-backfill
-  --dry-run`) and states that create and review runs from before this feature cannot be recovered (7.9).
+  --dry-run`) and states that create and review runs from before this feature cannot be recovered, and that runs whose
+  `begin` failed (no marker) cannot be recovered either, as backfill covers only runs from before this feature
+  (7.9, D10).
 
 ### New Components
 
@@ -245,7 +250,9 @@ expanded) and `<lens>` for one of `roles.CREATE_LENSES` (`fidelity`, `grounding`
 | `consistency 1`, `consistency 2` | `consistency check: pass <n>` (`MAX_CONSISTENCY_PASSES = 2`) | Consistency Check |
 | `cleanup` | `remove pre-revision snapshot` | Consistency Check |
 
-Without a run id (1.6, 2.5) the same templates are used with the `[ck:<run_id>] ` prefix left out.
+Without a run id (1.6, 2.5) the same templates are used with the `[ck:<run_id>] ` prefix left out, and the report
+ends with `⚠ ck stats begin failed: this run is not recorded in ck stats` in place of the collect step. Those agents
+carry no marker, so the run is never collected (D10).
 
 ### Python entry points
 
@@ -268,7 +275,7 @@ def collect_backfill(home: Path, plan: BackfillPlan, *, now: datetime, pricing: 
 def find_marked_agents(home: Path, run_id: str, session_id: Optional[str], workers: int = 8
                        ) -> Tuple[List[AgentFile], List[Path]]   # (agents, directories searched)
 def agent_metrics(ctx: AgentRunContext, rows: List[dict]) -> dict
-def session_agent_runs(home: Path, session_id: str, since_ms: int) -> Tuple[str, ...]   # ck run sweep (5.5)
+def session_agent_runs(home: Path, session_id: str, since_ms: int) -> Tuple[str, ...]   # ck run sweep, manifests only (5.5)
 
 # analytics/store.py
 def open_manifests_dir(env=None) -> Path          # <data_dir>/runs-open
@@ -307,11 +314,11 @@ numbers are `A*` to stay clear of run-analytics' `S1-S27`.
 | A6 | `roles.match_legacy` | `(description: object, agent_type: object) -> LegacyMatch` | for old unmarked descriptions: `implement <spec>: task <N>...`, `fix <spec>: ...`, `revise <spec> task <N>[:...]`, `review task <N>...`, and the same with `ck-*` types. Role from the type (`SPEC_AGENT_TYPES` map), refined by the verb as in A5; `spec` is the token before `:` (or after `revise `), `None` when absent; `task` when given. Unparseable: role from the type, `matched=False`, `spec=None` | 7.3, 7.4, 4.1 |
 | A7 | `agentrun.template_violations` | `(template: str) -> Tuple[str, ...]` | every `<placeholder>` in the template not in `ALLOWED_PLACEHOLDERS = {"run_id", "N", "k"}` (an allowlist, so `<spec>`, `<feature>`, `<title>`, `<task-summary>`, `<path>`, `<branch>`, and also `<step>`, `<lens>`, `<p>`, all fail); also flags a template that does not start with `[ck:<run_id>] ` | 2.2 |
 | A8 | `agentrun.render_template` | `(template: str, samples: Mapping[str, str]) -> str` | substitutes each allowed placeholder; with `description_templates(markdown: str) -> Tuple[str, ...]` (backtick spans that start with `[ck:<run_id>]`) the static test renders every template and checks `match_agent(parse_marker(d).rest, t)` is matched for each spec agent type and `general-purpose` | 2.1, 2.3 |
-| A9 | `agentrun.implement_outcome` | `(report: Optional[Mapping], done_at_start: Optional[AbstractSet[str]], start_ms: Optional[int], end_ms: Optional[int]) -> ReportSummary` | `None` report (or one missing any of the five lists): every field `None`. Each `mergedAt` (a `%cI` committer ISO string) is parsed with `datetime.fromisoformat` (a trailing `Z` read as `+00:00`) into epoch ms; an unparseable one counts as outside any window. `merged` = (`merged` ∪ `done` task ids) minus `done_at_start` when `done_at_start` is given (3.4); when it is `None`, `merged` = `merged` entries whose parsed `mergedAt` lies in `[start_ms, end_ms]` (no bound on a side whose value is `None`). Callers pass `end_ms` = the latest agent `last_ts` + `MERGE_SLACK_MS` (30 min) for manifest runs, and + `min(MERGE_SLACK_MS, gap_ms)` for backfill groups, so two same-session groups of one spec (more than `gap_ms` apart, A13) never claim the same merge (3.4, 7.5). `failed`, `blocked`, `not_started` (= `unstarted` + `blocked`) from the report minus `merged`. Outcome: any failed -> `failed`; else any blocked or not started -> `blocked`; else `complete` | 3.4, 3.5, 7.5 |
+| A9 | `agentrun.implement_outcome` | `(report: Optional[Mapping], done_at_start: Optional[AbstractSet[str]], start_ms: Optional[int], end_ms: Optional[int], run_tasks: Optional[AbstractSet[str]] = None) -> ReportSummary` | `None` report (or one missing any of the five lists): every field `None`. Each `mergedAt` (a `%cI` committer ISO string) is parsed with `datetime.fromisoformat` (a trailing `Z` read as `+00:00`) into epoch ms; an unparseable one counts as outside any window. `merged` = (`merged` ∪ `done` task ids) minus `done_at_start` when `done_at_start` is given (3.4); when it is `None`, `merged` = `merged` entries whose parsed `mergedAt` lies in `[start_ms, end_ms]` (no bound on a side whose value is `None`). Callers pass `end_ms` = the latest agent `last_ts` + `MERGE_SLACK_MS` (30 min) for manifest runs, and + `min(MERGE_SLACK_MS, gap_ms)` for backfill groups, so two same-session groups of one spec (more than `gap_ms` apart, A13) never claim the same merge (3.4, 7.5). `failed`, `blocked`, `not_started` (= `unstarted` + `blocked`) from the report minus `merged`, each limited to `run_tasks` when it is given (D11). `run_tasks` is the set of task ids this run worked on: `agent_metrics` passes the non-null `task` of every agent row of the run (backfill: of the group's spec-named agents only, D15); `None` (the Harness one-argument form) judges the whole spec. Outcome over those lists: any failed -> `failed`; else any blocked or not started -> `blocked`; else `complete`; an empty `run_tasks` (the run named no task) gives outcome `None`. Tasks of the spec that the run never named never change the outcome or these lists (a one-task or "Just these tasks" run is `complete` when its tasks merged, whatever an older failed branch says) | 3.4, 3.5, 7.5 |
 | A10 | `agentrun.manifest_start_ms` / `agentrun.check_manifest` / `agentrun.classify_open_manifest` | `manifest_start_ms(value: object) -> Optional[int]`; `check_manifest(data: object) -> FormatCheck`; `classify_open_manifest(check: FormatCheck, now_ms: int, threshold_ms: int = STALE_MS) -> Literal["collect", "young", "malformed"]` | `manifest_start_ms` parses an ISO-8601 string with a `Z` or `±hh:mm` offset (fractional seconds and missing seconds allowed) into epoch ms; a naive time, a non-string or an unparseable string gives `None`. `check_manifest` sets `FormatCheck.start_ms` from `startTime` through it and fails when it is `None`. `classify_open_manifest`: `malformed` when the check failed; `collect` iff `now_ms - check.start_ms > threshold_ms` (strictly older than 6 h, `STALE_MS = 6 * 3600 * 1000`); else `young`. Doctor, `--all` and the Harness `open_manifest_due` / `classify_manifest` all go through these three functions | 6.1-6.3, 6.6 |
 | A11 | `agentrun.decide_collect_args` | `(run_id: Optional[str], all_: bool, agents: Optional[str], backfill: bool, auto: bool, dry_run: bool, gap: Optional[str]) -> ArgsDecision` | `ArgsDecision(ok, mode: "run"|"all"|"agents"|"backfill"|None, exit_code: 0|2, message, gap_minutes: Optional[int])` per the CLI rules above; `gap` must be a decimal string of a positive integer (`"0"`, `"-1"`, `"1.5"`, `"x"` refused); `--run` with an A1-valid id is refused with the `--agents` pointer; with `auto` the id-format checks return `ok=False, exit_code=0` | 3.13, 3.14, 5.2, 7.8 |
 | A12 | `backfill.candidate_reason` | `(meta: MetaView) -> Optional[str]` | `None` (a candidate) iff `agent_type in SPEC_AGENT_TYPES`, `parse_marker(description)` is `None`, and the meta is not under a `subagents/workflows/` directory (`meta.under_workflow` False). Otherwise a reason, checked in this order: `"workflow agent"`, `"carries a marker"`, `"not a spec agent type"`. These are the Harness Contract strings and exactly what the dry-run text and `--json` `excluded[].reason` print (workflow agents may be left out of the list; every other excluded agent is listed) | 7.1, 7.2 |
-| A13 | `backfill.group_agents` | `(agents: Sequence[BackfillAgent], gap_ms: int) -> GroupPlan` | group by `session_id`; within a session, by `spec` (agents ordered by `start_ms`, then `agent_id`); split a spec group where the gap from the latest `end_ms` among the members so far (a running maximum, so an agent still running when a shorter one ends keeps the group open) to the next `start_ms` exceeds `gap_ms`; a group's `end_ms` is that maximum (7.3, P-11; a 150-minute agent followed 10 minutes after its end stays in one group under the 2 h default). An agent with `spec=None` joins the group of its session whose `[start, end]` contains it or lies within `gap_ms` of it (nearest group; tie: earliest start); none: left out with reason `"no spec"`. An agent with no timestamps: left out, `"no timing"`. `plan_backfill` and the Harness `group_backfill` both call this one function (and A12), so the property and the CLI see the same grouping. Each group's id is `group_id(session_id, first_agent_id)` = `"ag_" + sha256("backfill\0" + session_id + "\0" + first_agent_id)[:8]`; output ordered by session id then group start | 7.3, 7.4, 7.6 |
+| A13 | `backfill.group_agents` | `(agents: Sequence[BackfillAgent], gap_ms: int) -> GroupPlan` | group by `session_id`; within a session, by `spec` (agents ordered by `start_ms`, then `agent_id`); split a spec group where the gap from the latest `end_ms` among the members so far (a running maximum, so an agent still running when a shorter one ends keeps the group open) to the next `start_ms` exceeds `gap_ms`; a group's `end_ms` is that maximum (7.3, P-11; a 150-minute agent followed 10 minutes after its end stays in one group under the 2 h default). Groups and their `[start_ms, end_ms]` are formed from spec-named agents first; then an agent with `spec=None` joins the group of its session whose `[start, end]` contains it or lies within `gap_ms` of it (nearest group; tie: earliest start); none: left out with reason `"no spec"`. A joiner never moves its group's `start_ms`/`end_ms`, so the merge window (A9) and the spacing between groups (P-11, P-18) come from spec-named agents only; it adds its cost and time to the record only (7.5, D15). An agent with no timestamps: left out, `"no timing"`. `plan_backfill` and the Harness `group_backfill` both call this one function (and A12), so the property and the CLI see the same grouping. Each group's id is `group_id(session_id, first_agent_id)` = `"ag_" + sha256("backfill\0" + session_id + "\0" + first_agent_id)[:8]`; output ordered by session id then group start | 7.3, 7.4, 7.6 |
 | A14 | `agentrun.agent_cost_label` | `(transcript_agents: int, estimated_agents: int, unpriced_agents: int) -> str` | `"agent_transcripts"` iff `collect.cost_label(...) == "priced_from_transcripts"`, else `"estimate"` | 3.7, 8.2 |
 | A15 | `share.source_of` | `(local: Mapping) -> str` | `"agents"` iff `local.get("source") == "agents"`, else `"workflow"` (records written before this feature have no `source`) | 8.1, 8.6 |
 | A16 | `health.decide` (extended) | as above | adds the stale-manifest warning iff `stale_manifests > 0` and the unreadable-manifest warning iff `bad_manifests > 0`; messages carry counts only | 6.1, 6.2, 6.6 |
@@ -429,6 +436,8 @@ class AgentRunContext:        # passed to collect._build_record(agent_run=...)
     partial: bool             # missing manifest, stale sweep, or backfill
     backfill: bool
     gap_minutes: Optional[int]
+    spec_agent_ids: Optional[FrozenSet[str]]   # backfill: the group's spec-named agents, which alone give the A9
+                              # run_tasks and the bounds (D15); None = every agent row of the run counts (D11)
 
 @dataclass(frozen=True)
 class BackfillAgent:          # one candidate as A13 sees it
@@ -444,7 +453,8 @@ class BackfillGroup:
     record_id: str            # A13 group id
     session_id: str
     spec: str
-    agent_ids: Tuple[str, ...]
+    agent_ids: Tuple[str, ...]        # spec-named agents and joiners
+    spec_agent_ids: Tuple[str, ...]   # spec-named agents only; start_ms/end_ms come from these (D15)
     start_ms: int
     end_ms: int
 
@@ -557,7 +567,7 @@ flowchart TD
     F2 --> S
     BF[collect --agents-backfill] --> P[plan_backfill: metas -> A12 -> A6 -> A13]
     P -- --dry-run --> V[print groups + left out, write nothing]
-    P -- write --> BW[collect_backfill: _build_record partial, git report via A9 with mergedAt in group start .. end + min 30 min, gap]
+    P -- write --> BW[collect_backfill: _build_record partial, git report via A9 with mergedAt in spec-named group start .. end + min 30 min, gap, run_tasks from spec-named agents]
 ```
 
 ## Error Handling
@@ -566,7 +576,7 @@ flowchart TD
 |---|---|
 | 1.4 | `click.Choice` on `--kind` and an explicit empty check on `--spec` print usage naming `implement, create, review`; exit 2 before any store access, so no manifest. |
 | 1.5 | `begin_run` catches `OSError` (and `PermissionError`) from `write_manifest`; the id is already generated (A2 against whatever `taken_run_ids` could read), printed, `BeginResult.warning` goes to stderr, exit 0. |
-| 1.6 | Instruction text in `without-workflow-tool.md` and `spawn-worktree/SKILL.md`: on a non-zero exit, no output, or "command not found", continue with marker-less templates; never retry or stop. `begin_run` itself wraps session/role/tasks lookups so they degrade to `null` instead of failing. |
+| 1.6 | Instruction text in `without-workflow-tool.md` and `spawn-worktree/SKILL.md`: on a non-zero exit, no output, or "command not found", continue with marker-less templates; never retry or stop; end the report with the `begin` failed line instead of the collect step, as the run cannot be collected later (2.5, D10). `begin_run` itself wraps session/role/tasks lookups so they degrade to `null` instead of failing. |
 | 3.5 | `agentcollect._git_report` returns `None` on a missing root, non-repo, missing branch, `WorktreeError`, or any exception; A9 then returns all-`None`; the record gets `outcome: None`, `tasks: None`, `stats: None`, `missing += {"what": "outcome"}` and is still written. |
 | 3.6 | `agent_metrics` never calls the report for `create`/`review`; `outcome: None`, no `outcome` missing entry (nothing was expected). |
 | 3.10 | `read_manifest` -> `"missing"` but marked agents found: `AgentRunContext(manifest="missing", partial=True, spec=None, root=head cwd, into=head gitBranch)`, `missing += {"what": "manifest"}`; outcome unknown (no spec, so the report is never called). Kind: `create` (`workflow_name="spec-create"`, `mode` None) when every marked agent's `match_agent` result has a create `step`, else `implement` (`spec-implement`). `start_ms` = earliest agent `first_ts`. |
@@ -581,7 +591,7 @@ flowchart TD
 | 5.2 | `collect_agents_auto` wraps everything in `try/except Exception`, prints one line, logs the failure, returns 0. |
 | 5.3 | `auto_collect_enabled(...)` false: `ℹ️ auto-collect is off (ck agents set run.analytics true)`, return 0 before touching the manifest. |
 | 5.4 | Instruction text: the collect line comes after the run's report is composed and states "never let its result change what you report"; the command exits 0 under `--auto`. |
-| 5.5 | `collect_agents_auto` under `CK_RUN_SANDBOXED=1` with an unreadable home: the deferral line, exit 0, manifest open. `auto_collect_after_run` wraps each `session_agent_runs` id in its own `try`, so one failure gives one `stats: <id> not collected (...)` line and the others still run. |
+| 5.5 | `collect_agents_auto` under `CK_RUN_SANDBOXED=1` with an unreadable home: the deferral line (naming `ck stats collect --agents <run_id>` for a run without a manifest, D14), exit 0, manifest open. `auto_collect_after_run` wraps each `session_agent_runs` id in its own `try`, so one failure gives one `stats: <id> not collected (...)` line and the others still run. |
 | 6.5 | `collect_open_manifests`: a stale manifest for which `collect_agent_run` returns `error="no_agents"` (it has already searched the manifest session and then every session, 3.1) is closed with `abandoned: true` and returned as an `abandoned` outcome (reason `no agents carry the marker`); `summarize_outcomes` counts it in `abandoned`, never in `failed`; the loop continues. A closed manifest is never iterated again, so later `--all` and doctor runs do not see it. Manual `collect --agents` on a young manifest keeps 3.12 (left open, exit 1). |
 | 6.6 | `read_manifest` -> `"malformed"` (unparseable JSON or `check_manifest` fails): `--all` counts `failed` with reason `run manifest not recognised` (the content is never echoed); doctor counts it in `bad_manifests`. |
 | 7.4 | A13 leaves out spec-less agents with no nearby group, reason `no spec`, listed under `left out:` in the dry run. |
@@ -635,12 +645,12 @@ flowchart TD
 | 2.2 | A7 `template_violations`, `ALLOWED_PLACEHOLDERS` |
 | 2.3 | A8 `description_templates` + `render_template` with A3 + A5 |
 | 2.4 | `spawn-worktree/SKILL.md` Phase 1 `ck stats begin --kind implement` and Phase 3 template |
-| 2.5 | Marker-less template rule in both docs |
+| 2.5 | Marker-less template rule and the `begin` failed report line in both docs; no recovery path (D10) |
 | 2.6 | Vendored copies regenerated with `plugin.vendor_files()` in one `.claude/**` task |
 | 3.1 | `find_marked_agents` (manifest session first, then all sessions), A3, A4 |
 | 3.2 | `_build_agent` / `_aggregate` / `_costs` reuse, `timing_from_transcript` always on in agent mode |
 | 3.3 | `AgentRunContext.spec/root/into` from the manifest; `_build_record(agent_run=...)` |
-| 3.4 | `agentcollect._git_report` -> `worktrees.report`, A9 `implement_outcome` (minus `doneAtStart`, else the `[start_ms, end_ms]` window), `agent_metrics` |
+| 3.4 | `agentcollect._git_report` -> `worktrees.report`, A9 `implement_outcome` (minus `doneAtStart`, else the `[start_ms, end_ms]` window; outcome and failed/blocked/not-started over `run_tasks`, D11), `agent_metrics` (collects `run_tasks` from the agent rows) |
 | 3.5 | A9 all-`None` path, `missing` `outcome` (Error Handling 3.5) |
 | 3.6 | `agent_metrics` skips the report for create/review |
 | 3.7 | `source: "agents"`, A14 `agent_cost_label`, `_costs(transcript_source=...)` |
@@ -665,7 +675,7 @@ flowchart TD
 | 5.2 | `collect_agents_auto` (always 0, one line with path or reason + retry command) |
 | 5.3 | `auto_collect_enabled` check in `collect_agents_auto`; manifest untouched |
 | 5.4 | `--auto` exit 0 + instruction text (Error Handling 5.4) |
-| 5.5 | `collect_agents_auto` `CK_RUN_SANDBOXED` deferral; `cli/run.py` `auto_collect_after_run` + `agentcollect.session_agent_runs` |
+| 5.5 | `collect_agents_auto` `CK_RUN_SANDBOXED` deferral; `cli/run.py` `auto_collect_after_run` + `agentcollect.session_agent_runs` (own session's manifests and session-less ones started at or after it; never another session's, never manifest-less ids, D13, D14) |
 | 6.1 | A10, A16, `doctor_findings(now_ms=...)` stale-manifest warning |
 | 6.2 | A10 strict `> STALE_MS` |
 | 6.3 | `collect_open_manifests` (A10 `collect` -> `collect_agent_run(partial=True)` -> close; `young` -> unfinished) |
@@ -676,12 +686,12 @@ flowchart TD
 | 7.1 | `plan_backfill` + dry-run view (groups, agents, start, wall, est. cost, left out) |
 | 7.2 | A12 `candidate_reason`, `SPEC_AGENT_TYPES` |
 | 7.3 | A6 `match_legacy` spec parse, A13 grouping (end-to-start gap), `--gap` default 120 |
-| 7.4 | A13 spec-less attachment rule, `no spec` reason |
-| 7.5 | `collect_backfill`: partial, `missing` `manifest`, `source: "agents"`, root/branch from session head, A9 with `mergedAt` in `[group start, group end + min(30 min, gap)]` |
+| 7.4 | A13 spec-less attachment rule (bounds from spec-named agents, D15), `no spec` reason |
+| 7.5 | `collect_backfill`: partial, `missing` `manifest`, `source: "agents"`, root/branch from session head, A9 with `mergedAt` in `[group start, group end + min(30 min, gap)]` (spec-named bounds) and `run_tasks` from the spec-named agents (D11, D15) |
 | 7.6 | A13 deterministic `group_id`, `write_outcome_result` unchanged/updated, overlap rule (agent-set inequality) |
 | 7.7 | `plan_backfill` empty -> message, exit 0 |
 | 7.8 | A11 `--gap` rule |
-| 7.9 | Backfill summary output; `README.md` limitation note |
+| 7.9 | Backfill summary output; `README.md` limitation note (pre-feature create/review runs, and runs whose `begin` failed, D10) |
 | 8.1 | A15 `source_of`, `_TREE` `source` |
 | 8.2 | `COST_SOURCES` + `agent_transcripts`; `share._cost` passes it through |
 | 8.3 | `validate_shareable` over `_TREE` with optional `source` enum and extended `cost.source` enum |
