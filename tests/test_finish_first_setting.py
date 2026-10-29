@@ -127,7 +127,7 @@ def test_p12_finish_first_accepts_only_boolean_words(v):
 
 _CLI_CASES = [
     ("TRUE", True), ("nO", False), ("On", True),  # accepted
-    ("1", None), ("ture", None), (" true", None),  # refused
+    ("1", None), ("ture", None), ("enabled", None),  # refused
 ]
 
 
