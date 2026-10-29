@@ -523,7 +523,8 @@ def _implement_metrics(result: Mapping, rows: List[dict], workflow_name: str, tr
             esc_models = [m for m in esc_models if isinstance(m, str)]
         track = tracks.get(key) if isinstance(tracks.get(key), str) else None
         if track not in ("impl", "test"):
-            track = "unknown"
+            roles_seen = {r["role"] for r in rows if r.get("task") is not None and str(r["task"]) == key}
+            track = "test" if "test-writer" in roles_seen else ("impl" if "implementer" in roles_seen else "unknown")
         retry_esc = sum(1 for e in escs if isinstance(e, dict) and e.get("stage") == "retry")
         review = t.get("review") if isinstance(t.get("review"), dict) else {}
         resolves, inferred = conflict_count(t, resolver_labels)
