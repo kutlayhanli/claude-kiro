@@ -64,7 +64,7 @@ def build(env, agents=None, tasks=None, rid=RID, **run_kw):
     home = FakeClaudeHome(env.claude)
     proj = git_project(env.root, "git@github.com:acme-corp/ledger-a.git", name="proj")
     s = home.session("-proj", cwd=proj)
-    run = s.implement_run(rid, result=implement_result(tasks if tasks is not None else two_tasks()),
+    run = s.implement_run(rid, result=implement_result(tasks if tasks is not None else two_tasks(), base="2026-10-12T09:00:00Z"),
                           agents=agents if agents is not None else queue_agents(), **run_kw)
     return run
 
