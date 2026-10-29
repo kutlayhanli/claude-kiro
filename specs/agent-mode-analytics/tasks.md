@@ -116,7 +116,7 @@ Add self-checks to `tests/test_stats_helpers.py` that exercise only the harness 
 ---
 
 ### Task 4: Test the shareable `source` / `agent_transcripts` schema and leak vocabulary
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 9.4
 **Properties:** P-13, P-14
@@ -127,12 +127,12 @@ Add self-checks to `tests/test_stats_helpers.py` that exercise only the harness 
 **Verify:** `uv run pytest -q -n auto tests/test_stats_agents_schema.py` `uv run pytest -q -n auto tests/test_stats_export.py tests/test_stats_leak.py tests/test_stats_submit.py`
 **Verifies:** Task 5 (owns `SOURCES`, `source_of`, `COST_SOURCES`, the validator tree and `VOCABULARY`)
 **Acceptance:**
-- [ ] Seam tests call `build_shareable`, `validate_shareable` and `leak.VOCABULARY` directly; the TC-51 export runs the real `ck stats export` against a real git kiro checkout and a fake `gh`
-- [ ] Leak assertions scan raw JSON bytes, not parsed fields only
-- [ ] The 0.10.1 fixture is checked to validate today (before the feature) so later failures point at a regression, not at the fixture
-- [ ] `PROPERTIES` lists P-13 and P-14, each pointing at an existing test name
-- [ ] Before the implementation exists the new-schema tests fail for the right reason (no `source` in shareable output, `agent_transcripts` rejected, `SOURCES` missing), not broken fixtures
-- [ ] No mocks of the project's own code; existing export/leak/submit tests are not edited
+- [x] Seam tests call `build_shareable`, `validate_shareable` and `leak.VOCABULARY` directly; the TC-51 export runs the real `ck stats export` against a real git kiro checkout and a fake `gh`
+- [x] Leak assertions scan raw JSON bytes, not parsed fields only
+- [x] The 0.10.1 fixture is checked to validate today (before the feature) so later failures point at a regression, not at the fixture
+- [x] `PROPERTIES` lists P-13 and P-14, each pointing at an existing test name
+- [x] Before the implementation exists the new-schema tests fail for the right reason (no `source` in shareable output, `agent_transcripts` rejected, `SOURCES` missing), not broken fixtures
+- [x] No mocks of the project's own code; existing export/leak/submit tests are not edited
 **Dependencies:** Task 1 (uses `CONFIDENTIAL`, `seeded_local_record`, `kiro_checkout`, `fake_gh`)
 **Complexity:** Medium
 **Risk:** safety (oracle for what leaves the machine in shared records; a missed leak is irreversible once exported)
@@ -140,7 +140,7 @@ Add self-checks to `tests/test_stats_helpers.py` that exercise only the harness 
 ---
 
 ### Task 5: Add `source` and `agent_transcripts` to the shareable schema and extend the leak check
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 9.3, 9.4
 **Description:** In `share.py`: `COST_SOURCES` becomes `("priced_from_transcripts", "estimate", "agent_transcripts")`; add `SOURCES = ("workflow", "agents")` and `source_of(local)` (A15: `"agents"` iff `local.get("source") == "agents"`, else `"workflow"`); `_TREE` gains optional `"source": _enum(SOURCES)`; `build_shareable` sets `source` via `source_of` and passes the run cost source through unchanged; `_MISSING_MAP` gains `"manifest": "runfile"` and `"outcome": "result"`. `REQUIRED` stays unchanged and no other field is added: the allowlist construction must give run id, session id, agent ids, labels, `agentRun`, `partial` and `project.*` no path into the shared record. In `leak.py`: `_vocabulary()` adds `share.SOURCES` (`agent_transcripts` arrives via `COST_SOURCES`); `GENERIC_PATTERNS` gains `("agent_run_id", "id", re.compile(r"\bag_[0-9a-f]{8}\b", re.I))`. `build_terms` is not changed (record `terms` carry the new values once Task 7 lands). In `analytics/SCHEMA.md`: document `source` (enum `agents`, `workflow`), `cost.source` with `agent_transcripts`, the sources and cost-sources fixed-enum lines, and the `agent_run_id` generic pattern, keeping the schema id `ck-run-analytics/1`; follow the format `tests/test_stats_export.py` and `tests/test_stats_leak.py` already check. This task owns the Harness Contract names `share.SOURCES` and the extended `share.COST_SOURCES`.
@@ -151,12 +151,12 @@ Add self-checks to `tests/test_stats_helpers.py` that exercise only the harness 
 **Verify:** `uv run pytest -q -n auto tests/test_stats_agents_schema.py` `uv run pytest -q -n auto tests/test_stats_export.py tests/test_stats_leak.py tests/test_stats_submit.py tests/test_stats_properties_share.py tests/test_stats_properties_enums.py`
 **Verified by:** Task 4 (schema, validator and vocabulary tests plus P-13/P-14)
 **Acceptance:**
-- [ ] A shareable record built from a local record with `source: "agents"` has `source: "agents"`; one from a record without `source` has `source: "workflow"`
-- [ ] `validate_shareable` accepts records with or without `source`, rejects any other `source` value and any `cost.source` outside the three documented values
-- [ ] Existing 0.10.1 shareable records validate and submit exactly as before; schema id stays `ck-run-analytics/1`
-- [ ] SCHEMA.md documents `source` and `agent_transcripts`, and the existing doc-vs-validator tests pass
-- [ ] `workflow`, `agents`, `agent_transcripts` are never leak hits; any `ag_<8 hex>` string in an export or note is a hit
-- [ ] No run id, session id, agent id, description, spec name, path or branch can reach a shareable record
+- [x] A shareable record built from a local record with `source: "agents"` has `source: "agents"`; one from a record without `source` has `source: "workflow"`
+- [x] `validate_shareable` accepts records with or without `source`, rejects any other `source` value and any `cost.source` outside the three documented values
+- [x] Existing 0.10.1 shareable records validate and submit exactly as before; schema id stays `ck-run-analytics/1`
+- [x] SCHEMA.md documents `source` and `agent_transcripts`, and the existing doc-vs-validator tests pass
+- [x] `workflow`, `agents`, `agent_transcripts` are never leak hits; any `ag_<8 hex>` string in an export or note is a hit
+- [x] No run id, session id, agent id, description, spec name, path or branch can reach a shareable record
 **Dependencies:** Task 4 (its tests are the oracle)
 **Complexity:** Medium
 **Risk:** safety (governs what leaves the machine in shared records and the leak gate before export; a leak is irreversible)
@@ -295,7 +295,7 @@ Age is controlled by backdating whole hours (5 h vs 7 h); the clock is not faked
 ---
 
 ### Task 11: Test agent-mode privacy end to end and the CLI-wide properties
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.2, 5.2, 8.1, 8.2, 8.5, 9.1, 9.2, 9.3, 9.4
 **Properties:** P-15, P-16, P-17
@@ -308,12 +308,12 @@ Age is controlled by backdating whole hours (5 h vs 7 h); the clock is not faked
 **Verify:** `uv run pytest -q -n auto tests/test_stats_agents_share.py` `uv run pytest -q -n auto tests/test_stats_properties_agents_cli.py`
 **Verifies:** Task 13 (the `begin` / `collect --agents` / export CLI these tests drive, built on Tasks 5 and 7)
 **Acceptance:**
-- [ ] Export tests run the real `ck stats collect` and `ck stats export` against a real git kiro checkout and a fake `gh`; the note test runs under a pty with the fake `claude` drafter
-- [ ] Leak assertions scan raw bytes of every exported file, not parsed fields only
-- [ ] Property generators cover every surface form and negative listed in the P-15 to P-17 rows; each example has its own isolated env
-- [ ] The decision is checked against `ck cost` and `confidential_terms`, not re-implemented in the test
-- [ ] `PROPERTIES` lists P-15, P-16, P-17, each pointing at an existing test name
-- [ ] Before the implementation exists the tests fail for the right reason (unknown `--agents` option, `worktreePath` not in terms), not broken fixtures or generators
+- [x] Export tests run the real `ck stats collect` and `ck stats export` against a real git kiro checkout and a fake `gh`; the note test runs under a pty with the fake `claude` drafter
+- [x] Leak assertions scan raw bytes of every exported file, not parsed fields only
+- [x] Property generators cover every surface form and negative listed in the P-15 to P-17 rows; each example has its own isolated env
+- [x] The decision is checked against `ck cost` and `confidential_terms`, not re-implemented in the test
+- [x] `PROPERTIES` lists P-15, P-16, P-17, each pointing at an existing test name
+- [x] Before the implementation exists the tests fail for the right reason (unknown `--agents` option, `worktreePath` not in terms), not broken fixtures or generators
 **Dependencies:** Task 1 (uses `ToolAgentSpec` with worktree keys, `AgentSpec.extra_meta`, `begin`, `set_manifest`, `read_only`, `kiro_checkout`)
 **Complexity:** High
 **Risk:** safety (guards confidential project names, paths and branches from leaving the machine in exported records and issue notes)
@@ -382,7 +382,7 @@ In `health.py`, extend `decide(newest, auto_collect, uncollected, stale_manifest
 ---
 
 ### Task 14: Test the agent-mode instruction documents and their templates
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.6, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 5.1, 5.4, 7.9
 **Properties:** P-6
@@ -392,11 +392,11 @@ In `health.py`, extend `decide(newest, auto_collect, uncollected, stale_manifest
 **Verify:** `uv run pytest -q tests/test_stats_agents_docs.py`
 **Verifies:** Task 15 (owns the packaged docs and vendored copies these tests read)
 **Acceptance:**
-- [ ] Doc tests read both the packaged sources and the vendored renderings for implement, create, review, spawn-worktree and `without-workflow-tool.md`
-- [ ] The template checker's self-check proves it fails on a planted spec placeholder (a checker that passes everything is caught)
-- [ ] `PROPERTIES` lists P-6, pointing at an existing test name
-- [ ] Before the implementation exists the tests fail for the right reason (`AttributeError` for `parse_agent_description` / `AGENT_CREATE_STEPS`, missing templates in the docs), not import or fixture errors
-- [ ] No mocks of the project's own code
+- [x] Doc tests read both the packaged sources and the vendored renderings for implement, create, review, spawn-worktree and `without-workflow-tool.md`
+- [x] The template checker's self-check proves it fails on a planted spec placeholder (a checker that passes everything is caught)
+- [x] `PROPERTIES` lists P-6, pointing at an existing test name
+- [x] Before the implementation exists the tests fail for the right reason (`AttributeError` for `parse_agent_description` / `AGENT_CREATE_STEPS`, missing templates in the docs), not import or fixture errors
+- [x] No mocks of the project's own code
 **Dependencies:** Task 1 (uses `described`, `CONFIDENTIAL`, `SPEC_TYPES`)
 **Complexity:** Medium
 **Risk:** normal
