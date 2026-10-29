@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple
 
 from claude_kiro import bench, manifest
-from claude_kiro.analytics import agentrun, collect, roles, store
+from claude_kiro.analytics import agentrun, backfill, collect, roles, store
 from claude_kiro.analytics.agentrun import BeginResult, MetaView
 
 _CONFIG_ROLES = ("implementer", "test_writer", "reviewer", "reviewer_risky", "fixer", "resolver", "orchestrator")
@@ -414,6 +414,153 @@ def agent_metrics(ctx: AgentRunContext, rows: List[dict]) -> dict:
     out["tasks"] = _task_rows(rows, summary.merged, summary.failed or (), report or {})
     out["stats"] = {"notStarted": len(summary.not_started or ()), "blocked": len(summary.blocked or ())}
     return out
+
+
+# ---------------------------------------------------------------- backfill (7.1-7.6)
+
+
+@dataclass(frozen=True)
+class BackfillPlan:
+    plan: backfill.GroupPlan
+    est_usd: Dict[str, Optional[float]]        # record id -> priced cost of its agents (None: no transcript)
+    overlaps: Dict[str, str]                   # record id of a left-out group -> the backfill record it clashes with
+    files: Dict[str, AgentFile]                # agent id -> files, for every candidate
+    gap_minutes: int = agentrun.DEFAULT_GAP_MINUTES
+
+
+def _backfill_metas(home: Path, workers: int) -> List[AgentFile]:
+    """Every direct subagent meta of every session (workflow-tool agents live one level deeper and are not read)."""
+    paths = sorted((Path(home) / "projects").glob("*/*/subagents/agent-*.meta.json"))
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        views = list(pool.map(_read_meta, paths))
+    return [AgentFile(v, p, p.with_name(f"agent-{v.agent_id}.jsonl"))
+            for v, p in zip(views, paths) if v is not None]
+
+
+def _probe(af: AgentFile, pricing: dict) -> Tuple[Optional[int], Optional[int], Optional[float]]:
+    """(first ts, last ts, priced usd) from the transcript; all None when it is missing or unreadable."""
+    if not af.transcript.is_file():
+        return None, None, None
+    first, last = collect._timestamps(af.transcript)
+    usd: Optional[float] = None
+    try:
+        scan = bench.scan_transcript(af.transcript)
+    except OSError:
+        scan = None
+    if scan and scan.get("requests"):
+        usd = bench._price_by_model(scan["usage_by_model"], pricing)
+    return first, last, usd
+
+
+def _existing_backfill(env: Optional[Mapping[str, str]]) -> List[Tuple[str, FrozenSet[str]]]:
+    """(record id, agent ids) of every backfill record already written."""
+    try:
+        records = store.load_records(env)
+    except OSError:
+        return []
+    out: List[Tuple[str, FrozenSet[str]]] = []
+    for rec in records:
+        run = rec.get("agentRun")
+        if not isinstance(run, dict) or not run.get("backfill"):
+            continue
+        ids = frozenset(a["agentId"] for a in rec.get("agents") or []
+                        if isinstance(a, dict) and isinstance(a.get("agentId"), str))
+        out.append((str(rec.get("runId")), ids))
+    return out
+
+
+def plan_backfill(home: Path, *, gap_minutes: int = agentrun.DEFAULT_GAP_MINUTES, pricing: Optional[dict] = None,
+                  env: Optional[Mapping[str, str]] = None) -> BackfillPlan:
+    """Group the unmarked spec-agent runs (A12, A13, A6) and price them. Writes nothing."""
+    pricing = pricing or {}
+    gap_ms = gap_minutes * 60_000
+    excluded: List[Tuple[str, str, str]] = []
+    candidates: List[AgentFile] = []
+    for af in _backfill_metas(Path(home), 8):
+        reason = backfill.candidate_reason(af.meta)
+        if reason is None:
+            candidates.append(af)
+        else:
+            excluded.append((af.meta.agent_id, af.meta.session_id, reason))
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        probes = list(pool.map(lambda af: _probe(af, pricing), candidates))
+
+    agents: List[backfill.BackfillAgent] = []
+    files: Dict[str, AgentFile] = {}
+    usd_of: Dict[str, Optional[float]] = {}
+    for af, (start, end, usd) in zip(candidates, probes):
+        legacy = roles.match_legacy(af.meta.description, af.meta.agent_type)
+        agents.append(backfill.BackfillAgent(
+            agent_id=af.meta.agent_id, session_id=af.meta.session_id, spec=legacy.spec,
+            start_ms=start, end_ms=end, role=legacy.role))
+        files[af.meta.agent_id] = af
+        usd_of[af.meta.agent_id] = usd
+
+    grouped = backfill.group_agents(agents, gap_ms)
+    excluded.extend(grouped.excluded)
+
+    existing = _existing_backfill(env)
+    kept: List[backfill.BackfillGroup] = []
+    overlaps: Dict[str, str] = {}
+    for g in grouped.groups:
+        members = frozenset(g.agent_ids)
+        clash = next((rid for rid, ids in existing if ids & members and ids != members), None)
+        if clash is None:
+            kept.append(g)
+        else:
+            overlaps[g.record_id] = clash
+            excluded.extend((aid, g.session_id, f"overlaps backfill record {clash}") for aid in g.agent_ids)
+
+    est: Dict[str, Optional[float]] = {}
+    for g in kept:
+        priced = [usd_of[a] for a in g.agent_ids if usd_of.get(a) is not None]
+        est[g.record_id] = sum(priced) if priced else None
+
+    plan = backfill.GroupPlan(groups=tuple(kept),
+                              excluded=tuple(sorted(excluded, key=lambda e: (e[1], e[0]))))
+    return BackfillPlan(plan=plan, est_usd=est, overlaps=overlaps, files=files, gap_minutes=gap_minutes)
+
+
+def _legacy_matcher(label: object, agent_type: object) -> roles.LabelMatch:
+    m = roles.match_legacy(label, agent_type)
+    return roles.LabelMatch(role=m.role, matched=m.matched, task=m.task)
+
+
+def _collect_group(g: backfill.BackfillGroup, plan: BackfillPlan, pricing: dict,
+                   env: Optional[Mapping[str, str]]) -> collect.CollectOutcome:
+    files = [plan.files[a] for a in g.agent_ids]
+    agent_dir = files[0].meta_path.parent
+    session_dir = agent_dir.parent
+    session_jsonl = session_dir.parent / f"{session_dir.name}.jsonl"
+    head = collect._head(session_jsonl) if session_jsonl.is_file() else {}
+    gap_ms = plan.gap_minutes * 60_000
+    ctx = AgentRunContext(
+        run_id=g.record_id, kind="implement", workflow_name="spec-implement", matcher=_legacy_matcher,
+        spec=g.spec, root=head.get("cwd"), into=head.get("gitBranch"), start_ms=g.start_ms,
+        end_ms=g.end_ms + min(agentrun.MERGE_SLACK_MS, gap_ms), roles=None, done_at_start=None,
+        manifest="missing", partial=True, backfill=True, gap_minutes=plan.gap_minutes,
+        spec_agent_ids=frozenset(g.spec_agent_ids))
+    missing: List[dict] = [{"agentId": None, "what": "manifest"}]
+    record = collect._build_record(
+        run_id=g.record_id, workflow_name="spec-implement", run_data=None, session_dir=session_dir,
+        agent_dir=agent_dir, session_jsonl=session_jsonl, agents=[_to_agent(f) for f in files], missing=missing,
+        start_ms=None, wall_ms=None, status=None, pricing=pricing, fresh=False, partial=True, agent_run=ctx)
+    _, kind = collect.write_outcome_result(collect.CollectOutcome(g.record_id, "collected", record=record), env)
+    return collect.CollectOutcome(g.record_id, kind, record=record)
+
+
+def collect_backfill(home: Path, plan: BackfillPlan, *, now: datetime, pricing: Optional[dict] = None,
+                     env: Optional[Mapping[str, str]] = None) -> Tuple[collect.CollectOutcome, ...]:
+    """Write one partial record per planned group; one failing group never stops the others."""
+    pricing = pricing or {}
+    out: List[collect.CollectOutcome] = []
+    for g in plan.plan.groups:
+        try:
+            out.append(_collect_group(g, plan, pricing, env))
+        except Exception as e:  # noqa: BLE001 - recorded per group
+            out.append(collect.CollectOutcome(g.record_id, "failed", reason=f"{type(e).__name__}: {str(e)[:200]}"))
+    return tuple(out)
 
 
 # ---------------------------------------------------------------- open-manifest sweep

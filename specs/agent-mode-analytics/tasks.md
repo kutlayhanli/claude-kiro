@@ -219,7 +219,7 @@ Foundation task: Tasks 9, 10, 11 and 12 reach this code only through the CLI of 
 ---
 
 ### Task 8: Add backfill planning and writing for older implement-mode runs
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7
 **Description:** Foundation task (reached only through `ck stats collect --agents-backfill` in Task 13). In `agentcollect.py` add `BackfillPlan` and `plan_backfill(home, gap_minutes=120, pricing=None)`: read every `projects/*/*/subagents/agent-*.meta.json` in parallel (8 workers, input order kept), filter with `backfill.candidate_reason`, parse spec/role/task with `roles.match_legacy`, scan only candidate transcripts for start/end timestamps and a priced estimate, memoise session heads, group with `backfill.group_agents` (the same two functions behind the Harness `group_backfill`, so the dry run prints exactly their reason strings), and apply the design.md overlap rule: a group that shares an agent with an existing backfill record whose agent-id set is not exactly the group's is left out with reason `overlaps backfill record <id>` and the existing record is kept (7.6). Add `collect_backfill(home, plan, now=...)`: for each group build an `AgentRunContext` (`partial=True`, `backfill=True`, `manifest="missing"`, `gapMinutes`, spec from the group, root from the session head cwd, target from its `gitBranch`, matcher `match_legacy`, `spec_agent_ids` = the group's spec-named agents) and call `collect._build_record(..., agent_run=ctx)`; the implement outcome uses A9 with `done_at_start=None`, `start_ms` = group start and `end_ms` = group end + `min(MERGE_SLACK_MS, gap)`, both bounds from spec-named agents only, and `run_tasks` = the tasks the spec-named agents name; spec-less joiners add their cost and time to the record only (7.5, D11, D15). Record ids are the A13 group ids so a second run yields `unchanged`. No new pricing path.
@@ -229,13 +229,13 @@ Foundation task: Tasks 9, 10, 11 and 12 reach this code only through the CLI of 
 **Verified by:** None
 Foundation task: Task 10 reaches this code only through the CLI of Task 13, so its criteria are verified there. `tests/test_stats_perf.py` (TC-56, TC-57) drives `ck stats begin` and `--agents-backfill`, which Task 13 adds, so it runs under Tasks 9, 10 and 13, not here.
 **Acceptance:**
-- [ ] Only unmarked agents of spec agent types outside Workflow-tool directories are considered; `general-purpose` and workflow agents never appear in a group
-- [ ] Groups are by session, then legacy-parsed spec, split where the end-to-start gap exceeds the threshold; spec-less agents join a nearby group or are left out as `no spec`
-- [ ] The plan carries, per group, session, spec, agent count, start, wall time and estimated cost, plus the excluded agents with reasons, and writes nothing
-- [ ] Written records are partial, have `source: "agents"`, `missing` `manifest`, root and branch from the session, and the git-report outcome rules of 3.4-3.5
-- [ ] Running backfill twice gives the same record ids and `unchanged` results, with no duplicate or overlapping records; regrouping with another `--gap` leaves overlapping groups out and never changes existing records
-- [ ] Merges are credited only inside each group's window, set by its spec-named agents, so two same-session groups of one spec never share a merged task; a spec-less joiner adds cost and time but never moves the window or the record's start and wall time
-- [ ] A 50-session dry-run fixture plans in under 30 s
+- [x] Only unmarked agents of spec agent types outside Workflow-tool directories are considered; `general-purpose` and workflow agents never appear in a group
+- [x] Groups are by session, then legacy-parsed spec, split where the end-to-start gap exceeds the threshold; spec-less agents join a nearby group or are left out as `no spec`
+- [x] The plan carries, per group, session, spec, agent count, start, wall time and estimated cost, plus the excluded agents with reasons, and writes nothing
+- [x] Written records are partial, have `source: "agents"`, `missing` `manifest`, root and branch from the session, and the git-report outcome rules of 3.4-3.5
+- [x] Running backfill twice gives the same record ids and `unchanged` results, with no duplicate or overlapping records; regrouping with another `--gap` leaves overlapping groups out and never changes existing records
+- [x] Merges are credited only inside each group's window, set by its spec-named agents, so two same-session groups of one spec never share a merged task; a spec-less joiner adds cost and time but never moves the window or the record's start and wall time
+- [x] A 50-session dry-run fixture plans in under 30 s
 **Dependencies:** Task 3 (calls `candidate_reason`, `group_agents`, `match_legacy`), Task 7 (edits `agentcollect.py` it creates and calls `_build_record(agent_run=...)`)
 **Complexity:** Medium
 **Risk:** normal
