@@ -108,6 +108,20 @@ Split of the 7.1 min median wait per task (local record + Claude Code run file o
 **Complexity:** Low
 **Precedent:** merge queues report time-in-queue as the primary metric.
 
+### Option E: Run tests in parallel
+
+**Description:** Three parts.
+- **E1, this repo's suite under pytest-xdist.** Add `pytest-xdist` as a dev dependency and change `specs/ck.json` `verify` to `uv run pytest -q -n auto`. Measured on this machine (16 cores): **1,173 passed in 52 s vs ~253 s serial (4.8x)**, stable over two runs. One prerequisite fixed: `tests/test_worktree_cli.py` parametrized on `os.getpid()`, so xdist workers collected different test ids; the cases now have fixed ids (no behaviour change).
+- **E2, ck caps workers when many gates run at once.** Up to 14 agents can run gates concurrently in separate worktrees; each `-n auto` would start one worker per core and oversubscribe the CPU. `ck gate` sets `PYTEST_XDIST_AUTO_NUM_WORKERS` (honoured by `-n auto`) from the core count and the number of gates running on the machine, unless the user set it.
+- **E3, `ck doctor` / `ck init` hint.** For pytest projects whose `verify` has no `-n`, suggest xdist and the stable-id pitfall (collection mismatch error) with a one-line check (`pytest --collect-only` twice with different `PYTHONHASHSEED`).
+
+**Pros:** Cuts every full-suite run (task gates, full gates, final gate, each fix re-check) ~4-5x; helps specs without a test track most, which do run the full suite on every landing.
+**Cons:** Parallel runs expose shared-state or order-dependent tests (per-project); concurrent gates compete for cores (E2 mitigates); xdist is a pytest-only answer (other runners have their own flags).
+**Complexity:** Low (E1, E3) to Medium (E2)
+**Precedent:** standard pytest practice ([pytest-xdist docs](https://pytest-xdist.readthedocs.io/), [pytest flaky docs](https://docs.pytest.org/en/9.0.x/explanation/flaky.html)).
+
+---
+
 ## Comparison Matrix
 
 | Criteria | A: Fewer plan agents | B: Finish-first | C: Tiered gate | D: Queue metrics |
@@ -153,7 +167,7 @@ Split of the 7.1 min median wait per task (local record + Claude Code run file o
 
 ## Recommended Direction
 
-**Approach:** D first, then B, then A, in one spec; C deferred.
+**Approach:** D first, then B, then A, plus parallel tests (E), in one spec; C deferred.
 
 **Rationale:**
 - The measured bottleneck is reviewers waiting for an agent slot, not the gate: B removes it directly with no safety cost.
@@ -170,8 +184,11 @@ Split of the 7.1 min median wait per task (local record + Claude Code run file o
 
 | # | Decision | Choice | Rationale | Date |
 |---|----------|--------|-----------|------|
-| 1 | Scope for v1 | A + B + D: script-side readiness with fewer plan agents, finish-first scheduling, queue-wait metrics in `ck stats`; C (tiered landing gate) deferred | Targets the measured bottleneck (review slot wait) and the plan-agent cost with no safety trade-off; C can let the target go red between full gates | 2026-10-29 |
+| 1 | Scope for v1 | A + B + D (plus E, see D6): script-side readiness with fewer plan agents, finish-first scheduling, queue-wait metrics in `ck stats`; C (tiered landing gate) deferred | Targets the measured bottleneck (review slot wait) and the plan-agent cost with no safety trade-off; C can let the target go red between full gates | 2026-10-29 |
 | 2 | Finish-first rule (B) | Adaptive: never start a new task while a review, revise or land agent is queued; configurable off | Needs no knowledge of the undocumented runtime agent cap | 2026-10-29 |
 | 3 | When the plan agent still runs (A) | At start, after each landing, and when nothing is ready but tasks remain | Landings are frequent, so tasks.md edits and Done status are seen within minutes | 2026-10-29 |
 | 4 | Worktree creation (A) | The task agent creates and claims its own worktree as its first step | Removes another mechanical agent per task; the task agent already claims it | 2026-10-29 |
 | 5 | How to measure | Next real runs via `ck stats` with the new queue metrics; `ck bench` only if results are unclear | Real runs are free to collect; D makes the before/after visible | 2026-10-29 (default, not contested) |
+| 6 | Parallel tests (E) in scope | E1 + E2 + E3: this repo's verify runs `pytest -n auto`; ck caps xdist workers across concurrent gates; doctor/init suggest xdist for pytest projects | User asked for parallel tests; measured 4.8x on the full suite with all 1,173 tests passing | 2026-10-29 |
+| 7 | Worker cap (E2) | `ck gate` sets `PYTEST_XDIST_AUTO_NUM_WORKERS = max(1, cores // gates running)` unless already set | Avoids 14 concurrent gates each starting 16 workers | 2026-10-29 (default, not contested) |
+| 8 | Stable test ids | Fix the one pid-parametrized test now (fixed ids); E3 checks other projects for the same pitfall | It was the only collection mismatch; behaviour unchanged | 2026-10-29 (default, not contested) |

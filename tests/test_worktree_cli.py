@@ -118,7 +118,7 @@ def legacy_claim(path: Path, pid: int, seconds_ago: int = 0):
     git(path, "worktree", "lock", "--reason", f"ck task agent on host pid {pid} at {when}", str(path))
 
 
-@pytest.mark.parametrize("pid", [2, os.getpid()])
+@pytest.mark.parametrize("pid", [2, os.getpid()], ids=["kthreadd", "this-process"])  # stable ids: xdist workers have different pids
 def test_a_live_but_foreign_pid_does_not_keep_a_stale_claim(repo, pid):
     """Bench v2: Tasks 2 and 18 sat "claimed by a possibly-dead agent" (pid 2) with finished,
     committed work. A recorded PID that happens to be alive proves nothing; the claim's age decides."""
