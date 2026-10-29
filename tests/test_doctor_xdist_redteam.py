@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -102,7 +103,8 @@ def test_hint_check_command_fed_back_as_verify_does_not_crash_or_change_exit(ini
     set_verify(inited, HINT_VERIFY)
     res = doctor_out(inited)
     assert has_hint(res), "precondition: the hint is shown for plain pytest"
-    cmds = [part for line in res.stdout.splitlines() for part in line.split("`")[1::2] if "PYTHONHASHSEED" in part]
+    # The design's hint text has no markup around the check command, so find it by its shape.
+    cmds = re.findall(r"PYTHONHASHSEED=\d+ .*? --collect-only -q", res.stdout + res.stderr)
     assert cmds, res.stdout
     set_verify(inited, [cmds[0]])
     res2 = doctor_out(inited)
@@ -196,6 +198,7 @@ def test_init_changes_nothing_about_deps_or_verify(tmp_path: Path):
     cfg = (root / "specs" / "ck.json").read_text()
     assert not any(" -n" in v or "numprocesses" in v for v in json.loads(cfg).get("verify", []))
     assert "xdist" not in pyproject.read_text()
+    assert "xdist" in (res.stdout + res.stderr).lower(), "a freshly detected pytest verify earns the hint (7.4)"
 
 
 def test_init_twice_and_on_existing_ck_json_is_byte_identical(tmp_path: Path):
