@@ -262,8 +262,10 @@ def test_seeded_local_record_has_the_contract_keys_and_plants_strings(kind):
     rec = seeded_local_record(kind)
     common = {"schema", "runId", "workflow", "outcome", "ckVersion", "collectorVersion", "claudeCodeVersion", "startTime", "wallMs",
               "agentsConfig", "projectPseudonym", "outcomeInferred", "sessionId", "workflowName", "status", "project", "terms", "costs", "byModel", "byRole", "byPhase", "byTask", "agents", "missing"}
-    extra = ({"tasks", "landings", "fullGates", "finalGate", "crossTests", "fixerEscalations", "phases"} if kind == "spec-implement"
-             else {"review", "consistency", "phases"})
+    # design.md ImplementMetrics / CreateMetrics, as listed in the test plan's Harness Contract
+    extra = ({"tasks", "landings", "fullGates", "finalGate", "crossTests", "fixerEscalations", "phases",
+              "reportSource", "taskSpanMinutes", "stats"} if kind == "spec-implement"
+             else {"review", "consistency", "phases", "mode", "reviewResult", "openQuestions"})
     assert set(rec) == common | extra and rec["workflow"] == kind
     assert set(rec["agents"][0]) == {"agentId", "label", "role", "task", "attempt", "round", "model", "phase", "ms", "usd", "input",
                                      "output", "cacheRead", "cacheCreation"}
