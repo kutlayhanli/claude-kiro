@@ -256,13 +256,13 @@ Foundation task: Task 10 reaches this code only through the CLI of Task 13, so i
 **Verify:** `uv run pytest -q tests/test_stats_agents_begin.py` `uv run pytest -q -n auto tests/test_stats_agents_collect.py` `uv run pytest -q tests/test_stats_perf.py`
 **Verifies:** Task 13 (the `begin` / `collect --agents` CLI these tests drive, built on Tasks 3, 6 and 7)
 **Acceptance:**
-- [ ] Every test exercises the real boundary: the `ck` CLI as a subprocess over a fake Claude home with the real transcript/meta layout, real store, real git and the real `ck worktree report` / `ck cost` (no mocks of the project's own code)
-- [ ] Permissions are checked on the real filesystem; network asserted absent via `$CK_TEST_NET_LOG`
-- [ ] Cost agreement is checked against `ck cost`, not against a number computed in the test
-- [ ] Unknown values are asserted `null`, never `0`, wherever the requirements say "unknown"
-- [ ] Manifest open/closed state is observed only through `ck doctor` and `collect --all`, not by reading store internals the design may change
-- [ ] Before the implementation exists the tests fail for the right reason (click "No such command" for `begin`, "No such option: --agents", `AttributeError` from `claude_kiro.analytics` seams), not because of broken fixtures
-- [ ] The existing workflow-run tests are not edited (TC-28 proves compatibility metamorphically)
+- [x] Every test exercises the real boundary: the `ck` CLI as a subprocess over a fake Claude home with the real transcript/meta layout, real store, real git and the real `ck worktree report` / `ck cost` (no mocks of the project's own code)
+- [x] Permissions are checked on the real filesystem; network asserted absent via `$CK_TEST_NET_LOG`
+- [x] Cost agreement is checked against `ck cost`, not against a number computed in the test
+- [x] Unknown values are asserted `null`, never `0`, wherever the requirements say "unknown"
+- [x] Manifest open/closed state is observed only through `ck doctor` and `collect --all`, not by reading store internals the design may change
+- [x] Before the implementation exists the tests fail for the right reason (click "No such command" for `begin`, "No such option: --agents", `AttributeError` from `claude_kiro.analytics` seams), not because of broken fixtures
+- [x] The existing workflow-run tests are not edited (TC-28 proves compatibility metamorphically)
 **Dependencies:** Task 1 (uses `ToolAgentSpec`, `tool_agents`, `begin`, `read_only`, `spec_repo`, `land`, `fail`, `mark_done`, `logging_git`, `backdate_manifest`, `set_manifest`)
 **Complexity:** High
 **Risk:** safety (oracle for closing run manifests after collect; a wrong close or a mis-grouped agent loses or misattributes a run's data)

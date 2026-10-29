@@ -3,10 +3,11 @@
 Fixtures are built before the clock starts; only the real CLI subprocess is timed.
 """
 
+import json
 import time
 
 import stats_helpers
-from stats_helpers import AgentSpec, FakeClaudeHome, fresh_env, git_project
+from stats_helpers import AgentSpec, FakeClaudeHome, ToolAgentSpec, fresh_env, git_project
 
 
 def _agents(count: int, tag: str) -> list:
@@ -60,3 +61,28 @@ def test_collect_all_100_runs_over_5_projects_under_120_seconds():
 
         assert result.exit_code == 0, result.output
         assert elapsed < 120, f"collect --all took {elapsed:.1f}s (limit 120s)"
+
+
+def test_agent_mode_collect_of_100_agents_under_5_seconds():
+    """TC-56"""
+    with fresh_env() as env:
+        repo = stats_helpers.spec_repo(env.root / "repo")
+        home = FakeClaudeHome(env.claude)
+        session = home.session(cwd=repo, git_branch="integrate/demo")
+        run_id, manifest = stats_helpers.begin(env, repo, "implement", "demo", "integrate/demo")
+        start = stats_helpers.to_ms(json.loads(manifest.read_text())["startTime"]) + 5_000
+        specs = [
+            ToolAgentSpec(
+                stats_helpers.described(run_id, f"implement task {i % 4 + 1}"),
+                requests=[(f"req_ag_{i}_{r}", 1_000 + r, 500, 2_000, 100) for r in range(3)],
+            )
+            for i in range(100)
+        ]
+        session.tool_agents(specs, start=stats_helpers.iso_ms(start))
+
+        t0 = time.monotonic()
+        result = stats_helpers.stats("collect", "--agents", run_id, env=env, cwd=repo)
+        elapsed = time.monotonic() - t0
+
+        assert result.exit_code == 0, result.output
+        assert elapsed < 5, f"collect --agents took {elapsed:.1f}s (limit 5s)"
