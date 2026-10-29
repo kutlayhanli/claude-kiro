@@ -101,12 +101,18 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 **Verified by:** Task 2
 
 **Acceptance:**
-- [ ] The block is delimited by the two exact marker lines and evaluates standalone (no reference to script globals, `agent`, `log` or `args`)
-- [ ] `readyTasks` returns the same set and order as `ck plan --json --exclude` for the same tasks.md, Done set and exclusions, including multi-digit ids, diamonds, duplicate and dangling deps (1.2); a dependency missing from the `deps` keys keeps its dependent not ready even when `done` lists it (1.10, P-2)
-- [ ] `planDecision` never returns `run` for `freed`/`finished` when `scriptReadiness` is true, and returns `run` for them when it is false (1.3, 1.9); a second idle trigger with `idleArmed` false returns `none` (1.5)
-- [ ] `startDecision` with no queued review/revise/land entry and enough free slots returns exactly the first `maxConcurrent - working` ready tasks; with one queued and finish-first on returns none with `deferred: true`; with `inFlight.length >= slots` and finish-first on returns none with `deferred: true`, `waiting: 0`, and otherwise at most `slots - inFlight.length` starts; with finish-first off ignores the queue and the slot cap (3.1, 3.3, 3.5, 3.9)
-- [ ] `worktreeOutcome` maps BUSY, ERROR, CREATED, EXISTS and absent `worktree` as specified (2.2, 2.3, 2.4)
-- [ ] Existing `tests/js/spec_implement.test.mjs` passes unchanged and the vendored copy is byte-identical
+- [x] The block is delimited by the two exact marker lines and evaluates standalone (no reference to script globals, `agent`, `log` or `args`)
+- [x] `readyTasks` returns the same set and order as `ck plan --json --exclude` for the same tasks.md, Done set and exclusions, including multi-digit ids, diamonds, duplicate and dangling deps (1.2); a dependency missing from the `deps` keys keeps its dependent not ready even when `done` lists it (1.10, P-2)
+- [x] `planDecision` never returns `run` for `freed`/`finished` when `scriptReadiness` is true, and returns `run` for them when it is false (1.3, 1.9); a second idle trigger with `idleArmed` false returns `none` (1.5)
+- [x] `startDecision` with no queued review/revise/land entry and enough free slots returns exactly the first `maxConcurrent - working` ready tasks; with one queued and finish-first on returns none with `deferred: true`; with `inFlight.length >= slots` and finish-first on returns none with `deferred: true`, `waiting: 0`, and otherwise at most `slots - inFlight.length` starts; with finish-first off ignores the queue and the slot cap (3.1, 3.3, 3.5, 3.9)
+- [x] `worktreeOutcome` maps BUSY, ERROR, CREATED, EXISTS and absent `worktree` as specified (2.2, 2.3, 2.4)
+- [x] Existing `tests/js/spec_implement.test.mjs` passes unchanged and the vendored copy is byte-identical
+
+**Implementation notes (Task 3):**
+- `planDecision` checks eligibility first, then coalesces: a trigger that would not run a plan on its own (for example `freed` with script readiness, or an unarmed `idle`) returns `none` even while a plan is in flight, so a coalesced follow-up can never smuggle in a plan that 1.3/1.5 forbid. `stopLaunching` is checked before both.
+- `chainLengths` walks tasks in `order` (then any other `deps` keys), never in JS object-key order, so its memoization matches `ck plan`'s tasks.md order whatever order the `deps` keys arrive in (P-4).
+- `readyTasks` treats a task in `order` with no `deps` entry as not ready (never start on a guess); `startDecision` reports `deferred: true, waiting: 0` only when the slot cap actually holds back a ready task `maxConcurrent` would allow (an empty ready list is not a deferral).
+- `uv run ck vendor` also rewrites `.claude/agents/*.md` and `.claude/ck-manifest.json`; those side effects were reverted, only `.claude/workflows/spec-implement.js` is committed.
 
 **Dependencies:** Task 2 (its tests are the oracle)
 **Complexity:** Medium
