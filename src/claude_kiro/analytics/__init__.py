@@ -29,6 +29,16 @@ _EXPORTS = {
     "is_target_repo": "submit",
     "pr_text": "submit",
     "pseudonym": "collect",
+    "SPEC_AGENT_TYPES": "roles",
+    "AGENT_CREATE_STEPS": "roles",
+    "is_agent_run_id": "agentrun",
+    "new_agent_run_id": "agentrun",
+    "parse_agent_description": "agentrun",
+    "implement_outcome": "agentrun",
+    "implement_summary": "agentrun",
+    "open_manifest_due": "agentrun",
+    "classify_manifest": "agentrun",
+    "group_backfill": "backfill",
 }
 
 __all__ = ["SCHEMA_LOCAL", "SCHEMA_SHARED", *_EXPORTS]
