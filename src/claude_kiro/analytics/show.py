@@ -21,10 +21,19 @@ COVERAGE: Dict[str, str] = {
         "excludes waits between agents"
     ),
     "idle_before_merge": "task finished to merged; waiting in the landing queue plus landing, resolve and fix time",
+    "queue_wait": "queued to started in the runtime slot (queuedAt to startedAt); not recorded for older runs",
+    "wait_split": (
+        "task finished to merged, split into review (review and revise agents queued or running, overlaps "
+        "counted once) and landing (the rest); not recorded for older runs"
+    ),
 }
 
 UNKNOWN = "unknown"
 TOP_N = 5
+QUEUE_ORDER = ("task", "review", "revise", "plan", "land", "gate")
+# per-row and per-task fields that the record keeps for the queue sections but the JSON view does not repeat
+ROW_WAIT_KEYS = ("queuedAtMs", "queueMs")
+TASK_WAIT_KEYS = ("reviewWaitMs", "landingWaitMs")
 
 
 @dataclass(frozen=True)
@@ -172,6 +181,63 @@ def _div(a: Optional[float], b: Optional[float]) -> Optional[float]:
     if a is None or not b:
         return None
     return a / b
+
+
+def _is_int(v: Any) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+# ------------------------------------------------------------ queue wait
+
+def agent_kind(row: Mapping[str, Any]) -> str:
+    """The queue-wait kind of an agent row: task, revise, review, fix, resolve, or its role."""
+    role = row.get("role")
+    if role in ("implementer", "test-writer"):
+        return "revise" if row.get("round") is not None else "task"
+    if role == "reviewer":
+        return "review"
+    if role == "fixer":
+        return "fix"
+    if role == "resolver":
+        return "resolve"
+    return role if isinstance(role, str) and role else "other"
+
+
+def queue_summary(rows: Sequence[Mapping[str, Any]]) -> Optional[Dict[str, Dict[str, int]]]:
+    """Per kind: count, medianMs, p90Ms (nearest rank) and totalMs over the rows with an int queueMs; None when none has one."""
+    by_kind: Dict[str, List[int]] = {}
+    for r in rows:
+        v = r.get("queueMs")
+        if _is_int(v):
+            by_kind.setdefault(agent_kind(r), []).append(v)
+    if not by_kind:
+        return None
+    out: Dict[str, Dict[str, int]] = {}
+    for kind, vals in by_kind.items():
+        s = sorted(vals)
+        n = len(s)
+        out[kind] = {
+            "count": n,
+            "medianMs": int(round(median(s))),
+            "p90Ms": s[(9 * n + 9) // 10 - 1],  # ceil(0.9 n) - 1 without floats
+            "totalMs": sum(s),
+        }
+    return out
+
+
+def _ms_summary(vals: List[int]) -> Optional[Dict[str, float]]:
+    if not vals:
+        return None
+    return {"median": median(vals), "total": sum(vals)}
+
+
+def wait_split_summary(tasks: Optional[Sequence[Mapping[str, Any]]]) -> Dict[str, Optional[Dict[str, float]]]:
+    """Median and total (ms) of the review and landing parts of the wait before merge, over tasks that have them."""
+    rows = [t for t in tasks or [] if isinstance(t, Mapping)]
+    return {
+        "review": _ms_summary([t["reviewWaitMs"] for t in rows if _is_int(t.get("reviewWaitMs"))]),
+        "landing": _ms_summary([t["landingWaitMs"] for t in rows if _is_int(t.get("landingWaitMs"))]),
+    }
 
 
 # ------------------------------------------------------------------- list
@@ -370,6 +436,8 @@ def run_breakdown(record: Mapping[str, Any]) -> Dict[str, Any]:
         }
     else:
         other = {"agents": None, "minutes": None, "usd": None}
+    agents = record.get("agents")
+    queue = queue_summary([a for a in agents if isinstance(a, Mapping)]) if isinstance(agents, list) else None
     counts = _task_counts(record)
     cost = _cost(record)
     impl_span = _task_span_minutes(record)
@@ -404,6 +472,8 @@ def run_breakdown(record: Mapping[str, Any]) -> Dict[str, Any]:
         "idle_before_merge": idle,  # ms; render_run converts to minutes (design.md says minutes)
         "landings": landings,
         "other_role": other,
+        "queue_wait": queue,  # ms per kind; None when no agent has a queue time
+        "wait_split": wait_split_summary(tasks),  # ms; {"review": None, "landing": None} when not recorded
         "coverage": dict(COVERAGE),
         "missing": list(record.get("missing") or []),
     }
@@ -482,6 +552,34 @@ def _missing_text(m: Any) -> str:
     return str(m)
 
 
+def _queue_lines(summary: Optional[Mapping[str, Any]]) -> List[str]:
+    if not summary:
+        return ["queue wait (runtime slot): not recorded"]
+    kinds = [k for k in QUEUE_ORDER if k in summary] + sorted(k for k in summary if k not in QUEUE_ORDER)
+    lines = ["queue wait (runtime slot):"]
+    for k in kinds:
+        b = summary[k]
+        n = b["count"]
+        lines.append(
+            f"  {k}: {n} agent{'' if n == 1 else 's'}, median {b['medianMs'] / 1000:.1f} s, "
+            f"p90 {b['p90Ms'] / 1000:.1f} s, total {b['totalMs'] / 60000:.2f} min"
+        )
+    return lines
+
+
+def _split_text(split: Mapping[str, Any]) -> str:
+    parts = []
+    for name in ("review", "landing"):
+        b = split.get(name)
+        if isinstance(b, Mapping):
+            parts.append(f"{name} median {b['median'] / 60000:.2f} min, total {b['total'] / 60000:.2f} min")
+        else:
+            parts.append(f"{name} {UNKNOWN}")
+    if all(split.get(n) is None for n in ("review", "landing")):
+        return "not recorded"
+    return "; ".join(parts)
+
+
 def render_run(view: Mapping[str, Any]) -> List[str]:
     run = view.get("run") or {}
     src = run.get("cost_source")
@@ -517,11 +615,13 @@ def render_run(view: Mapping[str, Any]) -> List[str]:
         f"idle before merge: total {_min(idle.get('total'))}, median {_min(idle.get('median'))}, "
         f"max {_min(idle.get('max'))}  [{COVERAGE['idle_before_merge']}]"
     )
+    lines.append(f"wait before merge split: {_split_text(view.get('wait_split') or {})}  [{COVERAGE['wait_split']}]")
     ld = view.get("landings") or {}
     lines.append(
         f"landings: {_fmt(ld.get('count'))}, mean size {_fmt(ld.get('mean_size'), '.1f')}, "
         f"bisected {_fmt(ld.get('bisected'))}, red {_fmt(ld.get('red'))}"
     )
+    lines += _queue_lines(view.get("queue_wait"))
     o = view.get("other_role") or {}
     lines.append(f"other: {_fmt(o.get('agents'))} agents, {_min(o.get('minutes'))}, {_usd(o.get('usd'))}")
     miss = view.get("missing") or []
@@ -577,6 +677,30 @@ def run_json(view: Mapping[str, Any]) -> Dict[str, Any]:
     ld = view.get("landings") or {}
     rates = view.get("rates") or {}
     out: Dict[str, Any] = dict(record)
+    # the queue and split fields live in the record file and in queueWait / waitSplit; the existing
+    # `agents` and `tasks` values keep their pre-change shape here
+    if isinstance(record.get("agents"), list):
+        out["agents"] = [{k: v for k, v in a.items() if k not in ROW_WAIT_KEYS} if isinstance(a, Mapping) else a
+                         for a in record["agents"]]
+    if isinstance(record.get("tasks"), list):
+        out["tasks"] = [{k: v for k, v in t.items() if k not in TASK_WAIT_KEYS} if isinstance(t, Mapping) else t
+                        for t in record["tasks"]]
+    queue = view.get("queue_wait")
+    split = view.get("wait_split") or {}
+
+    def _pair(b: Any) -> Optional[Dict[str, Any]]:
+        return {"medianMs": int(round(b["median"])), "totalMs": b["total"]} if isinstance(b, Mapping) else None
+
+    out.update(
+        {
+            "queueWait": {"recorded": bool(queue), "byKind": dict(queue or {})},
+            "waitSplit": {
+                "recorded": split.get("review") is not None or split.get("landing") is not None,
+                "review": _pair(split.get("review")),
+                "landing": _pair(split.get("landing")),
+            },
+        }
+    )
     out.update(
         {
             "byRole": {k: {kk: vv for kk, vv in v.items() if kk != "minutes"} for k, v in (view.get("by_role") or {}).items()},
