@@ -15,7 +15,7 @@ Nothing outside this list is ever exported. Pattern syntax: `*` = a segment whos
 - `cost.by_role.*`: non-negative number
 - `cost.estimated`: boolean
 - `cost.pricing_date`: format: yyyy-mm
-- `cost.source`: enum: `estimate`, `priced_from_transcripts`
+- `cost.source`: enum: `agent_transcripts`, `estimate`, `priced_from_transcripts`
 - `cost.usd`: non-negative number
 - `counts.agents`: non-negative integer
 - `counts.agents_other`: non-negative integer
@@ -60,6 +60,7 @@ Nothing outside this list is ever exported. Pattern syntax: `*` = a segment whos
 - `month`: format: yyyy-mm
 - `outcome`: enum: `blocked`, `complete`, `failed`, `halted`, `needs_work`, `other`, `ready`, `ready_after_decisions`, `refused`
 - `schema`: enum: `ck-run-analytics/1`
+- `source`: enum: `agents`, `workflow`
 - `stack`: enum: `dotnet`, `go`, `java`, `node`, `other`, `python`, `ruby`, `rust`
 - `tasks[].agent_minutes`: non-negative number
 - `tasks[].attempts`: non-negative integer
@@ -130,6 +131,7 @@ identity and the names of non-ck workflows. Any hit blocks the submission.
   - `absolute_path` (path): `(?:^|[\s\"'(])(?:/(?:home|Users|root|var|tmp|mnt|opt|srv|etc)/|[A-Za-z]:\\|~/)`
   - `uuid` (id): `[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`
   - `run_id` (id): `wf_[A-Za-z0-9_-]{6,}`
+  - `agent_run_id` (id): `\bag_[0-9a-f]{8}\b`
   - `timestamp` (timestamp): `\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2})?`
   - `epoch_ms` (timestamp): `\b1[5-9]\d{11}\b`
   - `key_shape` (secret): `(?:sk-|sk-ant-|ghp_|gho_|github_pat_|xox[abp]-|AKIA)[A-Za-z0-9_-]{8,}`
@@ -149,7 +151,8 @@ identity and the names of non-ck workflows. Any hit blocks the submission.
 - roles: `implementer`, `test-writer`, `reviewer`, `fixer`, `resolver`, `plan`, `land`, `gate`, `cross-test`, `report`, `other`
 - tracks: `impl`, `test`, `unknown`, `other`
 - risks: `normal`, `safety`, `other`
-- cost sources: `priced_from_transcripts`, `estimate`
+- cost sources: `priced_from_transcripts`, `estimate`, `agent_transcripts`
+- sources: `workflow`, `agents`
 - missing kinds: `result`, `runfile`, `agent_entries`, `transcripts`, `meta`, `timing`, `ck_version`
 - phases: `plan`, `wave`, `tasks`, `final_gate`, `report`, `requirements`, `design_test_plan`, `task_tracks`, `link`, `adversarial_review`, `revise`, `consistency_check`, `other`
 - count keys: `tasks`, `tasks_merged`, `tasks_failed`, `tasks_not_started`, `waves`, `agents`, `attempts`, `retries`, `escalations`, `review_rounds`, `conflicts`, `conflicts_inferred`, `fixes`, `landings`, `bisects`, `gates_green`, `gates_red`, `cross_tests`, `cross_test_blocking`, `plan_steps`, `plan_failures`, `review_fixed`, `review_not_fixed`, `review_escalated`, `refuted`, `lenses_lost`, `consistency_passes`, `consistency_fixed`, `open_questions`, `agents_other`

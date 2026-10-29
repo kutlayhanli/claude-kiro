@@ -31,7 +31,8 @@ VARIANTS = ("default", "iso", "other")
 CONFIG_ROLES = ("implementer", "test_writer", "reviewer", "reviewer_risky", "fixer", "orchestrator", "resolver")
 TRACKS = ("impl", "test", "unknown", "other")
 RISKS = ("normal", "safety", "other")
-COST_SOURCES = ("priced_from_transcripts", "estimate")
+COST_SOURCES = ("priced_from_transcripts", "estimate", "agent_transcripts")
+SOURCES = ("workflow", "agents")
 MISSING_KINDS = ("result", "runfile", "agent_entries", "transcripts", "meta", "timing", "ck_version")
 PHASES = ("plan", "wave", "tasks", "final_gate", "report", "requirements", "design_test_plan", "task_tracks", "link",
           "adversarial_review", "revise", "consistency_check", "other")
@@ -171,6 +172,7 @@ _TREE = _obj(
         "ck_version": _fmt("version or other", re.compile(_VERSION_RE.pattern + "|other")),
         "claude_code_version": _fmt("version or other", re.compile(_VERSION_RE.pattern + "|other")),
         "workflow": _enum(WORKFLOWS),
+        "source": _enum(SOURCES),
         "variant": _enum(VARIANTS),
         "outcome": _enum(OUTCOMES),
         "month": _fmt("yyyy-mm", _MONTH_RE),
@@ -513,7 +515,13 @@ _MISSING_MAP = {
     "transcript": "transcripts", "transcript-unparseable": "transcripts", "transcript-truncated": "transcripts",
     "meta": "meta", "ckVersion": "ck_version", "result": "result", "runfile": "runfile",
     "agent_entry": "agent_entries", "timing": "timing",
+    "manifest": "runfile", "outcome": "result",
 }
+
+
+def source_of(local: Mapping) -> str:
+    """A15: "agents" iff the local record says so, else "workflow"."""
+    return "agents" if isinstance(local, Mapping) and local.get("source") == "agents" else "workflow"
 
 
 def _missing(local: Mapping) -> List[str]:
@@ -562,6 +570,7 @@ def build_shareable(local: Mapping, *, record_id: Optional[str] = None, machine_
         "id": record_id,
         "ck_version": _version(local.get("ckVersion")),
         "workflow": to_enum(local.get("workflow"), WORKFLOWS),
+        "source": source_of(local),
         "outcome": _outcome(local),
         "month": month_of(local.get("startTime")),
     }
