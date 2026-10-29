@@ -6,7 +6,7 @@ Labels are matched anchored and exactly as given (no stripping). A label that ma
 
 import re
 from dataclasses import asdict, dataclass
-from typing import Optional, Tuple
+from typing import Dict, FrozenSet, Optional, Tuple
 
 ROLES = (
     "implementer", "test-writer", "reviewer", "fixer", "resolver", "plan", "land", "gate",
@@ -168,3 +168,170 @@ def match_label(label: object, workflow: str) -> LabelMatch:
 def parse_label(label: object, workflow: str) -> dict:
     """Harness-contract form of `match_label`: a dict with keys role, task, attempt, round (and more)."""
     return match_label(label, workflow).to_dict()
+
+
+# ---------------------------------------------------------------------------------------------- agent mode
+# Agent-mode grammar (design A5, A6): the description templates of design.md "Description templates" and the
+# free-form descriptions of old implement-mode runs. `match_label` above is unchanged.
+
+SPEC_AGENT_TYPES: FrozenSet[str] = frozenset({
+    "spec:implementer", "spec:test-writer", "spec:reviewer", "spec:fixer", "spec:resolver",
+    "ck-implementer", "ck-test-writer", "ck-reviewer", "ck-fixer", "ck-resolver",
+})
+_TEST_WRITER_TYPES: FrozenSet[str] = frozenset({"spec:test-writer", "ck-test-writer"})
+_TYPE_ROLE: Dict[str, str] = {
+    "spec:implementer": "implementer", "ck-implementer": "implementer",
+    "spec:test-writer": "test-writer", "ck-test-writer": "test-writer",
+    "spec:reviewer": "reviewer", "ck-reviewer": "reviewer",
+    "spec:fixer": "fixer", "ck-fixer": "fixer",
+    "spec:resolver": "resolver", "ck-resolver": "resolver",
+}
+
+MAX_CONSISTENCY_PASSES = 2
+CREATE_LENSES: Tuple[str, ...] = ("fidelity", "grounding", "implementability", "verification")
+CREATE_STEPS: Tuple[str, ...] = (
+    "requirements", "design", "test-plan", "impl-track", "test-track", "link",
+    *(f"review {lens}" for lens in CREATE_LENSES),
+    *(f"refute {lens}" for lens in CREATE_LENSES),
+    "snapshot", "revise",
+    *(f"consistency {p}" for p in range(1, MAX_CONSISTENCY_PASSES + 1)),
+    "cleanup",
+)
+# Literal agent step -> the spec-create.js label whose role and phase it must share (design step table).
+AGENT_CREATE_STEPS: Dict[str, str] = {
+    "requirements": "write requirements.md",
+    "design": "write design.md",
+    "test-plan": "write test-plan.md",
+    "impl-track": "write implementation track",
+    "test-track": "write test track",
+    "link": "link tracks into tasks.md",
+    **{f"review {lens}": f"review: {lens}" for lens in CREATE_LENSES},
+    **{f"refute {lens}": f"refute: {lens}" for lens in CREATE_LENSES},
+    "snapshot": "snapshot spec before revision",
+    "revise": "revise spec + write review.md",
+    **{f"consistency {p}": f"consistency check: pass {p}" for p in range(1, MAX_CONSISTENCY_PASSES + 1)},
+    "cleanup": "remove pre-revision snapshot",
+}
+CREATE_STEP_PHASES: Dict[str, str] = {
+    "requirements": "Requirements",
+    "design": "Design + Test Plan",
+    "test-plan": "Design + Test Plan",
+    "impl-track": "Task Tracks",
+    "test-track": "Task Tracks",
+    "link": "Link",
+    **{f"review {lens}": "Adversarial Review" for lens in CREATE_LENSES},
+    **{f"refute {lens}": "Adversarial Review" for lens in CREATE_LENSES},
+    "snapshot": "Revise",
+    "revise": "Revise",
+    **{f"consistency {p}": "Consistency Check" for p in range(1, MAX_CONSISTENCY_PASSES + 1)},
+    "cleanup": "Consistency Check",
+}
+
+_TASK_ID = r"[0-9A-Za-z_]+"
+_COUNT = r"[1-9][0-9]*"  # <k> is a positive integer (design "Description templates")
+_AGENT_FORMS = [
+    ("implement", _c(rf"implement task (?P<n>{_TASK_ID})")),
+    ("retry", _c(rf"implement task (?P<n>{_TASK_ID}) retry (?P<k>{_COUNT})")),
+    ("revise", _c(rf"revise task (?P<n>{_TASK_ID}) round (?P<k>{_COUNT})")),
+    ("review", _c(rf"review task (?P<n>{_TASK_ID}) round (?P<k>{_COUNT})")),
+    ("resolve", _c(rf"resolve task (?P<n>{_TASK_ID})")),
+    ("resolve_round", _c(rf"resolve task (?P<n>{_TASK_ID}) round (?P<k>{_COUNT})")),
+    ("fix", _c(rf"fix (?P<k>{_COUNT})")),
+    ("fix_landing", _c(rf"fix task (?P<n>{_TASK_ID}) attempt (?P<k>{_COUNT})")),
+]
+
+
+def _is_test_writer(agent_type: object) -> bool:
+    return isinstance(agent_type, str) and agent_type in _TEST_WRITER_TYPES
+
+
+def _work_role(agent_type: object) -> str:
+    return "test-writer" if _is_test_writer(agent_type) else "implementer"
+
+
+def _agent_create(step: str) -> LabelMatch:
+    label = AGENT_CREATE_STEPS.get(step)
+    if label is None:
+        return _OTHER
+    match = _create(label)
+    return match if match.matched else _OTHER
+
+
+def _agent_form(name: str, groups: dict, agent_type: object) -> LabelMatch:
+    n = groups.get("n")
+    k = groups.get("k")
+    if name == "implement":
+        return LabelMatch(role=_work_role(agent_type), matched=True, task=n, attempt=1)
+    if name == "retry":
+        return LabelMatch(role=_work_role(agent_type), matched=True, task=n, attempt=int(k) + 1)
+    if name == "revise":
+        return LabelMatch(role=_work_role(agent_type), matched=True, task=n, round=int(k))
+    if name == "review":
+        return LabelMatch(role="reviewer", matched=True, task=n, round=int(k))
+    if name == "resolve":
+        return LabelMatch(role="resolver", matched=True, task=n)
+    if name == "resolve_round":
+        return LabelMatch(role="resolver", matched=True, task=n, round=int(k))
+    if name == "fix":
+        return LabelMatch(role="fixer", matched=True, attempt=int(k), step="target")
+    return LabelMatch(role="fixer", matched=True, task=n, attempt=int(k), step="landing")
+
+
+def match_agent(rest: object, agent_type: object) -> LabelMatch:
+    """A5: the description-template grammar (text after the marker), anchored and exact.
+
+    The verb sets the role family; `implement`/`revise` give test-writer for a test-writer type and implementer
+    otherwise. Types outside SPEC_AGENT_TYPES take their role from the verb alone. Anything else is `other`.
+    """
+    if not isinstance(rest, str):
+        return _OTHER
+    if rest.startswith("create "):
+        return _agent_create(rest[len("create "):])
+    for name, rx in _AGENT_FORMS:
+        found = rx.fullmatch(rest)
+        if found:
+            try:
+                return _agent_form(name, found.groupdict(), agent_type)
+            except ValueError:  # a counter too long for int(); never a guessed role
+                return _OTHER
+    return _OTHER
+
+
+@dataclass(frozen=True)
+class LegacyMatch:
+    role: str
+    matched: bool
+    spec: Optional[str] = None
+    task: Optional[str] = None
+
+
+_LEGACY_FORMS = [
+    ("implement", _c(rf"implement (?P<spec>[^\s:]+): task (?P<n>{_TASK_ID})(?:[ :].*)?")),
+    ("fix", _c(rf"fix (?P<spec>[^\s:]+): (?:task (?P<n>{_TASK_ID})(?:[ :].*)?|.*)")),
+    ("revise", _c(rf"revise (?P<spec>[^\s:]+) task (?P<n>{_TASK_ID})(?:[ :].*)?")),
+    ("review", _c(rf"review task (?P<n>{_TASK_ID})(?:[ :].*)?")),
+]
+
+
+def match_legacy(description: object, agent_type: object) -> LegacyMatch:
+    """A6: free-form descriptions of old implement-mode runs (`implement <spec>: task <N>` and friends).
+
+    The role comes from the type and is refined by the verb. `spec` is the token before `:` (or after
+    `revise `), None when absent. Unparseable: the type's role, `matched=False`, no spec.
+    """
+    if isinstance(description, str):
+        for verb, rx in _LEGACY_FORMS:
+            found = rx.fullmatch(description)
+            if not found:
+                continue
+            groups = found.groupdict()
+            spec, task = groups.get("spec"), groups.get("n")
+            if verb == "implement" or verb == "revise":
+                role = _work_role(agent_type)
+            elif verb == "fix":
+                role = "fixer"
+            else:
+                role = "reviewer"
+            return LegacyMatch(role=role, matched=True, spec=spec, task=task)
+    role = _TYPE_ROLE.get(agent_type, "other") if isinstance(agent_type, str) else "other"
+    return LegacyMatch(role=role, matched=False)
