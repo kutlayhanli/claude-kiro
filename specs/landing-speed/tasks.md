@@ -265,7 +265,7 @@ Separately, in `tests/test_worktree_create_lock.py` (no script involved, so Task
 ---
 
 ### Task 9: Report worktree creation failures as ERROR outcomes and serialize git worktree creation
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 2.1, 2.4
 **Description:** Task agents now run `ck worktree create … --json` themselves and must read a creation failure from its JSON (2.4). In `src/claude_kiro/worktrees.py`:
