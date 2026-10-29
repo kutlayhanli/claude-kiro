@@ -278,11 +278,11 @@ Every other state, detail and exit code (CREATED/EXISTS/BUSY, install ERROR) and
 **Verified by:** Task 8
 
 **Acceptance:**
-- [ ] Two or more concurrent `ck worktree create` runs for different tasks of one repo all succeed (no git index/lock-file collision) (2.1)
-- [ ] The install step runs outside the lock, so installs of different tasks overlap
-- [ ] A failed `git worktree add` (e.g. a bad `--base`) gives a JSON ERROR entry with git's message and exit 3 instead of a plain `❌` line (2.4, TC-64)
-- [ ] An existing unclaimed worktree still reports `EXISTS`; a live claim or uncommitted work still reports BUSY with exit code as today
-- [ ] Existing worktree CLI and landing tests pass unchanged
+- [x] Two or more concurrent `ck worktree create` runs for different tasks of one repo all succeed (no git index/lock-file collision) (2.1)
+- [x] The install step runs outside the lock, so installs of different tasks overlap
+- [x] A failed `git worktree add` (e.g. a bad `--base`) gives a JSON ERROR entry with git's message and exit 3 instead of a plain `❌` line (2.4, TC-64)
+- [x] An existing unclaimed worktree still reports `EXISTS`; a live claim or uncommitted work still reports BUSY with exit code as today
+- [x] Existing worktree CLI and landing tests pass unchanged
 
 **Dependencies:** Task 8 (its tests are the oracle)
 **Complexity:** Low
