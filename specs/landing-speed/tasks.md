@@ -654,7 +654,7 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 ---
 
 ### Task 21: Show the xdist hint in ck doctor and ck init
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 7.1, 7.2, 7.3, 7.4, 7.5
 **Description:** Owns the doctor/init side of Harness Contract item 11 (doctor appends the string to `warnings`, init prints the same string). In `src/claude_kiro/cli/main.py`, `doctor` appends `xdist.suggestion(load_config(project_dir)["verify"])` to `warnings` when it is not None; warnings never change the exit status, which stays driven by `issues` only. `init` prints the same suggestion after the config step, computed for the effective `verify` (newly written or existing `specs/ck.json`), and writes nothing extra: no `-n` added to verify, no change to `pyproject.toml`.
@@ -664,10 +664,10 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 **Verified by:** Task 19, Task 20
 
 **Acceptance:**
-- [ ] `ck doctor` with verify `["uv run pytest -q"]` shows a Warnings bullet equal to `xdist.suggestion(verify)` and no Issues bullet about xdist (7.1, 7.2)
-- [ ] No bullet for `-n auto`, `--numprocesses=4`, non-pytest or empty verify (7.3)
-- [ ] `ck init` in a pytest project prints the same text, leaves `specs/ck.json` verify without `-n` and `pyproject.toml` byte-identical; no suggestion for a package.json-only project (7.4)
-- [ ] Doctor exit codes are identical with and without the hint, healthy or with an issue (7.5)
+- [x] `ck doctor` with verify `["uv run pytest -q"]` shows a Warnings bullet equal to `xdist.suggestion(verify)` and no Issues bullet about xdist (7.1, 7.2)
+- [x] No bullet for `-n auto`, `--numprocesses=4`, non-pytest or empty verify (7.3)
+- [x] `ck init` in a pytest project prints the same text, leaves `specs/ck.json` verify without `-n` and `pyproject.toml` byte-identical; no suggestion for a package.json-only project (7.4)
+- [x] Doctor exit codes are identical with and without the hint, healthy or with an issue (7.5)
 
 **Dependencies:** Task 17 (calls `xdist.suggestion`), Task 19, Task 20 (its tests are the oracle)
 **Complexity:** Low
