@@ -484,9 +484,11 @@ Each file declares its `PROPERTIES` map (`P-17`, `P-18` in `test_gate_xdist.py`;
 **Verifies:** Task 17
 
 **Acceptance:**
-- [ ] Every case uses real `ck gate` processes and the real filesystem; no `claude_kiro` mocks
-- [ ] Each test fails before implementation for missing behaviour, not test code errors
-- [ ] Teardown kills every process group it started
+- [x] Every case uses real `ck gate` processes and the real filesystem; no `claude_kiro` mocks
+- [x] Each test fails before implementation for missing behaviour, not test code errors
+- [x] Teardown kills every process group it started
+
+**Implementation notes:** 11 cases in `tests/test_gate_xdist_redteam.py`: gate+verify SIGKILLed as a group (3 times; and 4 holding gates at once); only the gate process SIGKILLed while its verify child lives on; a verify command that forks a detached child outliving the gate; two gates started back to back; a live gate's registry entries copied and restored after it ends (and fed back twice); gate-shaped leftovers naming live non-gate PIDs (this test, pid 1, parent); a read-only leftover entry; a dangling gate-named symlink; stray files, near-miss names, `.reg-*`, a nested and a gate-named subdirectory (all must survive byte-identical); a registry path with spaces, unicode, a quote and `$HOME`. The probe's output directory and hold file travel through `PROBE_OUT` (relative names), because tmp paths contain "pytest" and `ck gate` would otherwise treat the probe as a pytest command and run it as the collection check. Before Task 17 every case fails with the probe seeing `None` for `PYTEST_XDIST_AUTO_NUM_WORKERS`.
 
 **Dependencies:** None
 **Complexity:** Medium
