@@ -95,6 +95,9 @@ class AgentSpec:
     last_tool: str = "Bash: pytest -q"
     state: str = "done"
     agent_id: Optional[str] = None
+    queued_at_ms: Optional[int] = None  # written as `queuedAt` when set
+    omit_started: bool = False  # leave `startedAt` out of the run-file entry
+    raw_progress: Optional[dict] = None  # merged over the generated `workflow_agent` entry (may set queuedAt to null, "x", ...)
 
 
 @dataclass
@@ -394,12 +397,19 @@ class FakeSession:
             started = spec.started_at_ms if spec.started_at_ms is not None else run_start_ms + idx * 1_000
             requests = spec.requests if spec.requests is not None else [(f"req_{aid}_1", 1_000, 500, 2_000, 100)]
             self._write_agent(run_id, aid, spec, started, requests)
-            progress.append({
+            entry = {
                 "type": "workflow_agent", "index": idx + 1, "agentId": aid, "label": spec.label, "phaseTitle": spec.phase,
                 "model": spec.model, "startedAt": started, "durationMs": spec.duration_ms, "attempt": spec.attempt,
                 "tokens": sum(r[1] + r[2] for r in requests), "toolCalls": 3, "state": spec.state,
                 "promptPreview": spec.prompt_preview, "resultPreview": spec.result_preview, "lastToolSummary": spec.last_tool,
-            })
+            }
+            if spec.queued_at_ms is not None:
+                entry["queuedAt"] = spec.queued_at_ms
+            if spec.omit_started:
+                del entry["startedAt"]
+            if spec.raw_progress:
+                entry.update(spec.raw_progress)
+            progress.append(entry)
         run_file: Dict[str, Any] = {
             "runId": run_id, "workflowName": name, "status": status, "startTime": start, "durationMs": duration_ms,
             "args": args if args is not None else {"spec": "demo", "root": str(self.cwd)},

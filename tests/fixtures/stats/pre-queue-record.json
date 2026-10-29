@@ -1,0 +1,294 @@
+{
+  "agents": [
+    {
+      "agentId": "a58eb51e8c63ae5a8",
+      "attempt": 1,
+      "cacheCreation": 100,
+      "cacheRead": 2000,
+      "escalatedTo": null,
+      "input": 1000,
+      "label": "task 1",
+      "matched": true,
+      "model": "claude-sonnet-5-5",
+      "ms": 300000,
+      "output": 500,
+      "phase": "Wave 1",
+      "role": "implementer",
+      "round": null,
+      "startedAtMs": 1791795600000,
+      "state": "done",
+      "step": null,
+      "task": "1",
+      "transcript": "ok",
+      "usd": 0.00765,
+      "usdEstimate": null
+    },
+    {
+      "agentId": "a0b9a2c0690e3d5c0",
+      "attempt": null,
+      "cacheCreation": 100,
+      "cacheRead": 2000,
+      "escalatedTo": null,
+      "input": 1000,
+      "label": "review 1",
+      "matched": true,
+      "model": "claude-opus-5-5",
+      "ms": 120000,
+      "output": 500,
+      "phase": "Wave 1",
+      "role": "reviewer",
+      "round": 1,
+      "startedAtMs": 1791795960000,
+      "state": "done",
+      "step": null,
+      "task": "1",
+      "transcript": "ok",
+      "usd": 0.0149,
+      "usdEstimate": null
+    },
+    {
+      "agentId": "a530d1b0ce51bb36c",
+      "attempt": null,
+      "cacheCreation": 100,
+      "cacheRead": 2000,
+      "escalatedTo": null,
+      "input": 1000,
+      "label": "land 1",
+      "matched": true,
+      "model": "claude-haiku-5-5",
+      "ms": 60000,
+      "output": 500,
+      "phase": "Wave 1",
+      "role": "land",
+      "round": null,
+      "startedAtMs": 1791796100000,
+      "state": "done",
+      "step": null,
+      "task": "1",
+      "transcript": "ok",
+      "usd": 0.0003825,
+      "usdEstimate": null
+    }
+  ],
+  "agentsConfig": {
+    "fixer": {
+      "effort": "high",
+      "model": "opus"
+    },
+    "implementer": {
+      "effort": "medium",
+      "model": "sonnet"
+    },
+    "orchestrator": {
+      "effort": "low",
+      "model": "haiku"
+    },
+    "resolver": {
+      "effort": "medium",
+      "model": "sonnet"
+    },
+    "reviewer": {
+      "effort": "medium",
+      "model": "opus"
+    },
+    "reviewer_risky": {
+      "effort": "high",
+      "model": "opus"
+    },
+    "test_writer": {
+      "effort": "medium",
+      "model": "sonnet"
+    }
+  },
+  "byModel": {
+    "claude-haiku-5-5": {
+      "agents": 1,
+      "cacheCreation": 100,
+      "cacheRead": 2000,
+      "input": 1000,
+      "ms": 60000,
+      "output": 500,
+      "usd": 0.0003825
+    },
+    "claude-opus-5-5": {
+      "agents": 1,
+      "cacheCreation": 100,
+      "cacheRead": 2000,
+      "input": 1000,
+      "ms": 120000,
+      "output": 500,
+      "usd": 0.0149
+    },
+    "claude-sonnet-5-5": {
+      "agents": 1,
+      "cacheCreation": 100,
+      "cacheRead": 2000,
+      "input": 1000,
+      "ms": 300000,
+      "output": 500,
+      "usd": 0.00765
+    }
+  },
+  "byPhase": {
+    "Wave 1": {
+      "agents": 3,
+      "cacheCreation": 300,
+      "cacheRead": 6000,
+      "input": 3000,
+      "ms": 480000,
+      "output": 1500,
+      "usd": 0.0229325
+    }
+  },
+  "byRole": {
+    "implementer": {
+      "agents": 1,
+      "cacheCreation": 100,
+      "cacheRead": 2000,
+      "input": 1000,
+      "ms": 300000,
+      "output": 500,
+      "usd": 0.00765
+    },
+    "land": {
+      "agents": 1,
+      "cacheCreation": 100,
+      "cacheRead": 2000,
+      "input": 1000,
+      "ms": 60000,
+      "output": 500,
+      "usd": 0.0003825
+    },
+    "reviewer": {
+      "agents": 1,
+      "cacheCreation": 100,
+      "cacheRead": 2000,
+      "input": 1000,
+      "ms": 120000,
+      "output": 500,
+      "usd": 0.0149
+    }
+  },
+  "byTask": {
+    "1": {
+      "agents": 3,
+      "cacheCreation": 300,
+      "cacheRead": 6000,
+      "input": 3000,
+      "ms": 480000,
+      "output": 1500,
+      "usd": 0.0229325
+    }
+  },
+  "ckVersion": null,
+  "claudeCodeVersion": "2.1.80",
+  "collectorVersion": "0.10.0",
+  "costs": [
+    {
+      "pricingDate": "2026-10",
+      "scope": "run",
+      "source": "priced_from_transcripts",
+      "usd": 0.0229325
+    }
+  ],
+  "crossTests": [],
+  "finalGate": {
+    "fixAttempted": false,
+    "fixed": null,
+    "green": true
+  },
+  "fixerEscalations": [],
+  "fullGates": [],
+  "landings": [
+    {
+      "bisected": false,
+      "conflict": 0,
+      "merged": 1,
+      "minutes": 1.0,
+      "red": 0,
+      "size": 1
+    }
+  ],
+  "missing": [
+    {
+      "agentId": null,
+      "what": "ckVersion"
+    }
+  ],
+  "outcome": "complete",
+  "outcomeInferred": false,
+  "phases": [
+    {
+      "group": "Wave 1",
+      "minutes": 10.0,
+      "tasks": 1
+    }
+  ],
+  "project": {
+    "branch": "integrate/x",
+    "pseudonym": "697626f7c2e9945b",
+    "remote": "git@github.com:acme-corp/ledger-a.git",
+    "root": "/tmp/claude-1000/ck-fresh-o9ln8xcw/proj",
+    "spec": "demo",
+    "stack": null
+  },
+  "projectPseudonym": "697626f7c2e9945b",
+  "reportSource": "git",
+  "runId": "wf_prequeue",
+  "schema": "ck-run-local/1",
+  "sessionId": "6abb9c2c-4d90-55a6-823d-effeb570a8f5",
+  "startTime": "2026-10-12T09:00:00.000Z",
+  "stats": {
+    "bisected": 0,
+    "failed": 0,
+    "fixes": 0,
+    "initiallyDone": 0,
+    "landings": 1,
+    "merged": 1,
+    "notStarted": 0,
+    "planFailures": 0,
+    "planSteps": 1
+  },
+  "status": "completed",
+  "taskSpanMinutes": 10.0,
+  "tasks": [
+    {
+      "agentMinutes": 5.0,
+      "attempts": 1,
+      "escalations": [],
+      "fixes": 0,
+      "idleBeforeMergeMs": 300000,
+      "ok": true,
+      "reason": null,
+      "resolves": 0,
+      "resolvesInferred": false,
+      "retries": 0,
+      "reviewRounds": 0,
+      "riskTag": "normal",
+      "task": "1",
+      "title": "Task 1 title",
+      "toMergedMinutes": 10.0,
+      "track": "impl",
+      "verdict": "approve",
+      "wave": 1
+    }
+  ],
+  "terms": [
+    "/tmp/claude-1000/ck-fresh-o9ln8xcw/proj",
+    "Implemented.",
+    "Task 1 title",
+    "Wave 1",
+    "acme-corp",
+    "demo",
+    "git@github.com:acme-corp/ledger-a.git",
+    "github.com",
+    "integrate/x",
+    "land 1",
+    "ledger-a",
+    "review 1",
+    "task 1"
+  ],
+  "wallMs": 720000,
+  "workflow": "spec-implement",
+  "workflowName": "spec-implement"
+}
