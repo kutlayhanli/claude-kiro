@@ -275,7 +275,7 @@ Every other state, detail and exit code (CREATED/EXISTS/BUSY, install ERROR) and
 ---
 
 ### Task 10: Write the scheduler property tests through the bridge
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 1.2, 1.4, 1.5, 2.1, 2.3, 2.5, 3.1, 3.2, 3.3, 3.4, 3.5, 3.9, NFR-1, NFR-6
 **Properties:** P-6, P-7, P-8, P-9, P-10, P-11, P-21, P-22, P-23
