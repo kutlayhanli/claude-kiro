@@ -450,7 +450,7 @@ No property uses a wall-clock tolerance. Settings `@settings(derandomize=True, m
 ---
 
 ### Task 14: Record and show queue-wait metrics and the review/landing wait split in ck stats
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7
 **Description:** Owns Harness Contract item 9 (stats; design renames the seams to `collect.queue_ms`, `collect.wait_split`, `show.queue_summary(rows)`, `show.agent_kind` and the JSON keys to `queueWait`/`waitSplit`). Collector (`src/claude_kiro/analytics/collect.py`):
@@ -474,9 +474,9 @@ View (`src/claude_kiro/analytics/show.py`):
 - [x] A run file with `queuedAt`/`startedAt` yields rows with `queueMs` = start − queued (0 when equal) (4.1)
 - [x] Missing, null, non-numeric, bool or inverted times yield `queueMs: null`, collection exits 0, other row fields unchanged (4.2)
 - [x] `ck stats show <run>` lists count, median, p90 and total queue wait per kind present (4.3)
-- [ ] Each task's finish-to-merge wait splits into review and landing time, with medians and totals shown next to idle-before-merge, overlapping review intervals not double-counted (4.4)
-- [ ] A run without queue data shows `not recorded` and every existing text and JSON figure is identical (4.5)
-- [ ] `--json` carries the same queue-wait and split values as the text view (4.6)
+- [x] Each task's finish-to-merge wait splits into review and landing time, with medians and totals shown next to idle-before-merge, overlapping review intervals not double-counted (4.4)
+- [x] A run without queue data shows `not recorded` and every existing text and JSON figure is identical (4.5)
+- [x] `--json` carries the same queue-wait and split values as the text view (4.6)
 - [x] A record collected before this change displays without re-collection (4.7)
 
 **Dependencies:** Task 13 (its tests are the oracle)
