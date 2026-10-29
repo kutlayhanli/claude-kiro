@@ -321,7 +321,7 @@ Age is controlled by backdating whole hours (5 h vs 7 h); the clock is not faked
 ---
 
 ### Task 12: Red-team the SHALL NOT clauses of Stories 3, 4 and 6
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 3.3, 3.4, 3.6, 3.9, 3.17, 4.4, 6.2, 6.7
 **Description:** Try to break each SHALL NOT clause with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Written from requirements.md only, never from the implementation. Every case cites the clause it attacks in its test id or docstring.
