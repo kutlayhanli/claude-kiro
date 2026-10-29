@@ -442,7 +442,7 @@ View (`src/claude_kiro/analytics/show.py`):
 ---
 
 ### Task 15: Write parallel-suite, gate worker-cap and xdist hint seam tests (Stories 5-6, Story 7 seam)
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 5.1, 5.2, 5.3, 5.4, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 7.1, 7.2, 7.3, NFR-4
 **Properties:** P-17, P-18, P-19
