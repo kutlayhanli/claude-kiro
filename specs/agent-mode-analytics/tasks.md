@@ -346,7 +346,7 @@ Age is controlled by backdating whole hours (5 h vs 7 h); the clock is not faked
 ---
 
 ### Task 13: Wire `ck stats begin`, `collect --agents`, `--agents-backfill`, the merged `--all` and the doctor warnings into the CLI
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.1, 1.3, 1.4, 1.5, 3.8, 3.11, 3.12, 3.13, 3.14, 3.16, 5.2, 5.3, 5.5, 6.1, 6.2, 6.4, 6.5, 6.6, 7.1, 7.6, 7.7, 7.8, 7.9
 **Description:** This task owns the Harness Contract CLI (`begin`, `collect --agents`, `--agents-backfill`, the `--all` summary, the `ck doctor` warnings). Exact texts are in design.md Public Interfaces (CLI) and Error Handling; JSON keys follow the Harness Contract.
@@ -366,15 +366,15 @@ In `health.py`, extend `decide(newest, auto_collect, uncollected, stale_manifest
 **Verify:** `uv run pytest -q tests/test_stats_agents_begin.py` `uv run pytest -q -n auto tests/test_stats_agents_collect.py tests/test_stats_agents_backfill.py tests/test_stats_agents_share.py tests/test_stats_properties_agents_cli.py tests/test_stats_redteam_agents_collect.py tests/test_stats_redteam_agents_roles.py tests/test_stats_redteam_agents_open.py` `uv run pytest -q tests/test_stats_agents_open.py tests/test_stats_perf.py` `uv run pytest -q -n auto tests/test_stats_*.py tests/test_stats_doctor.py tests/test_doctor_xdist.py tests/test_run.py`
 **Verified by:** Task 9, Task 10, Task 11, Task 12
 **Acceptance:**
-- [ ] `ck stats begin` prints a fresh `ag_<8 hex>` id (or the one JSON object under `--json`), exits 2 with usage naming `implement, create, review` on bad `--kind`/`--spec`, and exits 0 with a stderr warning when the manifest cannot be written
-- [ ] `collect --agents` prints the record path (or the JSON object with result and partial), exits 1 on not found / no agents / sandboxed without writing or closing anything
-- [ ] Invalid ids, `--run ag_...`, forbidden option combinations and bad `--gap` exit 2 with the documented messages
-- [ ] `--agents ... --auto` always exits 0 with one line; with auto-collect off it says so and leaves the manifest open
-- [ ] `--all` reports workflow and agent-mode outcomes in one summary with today's keys and spellings; a stale manifest without marked agents is reported once as `abandoned`, closed, and does not set exit 1
-- [ ] Under `ck run` (`CK_RUN_SANDBOXED=1`) `--agents ... --auto` prints the deferral line, and `auto_collect_after_run` collects the session's own and session-less (started after it) manifest runs after it exits, leaving other sessions' manifests and manifest-less marked runs alone
-- [ ] `--agents-backfill --dry-run` lists groups and excluded agents and writes nothing; without `--dry-run` it writes the groups and prints the count summary; no candidates exits 0 with the message
-- [ ] With open manifests older than 6 h, `ck doctor` reports their count and suggests `ck stats collect --all`, naming no spec, root or branch; with all open manifests 6 h old or younger no manifest warning appears; unreadable or malformed manifests are counted in a separate warning without their contents
-- [ ] All existing `tests/test_stats_*.py` and doctor tests pass unchanged
+- [x] `ck stats begin` prints a fresh `ag_<8 hex>` id (or the one JSON object under `--json`), exits 2 with usage naming `implement, create, review` on bad `--kind`/`--spec`, and exits 0 with a stderr warning when the manifest cannot be written
+- [x] `collect --agents` prints the record path (or the JSON object with result and partial), exits 1 on not found / no agents / sandboxed without writing or closing anything
+- [x] Invalid ids, `--run ag_...`, forbidden option combinations and bad `--gap` exit 2 with the documented messages
+- [x] `--agents ... --auto` always exits 0 with one line; with auto-collect off it says so and leaves the manifest open
+- [x] `--all` reports workflow and agent-mode outcomes in one summary with today's keys and spellings; a stale manifest without marked agents is reported once as `abandoned`, closed, and does not set exit 1
+- [x] Under `ck run` (`CK_RUN_SANDBOXED=1`) `--agents ... --auto` prints the deferral line, and `auto_collect_after_run` collects the session's own and session-less (started after it) manifest runs after it exits, leaving other sessions' manifests and manifest-less marked runs alone
+- [x] `--agents-backfill --dry-run` lists groups and excluded agents and writes nothing; without `--dry-run` it writes the groups and prints the count summary; no candidates exits 0 with the message
+- [x] With open manifests older than 6 h, `ck doctor` reports their count and suggests `ck stats collect --all`, naming no spec, root or branch; with all open manifests 6 h old or younger no manifest warning appears; unreadable or malformed manifests are counted in a separate warning without their contents
+- [x] All existing `tests/test_stats_*.py` and doctor tests pass unchanged
 **Dependencies:** Task 3 (calls `decide_collect_args`, `check_manifest`, `classify_open_manifest`), Task 5 (Task 11's exports of agent-mode records need the new `source` / `agent_transcripts` enums), Task 7 (calls `begin_run`, `collect_agent_run`, `finish_collected`, `collect_open_manifests`), Task 8 (calls `plan_backfill`, `collect_backfill`), Task 9 (its tests are the oracle), Task 10 (its tests are the oracle), Task 11 (its tests are the oracle), Task 12 (its tests are the oracle)
 **Complexity:** High
 **Risk:** safety (closes run manifests and writes records in every agent-mode run via `--auto`; a wrong close loses run history)
