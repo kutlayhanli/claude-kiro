@@ -243,7 +243,7 @@ Foundation task: Task 10 reaches this code only through the CLI of Task 13, so i
 ---
 
 ### Task 9: Test `ck stats begin` and `ck stats collect --agents` (grouping, pricing, outcome, attribution, `--auto`)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.7, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 3.10, 3.11, 3.12, 3.13, 3.14, 3.15, 3.16, 3.17, 3.18, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 5.2, 5.3, 5.4, 5.5
 **Description:** Implement the run-start and collector boundaries through the real CLI inside `fresh_env()` with `no_network`. Implement-run fixtures call `begin` after `spec_repo` and land tasks with `land` / `fail` / `mark_done` afterwards, as a real run does; landing before `begin` is how a test builds a resumed spec.
@@ -256,13 +256,13 @@ Foundation task: Task 10 reaches this code only through the CLI of Task 13, so i
 **Verify:** `uv run pytest -q tests/test_stats_agents_begin.py` `uv run pytest -q -n auto tests/test_stats_agents_collect.py` `uv run pytest -q tests/test_stats_perf.py`
 **Verifies:** Task 13 (the `begin` / `collect --agents` CLI these tests drive, built on Tasks 3, 6 and 7)
 **Acceptance:**
-- [ ] Every test exercises the real boundary: the `ck` CLI as a subprocess over a fake Claude home with the real transcript/meta layout, real store, real git and the real `ck worktree report` / `ck cost` (no mocks of the project's own code)
-- [ ] Permissions are checked on the real filesystem; network asserted absent via `$CK_TEST_NET_LOG`
-- [ ] Cost agreement is checked against `ck cost`, not against a number computed in the test
-- [ ] Unknown values are asserted `null`, never `0`, wherever the requirements say "unknown"
-- [ ] Manifest open/closed state is observed only through `ck doctor` and `collect --all`, not by reading store internals the design may change
-- [ ] Before the implementation exists the tests fail for the right reason (click "No such command" for `begin`, "No such option: --agents", `AttributeError` from `claude_kiro.analytics` seams), not because of broken fixtures
-- [ ] The existing workflow-run tests are not edited (TC-28 proves compatibility metamorphically)
+- [x] Every test exercises the real boundary: the `ck` CLI as a subprocess over a fake Claude home with the real transcript/meta layout, real store, real git and the real `ck worktree report` / `ck cost` (no mocks of the project's own code)
+- [x] Permissions are checked on the real filesystem; network asserted absent via `$CK_TEST_NET_LOG`
+- [x] Cost agreement is checked against `ck cost`, not against a number computed in the test
+- [x] Unknown values are asserted `null`, never `0`, wherever the requirements say "unknown"
+- [x] Manifest open/closed state is observed only through `ck doctor` and `collect --all`, not by reading store internals the design may change
+- [x] Before the implementation exists the tests fail for the right reason (click "No such command" for `begin`, "No such option: --agents", `AttributeError` from `claude_kiro.analytics` seams), not because of broken fixtures
+- [x] The existing workflow-run tests are not edited (TC-28 proves compatibility metamorphically)
 **Dependencies:** Task 1 (uses `ToolAgentSpec`, `tool_agents`, `begin`, `read_only`, `spec_repo`, `land`, `fail`, `mark_done`, `logging_git`, `backdate_manifest`, `set_manifest`)
 **Complexity:** High
 **Risk:** safety (oracle for closing run manifests after collect; a wrong close or a mis-grouped agent loses or misattributes a run's data)
