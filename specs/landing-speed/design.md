@@ -7,19 +7,19 @@ The whole-spec `/spec:implement` run is one Workflow script, `plugin/workflows/s
 How the PLAN.md decisions shape it:
 
 - **D1 (scope A + B + D, plus E; C deferred).** Nothing in the landing gate, `ck worktree land`, the land lock, bisection, protected-path checks, sandbox rules or `ck worktree report` changes. The landing queue (`requestLanding` / `pumpLandings` / `landBatch`), one landing at a time, the batch window and the full gate every `fullGateEvery` merges stay as they are.
-- **D2 (adaptive finish-first, configurable off).** A pure decision `startDecision` holds new task starts while any review, revise or land agent is *queued*. The Workflow runtime does not tell a script when an agent it requested has started, so "queued" is an estimate (see "Queued: the observable approximation" below). There is no fixed reserve and no `reserve_slots` setting. The only switch is `run.finish_first` (default on).
+- **D2 (adaptive finish-first, configurable off), refined by D9 and D10.** A pure decision `startDecision` holds new task starts while any review, revise or land agent is *queued*, and caps new task starts at the free runtime slots, `max(0, agentSlots - inFlight)`, so a start never itself queues ahead of a later review, revise or land (D10, requirement 3.9). The Workflow runtime does not tell a script when an agent it requested has started, so "queued" is an estimate from the documented runtime cap (D9; see "Queued: the observable approximation" below). There is no fixed reserve and no `reserve_slots` setting. The only switch is `run.finish_first` (default on).
 - **D3 (plan agent at start, after each landing, and when idle).** A pure decision `planDecision` allows a plan agent only on those three triggers. Between them the script works out readiness itself from the dependency graph (`readyTasks`, which mirrors `ck plan`'s `ready` ordering exactly).
 - **D4 (task agent creates its own worktree).** The plan prompt loses its `ck worktree create` step. `taskPrompt` gains it, and the task result reports the creation outcome. A pure `worktreeOutcome` maps that outcome to proceed, busy or error.
 - **D5 (measure with real runs).** `ck stats` records each agent's queue wait and splits each task's wait between finishing and merging into review time and landing time. There is no `ck bench` work.
 - **D6-D8 (parallel tests).** `ck gate` sets `PYTEST_XDIST_AUTO_NUM_WORKERS = max(1, cores // gates running)` for its verify commands unless the variable is already set. The count of gates running comes from a per-host registry of flock-held files. `ck doctor` / `ck init` suggest xdist and the stable-id check. This repo's verify becomes `uv run pytest -q -n auto`. The pid-parametrized test already has fixed ids (`tests/test_worktree_cli.py:121`).
 
-### Queued: the observable approximation (requirement 3.1, Assumptions)
+### Queued: the observable approximation (requirements 3.1, 3.9, Constraints, Assumptions; PLAN.md D9)
 
-A workflow script sees only `agent(prompt, opts) -> Promise`. It cannot see when the runtime moves an agent from its queue to a running slot. The Workflow runtime runs at most `min(16, CPUs - 2)` concurrent `agent()` calls per workflow, and further calls wait their turn (that is the documented cap of the Workflow script API; the 14-agent peak on a 16-core machine matches it). The design assumes the runtime starts queued agents in request order (FIFO). Under that assumption:
+A workflow script sees only `agent(prompt, opts) -> Promise`. It cannot see when the runtime moves an agent from its queue to a running slot. The Workflow runtime runs at most `min(16, CPUs - 2)` concurrent `agent()` calls per workflow, and further calls wait their turn (that is the documented cap of the Workflow script API; the 14-agent peak on a 16-core machine matches it). The design assumes the runtime starts queued agents in request order (FIFO); both the documented cap and FIFO order are recorded as assumptions in requirements.md. Under them:
 
 > Of the agents the script has requested and that have not yet returned, ordered by request sequence, the first `agentSlots` are running and the rest are queued.
 
-The script counts every `agent()` call it makes through one wrapper (`call`). `agentSlots` comes from the skill (`runtime.agentSlots` in `ck agents --json`, computed from the CPU count). `CK_AGENT_SLOTS` overrides it, and nothing in the script hard-codes a number. If `agentSlots` is absent (or null), no agent is presumed queued, so finish-first never defers a start (it is inert, and the run schedules exactly as with finish-first off). An `agentSlots` that is present but not a positive integer throws at load. The skill always passes `agentSlots` (TC-1 checks the wiring), so only hand-built args, such as every existing `tests/js/spec_implement.test.mjs` case, hit the inert fallback; those tests keep their current start order (requirements 3.1, 3.3, NFR-6).
+The script counts every `agent()` call it makes through one wrapper (`call`). `agentSlots` comes from the skill (`runtime.agentSlots` in `ck agents --json`, computed once by `runtime_agent_slots` from the affinity-aware CPU count). `CK_AGENT_SLOTS` overrides it, and nothing in the script hard-codes a number. The same estimate gives the free runtime slots, `max(0, agentSlots - inFlight.length)`, which cap new task starts (3.9). If `agentSlots` is absent (or null), no agent is presumed queued, so finish-first never defers a start (it is inert, and the run schedules exactly as with finish-first off). An `agentSlots` that is present but not a positive integer throws at load. The skill always passes `agentSlots` (TC-1 checks the wiring), so only hand-built args, such as every existing `tests/js/spec_implement.test.mjs` case, hit the inert fallback; those tests keep their current start order (requirements 3.1, 3.3, NFR-6).
 
 ## Components
 
@@ -27,12 +27,12 @@ The script counts every `agent()` call it makes through one wrapper (`call`). `a
 
 - `plugin/workflows/spec-implement.js`: the scheduler (stories 1-3).
   - **Args.** New fields: `deps`, `remaining` (the order), `agentSlots` and `finishFirst`. A non-boolean non-null `finishFirst` or a non-null `agentSlots` that is not a positive integer throws at load, in the style of `roleOpts`.
-  - **Agent wrapper.** Every `agent()` call goes through `call(kind, prompt, opts)`. The wrapper records `{ seq, kind }` in an in-flight list and removes it when the call settles. Each settle runs `poke()`, which wakes the main loop. Labels, phases and options are unchanged, so the `ck stats` label grammar (`src/claude_kiro/analytics/roles.py`) and the label corpus keep matching.
+  - **Agent wrapper.** Every `agent()` call goes through `call(kind, prompt, opts)`. The wrapper records `{ seq, kind }` in an in-flight list and removes it when the call settles. Each settle runs `poke()`, which wakes the main loop. The wake-up runs `schedule()` only after the settling call's own continuation has made its follow-up request (a finished implementer's `review`, an approval's `land`), so that request is already in the in-flight list when `startDecision` counts free slots and the review gets the freed slot ahead of any new task (3.9, TC-65). Labels, phases and options are unchanged, so the `ck stats` label grammar (`src/claude_kiro/analytics/roles.py`) and the label corpus keep matching.
   - **New pure decisions block.** It sits between the markers `// --- decisions (pure; loaded by tests) ---` and `// --- end decisions ---`, and holds `readyTasks`, `chainLengths`, `applyPlanView`, `planConsistent`, `planDecision`, `queuedAgents`, `startDecision` and `worktreeOutcome` (see Decision Seams). Code inside the block uses no script globals and no `agent`/`log`.
   - **`PLAN` schema and `planPrompt`.** These change to "run `ck plan --json --exclude …` and copy `done`, `remaining`, `deps`, `ready`, `cycles`, `verifyCycles`". The worktree step and the `busy` field are gone. `usablePlan`/`normalizePlan` are updated to match. `planConsistent` checks the copy: the script's readiness over the copied view must equal the copied `ready`, or the attempt counts as a planning failure and is retried once, as today.
   - **`plan()`** becomes `requestPlan(trigger)`. It runs asynchronously, keeps at most one plan agent in flight, and coalesces a trigger that arrives while one is running into one follow-up. Each attempt captures the exclude list (running, failed, merged in run) when it builds its prompt, and passes that same captured list to `planConsistent`; tasks that start or finish while the plan agent runs never make a correct copy look inconsistent (1.6, 1.8). On success it applies `applyPlanView`, `applyLint` and `poke()`. Two failed attempts set `stopLaunching` with `PLAN_FAILED`, as today. The start plan is still awaited before the first launch, and the cycle refusal at start is unchanged.
   - **`landBatch`.** After it resolves the batch outcomes (after any full gate, exactly where `b.resolve(t)` runs today), it adds each MERGED task to `mergedInRun`, calls `requestPlan('landing')` and `poke()`s.
-  - **`launch`** becomes `schedule()`. It computes ready tasks with `readyTasks`, asks `startDecision` which to start, and logs a finish-first deferral once per deferral period. Where `planDecision` says so, it requests the idle plan. Busy handling moves out of `launch` and into `runTask` (via `worktreeOutcome`).
+  - **`launch`** becomes `schedule()`. It computes ready tasks with `readyTasks`, asks `startDecision` which to start (it passes the in-flight list and `agentSlots`, so starts are capped at free runtime slots), and logs a finish-first deferral once per deferral period. Where `planDecision` says so, it requests the idle plan. Busy handling moves out of `launch` and into `runTask` (via `worktreeOutcome`).
   - **`taskPrompt`.** It now creates the worktree first: `ck -C ROOT worktree create SPEC N --install --base INTO --json`. On CREATED or EXISTS the agent claims the worktree and works. On BUSY or ERROR it stops at once, doesn't touch the worktree, and reports the creation result. `RESULT` gains `worktree: { state, detail }`.
   - **`retryPrompt`.** It keeps `--takeover` on the existing worktree. Only when the claim reports MISSING (the first agent died before creating it) does it run the same create command.
   - **`runTask`.** After the first attempt it calls `worktreeOutcome(r)`. Busy records `rec.busy = true` with reason `worktree busy: <detail>` and returns without retries or escalation. Error records reason `worktree create failed: <detail>` and returns without retries.
@@ -120,7 +120,7 @@ The shape is unchanged. `stats.planSteps` counts plan agents (NFR-1). Busy and c
 
 ### Run log lines (requirement 3.7)
 
-- `finish-first: holding new task starts while <k> review/revise/land agent(s) wait for a slot`: once when a deferral period begins. A period ends when a task starts or nothing is deferred any more.
+- `finish-first: holding new task starts while <k> review/revise/land agent(s) wait for a slot`, or `finish-first: holding new task starts while all <agentSlots> runtime slots are busy` when the hold comes from the free-slot cap alone (3.9): once when a deferral period begins, whichever reason starts it. A period ends when a task starts or nothing is deferred any more.
 - `plan <n> (idle): nothing ready, <m> task(s) open; re-reading the plan`: once per idle trigger.
 
 ### `ck agents`
@@ -207,7 +207,7 @@ Every rule that allows, refuses or holds something is a pure function: no I/O, n
 | `planConsistent` | same | `planConsistent(plan: PlanResult, exclude: string[]) -> boolean` | Whether a plan agent's copy holds together: `readyTasks` over `{order: remaining, deps, done: plan.done, exclude, blocked}` equals `plan.ready` with every task that has a dependency missing from the `deps` keys removed (the script's stricter 1.10 rule never turns into a planning failure), and every `remaining` task has a `deps` entry. `exclude` is the list captured when that attempt's prompt was built, not the scheduler's list at return time. False counts as a failed planning attempt (1.6, 1.8). |
 | `planDecision` | same | `planDecision({ trigger: 'start'\|'landing'\|'idle'\|'freed'\|'finished', scriptReadiness: boolean, planInFlight: boolean, idleArmed: boolean, freeSlot: boolean, readyCount: number, openCount: number, stopLaunching: boolean }) -> 'run' \| 'coalesce' \| 'none'` | Whether a plan agent runs. With `scriptReadiness`, only `start`, `landing` and `idle` can run one. `idle` needs `freeSlot && readyCount === 0 && openCount > 0 && idleArmed` (1.4, 1.5). Without `scriptReadiness`, `freed` and `finished` run one too (1.9). Any trigger while `planInFlight` is `coalesce`. `stopLaunching` gives `none` for every trigger except `start`. `openCount` = tasks in `order`, not done, not running, not failed. |
 | `queuedAgents` | same | `queuedAgents(inFlight: {seq: number, kind: string}[], slots: number \| null) -> {seq, kind}[]` | Which in-flight agents are presumed queued. With a positive integer `slots`, it is the entries after the first `slots` by ascending `seq`. With `slots` null or absent, it is no entry (finish-first inert; see "Queued: the observable approximation") (3.1, 3.3, NFR-6). |
-| `startDecision` | same | `startDecision({ finishFirst: boolean, inFlight, slots, ready: string[], working: number, maxConcurrent: number, stopLaunching: boolean }) -> { start: string[], deferred: boolean, waiting: number }` | Which ready tasks start now. If `stopLaunching`, none. If `finishFirst` and any `queuedAgents` entry has kind `review`, `revise` or `land`: none, with `deferred: true` and `waiting` = their count (3.1). Otherwise the first `maxConcurrent - working` of `ready` (3.2, 3.3, 3.5, NFR-6). It is never asked about non-task agents, so it can't delay them (3.4). |
+| `startDecision` | same | `startDecision({ finishFirst: boolean, inFlight, slots, ready: string[], working: number, maxConcurrent: number, stopLaunching: boolean }) -> { start: string[], deferred: boolean, waiting: number }` | Which ready tasks start now. If `stopLaunching`, none. If `finishFirst` and any `queuedAgents` entry has kind `review`, `revise` or `land`: none, with `deferred: true` and `waiting` = their count (3.1). Otherwise the first `min(maxConcurrent - working, free)` of `ready`, where `free = max(0, slots - inFlight.length)` when `finishFirst` and `slots` is a positive integer, else unbounded (3.2, 3.3, 3.5, 3.9, NFR-6). When `free` holds back a start that `maxConcurrent` allows, `deferred: true` with `waiting: 0`. It is never asked about non-task agents, so it can't delay them (3.4). |
 | `worktreeOutcome` | same | `worktreeOutcome(result: TaskResult \| null) -> { kind: 'proceed' \| 'busy' \| 'error', reason: string \| null }` | How a task agent's creation step ended. `worktree.state` BUSY, or a `blocker` matching `/worktree busy/i`, gives `busy` with reason `worktree busy: <detail>` (2.3). ERROR gives `error` with reason `worktree create failed: <detail>` (2.4). CREATED, EXISTS or no `worktree` field gives `proceed` (2.2, 2.5). |
 | `worker_cap` | `src/claude_kiro/xdist.py` (gate) | `worker_cap(preset: Optional[str], cores: Optional[int], running: Optional[int]) -> Optional[str]` | The `PYTEST_XDIST_AUTO_NUM_WORKERS` value to set. `preset` is not None (key present, any value) → None, so the value passes through unchanged (6.2). Otherwise `str(max(1, c // r))`, where `c = cores` if it is ≥ 1 else 1 and `r = running` if it is ≥ 1 else 1 (6.1, 6.3, 6.4, 6.6). |
 | `has_pytest_without_n` | `src/claude_kiro/xdist.py` (doctor/init) | `has_pytest_without_n(verify: Sequence[str]) -> Optional[str]` | Which verify command, if any, earns the hint. It returns the first command that invokes pytest (a `pytest` token, or `-m pytest`) and has none of `-n`, `-n<x>`, `-n=<x>`, `--numprocesses`, `--numprocesses=<x>`. Otherwise None (7.1, 7.3). It tokenizes with `shlex.split` and falls back to `str.split` on a parse error. |
@@ -275,7 +275,7 @@ A record is "queue recorded" when at least one agent row has an int `queueMs`. R
 
 ```python
 # agents.DEFAULTS["run"]
-"finish_first": bool = True   # hold new task starts while a review/revise/land agent is queued
+"finish_first": bool = True   # hold new task starts while a review/revise/land agent is queued, and cap them at free runtime slots
 
 # ck agents --json, top level
 "runtime": {"cpus": int, "agentSlots": int}
@@ -313,7 +313,7 @@ sequenceDiagram
     S->>S: worktreeOutcome: busy/error -> record not merged; proceed -> continue
     S->>S: releaseSlot, schedule(): readyTasks (no plan agent)
     S->>RT: call('review')
-    Note over S,RT: while queuedAgents() has review/revise/land,<br/>startDecision returns deferred (log once)
+    Note over S,RT: while queuedAgents() has review/revise/land, or no runtime slot is free,<br/>startDecision returns deferred (log once)
     RT->>R: run when a slot frees
     R-->>S: verdict
     S->>RT: call('land', batch)
@@ -360,9 +360,9 @@ flowchart LR
 **Security.** The protected-path, sandbox and land-lock logic are untouched. Task agents now run `ck worktree create`, a command the brief already lists for worktree work: it uses absolute `-C` paths, is a single simple command, and needs no new permission or network host (install uses the same configured install command as before). The gate registry lives at the fixed per-user path `~/.cache/ck/gates` (created with mode 0700), which `ck run`'s sandbox already allows to read and write (`SANDBOX_HOME_READABLE` / `SANDBOX_HOME_WRITABLE` in `cli/run.py` hold `~/.cache`), so sandboxed task gates and the unsandboxed landing gate and hook share it. It holds empty files and is only read to count flocks. A session whose own sandbox does not allow `~/.cache` gets the 6.6 fallback with its one-line note, never a silent miscount. `PYTEST_XDIST_AUTO_NUM_WORKERS` holds an integer, never user-controlled text.
 
 **Performance.**
-- Plan agents per run drop from about 1 per task plus 1 per freed slot to `1 + landings + idle plans`, each idle plan needing a landing completion or task record since the previous plan (NFR-1).
+- Plan agents per run drop from about 1 per task plus 1 per freed slot to `1 + landings + idle plans`. An idle plan may run right after the start plan or a landing plan; only an idle plan after the first idle plan needs a landing completion or task record since the previous idle plan, so idle plans ≤ 1 + landings + task records (NFR-1).
 - No worktree-creation agents run.
-- Finish-first keeps new task requests out of the runtime queue while unblockers wait, so the next free slot goes to a review or landing (NFR-5 target: review median queue wait under 30 s).
+- Finish-first keeps new task requests out of the runtime queue while unblockers wait, and at saturation never requests a task that would queue, so the next free slot goes to a review or landing (NFR-5 target: review median queue wait under 30 s). A held start loses nothing under FIFO: it could not have started before a slot freed, and it is requested at the settle that frees one unless a review, revise or land takes it. No deadlock: holds wait only on agents already in flight, each settle re-runs `startDecision`, and with nothing in flight `free = agentSlots ≥ 1` (NFR-6, P-11).
 - With nothing queued, the decision is the same as today's launch (NFR-6).
 - With the worker cap, k concurrent gates on c cores start about c workers in total instead of k·c.
 - This repo's suite runs in about 52 s instead of about 253 s on 16 cores (NFR-4).
@@ -393,14 +393,15 @@ flowchart LR
 | 2.4 | `worktrees.create` ERROR outcome for a failed `git worktree add`; `worktreeOutcome` error; reason `worktree create failed: <detail>`; `onFailure` in main loop |
 | 2.5 | `retryPrompt` / `revisePrompt` / `reviewPrompt` reuse `WT(n)`; create only on claim MISSING |
 | 2.6 | `fixPrompt` unchanged (`ck worktree create … fix<k>`) |
-| 3.1 | `call` wrapper in-flight list, `queuedAgents` (presumed queued; none without `agentSlots`), `startDecision`; `runtime.agentSlots` |
-| 3.2 | `poke()` on every agent settle → `schedule()` before any other agent can settle |
-| 3.3 | `startDecision` with no presumed-queued unblocker = first `maxConcurrent - working` ready; `queuedAgents` none without `agentSlots` |
+| 3.1 | `call` wrapper in-flight list, `queuedAgents` (presumed queued = beyond the first `agentSlots` in request order, FIFO; none without `agentSlots`), `startDecision`; `runtime.agentSlots` from `runtime_agent_slots` (documented cap, `CK_AGENT_SLOTS` override) |
+| 3.2 | `poke()` on every agent settle → `schedule()` before any other agent can settle; starts only into a free runtime slot (3.9) |
+| 3.3 | `startDecision` with no presumed-queued unblocker and enough free slots = first `maxConcurrent - working` ready; `queuedAgents` none and no slot cap without `agentSlots` |
 | 3.4 | `startDecision` gates only `schedule()` task starts; all other `call`s ungated |
 | 3.5 | `run.finish_first` false → `finishFirst: false` → `startDecision` ignores queue |
 | 3.6 | `DEFAULTS["run"]["finish_first"] = True`; script default when absent |
 | 3.7 | `deferring` flag; one `finish-first: holding …` log per deferral period |
 | 3.8 | `_coerce("run","finish_first", …)` → `AgentConfigError`; script load-time check |
+| 3.9 | `startDecision` `free = max(0, slots - inFlight.length)` cap; `schedule()` runs after the settling call's follow-up request; slot-cap deferral log line |
 | 4.1 | `_Agent.queued_ms`, row `queuedAtMs`, `queueMs` via `queue_ms` |
 | 4.2 | `queue_ms` → None on missing/inverted |
 | 4.3 | `agent_kind`, `queue_summary`, `render_run` queue-wait section |
@@ -429,4 +430,4 @@ flowchart LR
 | NFR-3 | `uv run ck vendor`; `test_dogfood_copies_in_this_repo_match_the_plugin_source` |
 | NFR-4 | `specs/ck.json` `-n auto`, pytest-xdist |
 | NFR-5 | `queue_summary` review median; `stats.planSteps` vs tasks |
-| NFR-6 | `startDecision` identical to plain launch when nothing is presumed queued |
+| NFR-6 | `startDecision` identical to plain launch when nothing is presumed queued and slots are free; holds wait only on in-flight agents, re-run on every settle (no deadlock) |

@@ -185,10 +185,13 @@ Split of the 7.1 min median wait per task (local record + Claude Code run file o
 | # | Decision | Choice | Rationale | Date |
 |---|----------|--------|-----------|------|
 | 1 | Scope for v1 | A + B + D (plus E, see D6): script-side readiness with fewer plan agents, finish-first scheduling, queue-wait metrics in `ck stats`; C (tiered landing gate) deferred | Targets the measured bottleneck (review slot wait) and the plan-agent cost with no safety trade-off; C can let the target go red between full gates | 2026-10-29 |
-| 2 | Finish-first rule (B) | Adaptive: never start a new task while a review, revise or land agent is queued; configurable off | Needs no knowledge of the undocumented runtime agent cap | 2026-10-29 |
+| 2 | Finish-first rule (B) | Adaptive: never start a new task while a review, revise or land agent is queued; configurable off; refined by D9 | Needs no knowledge of the undocumented runtime agent cap | 2026-10-29 |
 | 3 | When the plan agent still runs (A) | At start, after each landing, and when nothing is ready but tasks remain | Landings are frequent, so tasks.md edits and Done status are seen within minutes | 2026-10-29 |
 | 4 | Worktree creation (A) | The task agent creates and claims its own worktree as its first step | Removes another mechanical agent per task; the task agent already claims it | 2026-10-29 |
 | 5 | How to measure | Next real runs via `ck stats` with the new queue metrics; `ck bench` only if results are unclear | Real runs are free to collect; D makes the before/after visible | 2026-10-29 (default, not contested) |
 | 6 | Parallel tests (E) in scope | E1 + E2 + E3: this repo's verify runs `pytest -n auto`; ck caps xdist workers across concurrent gates; doctor/init suggest xdist for pytest projects | User asked for parallel tests; measured 4.8x on the full suite with all 1,173 tests passing | 2026-10-29 |
 | 7 | Worker cap (E2) | `ck gate` sets `PYTEST_XDIST_AUTO_NUM_WORKERS = max(1, cores // gates running)` unless already set | Avoids 14 concurrent gates each starting 16 workers | 2026-10-29 (default, not contested) |
 | 8 | Stable test ids | Fix the one pid-parametrized test now (fixed ids); E3 checks other projects for the same pitfall | It was the only collection mismatch; behaviour unchanged | 2026-10-29 (default, not contested) |
+| 9 | Meaning of "queued" (B) | Documented runtime cap min(16, CPUs-2) via runtime_agent_slots, CK_AGENT_SLOTS override; agents beyond the first N in request order are queued | Script cannot observe the queue; documented cap matches the observed 14 on 16 cores; refines D2 | 2026-10-29 |
+| 10 | Saturation (B) | Cap new task starts at free slots | Reviews never queue behind task starts; this is when the 77 s waits happened | 2026-10-29 |
+| 11 | Idle plan timing (A) | Idle plan may follow the start or a landing plan; only a repeated idle plan waits for new progress | Matches 1.4(c)/1.5; same plan-count bound | 2026-10-29 |
