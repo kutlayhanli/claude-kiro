@@ -178,7 +178,7 @@ Split of the 7.1 min median wait per task (local record + Claude Code run file o
 - Script readiness diverges from `ck plan` -> contract test: script readiness equals `ck plan --json` ready set for generated graphs; plan agent after every landing as a resync.
 - Throttling starts slows a run with few reviews -> adaptive rule only defers while a review/land agent is actually queued.
 - Mid-run tasks.md edits picked up later -> plan agent after each landing and when idle; documented in the skill.
-- Undocumented runtime cap changes -> no hard-coded cap; B is adaptive.
+- Runtime cap differs from the documented min(16, CPUs-2) -> computed in one place (runtime_agent_slots), overridable with CK_AGENT_SLOTS; queue waits stay visible in `ck stats` (D9).
 
 ## Decisions Log
 
