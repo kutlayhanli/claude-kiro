@@ -27,7 +27,7 @@ does for `ck run` code.
 ## Task Breakdown
 
 ### Task 1: Extend the stats test harness with Agent-tool subagents, manifests and spec repos
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.2, 3.1, 3.4, 3.15, 6.1, 7.3, 9.1
 **Description:** Build the shared test infrastructure that test-plan.md "Add to `tests/stats_helpers.py`" lists (items 1-11), so every other test task can write agent-mode fixtures without touching ck code. In `tests/stats_helpers.py` add:
@@ -49,12 +49,12 @@ Add self-checks to `tests/test_stats_helpers.py` that exercise only the harness 
 **Verify:** `uv run pytest -q tests/test_stats_helpers.py` `uv run pytest -q -n auto tests/test_stats_*.py tests/test_plugin.py tests/test_cost.py tests/test_worktree_report.py`
 **Verifies:** None
 **Acceptance:**
-- [ ] The fake layout matches the real Claude Code layout named in the requirements' Constraints (`projects/<proj>/<sid>/subagents/agent-<id>.{jsonl,meta.json}`, meta keys as listed), checked by a self-test that reads the written files back
-- [ ] `spec_repo` plus `land` / `fail` / `mark_done` produce a repo over which the real `ck worktree report <spec> --into <into> --json` returns the expected merged/done/failed/unstarted lists, with each `mergedAt` at or after the moment `land` ran (real git, real `ck worktree report`, no mocks of project code)
-- [ ] Fault injectors leave exactly the damage they name (dropped file absent, truncated file cut mid-line, corrupted meta not JSON)
-- [ ] The existing stats suite still passes unchanged with the extended helpers (`AgentSpec.extra_meta` defaults to `{}` and changes no existing fixture's bytes)
-- [ ] Project modules are imported inside test bodies only; no ck code is mocked
-- [ ] Helpers write no real project or client names
+- [x] The fake layout matches the real Claude Code layout named in the requirements' Constraints (`projects/<proj>/<sid>/subagents/agent-<id>.{jsonl,meta.json}`, meta keys as listed), checked by a self-test that reads the written files back
+- [x] `spec_repo` plus `land` / `fail` / `mark_done` produce a repo over which the real `ck worktree report <spec> --into <into> --json` returns the expected merged/done/failed/unstarted lists, with each `mergedAt` at or after the moment `land` ran (real git, real `ck worktree report`, no mocks of project code)
+- [x] Fault injectors leave exactly the damage they name (dropped file absent, truncated file cut mid-line, corrupted meta not JSON)
+- [x] The existing stats suite still passes unchanged with the extended helpers (`AgentSpec.extra_meta` defaults to `{}` and changes no existing fixture's bytes)
+- [x] Project modules are imported inside test bodies only; no ck code is mocked
+- [x] Helpers write no real project or client names
 **Dependencies:** None
 **Complexity:** Medium
 **Risk:** normal

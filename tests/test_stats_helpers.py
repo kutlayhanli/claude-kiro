@@ -13,6 +13,8 @@ from stats_helpers import (
     CK, CONFIDENTIAL, AgentSpec, FakeClaudeHome, all_bytes, ck_sub, create_result, fake_claude_drafter, fake_claude_session,
     fake_editor, fake_gh, flatten_paths, fresh_env, gh_calls, git, git_project, implement_result, kiro_checkout,
     path_without_gh, run_tty, seeded_home, seeded_local_record, stats, store_files, TaskSpec,
+    OLD_DESCRIPTIONS, SPEC_TYPES, ToolAgentSpec, backdate_manifest, backfill_home, described, fail, land, logging_git,
+    mark_done, marker, read_only, set_manifest, spec_repo, to_ms, parse_iso,
 )
 
 
@@ -281,3 +283,151 @@ def test_the_helpers_module_never_imports_the_cli():
     from pathlib import Path
     text = (Path(__file__).parent / "stats_helpers.py").read_text()
     assert "import claude_kiro.cli" not in text and "from claude_kiro.cli" not in text and "from claude_kiro import cli" not in text
+
+
+# --------------------------------------------------------------------------- agent-mode harness (Agent-tool subagents)
+
+
+def test_tool_agents_write_the_real_layout_and_meta_keys(tmp_path):
+    home = FakeClaudeHome(tmp_path / "h")
+    session = home.session(cwd=tmp_path)
+    ta = session.tool_agents([
+        ToolAgentSpec(described("ag_0123abcd", "implement task 1"), meta_model="sonnet", worktree_path="/w/demo-task-1",
+                      worktree_branch="feat/demo-task-1", extra_meta={"futureKey": 7}),
+        ToolAgentSpec("plain", agent_type="general-purpose", requests=[("rq1", 1, 2, 3, 4)], duration_ms=90_000),
+    ])
+    d = session.dir / "subagents"
+    assert ta.transcript(0) == d / f"agent-{ta.agent_ids[0]}.jsonl" and ta.transcript(0).exists()
+    meta = json.loads(ta.meta_path(0).read_text())
+    assert meta == {
+        "agentType": "spec:implementer", "description": "[ck:ag_0123abcd] implement task 1", "toolUseId": meta["toolUseId"],
+        "spawnDepth": 1, "requestShape": "tool", "requestNonInteractive": False, "isBuiltIn": False, "model": "sonnet",
+        "worktreePath": "/w/demo-task-1", "worktreeBranch": "feat/demo-task-1", "futureKey": 7,
+    }
+    plain = json.loads(ta.meta_path(1).read_text())
+    assert not {"model", "worktreePath", "worktreeBranch", "startedAt", "endedAt", "startTime", "endTime"} & set(plain)
+    lines = [json.loads(l) for l in ta.transcript(1).read_text().splitlines()]
+    assistants = [l for l in lines if l["type"] == "assistant"]
+    assert len(assistants) == 2 and {l["requestId"] for l in assistants} == {"rq1"}
+    assert assistants[0]["message"]["usage"]["output_tokens"] == 2
+    assert to_ms(lines[-1]["timestamp"]) - to_ms(lines[0]["timestamp"]) == 90_000
+    uses = [blk for l in map(json.loads, session.transcript_path.read_text().splitlines()) if l.get("type") == "assistant"
+            for blk in l["message"]["content"] if blk.get("name") == "Agent"]
+    assert [u["id"] for u in uses][0] == meta["toolUseId"] and len(uses) == 2
+    assert uses[0]["input"]["description"] == meta["description"]
+
+
+def test_tool_agent_none_description_and_type_leave_the_keys_out(tmp_path):
+    home = FakeClaudeHome(tmp_path / "h")
+    session = home.session(cwd=tmp_path)
+    ta = session.tool_agents([ToolAgentSpec(None, agent_type=None)])
+    meta = json.loads(ta.meta_path(0).read_text())
+    assert "description" not in meta and "agentType" not in meta
+    use = [blk for l in map(json.loads, session.transcript_path.read_text().splitlines()) if l.get("type") == "assistant"
+           for blk in l["message"]["content"] if blk.get("name") == "Agent"][0]
+    assert "description" not in use["input"] and "subagent_type" not in use["input"]
+
+
+def test_tool_agent_fault_injectors_leave_exactly_the_named_damage(tmp_path):
+    home = FakeClaudeHome(tmp_path / "h")
+    ta = home.session(cwd=tmp_path).tool_agents([ToolAgentSpec(f"d{i}") for i in range(4)])
+    ta.drop_transcript(0)
+    assert not ta.transcript(0).exists() and ta.meta_path(0).exists()
+    ta.drop_meta(1)
+    assert not ta.meta_path(1).exists() and ta.transcript(1).exists()
+    ta.truncate_transcript(2)
+    text = ta.transcript(2).read_text()
+    assert not text.endswith("\n")
+    *good, last = text.split("\n")
+    assert all(json.loads(l) for l in good)
+    with pytest.raises(ValueError):
+        json.loads(last)
+    ta.corrupt_meta(3)
+    assert ta.meta_path(3).read_text() == "{not json" and ta.transcript(3).exists()
+
+
+def test_workflow_agent_extra_meta_is_merged_and_defaults_to_nothing(tmp_path):
+    home = FakeClaudeHome(tmp_path / "h")
+    run = home.session(cwd=tmp_path).implement_run(agents=[AgentSpec("a", extra_meta={"newKey": 1}), AgentSpec("b")])
+    assert json.loads(run.meta_path(0).read_text()) == {"description": "a", "workflowPhase": "Wave 1", "model": "claude-sonnet-5-5", "newKey": 1}
+    assert json.loads(run.meta_path(1).read_text()) == {"description": "b", "workflowPhase": "Wave 1", "model": "claude-sonnet-5-5"}
+
+
+def test_marker_and_described():
+    assert marker("ag_0123abcd") == "[ck:ag_0123abcd]"
+    assert described("ag_0123abcd", "fix 2") == "[ck:ag_0123abcd] fix 2"
+    assert len(SPEC_TYPES) == 10 and len(set(SPEC_TYPES)) == 10 and SPEC_TYPES[0] == "spec:implementer" and SPEC_TYPES[-1].startswith("ck-")
+    assert all(d.format(spec="demo", n=3) for d in OLD_DESCRIPTIONS) and not any("[ck:" in d for d in OLD_DESCRIPTIONS)
+
+
+def _report(repo, spec="demo", into="integrate/demo"):
+    out = subprocess.run([*CK, "worktree", "report", spec, "--into", into, "--json"], cwd=repo, capture_output=True, text=True)
+    assert out.returncode == 0, out.stdout + out.stderr
+    return json.loads(out.stdout)
+
+
+def test_spec_repo_with_landing_helpers_gives_the_expected_report(tmp_path):
+    import time
+    repo = spec_repo(tmp_path / "repo", tasks=5, deps={"3": ["2"], "4": ["3"]})
+    assert git(repo, "branch", "--list", "integrate/demo")
+    assert [e["task"] for e in _report(repo)["unstarted"]] == ["1", "2", "5"]
+    before = time.time() - 2
+    land(repo, "demo", "integrate/demo", 1)
+    fail(repo, "demo", 2)
+    mark_done(repo, "demo", "integrate/demo", 5)
+    data = _report(repo)
+    merged = {e["task"]: e for e in data["merged"]}
+    assert list(merged) == ["1"] and merged["1"]["subject"] == "Merge feat/demo-task-1 (task 1)" and merged["1"]["done"] is True
+    assert parse_iso(merged["1"]["mergedAt"]).timestamp() >= before
+    assert [e["task"] for e in data["done"]] == ["5"]
+    assert [e["task"] for e in data["failed"]] == ["2"]
+    assert sorted(e["task"] for e in data["blocked"]) == ["3", "4"] and data["unstarted"] == []
+    land(repo, "demo", "integrate/demo", 3, done=False)
+    assert "3" in {e["task"] for e in _report(repo)["merged"]}
+    assert git(repo, "branch", "--show-current") == "main"
+
+
+
+def test_logging_git_logs_argv_and_runs_the_real_git(tmp_path):
+    bin_dir, log = tmp_path / "bin", tmp_path / "git.log"
+    bin_dir.mkdir()
+    logging_git(bin_dir, log)
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    out = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=git_project(tmp_path), env=env, capture_output=True, text=True)
+    assert out.returncode == 0 and out.stdout.strip() == "true"
+    assert json.loads(log.read_text().splitlines()[-1]) == ["rev-parse", "--is-inside-work-tree"]
+
+
+def test_read_only_restores_the_mode(tmp_path):
+    d = tmp_path / "d"
+    d.mkdir()
+    d.chmod(0o755)
+    with read_only(d):
+        assert d.stat().st_mode & 0o777 == 0o500
+    assert d.stat().st_mode & 0o777 == 0o755
+    with pytest.raises(RuntimeError):
+        with read_only(d):
+            raise RuntimeError
+    assert d.stat().st_mode & 0o777 == 0o755
+
+
+def test_backdate_and_set_manifest_arithmetic(tmp_path):
+    from datetime import datetime, timezone
+    p = tmp_path / "m.json"
+    p.write_text(json.dumps({"startTime": "2026-01-01T00:00:00Z", "kind": "implement", "doneAtStart": []}))
+    backdate_manifest(p, 7)
+    d = json.loads(p.read_text())
+    age = (datetime.now(timezone.utc) - parse_iso(d["startTime"])).total_seconds()
+    assert d["startTime"].endswith("Z") and abs(age - 7 * 3600) < 5 and d["kind"] == "implement"
+    set_manifest(p, sessionId="s1", doneAtStart=None)
+    d = json.loads(p.read_text())
+    assert d["sessionId"] == "s1" and d["doneAtStart"] is None and d["kind"] == "implement"
+
+
+def test_backfill_home_writes_unmarked_spec_type_agents(tmp_path):
+    with fresh_env() as env:
+        home = backfill_home(env, 3, 5)
+        metas = [json.loads(p.read_text()) for p in sorted(home.projects.rglob("agent-*.meta.json"))]
+        assert len(metas) == 15 and len(home.sessions) == 3
+        assert all(m["agentType"] in SPEC_TYPES and not m["description"].startswith("[ck:") for m in metas)
+        assert len({m["description"] for m in metas}) > 4

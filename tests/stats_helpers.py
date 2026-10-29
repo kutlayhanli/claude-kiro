@@ -98,6 +98,47 @@ class AgentSpec:
     queued_at_ms: Optional[int] = None  # written as `queuedAt` when set
     omit_started: bool = False  # leave `startedAt` out of the run-file entry
     raw_progress: Optional[dict] = None  # merged over the generated `workflow_agent` entry (may set queuedAt to null, "x", ...)
+    extra_meta: Dict[str, Any] = field(default_factory=dict)  # merged last into the agent's meta.json (unknown keys)
+
+
+SPEC_TYPES: Tuple[str, ...] = (
+    "spec:implementer", "spec:test-writer", "spec:reviewer", "spec:fixer", "spec:resolver",
+    "ck-implementer", "ck-test-writer", "ck-reviewer", "ck-fixer", "ck-resolver",
+)
+
+# Free-form pre-marker descriptions; `{spec}` and `{n}` are slots.
+OLD_DESCRIPTIONS: Tuple[str, ...] = (
+    "implement {spec}: task {n}",
+    "fix {spec}: task {n} red",
+    "revise {spec} task {n}: x",
+    "review task {n} diff",
+)
+
+
+def marker(run_id: str) -> str:
+    return f"[ck:{run_id}]"
+
+
+def described(run_id: str, rest: str) -> str:
+    return f"[ck:{run_id}] {rest}"
+
+
+@dataclass
+class ToolAgentSpec:
+    """One Agent-tool subagent (no Workflow tool). `requests` has the `AgentSpec` tuple shape."""
+
+    description: Optional[str]  # None leaves the key out of the meta and the Agent tool_use input
+    agent_type: Optional[str] = "spec:implementer"  # None leaves the key out
+    model: str = "claude-sonnet-5-5"  # transcript model
+    meta_model: Optional[str] = None  # meta `model` when set
+    requests: Optional[List[Tuple[str, int, int, int, int]]] = None
+    duration_ms: int = 60_000
+    started_at_ms: Optional[int] = None
+    worktree_path: Optional[str] = None
+    worktree_branch: Optional[str] = None
+    extra_meta: Dict[str, Any] = field(default_factory=dict)
+    meta: bool = True
+    agent_id: Optional[str] = None
 
 
 @dataclass
@@ -330,6 +371,43 @@ class FakeRun:
         return self
 
 
+class FakeToolAgents:
+    """Written Agent-tool subagents: `projects/<slug>/<sid>/subagents/agent-<id>.{jsonl,meta.json}`."""
+
+    def __init__(self, session: "FakeSession", agent_ids: List[str]):
+        self.session = session
+        self.agent_ids = agent_ids
+
+    @property
+    def agents_dir(self) -> Path:
+        return self.session.dir / "subagents"
+
+    def _aid(self, agent: object) -> str:
+        return self.agent_ids[agent] if isinstance(agent, int) else str(agent)
+
+    def transcript(self, agent: object) -> Path:
+        return self.agents_dir / f"agent-{self._aid(agent)}.jsonl"
+
+    def meta_path(self, agent: object) -> Path:
+        return self.agents_dir / f"agent-{self._aid(agent)}.meta.json"
+
+    def drop_transcript(self, agent: object) -> None:
+        self.transcript(agent).unlink()
+
+    def truncate_transcript(self, agent: object) -> None:
+        """Cut the last line mid-JSON (the file ends without a newline)."""
+        p = self.transcript(agent)
+        lines = p.read_text().splitlines()
+        lines[-1] = lines[-1][: max(1, len(lines[-1]) // 2)]
+        p.write_text("\n".join(lines))
+
+    def drop_meta(self, agent: object) -> None:
+        self.meta_path(agent).unlink()
+
+    def corrupt_meta(self, agent: object) -> None:
+        self.meta_path(agent).write_text("{not json")
+
+
 class FakeSession:
     """One Claude Code session: the orchestrator transcript plus the workflow runs it launched."""
 
@@ -427,11 +505,11 @@ class FakeSession:
         self.runs.append(run)
         return run
 
-    def _write_agent(self, run_id: str, aid: str, spec: AgentSpec, started_ms: int, requests: Sequence[Tuple[str, int, int, int, int]]) -> None:
-        d = self.dir / "subagents" / "workflows" / run_id
+    def _agent_lines(self, prompt: str, model: str, started_ms: int, duration_ms: int, split_blocks: bool,
+                     requests: Sequence[Tuple[str, int, int, int, int]]) -> List[dict]:
         base = self._base
-        lines: List[dict] = [base({"type": "user", "timestamp": iso_ms(started_ms), "message": {"role": "user", "content": spec.prompt_preview}})]
-        per_request = 2 if spec.split_blocks else 1
+        lines: List[dict] = [base({"type": "user", "timestamp": iso_ms(started_ms), "message": {"role": "user", "content": prompt}})]
+        per_request = 2 if split_blocks else 1
         total = max(1, len(requests) * per_request)
         k = 0
         for rid, inp, out, cread, cwrite in requests:
@@ -439,12 +517,62 @@ class FakeSession:
             blocks: List[List[dict]] = [[{"type": "text", "text": "working"}], [{"type": "tool_use", "id": f"toolu_{_hex(rid, 'b')}", "name": "Bash", "input": {}}]]
             for content in blocks[:per_request]:
                 k += 1
-                ts = started_ms + round(spec.duration_ms * k / total)
+                ts = started_ms + round(duration_ms * k / total)
                 lines.append(base({"type": "assistant", "requestId": rid, "timestamp": iso_ms(ts),
-                                   "message": {"id": f"msg_{_hex(rid)}", "role": "assistant", "model": spec.model, "usage": usage, "content": content}}))
-        _write_jsonl(d / f"agent-{aid}.jsonl", lines)
+                                   "message": {"id": f"msg_{_hex(rid)}", "role": "assistant", "model": model, "usage": usage, "content": content}}))
+        return lines
+
+    def _write_agent(self, run_id: str, aid: str, spec: AgentSpec, started_ms: int, requests: Sequence[Tuple[str, int, int, int, int]]) -> None:
+        d = self.dir / "subagents" / "workflows" / run_id
+        _write_jsonl(d / f"agent-{aid}.jsonl", self._agent_lines(spec.prompt_preview, spec.model, started_ms, spec.duration_ms, spec.split_blocks, requests))
         if spec.meta:
-            (d / f"agent-{aid}.meta.json").write_text(json.dumps({"description": spec.label, "workflowPhase": spec.phase, "model": spec.model}))
+            (d / f"agent-{aid}.meta.json").write_text(
+                json.dumps({"description": spec.label, "workflowPhase": spec.phase, "model": spec.model, **spec.extra_meta}))
+
+    def tool_agents(self, specs: Sequence[ToolAgentSpec], *, start: str = "2026-10-12T09:00:00Z") -> FakeToolAgents:
+        """Write Agent-tool subagents (transcripts + metas) and the orchestrator's `Agent` tool_use lines."""
+        start_ms = to_ms(start)
+        d = self.dir / "subagents"
+        agent_ids: List[str] = []
+        orchestrator: List[dict] = []
+        n0 = len(self.home.tool_counter)
+        self.home.tool_counter.append(1)
+        for idx, spec in enumerate(specs):
+            aid = spec.agent_id or "a" + _hex(self.session_id, n0, idx, "tool")
+            agent_ids.append(aid)
+            started = spec.started_at_ms if spec.started_at_ms is not None else start_ms + idx * 1_000
+            requests = spec.requests if spec.requests is not None else [(f"req_{aid}_1", 1_000, 500, 2_000, 100)]
+            _write_jsonl(d / f"agent-{aid}.jsonl", self._agent_lines("Implement the task.", spec.model, started, spec.duration_ms, True, requests))
+            tool_id = "toolu_" + _hex(self.session_id, aid, "agent")
+            if spec.meta:
+                meta: Dict[str, Any] = {
+                    "toolUseId": tool_id, "spawnDepth": 1,
+                    "requestShape": "tool", "requestNonInteractive": False, "isBuiltIn": False,
+                }
+                if spec.agent_type is not None:
+                    meta["agentType"] = spec.agent_type
+                if spec.description is not None:
+                    meta["description"] = spec.description
+                if spec.meta_model is not None:
+                    meta["model"] = spec.meta_model
+                if spec.worktree_path is not None:
+                    meta["worktreePath"] = spec.worktree_path
+                if spec.worktree_branch is not None:
+                    meta["worktreeBranch"] = spec.worktree_branch
+                meta.update(spec.extra_meta)
+                (d / f"agent-{aid}.meta.json").write_text(json.dumps(meta))
+            tool_input: Dict[str, Any] = {"prompt": "Implement the task."}
+            if spec.description is not None:
+                tool_input["description"] = spec.description
+            if spec.agent_type is not None:
+                tool_input["subagent_type"] = spec.agent_type
+            orchestrator.append(self._base({
+                "type": "assistant", "timestamp": iso_ms(started - 2_000), "requestId": "req_" + _hex(aid, "agent"),
+                "message": {"id": "msg_" + _hex(aid, "agent"), "role": "assistant", "model": "claude-sonnet-5-5",
+                            "content": [{"type": "tool_use", "id": tool_id, "name": "Agent",
+                                         "input": tool_input}]}}))
+        self.append(orchestrator)
+        return FakeToolAgents(self, agent_ids)
 
     def implement_run(self, run_id: Optional[str] = None, *, name: str = "spec-implement", status: str = "completed",
                       start: str = "2026-10-12T09:00:00Z", duration_ms: int = 720_000, args: Optional[dict] = None,
@@ -499,6 +627,7 @@ class FakeClaudeHome:
         self.projects = self.root / "projects"
         self.projects.mkdir(parents=True, exist_ok=True)
         self.run_counter: List[int] = []
+        self.tool_counter: List[int] = []
         self.sessions: List[FakeSession] = []
 
     def session(self, slug: str = "-work-acme", session_id: Optional[str] = None, *, cwd: Optional[Path] = None,
@@ -1039,3 +1168,131 @@ def seeded_local_record(kind: str) -> dict:
             "phases": {pick(2): 1.7, pick(3): 3.3},
         })
     return rec
+
+
+# --------------------------------------------------------------------------- agent-mode helpers
+
+
+def begin(env: Dict[str, str], cwd: Path, kind: str = "implement", spec: str = "demo", into: Optional[str] = None) -> Tuple[str, Path]:
+    """`ck stats begin --kind <kind> --spec <spec> [--into <into>] --json` in `cwd` -> (run_id, manifest_path)."""
+    args = ["begin", "--kind", kind, "--spec", spec, *(["--into", into] if into else []), "--json"]
+    out = stats(*args, env=env, cwd=cwd)
+    assert out.exit_code == 0, out.output
+    data = json.loads(out.stdout)
+    return data["run_id"], Path(data["manifest"])
+
+
+def backdate_manifest(path: Path, hours: float) -> None:
+    """Rewrite the manifest's `startTime` (its only clock field) to now minus `hours`."""
+    set_manifest(path, startTime=iso(datetime.now(timezone.utc) - timedelta(hours=hours)))
+
+
+def set_manifest(path: Path, **keys: Any) -> None:
+    path = Path(path)
+    d = json.loads(path.read_text())
+    d.update(keys)
+    path.write_text(json.dumps(d))
+
+
+def _tasks_md(spec: str, tasks: int, deps: Optional[Dict[str, List[str]]]) -> str:
+    out = [f"# Implementation Tasks: {spec}", ""]
+    for n in range(1, tasks + 1):
+        out += [f"### Task {n}: step {n}", "**Status:** Not Started", f"**Verify:** `test -f t{n}.txt`"]
+        if deps and deps.get(str(n)):
+            out.append("**Dependencies:** " + ", ".join(f"Task {d}" for d in deps[str(n)]))
+        out.append("")
+    return "\n".join(out)
+
+
+def spec_repo(root: Path, spec: str = "demo", into: str = "integrate/demo", tasks: int = 4,
+              deps: Optional[Dict[str, List[str]]] = None) -> Path:
+    """A real, unlanded repo: `specs/<spec>/tasks.md` committed on `main`, plus branch `into` (checked out: main)."""
+    repo = Path(root)
+    repo.mkdir(parents=True, exist_ok=True)
+    git(repo, "init", "-q", "-b", "main")
+    (repo / ".gitignore").write_text(".ck/worktrees/\n")
+    (repo / "specs" / spec).mkdir(parents=True)
+    (repo / "specs" / spec / "tasks.md").write_text(_tasks_md(spec, tasks, deps))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "base")
+    git(repo, "branch", into)
+    return repo
+
+
+def _set_done(repo: Path, spec: str, task: int | str) -> None:
+    f = Path(repo) / "specs" / spec / "tasks.md"
+    text = f.read_text()
+    start = text.index(f"### Task {task}:")
+    at = text.index("**Status:** Not Started", start)
+    f.write_text(text[:at] + "**Status:** Done" + text[at + len("**Status:** Not Started"):])
+
+
+def land(repo: Path, spec: str, into: str, task: int | str, done: bool = True) -> None:
+    """Branch `feat/<spec>-task-N` with one commit, merged into `into` with `--no-ff`; marks the task Done unless `done=False`."""
+    repo = Path(repo)
+    branch = f"feat/{spec}-task-{task}"
+    git(repo, "checkout", "-q", "-b", branch, into)
+    (repo / f"t{task}.txt").write_text(f"{task}\n")
+    if done:
+        _set_done(repo, spec, task)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", f"task {task}")
+    git(repo, "checkout", "-q", into)
+    git(repo, "merge", "-q", "--no-ff", "-m", f"Merge {branch} (task {task})", branch)
+    git(repo, "checkout", "-q", "main")
+
+
+def fail(repo: Path, spec: str, task: int | str, into: str = "integrate/demo") -> None:
+    """A task branch holding a commit that never landed."""
+    repo = Path(repo)
+    git(repo, "checkout", "-q", "-b", f"feat/{spec}-task-{task}", into)
+    (repo / f"t{task}.txt").write_text("attempt\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", f"task {task} attempt")
+    git(repo, "checkout", "-q", "main")
+
+
+def mark_done(repo: Path, spec: str, into: str, task: int | str) -> None:
+    """Mark a task Done on `into` without a merge (the report's `done` list)."""
+    repo = Path(repo)
+    git(repo, "checkout", "-q", into)
+    _set_done(repo, spec, task)
+    git(repo, "commit", "-qam", f"task {task} done")
+    git(repo, "checkout", "-q", "main")
+
+
+def logging_git(bin_dir: Path, log: Path) -> Path:
+    """A `git` on PATH that appends its argv as one JSON line to `log`, then execs the real git."""
+    real = shutil.which("git")
+    assert real, "git not found"
+    body = (f"import json, os, sys\nwith open({str(log)!r}, 'a') as fh:\n    fh.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+            f"os.execv({real!r}, [{real!r}] + sys.argv[1:])\n")
+    return _script(Path(bin_dir) / "git", body)
+
+
+@contextlib.contextmanager
+def read_only(path: Path) -> Iterator[Path]:
+    """chmod 0o500 on a directory, restored on exit (callers skip as root)."""
+    path = Path(path)
+    old = path.stat().st_mode & 0o7777
+    path.chmod(0o500)
+    try:
+        yield path
+    finally:
+        path.chmod(old)
+
+
+def backfill_home(env: Dict[str, str], sessions: int, per_session: int) -> FakeClaudeHome:
+    """`sessions` sessions of `per_session` unmarked spec-type agents with old free-form descriptions."""
+    root = Path(getattr(env, "claude", None) or env["CLAUDE_CONFIG_DIR"])
+    home = FakeClaudeHome(root)
+    base = to_ms("2026-09-01T09:00:00Z")
+    for s_i in range(sessions):
+        session = home.session(slug="-work-demo", cwd=root.parent / "project")
+        specs = []
+        for a_i in range(per_session):
+            k = s_i * per_session + a_i
+            specs.append(ToolAgentSpec(OLD_DESCRIPTIONS[k % len(OLD_DESCRIPTIONS)].format(spec="demo", n=a_i % 4 + 1),
+                                       agent_type=SPEC_TYPES[k % len(SPEC_TYPES)]))
+        session.tool_agents(specs, start=iso_ms(base + s_i * 3_600_000))
+    return home
