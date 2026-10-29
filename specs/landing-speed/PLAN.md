@@ -1,7 +1,7 @@
 # Plan: Landing Speed
 
 **Created:** 2026-10-29
-**Status:** Pending Decision
+**Status:** Decisions Made
 
 ## Problem Statement
 
@@ -148,8 +148,8 @@ Split of the 7.1 min median wait per task (local record + Claude Code run file o
 ## Open Questions
 
 - [ ] Is the observed 14-agent peak a fixed Workflow runtime cap? (Determines whether B's reserve or a lower `maxConcurrent` default matters more.)
-- [ ] Should A-C be measured with one `ck bench` A/B, or with the next few real runs via `ck stats` (D)?
-- [ ] Do we want C at all, given it can let the target go red between full gates?
+- [x] Measured with the next real runs via `ck stats` (D); `ck bench` only if results are unclear (D5).
+- [x] C is out of scope for v1 (D1).
 
 ## Recommended Direction
 
@@ -170,6 +170,8 @@ Split of the 7.1 min median wait per task (local record + Claude Code run file o
 
 | # | Decision | Choice | Rationale | Date |
 |---|----------|--------|-----------|------|
-| | | | | |
-
-_Populated after discussion with user._
+| 1 | Scope for v1 | A + B + D: script-side readiness with fewer plan agents, finish-first scheduling, queue-wait metrics in `ck stats`; C (tiered landing gate) deferred | Targets the measured bottleneck (review slot wait) and the plan-agent cost with no safety trade-off; C can let the target go red between full gates | 2026-10-29 |
+| 2 | Finish-first rule (B) | Adaptive: never start a new task while a review, revise or land agent is queued; configurable off | Needs no knowledge of the undocumented runtime agent cap | 2026-10-29 |
+| 3 | When the plan agent still runs (A) | At start, after each landing, and when nothing is ready but tasks remain | Landings are frequent, so tasks.md edits and Done status are seen within minutes | 2026-10-29 |
+| 4 | Worktree creation (A) | The task agent creates and claims its own worktree as its first step | Removes another mechanical agent per task; the task agent already claims it | 2026-10-29 |
+| 5 | How to measure | Next real runs via `ck stats` with the new queue metrics; `ck bench` only if results are unclear | Real runs are free to collect; D makes the before/after visible | 2026-10-29 (default, not contested) |
