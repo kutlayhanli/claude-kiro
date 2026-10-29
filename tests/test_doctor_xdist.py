@@ -98,13 +98,39 @@ def test_doctor_warns_about_xdist_for_serial_pytest_verify(inited):
     assert xdist_bullets(issues) == []
 
 
+CHECK_RE = re.compile(r"PYTHONHASHSEED=1 .*?diff /tmp/ids1 /tmp/ids2")
+
+
 def _check_command(hint):
+    """The one-line check command in a hint: a backticked span, or the text from the first
+    PYTHONHASHSEED= up to the end of `diff /tmp/ids1 /tmp/ids2` (prose after it is dropped)."""
     ticks = re.findall(r"`([^`]+)`", hint)
     if ticks:
         cmds = [t for t in ticks if "PYTHONHASHSEED" in t]
         assert len(cmds) == 1, hint
         return cmds[0]
-    return hint.split("One-line check:", 1)[1].strip()
+    m = CHECK_RE.search(hint.split("One-line check:", 1)[1])
+    assert m, hint
+    return m.group(0)
+
+
+DESIGN = Path(__file__).resolve().parents[1] / "specs" / "landing-speed" / "design.md"
+
+
+def _design_hint(cmd):
+    """The design's exact hint text block, with `<cmd>` filled in as doctor will."""
+    text = DESIGN.read_text()
+    block = re.search(r"Hint text \(both commands\):\n\n```\n(.*?)\n```", text, re.S)
+    assert block, "design.md hint text block not found"
+    return block.group(1).replace("<cmd>", cmd)
+
+
+def test_check_command_extraction_is_a_runnable_command_only():
+    for hint in (_design_hint(PYTEST_CMD),
+                 _design_hint(PYTEST_CMD) + " (a trailing note: with <cmd> and colons)"):
+        cmd = _check_command(hint)
+        assert "(" not in cmd and "<cmd>" not in cmd, cmd
+        assert cmd.startswith("PYTHONHASHSEED=1 ") and cmd.endswith("diff /tmp/ids1 /tmp/ids2"), cmd
 
 
 # TC-50 (7.2)
@@ -116,6 +142,7 @@ def test_hint_names_the_pitfall_and_its_check_command_discriminates(inited, stab
     assert "different tests were collected" in hint.lower()
     cmd = _check_command(hint)
     assert cmd.count("PYTHONHASHSEED") == 2 and "--collect-only" in cmd
+    assert "(" not in cmd and "<cmd>" not in cmd, cmd
     cmd = cmd.replace("/tmp/", str(tmp_path) + "/")  # /tmp may be read-only in a sandbox
 
     ok = subprocess.run(["sh", "-c", cmd], cwd=stable_suite, capture_output=True, text=True, timeout=300)
@@ -125,16 +152,10 @@ def test_hint_names_the_pitfall_and_its_check_command_discriminates(inited, stab
     assert "test_pid.py::test_a[" in bad.stdout, bad.stdout + bad.stderr
 
 
-# TC-50 (7.2): the design's own check command, hand-written, proves the stable-suite assertion is satisfiable
-# (pytest's trailing "N tests collected in 0.xxs" line must not reach the diff).
-HAND_WRITTEN_CHECK = (
-    "PYTHONHASHSEED=1 {cmd} --collect-only -q | grep :: > ids1 && "
-    "PYTHONHASHSEED=2 {cmd} --collect-only -q | grep :: > ids2 && diff ids1 ids2"
-)
-
-
-def test_design_check_command_passes_stable_and_fails_pid_suite(stable_suite, pid_suite):
-    cmd = HAND_WRITTEN_CHECK.format(cmd=PYTEST_CMD)
+# Fixture sanity check (not TC-50 itself): the check command in design.md's hint text, run as written,
+# passes the stable suite and fails the pid suite, so TC-50's assertions are satisfiable by a faithful hint.
+def test_design_check_command_passes_stable_and_fails_pid_suite(stable_suite, pid_suite, tmp_path):
+    cmd = _check_command(_design_hint(PYTEST_CMD)).replace("/tmp/", str(tmp_path) + "/")
     ok = subprocess.run(["sh", "-c", cmd], cwd=stable_suite, capture_output=True, text=True, timeout=300)
     assert ok.returncode == 0, ok.stdout + ok.stderr
     bad = subprocess.run(["sh", "-c", cmd], cwd=pid_suite, capture_output=True, text=True, timeout=300)
@@ -202,17 +223,14 @@ def test_doctor_hint_iff_seam_suggests(inited, verify):
 
 
 # P-20 (7.5): exit status is the same with and without the hint, in each project state.
-# "no-verify" contrasts a missing verify key with the hint's verify in a project without specs/ck.json
-# (nothing to flag for a missing config; the hint must not change the exit status either way).
+# The row's states: healthy, missing .claude/, and a specs/ck.json with no verify key. Each state is
+# crossed with the hint verify and an `-n auto` verify; with no verify key there is nothing to hint about.
 def _no_claude(p):
     shutil.rmtree(p / ".claude")
 
 
-def _no_config(p):
-    (p / "specs" / "ck.json").unlink()
-
-
-STATES = {"healthy": None, "no-claude": _no_claude, "no-verify": _no_config}
+STATES = {"healthy": None, "no-claude": _no_claude}
+VERIFIES = {"hint": HINT_VERIFY, "no-hint": ["uv run pytest -q -n auto"], "no-verify": None}
 
 
 @pytest.mark.parametrize("state", sorted(STATES))
@@ -220,18 +238,21 @@ def test_p20_doctor_exit_status_ignores_the_hint(inited, state):
     if STATES[state]:
         STATES[state](inited)
     codes = {}
-    for name, verify in (("hint", HINT_VERIFY), ("no-hint", ["uv run pytest -q -n auto"])):
-        if state == "no-verify":
-            (inited / "specs").mkdir(exist_ok=True)
-            cfg = inited / "specs" / "ck.json"
-            cfg.write_text(json.dumps({"verify": verify}) + "\n") if name == "hint" else cfg.unlink(missing_ok=True)
-        else:
-            set_verify(inited, verify)
+    for name, verify in VERIFIES.items():
+        set_verify(inited, verify)
         code, warnings, _ = doctor(inited)
-        if state != "no-verify":
-            assert bool(xdist_bullets(warnings)) == (name == "hint")
+        assert bool(xdist_bullets(warnings)) == (name == "hint"), (name, warnings)
         codes[name] = code
-    assert codes["hint"] == codes["no-hint"]
+    assert codes["hint"] == codes["no-hint"] == codes["no-verify"], codes
+
+
+def test_p20_no_config_has_no_hint_and_same_exit_status_as_the_hint(inited):
+    set_verify(inited, HINT_VERIFY)
+    with_hint = doctor(inited)
+    (inited / "specs" / "ck.json").unlink()
+    no_config = doctor(inited)
+    assert xdist_bullets(no_config[1]) == []
+    assert with_hint[0] == no_config[0]
 
 
 PROPERTIES = {"P-20": "test_p20_doctor_exit_status_ignores_the_hint"}

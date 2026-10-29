@@ -168,10 +168,10 @@ def suggestion(verify: Sequence[str]) -> Optional[str]:
 Hint text (both commands):
 
 ```
-pytest runs serially in "verify": pytest-xdist can run it in parallel (add pytest-xdist as a dev dependency and "-n auto" to the command). Check first that test ids are stable: unstable ids make xdist fail with "Different tests were collected between gw0 and gw1". One-line check: PYTHONHASHSEED=1 <cmd> --collect-only -q | grep :: > /tmp/ids1 && PYTHONHASHSEED=2 <cmd> --collect-only -q | grep :: > /tmp/ids2 && diff /tmp/ids1 /tmp/ids2 (<cmd> must not already contain -q: two -q make pytest print per-file counts instead of ids)
+pytest runs serially in "verify": pytest-xdist can run it in parallel (add pytest-xdist as a dev dependency and "-n auto" to the command). Check first that test ids are stable: unstable ids make xdist fail with "Different tests were collected between gw0 and gw1". One-line check: PYTHONHASHSEED=1 <cmd> --collect-only -q | grep :: > /tmp/ids1 && PYTHONHASHSEED=2 <cmd> --collect-only -q | grep :: > /tmp/ids2 && diff /tmp/ids1 /tmp/ids2
 ```
 
-Here `<cmd>` is the pytest prefix of the first pytest command without `-n` (as in `config.collect_command`).
+Here `<cmd>` is the pytest prefix of the first pytest command without `-n` (as in `config.collect_command`). That prefix ends at `pytest` and drops the command's trailing flags, so `<cmd>` never carries its own `-q` (two `-q` would make `--collect-only` print per-file counts instead of ids). The `grep ::` keeps only the test-id lines, so pytest's trailing "N tests collected in 0.xxs" line does not reach the diff.
 
 ### `ck stats show` (requirements 4.3-4.6)
 
