@@ -1877,7 +1877,7 @@ run's report; the vendored renderings from `plugin.vendor_files()` (`.claude/com
 ---
 
 ### Task 51: Add the end-of-run collect step to the implement, create and review skills
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 3.2, 3.3, 3.4
 **Description:** In `plugin/skills/implement/SKILL.md` step 9 (:79-89) add a final bullet after the spend bullet: "run
@@ -1899,9 +1899,9 @@ before the open questions (`/spec:review` runs spec-create in review mode). Use 
 **Verified by:** Task 50
 
 **Acceptance:**
-- [ ] All three skills run `ck stats collect --run <id> --auto` outside the sandbox as the last reporting step and quote its line
-- [ ] All three skills say the collect result never changes the run's report or outcome
-- [ ] Vendored copies match the plugin source
+- [x] All three skills run `ck stats collect --run <id> --auto` outside the sandbox as the last reporting step and quote its line
+- [x] All three skills say the collect result never changes the run's report or outcome
+- [x] Vendored copies match the plugin source
 
 **Dependencies:** Task 24 (the skills invoke `ck stats collect --auto`, which Task 24 creates), Task 50 (its tests are the oracle)
 **Complexity:** Low
