@@ -315,6 +315,7 @@ def test_317_unmarked_and_foreign_marked_general_purpose_agents_are_in_no_record
     with fresh_env() as env:
         repo, session, run_id, manifest, envp, log = _setup(env, kind)
         first = _collect_prior(envp, repo, session, run_id)  # one legit record, so we can feed its output back
+        prior_missing = load_record(env.xdg, run_id).get("missing", [])
         extras = {"path": first["path"], "json": json.dumps(first), "manifest": str(manifest)}
         ids = _write_adversarial(session, run_id, GHOST, extras)
         # a marker only in the first user message of an otherwise unmarked agent
@@ -324,10 +325,8 @@ def test_317_unmarked_and_foreign_marked_general_purpose_agents_are_in_no_record
 
         out = _collect(envp, run_id, repo)
         assert out.exit_code == 0, out.output
-        assert json.loads(out.stdout)["result"] in ("unchanged", "updated"), f"3.17: unexpected result: {out.output}"
         rec = load_record(env.xdg, run_id)
-        # 3.15 may record unreadable metas as gaps; nothing else may change
-        assert all(m.get("what") == "meta" and m.get("agentId") is None for m in rec.get("missing", [])), rec.get("missing")
+        _assert_only_meta_gaps_added(out, rec, prior_missing)
         assert _agent_ids(rec) == [LEGIT], f"3.17: foreign agents in the record: {_agent_ids(rec)}"
         if kind == "create":
             assert _report_calls(log) == []
@@ -341,6 +340,22 @@ def test_317_unmarked_and_foreign_marked_general_purpose_agents_are_in_no_record
         assert every.exit_code == 0, every.output
         assert _runs(env) == [f"{run_id}.json"], "3.17: `collect --all` wrote a record for a foreign agent"
         assert _agent_ids(load_record(env.xdg, run_id)) == [LEGIT]
+
+
+def _assert_only_meta_gaps_added(out, rec: dict, prior_missing: list) -> None:
+    """3.17 with 3.15: a recollect over adversarial agents may only add `{agentId: None, what: "meta"}` gaps
+    to the `missing` entries the first collect wrote; with nothing added the result is `unchanged`."""
+    result = json.loads(out.stdout)["result"]
+    missing = rec.get("missing", [])
+    remaining = list(missing)
+    for entry in prior_missing:
+        assert entry in remaining, f"3.17: a gap of the first collect was dropped: {entry} not in {missing}"
+        remaining.remove(entry)
+    assert all(m == {"agentId": None, "what": "meta"} for m in remaining), f"3.17: an adversarial agent added a gap: {remaining}"
+    if remaining:
+        assert result == "updated", f"3.17: new meta gaps but result {result}: {out.output}"
+    else:
+        assert result == "unchanged", f"3.17: an adversarial agent changed the record: {out.output}"
 
 
 def _collect_prior(envp, repo: Path, session, run_id: str) -> dict:
@@ -387,10 +402,13 @@ def test_317_other_agent_types_with_foreign_markers_are_not_included_either(agen
     with fresh_env() as env:
         repo, session, run_id, manifest, envp, log = _setup(env, "create")
         _collect_prior(envp, repo, session, run_id)
+        prior_missing = load_record(env.xdg, run_id).get("missing", [])
         _write_adversarial(session, run_id, GHOST, {"path": "p", "json": "{}", "manifest": str(manifest)}, agent_type=agent_type)
         out = _collect(envp, run_id, repo)
-        assert out.exit_code == 0 and json.loads(out.stdout)["result"] == "unchanged", out.output
-        assert _agent_ids(load_record(env.xdg, run_id)) == [LEGIT]
+        assert out.exit_code == 0, out.output
+        rec = load_record(env.xdg, run_id)
+        _assert_only_meta_gaps_added(out, rec, prior_missing)
+        assert _agent_ids(rec) == [LEGIT]
 
 
 def test_317_two_runs_with_manifests_never_share_agents():
