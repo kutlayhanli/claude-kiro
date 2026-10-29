@@ -1,0 +1,49 @@
+{
+  "schema": "ck-run-analytics/1",
+  "id": "0a1b2c3d4e5f6789",
+  "ck_version": "0.10.1",
+  "claude_code_version": "2.1.80",
+  "workflow": "spec-implement",
+  "variant": "default",
+  "outcome": "complete",
+  "month": "2026-08",
+  "machine": "testbox",
+  "stack": "python",
+  "config": {
+    "implementer": {"model": "sonnet", "effort": "medium"},
+    "reviewer": {"model": "opus", "effort": "high"}
+  },
+  "counts": {"agents": 2, "tasks": 1},
+  "agents_by_role": {"implementer": 1, "reviewer": 1},
+  "verdicts": {"approve": 1},
+  "durations": {
+    "wall_minutes": 12.5,
+    "task_span_minutes": 9.0,
+    "phases": [{"phase": "wave", "wave": 1, "minutes": 9.0}],
+    "by_role": {"implementer": 6.5, "reviewer": 2.0}
+  },
+  "tasks": [
+    {"index": 1, "track": "impl", "ok": true, "attempts": 1, "review_rounds": 1, "verdict": "approve", "resolves": 0,
+     "landing_fixes": 0, "escalations": 0, "risk": "normal", "agent_minutes": 8.5, "to_merged_minutes": 9.0, "idle_minutes": 0.5}
+  ],
+  "tokens": {
+    "by_model": {
+      "sonnet": {"input": 1000, "output": 500, "cacheRead": 2000, "cacheCreation": 100},
+      "opus": {"input": 400, "output": 200, "cacheRead": 800, "cacheCreation": 50}
+    },
+    "by_role": {
+      "implementer": {"input": 1000, "output": 500, "cacheRead": 2000, "cacheCreation": 100},
+      "reviewer": {"input": 400, "output": 200, "cacheRead": 800, "cacheCreation": 50}
+    }
+  },
+  "cost": {
+    "usd": 1.25,
+    "source": "priced_from_transcripts",
+    "pricing_date": "2026-08",
+    "estimated": false,
+    "by_model": {"sonnet": 0.75, "opus": 0.5},
+    "by_role": {"implementer": 0.75, "reviewer": 0.5}
+  },
+  "issues": [],
+  "missing": []
+}

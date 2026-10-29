@@ -116,7 +116,7 @@ Add self-checks to `tests/test_stats_helpers.py` that exercise only the harness 
 ---
 
 ### Task 4: Test the shareable `source` / `agent_transcripts` schema and leak vocabulary
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 9.4
 **Properties:** P-13, P-14
@@ -127,12 +127,12 @@ Add self-checks to `tests/test_stats_helpers.py` that exercise only the harness 
 **Verify:** `uv run pytest -q -n auto tests/test_stats_agents_schema.py` `uv run pytest -q -n auto tests/test_stats_export.py tests/test_stats_leak.py tests/test_stats_submit.py`
 **Verifies:** Task 5 (owns `SOURCES`, `source_of`, `COST_SOURCES`, the validator tree and `VOCABULARY`)
 **Acceptance:**
-- [ ] Seam tests call `build_shareable`, `validate_shareable` and `leak.VOCABULARY` directly; the TC-51 export runs the real `ck stats export` against a real git kiro checkout and a fake `gh`
-- [ ] Leak assertions scan raw JSON bytes, not parsed fields only
-- [ ] The 0.10.1 fixture is checked to validate today (before the feature) so later failures point at a regression, not at the fixture
-- [ ] `PROPERTIES` lists P-13 and P-14, each pointing at an existing test name
-- [ ] Before the implementation exists the new-schema tests fail for the right reason (no `source` in shareable output, `agent_transcripts` rejected, `SOURCES` missing), not broken fixtures
-- [ ] No mocks of the project's own code; existing export/leak/submit tests are not edited
+- [x] Seam tests call `build_shareable`, `validate_shareable` and `leak.VOCABULARY` directly; the TC-51 export runs the real `ck stats export` against a real git kiro checkout and a fake `gh`
+- [x] Leak assertions scan raw JSON bytes, not parsed fields only
+- [x] The 0.10.1 fixture is checked to validate today (before the feature) so later failures point at a regression, not at the fixture
+- [x] `PROPERTIES` lists P-13 and P-14, each pointing at an existing test name
+- [x] Before the implementation exists the new-schema tests fail for the right reason (no `source` in shareable output, `agent_transcripts` rejected, `SOURCES` missing), not broken fixtures
+- [x] No mocks of the project's own code; existing export/leak/submit tests are not edited
 **Dependencies:** Task 1 (uses `CONFIDENTIAL`, `seeded_local_record`, `kiro_checkout`, `fake_gh`)
 **Complexity:** Medium
 **Risk:** safety (oracle for what leaves the machine in shared records; a missed leak is irreversible once exported)
