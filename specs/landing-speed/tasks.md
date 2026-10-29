@@ -237,10 +237,17 @@ Separately, in `tests/test_worktree_create_lock.py` (no script involved, so Task
 **Verifies:** Task 9, Task 12
 
 **Acceptance:**
-- [ ] Commands come from the prompt the real script produced, and run through the real `ck` CLI on real git; no string-only assertions stand in for execution
-- [ ] Before implementation the prompt tests fail because the task prompt has no create/claim lines, and TC-64 fails because a failed `git worktree add` prints no JSON ERROR entry, not from fixture errors; the concurrent case is red-before only if the collision was reproduced (its docstring says which)
-- [ ] TC-19 shows the BUSY worktree's contents are left untouched
-- [ ] No mocks of `claude_kiro`, git or the filesystem
+- [x] Commands come from the prompt the real script produced, and run through the real `ck` CLI on real git; no string-only assertions stand in for execution
+- [x] Before implementation the prompt tests fail because the task prompt has no create/claim lines, and TC-64 fails because a failed `git worktree add` prints no JSON ERROR entry, not from fixture errors; the concurrent case is red-before only if the collision was reproduced (its docstring says which)
+- [x] TC-19 shows the BUSY worktree's contents are left untouched
+- [x] No mocks of `claude_kiro`, git or the filesystem
+
+**Implementation notes (Task 8):**
+- Concurrent creates: 12 threads x 5 rounds (60 `ck worktree create --install --base main --json` subprocesses on one repo) did not reproduce a git lock-file collision without `create_lock`, so `test_concurrent_creates_all_succeed_and_installs_overlap` is a regression guard and passes before Task 9 (its docstring says so).
+- The prompt tests extract the create line with `ck -C \S+ worktree create demo 1 ... --json` and the first `ck -C \S+ worktree claim demo 1` after it; they also assert the create runs from `root` with `--install --base integrate/demo` and the claim targets `<worktreeDir>/demo-task-1` (test-plan Harness Contract 5). TC-19(a) also asserts the prompt pairs BUSY with an instruction to stop.
+- The install step in the fixture writes `.venv/installed-by-ck` (ignored), so a rerun still sees a clean worktree.
+- Extra case beyond the TC rows: `test_tc64_other_tasks_in_the_same_call_keep_their_own_outcome` (design: other tasks in the same call still get their own outcome).
+- Verified the command-running paths once against a synthetic design-shaped prompt (scratch test, not committed): all four prompt tests pass, so before Task 12 they fail only on the missing prompt lines.
 
 **Dependencies:** Task 1 (bridge)
 **Complexity:** Medium
