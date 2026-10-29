@@ -1,6 +1,7 @@
 """Fixtures: a real git project with a spec, a committed test suite, and a feature branch."""
 
 import json
+import os
 import subprocess
 import uuid
 from pathlib import Path
@@ -14,6 +15,73 @@ CALC = "def add(a, b):\n    return a + b\n"
 def _isolated_preferences(tmp_path_factory, monkeypatch):
     """Never read the developer's real ~/.config/claude-kiro (ck init/upgrade resolve agent settings)."""
     monkeypatch.setenv("CK_CONFIG_HOME", str(tmp_path_factory.mktemp("ck-prefs")))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_data_home(tmp_path_factory, monkeypatch):
+    """`ck run` auto-collects run analytics: never let a test touch the developer's real ~/.local/share."""
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path_factory.mktemp("xdg-parent") / "xdg-data"))
+    monkeypatch.delenv("CK_DATA_HOME", raising=False)
+    monkeypatch.delenv("CK_RUN_SANDBOXED", raising=False)
+    monkeypatch.delenv("CK_STATS_DRAFTER", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_claude_home(tmp_path_factory, monkeypatch):
+    """Default to an empty Claude home; a test that needs one sets CLAUDE_CONFIG_DIR itself afterwards."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path_factory.mktemp("claude-parent") / "empty-claude-home"))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_git_identity(tmp_path_factory, monkeypatch):
+    """Never read the developer's git config; give every test a fixed identity."""
+    cfg = tmp_path_factory.mktemp("git-parent") / "gitconfig"
+    cfg.write_text("[user]\n\tname = Test User\n\temail = test@example.com\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(cfg))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+
+NETGUARD_DIR = Path(__file__).parent / "netguard"
+
+
+@pytest.fixture
+def no_network(tmp_path_factory, monkeypatch):
+    """Block the network in this process and (through tests/netguard/sitecustomize.py) in every Python child.
+
+    The in-process guard raises AssertionError("network"); the child guard appends a line to $CK_TEST_NET_LOG.
+    Unix sockets stay allowed. Non-Python children (git, gh) get a dead proxy and file-only git protocols.
+    """
+    import socket
+
+    real_connect, real_connect_ex, real_create = socket.socket.connect, socket.socket.connect_ex, socket.create_connection
+
+    def _is_net(sock) -> bool:
+        return sock.family in (socket.AF_INET, socket.AF_INET6)
+
+    def connect(self, *a, **k):
+        if _is_net(self):
+            raise AssertionError("network")
+        return real_connect(self, *a, **k)
+
+    def connect_ex(self, *a, **k):
+        if _is_net(self):
+            raise AssertionError("network")
+        return real_connect_ex(self, *a, **k)
+
+    def create_connection(*a, **k):
+        raise AssertionError("network")
+
+    monkeypatch.setattr(socket.socket, "connect", connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", connect_ex)
+    monkeypatch.setattr(socket, "create_connection", create_connection)
+    log = tmp_path_factory.mktemp("netlog") / "net.log"
+    monkeypatch.setenv("CK_TEST_NET_LOG", str(log))
+    existing = os.environ.get("PYTHONPATH")
+    monkeypatch.setenv("PYTHONPATH", str(NETGUARD_DIR) + (os.pathsep + existing if existing else ""))
+    monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "file")
+    for var in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"):
+        monkeypatch.setenv(var, "http://127.0.0.1:9")
+    yield log
 
 CALC_TEST = """from calc import add
 

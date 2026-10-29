@@ -46,5 +46,6 @@ packages = ["src/claude_kiro"]
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.170.13",
     "pytest>=9.1.1",
 ]
