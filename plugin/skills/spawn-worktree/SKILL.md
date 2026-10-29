@@ -49,6 +49,8 @@ Run multiple implementation tasks concurrently, each in its own git worktree wit
      - **Just these tasks**: run them, merge as they pass, then stop and report what became ready
      - **Hold merges**: run them, and ask me before merging anything (nothing new becomes ready until I approve)
 
+5. **Start the run record** (spec given, Agent path: no Workflow tool, or every role `inherit` with review off): run `ck stats begin --kind implement --spec <name> --into <current branch> --json` outside the sandbox and keep the `run_id` from its JSON. If it fails or prints no id, go on without a run id: use the same descriptions without the `[ck:<run_id>] ` prefix, and never stop or retry the run because of it. Phase 5 then ends with the begin-failed line instead of the collect step.
+
 ### Phase 2: Pre-create Worktrees
 
 **Spec tasks:** create the worktrees of the tasks you're about to start, **before spawning their agents**:
@@ -69,7 +71,7 @@ For each task, spawn an agent with `run_in_background: true`:
 
 ```json
 {
-  "description": "implement <feature>: <task-summary>",
+  "description": "[ck:<run_id>] implement task <N>",
   "prompt": "Your task: Task <N> of spec <name>.\nWorktree: <worktreeDir from ck plan>/<name>-task-<N> (branch feat/<name>-task-<N>). Target branch for the final merge: <current branch>.\nRead your operating brief at ${CLAUDE_PLUGIN_ROOT}/resources/spec-implement-brief.md and follow it exactly: claim the worktree with `ck worktree claim <name> <N>`, implement per your track, get `ck gate <name> --task <N>` passing, merge the target into your branch before finishing, release the worktree.\nReport: status, gatePassed, summary, commits, gate output tail, blocker, deviations, wrong tests, files outside your task.",
   "subagent_type": "general-purpose",
   "run_in_background": true
@@ -77,9 +79,9 @@ For each task, spawn an agent with `run_in_background: true`:
 ```
 
 **Models, effort, and review:** run `ck agents --json` (adding `--override` for anything I asked, as described in `/spec:implement` under Agents) and use its roles: the implementer for impl-track tasks, the test_writer for test-track tasks, the reviewer after each task. Values are a family alias (`sonnet`, `opus`, `haiku`, `fable`, each the newest of its family) or `inherit`, and an effort from `low` to `max` or `inherit`.
-- **Everything `inherit`, review off:** use the Agent calls above as they are.
+- **Everything `inherit`, review off:** run `ck stats begin --kind implement --spec <name> --into <current branch> --json` first (Phase 1), then use the Agent calls above as they are, each with the description `[ck:<run_id>] implement task <N>`.
 - **Otherwise:** launch the tasks you start together as one Workflow call instead of separate Agent calls (workflows run in the background, so a later launch never waits for an earlier one): an inline script that runs the same per-task prompts in `parallel()`, each `agent(prompt, { label: 'task <N>', model, effort })` with that task's role settings (omit any that are `inherit`). If the reviewer is enabled, the script runs a reviewer `agent()` with the reviewer's `{ model, effort }` for each task whose gate passed, reading `command git -C <worktree> diff <target>...<branch>` and the spec without editing, and gives blocking findings to one revising implementer `agent()` (up to the reviewer's `rounds`) before the merge phase. The worktrees are already created, so don't pass `isolation`. Running this command is my opt-in to that workflow.
-- **No Workflow tool** (missing, refused, or blocked): spawn the Agent calls above with `subagent_type` set to the task's type, `spec:implementer` or `spec:test-writer`, and the role's `model` and `effort` on each call (omit any that are `inherit`). If the reviewer is enabled, run a `spec:reviewer` (with the reviewer's `model` and `effort`) for each task whose gate passed, before the merge phase. Send blocking findings back to that task's agent with SendMessage, up to the reviewer's `rounds`. Details: `${CLAUDE_PLUGIN_ROOT}/resources/without-workflow-tool.md`.
+- **No Workflow tool** (missing, refused, or blocked): spawn the Agent calls above with `subagent_type` set to the task's type, `spec:implementer` or `spec:test-writer`, and the role's `model` and `effort` on each call (omit any that are `inherit`). Run `ck stats begin --kind implement --spec <name> --into <current branch> --json` first (Phase 1), and give each Agent the description `[ck:<run_id>] implement task <N>`. If the reviewer is enabled, run a `spec:reviewer` (with the reviewer's `model` and `effort`, and the description `[ck:<run_id>] review task <N> round <k>`) for each task whose gate passed, before the merge phase. Send blocking findings back to that task's agent with SendMessage, up to the reviewer's `rounds`. Details: `${CLAUDE_PLUGIN_ROOT}/resources/without-workflow-tool.md`.
 
 Name each role's model and effort, and whether review is on, in the Phase 1 plan you show me.
 
@@ -125,6 +127,10 @@ Run complete (42 min):
   Waiting on dependencies: none · Full gate: PASS
 ```
 List failed worktrees and offer to clean them up.
+
+For a spec run on the Agent path, after the report: if `begin` gave a run id, run `ck stats collect --agents <run_id> --auto` outside the sandbox and quote the line it prints (where the record went, or why it was skipped; if it failed, quote the retry command it gives). Never let its result change what you report about the run. If `begin` failed or printed no id, end the report with this line in place of the collect step: `⚠ ck stats begin failed: this run is not recorded in ck stats`
+
+Ad-hoc batches (no spec) have no run record: their descriptions are `implement task <n>` without the marker, and they get no collect step.
 
 ## Error Handling
 
