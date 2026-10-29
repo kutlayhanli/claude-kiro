@@ -186,7 +186,7 @@ Foundation task: its tests drive `ck stats begin` / `collect`, so its criteria a
 ---
 
 ### Task 7: Build the agent-mode collector (begin, marked-agent discovery, record building, open-manifest sweep)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.1, 1.2, 1.5, 1.7, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 3.10, 3.11, 3.12, 3.15, 3.17, 3.18, 4.4, 4.5, 5.5, 6.3, 6.5, 6.6, 6.7, 9.1, 9.2
 **Description:** Foundation task (its behaviour is reached only through the CLI of Task 13).
@@ -200,18 +200,18 @@ Foundation task: its tests drive `ck stats begin` / `collect`, so its criteria a
 **Verified by:** None
 Foundation task: Tasks 9, 10, 11 and 12 reach this code only through the CLI of Task 13, so its criteria are verified there.
 **Acceptance:**
-- [ ] A collected run contains exactly the agents whose meta description starts with that run's marker; unmarked `general-purpose` agents and other runs' agents are never included
-- [ ] Per-agent model, tokens, cost and timing reuse the workflow collector; the run's priced total equals `ck cost` over the same transcripts to the cent; run cost source is `agent_transcripts` when all agents are transcript-priced, else `estimate`
-- [ ] Spec, root, target branch and kind come from the manifest and appear only in the local record and its `terms`, together with the run id and every meta `worktreePath`/`worktreeBranch`
-- [ ] Implement runs take failed/blocked/not-started and outcome from the in-process git report over the tasks this run's agent rows name only, and merged only for this run (minus `doneAtStart`, else within the start..end window); any report failure gives unknown (None) counts and a `missing` `outcome` entry, and the record is still written; create/review never run the report
-- [ ] A complete agent-mode record has no `result` missing entry and a non-null `wallMs`
-- [ ] Missing manifest with marked agents gives a partial record with `missing` `manifest` and the kind from the matched templates; neither gives `not_found` naming the searched directories; manifest without marked agents gives `no_agents` and leaves the manifest open; a malformed manifest gives `malformed` and is left untouched
-- [ ] `collect_open_manifests` closes a stale manifest with no marked agent anywhere as `abandoned` and does not report it as failed
-- [ ] Missing/truncated transcripts or unparseable metas are listed in `missing` and never shown as zero
-- [ ] Re-collecting gives `unchanged` or `updated`; the manifest is closed only after a successful write
-- [ ] `begin_run` writes a 0600 manifest with the documented keys (role projection only, `doneAtStart`), makes no network call, honours `CK_TEST_RUN_ID_DRAWS`, and returns an id plus warning when the write fails
-- [ ] `collect_open_manifests` collects only manifests strictly older than 6 h, counts younger ones unfinished, malformed ones failed without printing contents
-- [ ] Every existing workflow-collection, show and cost test passes unchanged
+- [x] A collected run contains exactly the agents whose meta description starts with that run's marker; unmarked `general-purpose` agents and other runs' agents are never included
+- [x] Per-agent model, tokens, cost and timing reuse the workflow collector; the run's priced total equals `ck cost` over the same transcripts to the cent; run cost source is `agent_transcripts` when all agents are transcript-priced, else `estimate`
+- [x] Spec, root, target branch and kind come from the manifest and appear only in the local record and its `terms`, together with the run id and every meta `worktreePath`/`worktreeBranch`
+- [x] Implement runs take failed/blocked/not-started and outcome from the in-process git report over the tasks this run's agent rows name only, and merged only for this run (minus `doneAtStart`, else within the start..end window); any report failure gives unknown (None) counts and a `missing` `outcome` entry, and the record is still written; create/review never run the report
+- [x] A complete agent-mode record has no `result` missing entry and a non-null `wallMs`
+- [x] Missing manifest with marked agents gives a partial record with `missing` `manifest` and the kind from the matched templates; neither gives `not_found` naming the searched directories; manifest without marked agents gives `no_agents` and leaves the manifest open; a malformed manifest gives `malformed` and is left untouched
+- [x] `collect_open_manifests` closes a stale manifest with no marked agent anywhere as `abandoned` and does not report it as failed
+- [x] Missing/truncated transcripts or unparseable metas are listed in `missing` and never shown as zero
+- [x] Re-collecting gives `unchanged` or `updated`; the manifest is closed only after a successful write
+- [x] `begin_run` writes a 0600 manifest with the documented keys (role projection only, `doneAtStart`), makes no network call, honours `CK_TEST_RUN_ID_DRAWS`, and returns an id plus warning when the write fails
+- [x] `collect_open_manifests` collects only manifests strictly older than 6 h, counts younger ones unfinished, malformed ones failed without printing contents
+- [x] Every existing workflow-collection, show and cost test passes unchanged
 **Dependencies:** Task 3 (calls `match_agent`, `agentrun` seams), Task 6 (calls the manifest store functions)
 **Complexity:** High
 **Risk:** safety (fills the confidential-terms list the leak gate uses before records leave the machine, and closes run manifests)

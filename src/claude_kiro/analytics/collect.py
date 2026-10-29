@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from claude_kiro import bench, manifest
 from claude_kiro.analytics import SCHEMA_LOCAL, roles, runfile, store
@@ -361,10 +361,12 @@ class _Agent:
     transcript: Optional[Path]
     meta_path: Optional[Path]
     queued_ms: Optional[int] = None
+    agent_type: Optional[str] = None
 
 
 def _build_agent(a: _Agent, workflow_name: str, pricing: dict, missing: List[dict],
-                 versions: Counter, timing_from_transcript: bool) -> Tuple[dict, dict]:
+                 versions: Counter, timing_from_transcript: bool,
+                 matcher: Optional[Callable[[Any, Any], Any]] = None) -> Tuple[dict, dict]:
     """-> (disk row, internal info with usage_by_model and the contribution to the run cost)."""
     aid = a.agent_id
     meta = _read_json(a.meta_path) if a.meta_path is not None else None
@@ -374,7 +376,13 @@ def _build_agent(a: _Agent, workflow_name: str, pricing: dict, missing: List[dic
     label = a.label if isinstance(a.label, str) else (meta.get("description") if isinstance(meta.get("description"), str) else None)
     phase = a.phase if isinstance(a.phase, str) and a.phase else (
         meta.get("workflowPhase") if isinstance(meta.get("workflowPhase"), str) else None)
-    match = roles.match_label(label, workflow_name)
+    agent_type = a.agent_type if isinstance(a.agent_type, str) else (
+        meta.get("agentType") if isinstance(meta.get("agentType"), str) else None)
+    if matcher is None:
+        match = roles.match_label(label, workflow_name)
+    else:
+        match = matcher(label, agent_type)
+    terms = {v for v in (meta.get("worktreePath"), meta.get("worktreeBranch")) if isinstance(v, str) and v}
 
     status = "missing"
     scan: Optional[dict] = None
@@ -444,7 +452,7 @@ def _build_agent(a: _Agent, workflow_name: str, pricing: dict, missing: List[dic
             if row[k] == 0:
                 row[k] = None
     info = {"scan": scan, "usage_by_model": usage_by_model, "usage": usage, "match": match,
-            "first_ts": first_ts, "last_ts": last_ts}
+            "first_ts": first_ts, "last_ts": last_ts, "terms": terms}
     return row, info
 
 
@@ -469,7 +477,8 @@ def _aggregate(rows: List[dict], infos: List[dict], pricing: dict) -> Dict[str, 
     return {"byModel": by_model, "byRole": by_role, "byPhase": by_phase, "byTask": by_task}
 
 
-def _costs(rows: List[dict], infos: List[dict], pricing: dict, session_usd: Optional[float]) -> List[dict]:
+def _costs(rows: List[dict], infos: List[dict], pricing: dict, session_usd: Optional[float],
+           transcript_source: str = "priced_from_transcripts") -> List[dict]:
     scans = [i["scan"] for i in infos if i["scan"]]
     transcript_agents = len(scans)
     estimated_agents = sum(1 for i in infos if not i["scan"])
@@ -483,7 +492,10 @@ def _costs(rows: List[dict], infos: List[dict], pricing: dict, session_usd: Opti
     estimates = [r["usdEstimate"] for r in rows if r["usd"] is None and r["usdEstimate"] is not None]
     if estimates:
         total = (total or 0.0) + sum(estimates)
-    costs = [{"usd": total, "source": cost_label(transcript_agents, estimated_agents, unpriced),
+    label = cost_label(transcript_agents, estimated_agents, unpriced)
+    if label == "priced_from_transcripts":
+        label = transcript_source
+    costs = [{"usd": total, "source": label,
               "pricingDate": bench.PRICING_DATE, "scope": "run"}]
     if session_usd is not None:
         costs.append({"usd": session_usd, "source": "claude_total", "pricingDate": bench.PRICING_DATE, "scope": "session"})
@@ -769,17 +781,33 @@ def _previous_ck_version(run_id: str) -> Optional[str]:
 def _build_record(*, run_id: str, workflow_name: str, run_data: Optional[Mapping], session_dir: Path,
                   agent_dir: Path, session_jsonl: Optional[Path], agents: List[_Agent], missing: List[dict],
                   start_ms: Optional[int], wall_ms: Optional[int], status: Optional[str], pricing: dict,
-                  fresh: bool, partial: bool) -> dict:
+                  fresh: bool, partial: bool, agent_run: Any = None) -> dict:
+    ctx = agent_run
     kind = _kind_of(workflow_name)
     versions: Counter = Counter()
     rows: List[dict] = []
     infos: List[dict] = []
+    matcher = ctx.matcher if ctx is not None else None
     for a in agents:
-        row, info = _build_agent(a, workflow_name, pricing, missing, versions, partial)
+        row, info = _build_agent(a, workflow_name, pricing, missing, versions,
+                                 True if ctx is not None else partial, matcher)
         rows.append(row)
         infos.append(info)
 
-    if partial:
+    if ctx is not None:
+        timed = [(r, i) for r, i in zip(rows, infos)
+                 if ctx.spec_agent_ids is None or r["agentId"] in ctx.spec_agent_ids]
+        firsts = [i["first_ts"] for _, i in timed if i["first_ts"] is not None]
+        lasts = [i["last_ts"] for _, i in timed if i["last_ts"] is not None]
+        start_ms = ctx.start_ms if ctx.start_ms is not None else (min(firsts) if firsts else None)
+        wall_ms = (max(lasts) - start_ms) if lasts and start_ms is not None else None
+        if ctx.end_ms is None:
+            from claude_kiro.analytics import agentrun
+            alasts = [i["last_ts"] for i in infos if i["last_ts"] is not None]
+            ctx = replace(ctx, end_ms=(max(alasts) + agentrun.MERGE_SLACK_MS) if alasts else None)
+        if ctx.start_ms is None and start_ms is not None:
+            ctx = replace(ctx, start_ms=start_ms)
+    elif partial:
         firsts = [i["first_ts"] for i in infos if i["first_ts"] is not None]
         lasts = [i["last_ts"] for i in infos if i["last_ts"] is not None]
         if firsts and lasts:
@@ -798,9 +826,12 @@ def _build_record(*, run_id: str, workflow_name: str, run_data: Optional[Mapping
 
     args = run_data.get("args") if run_data else None
     args = args if isinstance(args, dict) else {}
-    root = args.get("root") if isinstance(args.get("root"), str) and args.get("root") else head.get("cwd")
-    spec = next((args[k] for k in ("spec", "feature") if isinstance(args.get(k), str) and args[k]), None)
-    branch = head.get("gitBranch")
+    if ctx is not None:
+        root, spec, branch = ctx.root, ctx.spec, ctx.into
+    else:
+        root = args.get("root") if isinstance(args.get("root"), str) and args.get("root") else head.get("cwd")
+        spec = next((args[k] for k in ("spec", "feature") if isinstance(args.get(k), str) and args[k]), None)
+        branch = head.get("gitBranch")
     remote = _git_remote(root)
     pseudo = pseudonym(remote, _get_salt()) if remote else None
 
@@ -820,7 +851,7 @@ def _build_record(*, run_id: str, workflow_name: str, run_data: Optional[Mapping
         missing.append({"agentId": None, "what": "ckVersion"})
 
     result = run_data.get("result") if run_data else None
-    if not partial and not isinstance(result, dict):
+    if ctx is None and not partial and not isinstance(result, dict):
         missing.append({"agentId": None, "what": "result"})
 
     terms = {t for t in (root, spec, branch, remote) if isinstance(t, str) and t}
@@ -829,6 +860,10 @@ def _build_record(*, run_id: str, workflow_name: str, run_data: Optional[Mapping
     terms.update(r["label"] for r in rows if isinstance(r["label"], str) and r["label"])
     terms.update(r["phase"] for r in rows if isinstance(r["phase"], str) and r["phase"])
     terms.update(_result_terms(result))
+    for info in infos:
+        terms.update(info.get("terms") or ())
+    if ctx is not None:
+        terms.add(ctx.run_id)
 
     record: Dict[str, Any] = {
         "schema": SCHEMA_LOCAL,
@@ -846,12 +881,24 @@ def _build_record(*, run_id: str, workflow_name: str, run_data: Optional[Mapping
                     "stack": _stack_hint(root)},
         "projectPseudonym": pseudo,
         "terms": sorted(terms),
-        "costs": _costs(rows, infos, pricing, session_usd),
+        "costs": _costs(rows, infos, pricing, session_usd,
+                        "agent_transcripts" if ctx is not None else "priced_from_transcripts"),
         **_aggregate(rows, infos, pricing),
         "agents": rows,
         "missing": missing,
     }
-    record.update(_workflow_metrics(kind, workflow_name, result, rows, run_data))
+    if ctx is not None:
+        from claude_kiro.analytics import agentcollect
+        metrics = agentcollect.agent_metrics(ctx, rows)
+        if metrics.pop("outcomeMissing", False):
+            missing.append({"agentId": None, "what": "outcome"})
+        record.update(metrics)
+        record["source"] = "agents"
+        record["partial"] = bool(ctx.partial)
+        record["agentRun"] = {"kind": ctx.kind, "manifest": ctx.manifest, "backfill": bool(ctx.backfill),
+                              "gapMinutes": ctx.gap_minutes}
+    else:
+        record.update(_workflow_metrics(kind, workflow_name, result, rows, run_data))
     return record
 
 
