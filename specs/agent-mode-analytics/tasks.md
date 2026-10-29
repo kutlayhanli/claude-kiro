@@ -270,7 +270,7 @@ Foundation task: Task 10 reaches this code only through the CLI of Task 13, so i
 ---
 
 ### Task 10: Test open manifests (`ck doctor`, `collect --all`) and `--agents-backfill`
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8, 7.9
 **Description:** Implement the two recovery flows through the real CLI in `fresh_env()` with `no_network`.
