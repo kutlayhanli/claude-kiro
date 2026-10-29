@@ -440,7 +440,7 @@ OFFSETS = {"Z": timedelta(0), "+00:00": timedelta(0), "+02:00": timedelta(hours=
 
 
 def _iso(ms, form, fractional, seconds=True):
-    off = {"Z": timedelta(0), "+00:00": timedelta(0), "+02:00": timedelta(hours=2), "-05:30": -timedelta(hours=5, minutes=30)}[form]
+    off = OFFSETS[form]
     dt = datetime.fromtimestamp(ms / 1000, tz=timezone.utc) + off
     suffix = "Z" if form == "Z" else form
     if not seconds:
@@ -565,8 +565,10 @@ def _agents_case(draw, mixed=True, one_spec_per_session=False, min_size=1):
             marker_kind = draw(st.sampled_from(["none"] * 5 + ["valid", "invalid"]))
             if marker_kind == "valid":
                 desc = described("ag_%08x" % i, "implement task %d" % i)
+                spec = None
             elif marker_kind == "invalid":
                 desc = "[ck:ag_X] " + (desc or "implement task 1")
+                spec = None  # the prefixed description no longer parses to a spec
         agent = {
             "agentId": "a%04d" % i, "sessionId": sid, "agentType": typ, "description": desc,
             "startMs": start, "endMs": start + dur, "workflow": workflow,
@@ -726,13 +728,11 @@ def test_p12_group_ids_stable(case, gap, rnd):
     _agents_case(mixed=False, one_spec_per_session=True),
     gaps,
     st.lists(st.tuples(st.integers(-3600, DAY_MS // 1000 + 3 * 3600), st.sampled_from(["Z", "utc", "+02"])), max_size=20),
-    st.sets(st.integers(0, 19), max_size=4),
 )
 @SETTINGS
-def test_p18_merged_sets_disjoint(case, gap, merges, probe_edges):
+def test_p18_merged_sets_disjoint(case, gap, merges):
     a = _a()
     agents = case[0]
-    out = a.group_backfill(agents, gap_minutes=gap)
     placement = ["merged"] * len(merges)
     times = [_fmt(BASE_MS + s * 1000, style) for s, style in merges]
     # Re-base the agents onto the same clock as the merge times.
