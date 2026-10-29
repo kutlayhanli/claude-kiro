@@ -300,6 +300,8 @@ def repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
     root.mkdir()
     git(root, "init", "-q", "-b", "main")
+    git(root, "config", "user.email", "t@example.com")
+    git(root, "config", "user.name", "Test")
     (root / ".gitignore").write_text(".ck/worktrees/\n")
     (root / "shared.txt").write_text("base\n")
     (root / "specs/demo").mkdir(parents=True)

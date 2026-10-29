@@ -239,6 +239,16 @@ def test_ready_seam_prototype_keys_in_done_do_not_satisfy_a_dependency(bridge, k
 
 
 @needs_node
+@pytest.mark.parametrize("key", PROTO)
+def test_ready_seam_prototype_names_as_task_ids_follow_the_key_rule(bridge, key):
+    # A prototype name as a key of the deps map (JSON.parse makes it an own key) is a real task id: "d is a key of
+    # deps AND d in done" applies to it like any other id.
+    deps = {key: [], "2": [key]}
+    assert set(bridge.ready(deps=deps, done=[], exclude=[], order=[key, "2"])) == {key}
+    assert set(bridge.ready(deps=deps, done=[key], exclude=[], order=[key, "2"])) == {"2"}
+
+
+@needs_node
 @pytest.mark.parametrize("dep", NEAR_MISS, ids=[repr(d) for d in NEAR_MISS])
 def test_ready_seam_near_miss_ids_in_done_do_not_satisfy_a_dependency(bridge, dep):
     # Task 2 is Done and the near-miss form is listed Done too: the dependent still waits on an unknown id.

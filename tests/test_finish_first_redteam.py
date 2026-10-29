@@ -41,8 +41,15 @@ def violations(trace):
 
 
 def run_checked(bridge, project, args, slots):
-    out = bridge.run(project, args, slots=slots)
-    assert not violations(out["trace"]), violations(out["trace"])
+    """Attack the hold in both modes: the 1.9 fallback (no `deps` in args, plan agents decide readiness) and script
+    readiness (the skill passes `deps`/`remaining`, so `schedule()` starts tasks from `readyTasks`). Returns the
+    script-readiness run, the production path."""
+    fallback = bridge.run(project, args, slots=slots)
+    assert not violations(fallback["trace"]), ("fallback", violations(fallback["trace"]))
+    deps = project.get("deps", {})
+    ready_args = {"deps": {k: list(v) for k, v in deps.items()}, "remaining": list(deps), **args}
+    out = bridge.run(project, ready_args, slots=slots)
+    assert not violations(out["trace"]), ("script readiness", violations(out["trace"]))
     return out
 
 
