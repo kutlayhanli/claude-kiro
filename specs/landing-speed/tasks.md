@@ -442,7 +442,7 @@ View (`src/claude_kiro/analytics/show.py`):
 ---
 
 ### Task 15: Write parallel-suite, gate worker-cap and xdist hint seam tests (Stories 5-6, Story 7 seam)
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 5.1, 5.2, 5.3, 5.4, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 7.1, 7.2, 7.3, NFR-4
 **Properties:** P-17, P-18, P-19
@@ -461,11 +461,13 @@ Each file declares its `PROPERTIES` map (`P-17`, `P-18` in `test_gate_xdist.py`;
 **Verifies:** Task 17, Task 18
 
 **Acceptance:**
-- [ ] Gate tests run real `ck gate` subprocesses with real verify commands and real signals; only the core count is varied, and only at the seam
-- [ ] P-17 and P-19 generators cover every form and near-miss in their rows; settings deterministic; they call `worker_cap`/`verify_env`/`suggestion`, not a gate or doctor
-- [ ] Before implementation the tests fail because `ck gate` sets no `PYTEST_XDIST_AUTO_NUM_WORKERS`, `claude_kiro.xdist` is missing and pyproject/ck.json lack xdist, not from fixture bugs
-- [ ] Holding gates always get released and process groups killed in teardown (no stray processes)
-- [ ] TC-41 is skipped without `CK_COMPARE_PARALLEL=1` and never recurses
+- [x] Gate tests run real `ck gate` subprocesses with real verify commands and real signals; only the core count is varied, and only at the seam
+- [x] P-17 and P-19 generators cover every form and near-miss in their rows; settings deterministic; they call `worker_cap`/`verify_env`/`suggestion`, not a gate or doctor
+- [x] Before implementation the tests fail because `ck gate` sets no `PYTEST_XDIST_AUTO_NUM_WORKERS`, `claude_kiro.xdist` is missing and pyproject/ck.json lack xdist, not from fixture bugs
+- [x] Holding gates always get released and process groups killed in teardown (no stray processes)
+- [x] TC-41 is skipped without `CK_COMPARE_PARALLEL=1` and never recurses
+
+**Implementation notes:** The probe project replaces `specs/calc/tasks.md` with one Done impl task (so `ck gate calc` runs the configured verify) and sets `"collect": ""` so only the probe commands run. Probe options are argv tokens (`HOLD=<file>`, `SLEEP=<s>`, `EXIT=<code>`) added only where a case needs them, so TC-48/P-18 argv stay exact. The tests were checked against a throwaway scratch `xdist.py` + `run_gate` wiring written from design.md (all 26 gate tests and the hint tests passed; the scratch code was not committed). TC-40 passes today (ids already stable); TC-43 passes today too (an inherited preset passes through without any cap), and must stay a pass.
 
 **Dependencies:** None
 **Complexity:** High
