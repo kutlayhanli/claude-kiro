@@ -405,6 +405,153 @@ Fix it without weakening any test and without editing requirements.md or existin
 If the only way to green is to weaken a test or change a requirement, stop and explain precisely instead.
 Return green=true only if ${INTO} is green after your merge, else failing with the reason.`
 
+// --- decisions (pure; loaded by tests) ---
+// Every scheduling rule that allows, refuses or holds something. No script globals, no agent/log/args,
+// no clock and no I/O: tests/js/load_decisions.mjs cuts this block out and evaluates it on its own.
+
+const decisionIds = v => [...(v || [])].map(x => String(x && typeof x === 'object' ? x.task : x))
+const hasKey = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k)
+
+// Port of cli/worktree.py::_chain_lengths: for each open task, the number of open tasks on its longest
+// chain of dependents, itself included. Tasks are visited in `order` (tasks.md order, as ck plan's deps
+// keys are), never in JS object-key order, so memoization, ties and cycles match ck plan.
+function chainLengths(order, deps, done) {
+  deps = deps || {}
+  const doneSet = new Set(decisionIds(done))
+  const keys = []
+  const seen = new Set()
+  for (const n of [...decisionIds(order), ...Object.keys(deps)]) {
+    if (hasKey(deps, n) && !seen.has(n)) { seen.add(n); keys.push(n) }
+  }
+  const dependents = new Map(keys.map(n => [n, []]))
+  for (const n of keys) {
+    for (const d of decisionIds(deps[n])) {
+      if (dependents.has(d) && !doneSet.has(n)) dependents.get(d).push(n)
+    }
+  }
+  const lengths = new Map()
+  const length = (n, stack) => {
+    if (!lengths.has(n)) {
+      const below = dependents.get(n).filter(m => !stack.has(m)).map(m => length(m, new Set([...stack, m])))
+      lengths.set(n, 1 + Math.max(0, ...below))
+    }
+    return lengths.get(n)
+  }
+  const out = {}
+  for (const n of keys) if (!doneSet.has(n)) out[n] = length(n, new Set([n]))
+  return out
+}
+
+// Which tasks may start, in ck plan's order: longest open chain first, then numeric id, stable over `order`.
+// A dependency is met only if it is a key of `deps` AND Done: a dependency the script has no entry for is
+// never met, even when `done` lists it (never start on a guess, 1.10).
+function readyTasks({ order, deps, done, exclude, blocked } = {}) {
+  deps = deps || {}
+  const doneSet = new Set(decisionIds(done))
+  const skip = new Set([...decisionIds(exclude), ...decisionIds(blocked)])
+  const met = d => hasKey(deps, d) && doneSet.has(d)
+  const seen = new Set()
+  const ready = []
+  for (const n of decisionIds(order)) {
+    if (seen.has(n)) continue
+    seen.add(n)
+    if (!hasKey(deps, n) || doneSet.has(n) || skip.has(n)) continue
+    if (decisionIds(deps[n]).every(met)) ready.push(n)
+  }
+  const chain = chainLengths(order, deps, [...doneSet])
+  const num = n => (/^[0-9]+$/.test(n) ? Number(n) : 0)
+  const rank = new Map(ready.map((n, i) => [n, i]))
+  return ready.slice().sort((a, b) =>
+    ((chain[b] ?? 1) - (chain[a] ?? 1)) || (num(a) - num(b)) || (rank.get(a) - rank.get(b)))
+}
+
+const blockedOf = view => [
+  ...decisionIds(view && view.verifyCycles),
+  ...((view && view.cycles) || []).flatMap(c => decisionIds(c)),
+]
+
+// The scheduler's view after a plan returns. Merges never un-happen: Done = plan.done ∪ mergedInRun (1.6).
+function applyPlanView(plan, mergedInRun) {
+  return {
+    order: decisionIds(plan.remaining),
+    deps: plan.deps || {},
+    done: new Set([...decisionIds(plan.done), ...decisionIds(mergedInRun)]),
+    cycles: (plan.cycles || []).map(c => decisionIds(c)),
+    verifyCycles: [...(plan.verifyCycles || [])],
+  }
+}
+
+// Whether a plan agent's copy holds together: our readiness over its view equals its ready list (minus
+// tasks the stricter 1.10 rule holds back), and every remaining task has a deps entry (1.6, 1.8).
+function planConsistent(plan, exclude) {
+  if (!plan || typeof plan !== 'object') return false
+  const deps = plan.deps
+  if (!deps || typeof deps !== 'object' || Array.isArray(deps)) return false
+  if (![plan.remaining, plan.done, plan.ready].every(Array.isArray)) return false
+  const remaining = decisionIds(plan.remaining)
+  if (!remaining.every(n => hasKey(deps, n))) return false
+  const ours = readyTasks({ order: remaining, deps, done: plan.done, exclude: exclude || [], blocked: blockedOf(plan) })
+  const theirs = decisionIds(plan.ready).filter(n => decisionIds(deps[n]).every(d => hasKey(deps, d)))
+  return ours.length === theirs.length && ours.every((n, i) => n === theirs[i])
+}
+
+// Whether a plan agent runs for this trigger. Only an eligible trigger coalesces while one is in flight.
+function planDecision({ trigger, scriptReadiness, planInFlight, idleArmed, freeSlot, readyCount, openCount, stopLaunching } = {}) {
+  if (stopLaunching && trigger !== 'start') return 'none'
+  let eligible
+  if (trigger === 'start' || trigger === 'landing') eligible = true
+  else if (trigger === 'idle') eligible = !!freeSlot && readyCount === 0 && openCount > 0 && !!idleArmed
+  else if (trigger === 'freed' || trigger === 'finished') eligible = !scriptReadiness
+  else eligible = false
+  if (!eligible) return 'none'
+  return planInFlight ? 'coalesce' : 'run'
+}
+
+const isSlotCount = s => Number.isInteger(s) && s > 0
+
+// In-flight agents presumed queued: those after the first `slots` in request order. None without slots.
+function queuedAgents(inFlight, slots) {
+  if (!isSlotCount(slots)) return []
+  return [...(inFlight || [])].sort((a, b) => a.seq - b.seq).slice(slots)
+}
+
+const UNBLOCKER_KINDS = ['review', 'revise', 'land']
+
+// Which ready tasks start now (3.1, 3.3, 3.5, 3.9). Asked only about new task starts.
+function startDecision({ finishFirst, inFlight, slots, ready, working, maxConcurrent, stopLaunching } = {}) {
+  const none = (deferred, waiting) => ({ start: [], deferred, waiting })
+  if (stopLaunching) return none(false, 0)
+  const list = [...(ready || [])]
+  const flight = inFlight || []
+  if (finishFirst) {
+    const waiting = queuedAgents(flight, slots).filter(e => UNBLOCKER_KINDS.includes(e && e.kind)).length
+    if (waiting > 0) return none(true, waiting)
+  }
+  const cap = typeof maxConcurrent === 'number' && Number.isFinite(maxConcurrent) ? maxConcurrent : Infinity
+  const allowed = Math.max(0, cap - (working || 0))
+  const free = finishFirst && isSlotCount(slots) ? Math.max(0, slots - flight.length) : Infinity
+  const count = Math.min(allowed, free, list.length)
+  return { start: list.slice(0, count), deferred: free < Math.min(allowed, list.length), waiting: 0 }
+}
+
+// How a task agent's worktree creation step ended (2.2, 2.3, 2.4).
+function worktreeOutcome(result) {
+  const proceed = { kind: 'proceed', reason: null }
+  if (!result || typeof result !== 'object') return proceed
+  const wt = result.worktree && typeof result.worktree === 'object' ? result.worktree : null
+  const state = wt ? String(wt.state || '').toUpperCase() : ''
+  const detail = wt && wt.detail != null ? String(wt.detail) : ''
+  const blocker = typeof result.blocker === 'string' ? result.blocker : ''
+  if (state === 'BUSY' || /worktree busy/i.test(blocker)) {
+    const fromBlocker = blocker.replace(/^\s*worktree busy\s*:?\s*/i, '') || blocker
+    return { kind: 'busy', reason: `worktree busy: ${detail || fromBlocker}` }
+  }
+  if (state === 'ERROR') return { kind: 'error', reason: `worktree create failed: ${detail || blocker}` }
+  return proceed
+}
+
+// --- end decisions ---
+
 // --- scheduler ---------------------------------------------------------------
 
 const running = new Map()    // task -> promise of its record

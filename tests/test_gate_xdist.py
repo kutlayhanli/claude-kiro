@@ -393,6 +393,9 @@ from claude_kiro.xdist import running_gates
 reg, stop = Path(sys.argv[1]), Path(sys.argv[2])
 n = 0
 seen = set()
+seen.add(running_gates(reg))  # count once before signalling, so the test's loop never outruns start-up
+n += 1
+print("ready", flush=True)
 while not stop.exists():
     seen.add(running_gates(reg))
     n += 1
@@ -421,6 +424,7 @@ def test_counter_never_removes_live_or_in_progress_registrations(tmp_path):
         counter = subprocess.Popen(
             [sys.executable, "-c", COUNTER, str(registry), str(stop)], stdout=subprocess.PIPE, text=True
         )
+        assert counter.stdout.readline().strip() == "ready"
         for _ in range(30):
             with gate_slot(registry) as slot:
                 assert slot is not None

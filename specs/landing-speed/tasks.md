@@ -81,7 +81,7 @@ Settings: `@settings(derandomize=True, max_examples=200, database=None, deadline
 ---
 
 ### Task 3: Add the pure scheduling decisions block to the spec-implement workflow
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.2, 1.3, 1.4, 1.5, 1.6, 1.9, 1.10, 2.2, 2.3, 2.4, 3.1, 3.3, 3.5, 3.9
 **Description:** Foundation for Task 12. Owns Harness Contract item 2 (readiness seam, renamed by design to `readyTasks({...})` inside the decisions block) and the script side of items 12-13 (the marker-delimited block `tests/js/load_decisions.mjs` and the bridge cut out). In `plugin/workflows/spec-implement.js`, add a self-contained block between the exact marker lines `// --- decisions (pure; loaded by tests) ---` and `// --- end decisions ---` (design.md "Decision Seams"). Code inside the block uses no script globals, no `agent`/`log`/`args`, no clock and no I/O, so `tests/js/load_decisions.mjs` can cut it out and evaluate it with `new Function(...)`. Implement:
@@ -101,12 +101,18 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 **Verified by:** Task 2
 
 **Acceptance:**
-- [ ] The block is delimited by the two exact marker lines and evaluates standalone (no reference to script globals, `agent`, `log` or `args`)
-- [ ] `readyTasks` returns the same set and order as `ck plan --json --exclude` for the same tasks.md, Done set and exclusions, including multi-digit ids, diamonds, duplicate and dangling deps (1.2); a dependency missing from the `deps` keys keeps its dependent not ready even when `done` lists it (1.10, P-2)
-- [ ] `planDecision` never returns `run` for `freed`/`finished` when `scriptReadiness` is true, and returns `run` for them when it is false (1.3, 1.9); a second idle trigger with `idleArmed` false returns `none` (1.5)
-- [ ] `startDecision` with no queued review/revise/land entry and enough free slots returns exactly the first `maxConcurrent - working` ready tasks; with one queued and finish-first on returns none with `deferred: true`; with `inFlight.length >= slots` and finish-first on returns none with `deferred: true`, `waiting: 0`, and otherwise at most `slots - inFlight.length` starts; with finish-first off ignores the queue and the slot cap (3.1, 3.3, 3.5, 3.9)
-- [ ] `worktreeOutcome` maps BUSY, ERROR, CREATED, EXISTS and absent `worktree` as specified (2.2, 2.3, 2.4)
-- [ ] Existing `tests/js/spec_implement.test.mjs` passes unchanged and the vendored copy is byte-identical
+- [x] The block is delimited by the two exact marker lines and evaluates standalone (no reference to script globals, `agent`, `log` or `args`)
+- [x] `readyTasks` returns the same set and order as `ck plan --json --exclude` for the same tasks.md, Done set and exclusions, including multi-digit ids, diamonds, duplicate and dangling deps (1.2); a dependency missing from the `deps` keys keeps its dependent not ready even when `done` lists it (1.10, P-2)
+- [x] `planDecision` never returns `run` for `freed`/`finished` when `scriptReadiness` is true, and returns `run` for them when it is false (1.3, 1.9); a second idle trigger with `idleArmed` false returns `none` (1.5)
+- [x] `startDecision` with no queued review/revise/land entry and enough free slots returns exactly the first `maxConcurrent - working` ready tasks; with one queued and finish-first on returns none with `deferred: true`; with `inFlight.length >= slots` and finish-first on returns none with `deferred: true`, `waiting: 0`, and otherwise at most `slots - inFlight.length` starts; with finish-first off ignores the queue and the slot cap (3.1, 3.3, 3.5, 3.9)
+- [x] `worktreeOutcome` maps BUSY, ERROR, CREATED, EXISTS and absent `worktree` as specified (2.2, 2.3, 2.4)
+- [x] Existing `tests/js/spec_implement.test.mjs` passes unchanged and the vendored copy is byte-identical
+
+**Implementation notes (Task 3):**
+- `planDecision` checks eligibility first, then coalesces: a trigger that would not run a plan on its own (for example `freed` with script readiness, or an unarmed `idle`) returns `none` even while a plan is in flight, so a coalesced follow-up can never smuggle in a plan that 1.3/1.5 forbid. `stopLaunching` is checked before both.
+- `chainLengths` walks tasks in `order` (then any other `deps` keys), never in JS object-key order, so its memoization matches `ck plan`'s tasks.md order whatever order the `deps` keys arrive in (P-4).
+- `readyTasks` treats a task in `order` with no `deps` entry as not ready (never start on a guess); `startDecision` reports `deferred: true, waiting: 0` only when the slot cap actually holds back a ready task `maxConcurrent` would allow (an empty ready list is not a deferral).
+- `uv run ck vendor` also rewrites `.claude/agents/*.md` and `.claude/ck-manifest.json`; those side effects were reverted, only `.claude/workflows/spec-implement.js` is committed.
 
 **Dependencies:** Task 2 (its tests are the oracle)
 **Complexity:** Medium
@@ -161,7 +167,7 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 ---
 
 ### Task 6: Write workflow example tests for script-side readiness and task-owned worktrees (Stories 1-2)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 1.10, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 3.1, 3.5, NFR-1, NFR-3
 **Description:** Create `tests/js/landing_speed.test.mjs` (runs the real script source under `runWorkflow` with `fake_project.mjs`; the glob in `test_workflow_scripts.py` picks it up). Implement TC-1, TC-2, TC-4, TC-5, TC-6, TC-7, TC-8, TC-9, TC-10, TC-11, TC-12, TC-13, TC-14, TC-17, TC-18, TC-20, TC-21, TC-22, TC-55 and TC-62 exactly as the test-plan rows describe, asserting only on requested labels, their order, prompts, `result` and the log. Pass `args.deps` and `args.remaining` (from the fake plan) except in TC-12, which omits both but keeps normal plan answers (1.9 is about args, not plan answers). Specifics:
@@ -183,12 +189,19 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 **Verifies:** Task 12
 
 **Acceptance:**
-- [ ] Tests run the real `plugin/workflows/spec-implement.js` under the fake runtime; agents are the only fakes
-- [ ] Assertions use observable behaviour only (labels, order, prompts, result, log), never script internals
-- [ ] Before implementation the suite fails for missing behaviour (e.g. plan requested after every finished task, plan prompt still creates worktrees, no `worktree` outcome handling, no `deps` arg in the skill), not from harness errors
-- [ ] TC-18 checks all four BUSY clauses (reason, one agent, worktree untouched, others merge) under both `onFailure` values
-- [ ] TC-1 checks `agentSlots` and `finishFirst` in the skill args as well as `deps`/`remaining`, and that the real `ck agents --json` emits the key paths the skill names
-- [ ] TC-9/TC-10/TC-11 show cycle refusal, verify-order handling under both `onFailure` values, and planning-failure stop behave as today
+- [x] Tests run the real `plugin/workflows/spec-implement.js` under the fake runtime; agents are the only fakes
+- [x] Assertions use observable behaviour only (labels, order, prompts, result, log), never script internals
+- [x] Before implementation the suite fails for missing behaviour (e.g. plan requested after every finished task, plan prompt still creates worktrees, no `worktree` outcome handling, no `deps` arg in the skill), not from harness errors
+- [x] TC-18 checks all four BUSY clauses (reason, one agent, worktree untouched, others merge) under both `onFailure` values
+- [x] TC-1 checks `agentSlots` and `finishFirst` in the skill args as well as `deps`/`remaining`, and that the real `ck agents --json` emits the key paths the skill names
+- [x] TC-9/TC-10/TC-11 show cycle refusal, verify-order handling under both `onFailure` values, and planning-failure stop behave as today
+
+**Implementation notes (Task 6):**
+- Pre-implementation run: TC-4, TC-5, TC-6, TC-13, TC-14, TC-20 (both), TC-55 (a, b), TC-62 and TC-1's args checks fail for missing behaviour (plan after every freed slot, no idle plan, no create step in the task prompt, ERROR retried, no decisions block, no `deps` in the skill). TC-2, TC-7-TC-12, TC-17, TC-18, TC-21, TC-22 already hold today (as-today and guard cases).
+- Idle plans are recognised by the design's log line `plan <n> (idle): …`; plan labels are matched as `plan <k>` / `plan <k> retry`.
+- TC-8 deviation: the row's deps `{1:[],2:[],3:[],4:['3']}` put task 3 first in chain order at the start, so "never requests task 3" cannot hold for any correct scheduler. The test uses `{1:[],2:[],3:['1'],4:['3']}` with task 2 holding the only slot (100 ms), so 3 can only become ready through plan 2 (after landing 1), which reports it Done. The Done-not-merged check reads the fake `ck worktree report` output (the script's `result.merged` folds git's `done` into merged).
+- TC-22 deviation: with `checkRed: ['2']` the `fix 1 …` agent is today's red-landing fixer (`landFixPrompt`), which works in the task worktree and never creates `fix1`. The `worktree create demo fix1 --install --base integrate/demo` assertion is made on the fixer after a red full gate (`fullRed`, `fullGateEvery: 1`), which is where today's script creates the fix worktree; the `checkRed: ['2']` fixer is checked to stay in `demo-task-2` without creating a worktree, as today.
+- TC-4 gives task 2 a 50 ms duration and TC-55 (b) gives task 2's merge 50 ms, so the asserted orders are deterministic; TC-5 / TC-12 use 10 ms merges so landings batch.
 
 **Dependencies:** Task 1 (fake_project.mjs options, runWorkflow, load_decisions.mjs)
 **Complexity:** High
@@ -197,7 +210,7 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 ---
 
 ### Task 7: Write finish-first workflow examples (Story 3, script side)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 3.2, 3.3, 3.4, 3.6, 3.7, 3.9, NFR-6
 **Description:** `tests/js/finish_first.test.mjs` (real script, fake runtime with `slots`; picked up by the glob): TC-23, TC-24, TC-25, TC-26, TC-27, TC-28 (script part), TC-29, TC-63, TC-65. Every slot-pressure case passes `args.agentSlots` equal to `slots` so the script's queued estimate matches the fake queue; assertions judge by the fake runtime's own `trace`. No assertion uses a wall-clock tolerance: every timing claim is an event-order relation on `trace`, so the suite stays deterministic under `-n auto` and concurrent gates. TC-23 builds its queue from one freed slot getting two requests (land 1 ends while task 3 runs, so the landing plan and land 2 are requested together and land 2 queues behind the 60 ms plan, `planDurations`), because a new task start can no longer queue (3.9); it must prove non-vacuity (`start land 2` comes after `request land 2` with another `end` between, and task 4 is requested only after `start land 2`). TC-24: after `start land 2`, at the first `end` after which the non-task requests made before the next `end` leave a runtime slot free, a first-attempt task request comes before the next `end`. TC-65 (saturation, 3.9): `slots: 2`, `maxConcurrent: 3`, deps `{1..4: []}`, task 1 5 ms, task 2 80 ms, review 1 5 ms; only 2 tasks are requested at start; when task 1 ends with all slots busy, `request review 1` precedes any further first-attempt task request and `start review 1` follows `end task 1` with no other `start` between; at every first-attempt task request fewer than `slots` agents are requested and not ended; the run terminates with every task merged; non-vacuous because with `finishFirst: false` task 3 is requested before any `end`. TC-25 compares `finishFirst: true` vs `false` without `slots`, passing `agentSlots: 1000` (larger than any in-flight count): identical sequences of `request`/`start`/`end` trace events, deep-equal results. TC-26 checks each finish-type request comes after its trigger and before the next `end` trace event of any agent (`review N` after `task N end`, revise after review end, `land` after approval or, when a landing step is in flight, after that step's last agent ends (its land, or the full gate and any fix/re-check it runs), `full gate` after its land, `fix k` after the red land or full gate that calls for it, `re-check` after its fix) with `checkRed: ['2']`, `fullGateEvery: 2`. TC-63: the existing hand-built-args case (no `agentSlots`, `finishFirst` absent, `maxConcurrent: 1`, reviews on, slow merge of 1, slow review of 2) still starts task 2 before task 1's land ends and task 3 before `review 2 end` (no `agentSlots` = nothing presumed queued). TC-27 uses `finishFirst: false` and expects at least one first-attempt task request while `slots` agents are already requested and not ended, and no `finish-first` log line. TC-28 omits `finishFirst` and expects the deferral. TC-29: exactly one log line containing `finish-first` per deferral period (one period with ≥ 3 agent ends → 1 line; two periods → 2). The `ck agents` setting side is Task 4.
@@ -207,11 +220,19 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 **Verifies:** Task 12
 
 **Acceptance:**
-- [ ] Workflow tests exercise the real script against the fake runtime queue
-- [ ] Before implementation the tests fail because no deferral happens, not from test bugs
-- [ ] TC-23 is non-vacuous (asserts a deferral actually occurred)
-- [ ] TC-65 shows that at saturation a finished implementer's review gets the next slot and no task start is queued ahead of it, and is non-vacuous against the `finishFirst: false` run (3.9)
-- [ ] No assertion compares wall-clock times; TC-25/TC-26 use event order on `trace`
+- [x] Workflow tests exercise the real script against the fake runtime queue
+- [x] Before implementation the tests fail because no deferral happens, not from test bugs
+- [x] TC-23 is non-vacuous (asserts a deferral actually occurred)
+- [x] TC-65 shows that at saturation a finished implementer's review gets the next slot and no task start is queued ahead of it, and is non-vacuous against the `finishFirst: false` run (3.9)
+- [x] No assertion compares wall-clock times; TC-25/TC-26 use event order on `trace`
+
+**Implementation notes (Task 7):**
+- On today's script: TC-23/TC-28 fail on the land-2 queue (today's scheduler never builds that queue), TC-24 on "slot free after land 2, no task request before the next end", TC-65 on "a third task requested at start", TC-26 and TC-29 on "no `finish-first` log line". TC-25, TC-27 and TC-63 already pass (today's script ignores `finishFirst`/`agentSlots`).
+- Every case passes `args.deps`/`args.remaining` (as the skill does) except TC-63, which keeps the hand-built args of the existing case.
+- TC-25 gives every timed fake agent (tasks, landings) the same 10 ms: Node fires timers of one duration in insertion order, so the two runs' event order cannot drift apart on a loaded machine. Durations are not fixed by the test plan for the TC-5 graph.
+- TC-26 wraps the fake project so plan, full gate, fix, re-check and resolve agents sleep 1 ms first (the fake ends them without a timer; a queued one would otherwise start and end in the same microtask run as the agent whose end freed its slot, ahead of that agent's own follow-up). It adds one revision of task 1 (`reviews: {1: ['changes', 'approve']}`) and a second run with `fullRed: true` so revise, full-gate fix and re-check are exercised; it also asserts a `finish-first` line, since the case is "during a deferral".
+- TC-29 builds its periods with one runtime slot (`slots: 1`, `agentSlots: 1`, `maxConcurrent: 1`): the next ready task is held while the previous task's review, land and landing plan run (≥ 3 ends, checked on `trace`); 2 tasks give one period, 3 tasks two. These periods come from the free-slot cap (3.9) rather than a queued finish-type agent: with FIFO and one freed slot per end, a queued finish agent sees ≥ 3 ends only behind a queue of ≥ 2, which the TC-23 shape cannot build without also creating other periods whose count would depend on scheduling details.
+- The suite ends with `process.exit` and bounds each run at 20 s, so a run that never settles fails the suite instead of hanging it.
 
 **Dependencies:** Task 1 (runWorkflow `slots`/`trace`, fake_project.mjs)
 **Complexity:** Medium
@@ -258,7 +279,7 @@ Separately, in `tests/test_worktree_create_lock.py` (no script involved, so Task
 ---
 
 ### Task 9: Report worktree creation failures as ERROR outcomes and serialize git worktree creation
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 2.1, 2.4
 **Description:** Task agents now run `ck worktree create … --json` themselves and must read a creation failure from its JSON (2.4). In `src/claude_kiro/worktrees.py`:
@@ -271,11 +292,11 @@ Every other state, detail and exit code (CREATED/EXISTS/BUSY, install ERROR) and
 **Verified by:** Task 8
 
 **Acceptance:**
-- [ ] Two or more concurrent `ck worktree create` runs for different tasks of one repo all succeed (no git index/lock-file collision) (2.1)
-- [ ] The install step runs outside the lock, so installs of different tasks overlap
-- [ ] A failed `git worktree add` (e.g. a bad `--base`) gives a JSON ERROR entry with git's message and exit 3 instead of a plain `❌` line (2.4, TC-64)
-- [ ] An existing unclaimed worktree still reports `EXISTS`; a live claim or uncommitted work still reports BUSY with exit code as today
-- [ ] Existing worktree CLI and landing tests pass unchanged
+- [x] Two or more concurrent `ck worktree create` runs for different tasks of one repo all succeed (no git index/lock-file collision) (2.1)
+- [x] The install step runs outside the lock, so installs of different tasks overlap
+- [x] A failed `git worktree add` (e.g. a bad `--base`) gives a JSON ERROR entry with git's message and exit 3 instead of a plain `❌` line (2.4, TC-64)
+- [x] An existing unclaimed worktree still reports `EXISTS`; a live claim or uncommitted work still reports BUSY with exit code as today
+- [x] Existing worktree CLI and landing tests pass unchanged
 
 **Dependencies:** Task 8 (its tests are the oracle)
 **Complexity:** Low
@@ -284,7 +305,7 @@ Every other state, detail and exit code (CREATED/EXISTS/BUSY, install ERROR) and
 ---
 
 ### Task 10: Write the scheduler property tests through the bridge
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.2, 1.4, 1.5, 2.1, 2.3, 2.5, 3.1, 3.2, 3.3, 3.4, 3.5, 3.9, NFR-1, NFR-6
 **Properties:** P-6, P-7, P-8, P-9, P-10, P-11, P-21, P-22, P-23
@@ -305,10 +326,18 @@ No property uses a wall-clock tolerance. Settings `@settings(derandomize=True, m
 **Verifies:** Task 12
 
 **Acceptance:**
-- [ ] Generators cover the domains in each row: DAGs and independent graphs, `maxConcurrent` 1-4/None, `mergeBatch` 1-4, `slots` 1-6/None, review durations shorter and longer than tasks, `checkRed`, review `changes`, `failUntil`, `relink`, `fullGateEvery`
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] Properties judge by the fake runtime's own `trace` and the script's result, not by script internals
-- [ ] Before implementation they fail for missing behaviour (plan storms, no deferral, worktree created by plan), not test bugs
+- [x] Generators cover the domains in each row: DAGs and independent graphs, `maxConcurrent` 1-4/None, `mergeBatch` 1-4, `slots` 1-6/None, review durations shorter and longer than tasks, `checkRed`, review `changes`, `failUntil`, `relink`, `fullGateEvery`
+- [x] Settings are deterministic (derandomized, no database)
+- [x] Properties judge by the fake runtime's own `trace` and the script's result, not by script internals
+- [x] Before implementation they fail for missing behaviour (plan storms, no deferral, worktree created by plan), not test bugs
+
+**Implementation notes (Task 10):**
+- On today's script P-6 (plan storm: 8 plan agents for 4 landings), P-7 (plan prompt creates worktrees), P-8 (task requested while `land 2` queued), P-11 (ready task waits for a plan agent), P-22 (decision marker missing) and P-23 (task request with all slots busy) fail for the missing behaviour. P-9, P-10 and P-21 pass on today's script: today never delays a finish-type request, ignores `finishFirst`, and already stops a task whose blocker says `worktree busy`; they guard that Task 12 keeps it so.
+- Every scenario runs with script readiness: `args.deps`/`args.remaining` are the scenario's graph and order. `prepare()` also gives every plan agent 1 ms (`planDurations`), as a real plan agent takes time.
+- The fake answers full gate, fix, re-check, resolve, final gate and report at once (no timer), so their `end` can fall between a trigger and the script's follow-up request inside one microtask flush. P-9 and P-11 therefore read "the next `end`" as the next `end` of a timer-driven agent (task, review, land, plan); ends of those instant agents in between are allowed. Without this a correct script fails P-9 (seen on today's script: `fix 1` requested after a queued plan that started and ended inside the land's flush).
+- P-10 runs on real timers, and about 1 example in 13 gives a different event order when the same configuration is run twice (timers falling due in the same millisecond). A mismatch is re-run: the relation holds when some on-run is identical to some off-run, up to six runs of each. A difference caused by the setting shows in every on-run.
+- P-11 and P-21 leave `relink` out: with a relink, which tasks merge can depend on timing, so two runs' merged sets could differ without a fault. P-11's slot rule is checked at every `end` with a readiness model rebuilt from `trace` (a land's tasks are Done when the land ends, or when its full gate ends; `checkRed` tasks are RED on their first landing).
+- P-21's reference run is the same scenario with S's tasks failing every attempt (`failUntil` 99).
 
 **Dependencies:** Task 1 (bridge, `scenarios()`)
 **Complexity:** High
@@ -317,7 +346,7 @@ No property uses a wall-clock tolerance. Settings `@settings(derandomize=True, m
 ---
 
 ### Task 11: Red-team the SHALL NOT clauses of Stories 1-3 (no idle-plan storm, no start on a guess, no touching a BUSY worktree, no new task while a finish-type agent is queued)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.5, 1.10, 2.3, 3.1, 3.8
 **Description:** Try to break each SHALL NOT clause of Stories 1, 2 and 3 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Write from requirements.md only, through `bridge.run` / `bridge.ready` (real script) and, for Story 2, the real CLI. One file per story:
@@ -332,10 +361,16 @@ No property uses a wall-clock tolerance. Settings `@settings(derandomize=True, m
 **Verifies:** Task 12
 
 **Acceptance:**
-- [ ] Every workflow case drives the real script (or the real `readyTasks` seam) via the bridge and reads only `trace`, result, prompts and log; CLI cases use real `ck` on real git
-- [ ] Each test fails before implementation for missing behaviour, not test code errors
-- [ ] Cases include near-miss ids, the plan's own output fed back, and prototype-key tricks
-- [ ] A BUSY worktree's files and claim are unchanged in every CLI case
+- [x] Every workflow case drives the real script (or the real `readyTasks` seam) via the bridge and reads only `trace`, result, prompts and log; CLI cases use real `ck` on real git
+- [x] Each test fails before implementation for missing behaviour, not test code errors
+- [x] Cases include near-miss ids, the plan's own output fed back, and prototype-key tricks
+- [x] A BUSY worktree's files and claim are unchanged in every CLI case
+
+**Implementation notes:**
+- Answers the fake project cannot produce (BUSY next to `status:'done'`/`gatePassed:true`, BUSY only in `blocker` text) and prototype-named Done ids (the fake's own `chainLengths` crashes on `d in dependents` for `constructor`/`__proto__`) go through `run_driver` in `tests/test_worktree_redteam.py`: a one-shot Node driver written to a temp dir that runs the real script with the same `load_workflow.mjs` / `fake_project.mjs`, replacing only the first task agent's answer (`override`) or merging extra `deps`/`done` into every plan answer (`plan_patch`, exactly what `ck plan` would print for those ids). No harness file was changed.
+- Before Task 12, 96 of 129 cases fail for missing behaviour (no decisions block, no create/claim lines in the task prompt, no load-time validation of `finishFirst`/`agentSlots`, BUSY not recognised in the result, idle-plan back-to-back, tasks started on dangling deps, task starts while a review/land queues). The other 33 cover SHALL NOT clauses today's script already happens to satisfy (for example an upper-case BUSY from the fake under `continue`, or pressure scenarios where today's per-event plan agents keep the queue short); they stay as regression guards.
+- 1.10 oracle: near-miss string ids (`"02"`, `"2 "`, `"Task 2"`, `"２"`, `""`, worktree-path forms…) are unknown and never started; a numeric `2` (not a string, never emitted by `ck plan`) is only required never to start before task 2 merges.
+- 1.5 oracle: a plan request with no `land … end` since the previous plan request is an idle plan; consecutive idle plans need a `land … end` or `task … end` between them.
 
 **Dependencies:** Task 1 (bridge, fake_project `worktree` option, runWorkflow `slots`/`trace`)
 **Complexity:** High
@@ -550,7 +585,7 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 ---
 
 ### Task 18: Switch this project's verify to pytest-xdist
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 5.1, 5.2, 5.3, 5.4
 **Description:** Add `pytest-xdist>=3.6` to `[dependency-groups] dev` in `pyproject.toml` and re-lock with `uv lock` (commit `uv.lock`). Change `specs/ck.json` `verify` to `["uv run pytest -q -n auto"]`; leave the collection command as is (it uses `--collect-only`). Confirm test ids are stable across processes: run `PYTHONHASHSEED=1 uv run pytest --collect-only -q > /tmp/ids1 && PYTHONHASHSEED=2 uv run pytest --collect-only -q > /tmp/ids2 && diff /tmp/ids1 /tmp/ids2`; if any id depends on pid, hash seed or time, give that parametrization fixed `ids=` in the source under test only if it is not a test-plan-owned file, otherwise report it as a blocker. Confirm with `CK_COMPARE_PARALLEL=1 uv run pytest -q tests/test_parallel_suite.py -k compare` that the suite gives the same results under `-n auto` as serially. The task Verify deliberately does not run the whole suite: tests written ahead of other open impl tasks are still red at this point, identically in both modes; the final gate runs the whole suite under the new verify.
@@ -562,10 +597,10 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 **Verified by:** Task 15
 
 **Acceptance:**
-- [ ] `pyproject.toml` dev group includes pytest-xdist and `uv.lock` is in sync (`uv lock --check`) (5.1)
-- [ ] `specs/ck.json` verify runs pytest with `-n auto` (5.2)
-- [ ] Collecting the suite with two different `PYTHONHASHSEED` values gives identical ids (5.3)
-- [ ] The suite gives the same (nodeid, outcome) set under `-n auto` as serially, with no test skipped, deselected or lost relative to serial (TC-41 compare run) (5.4)
+- [x] `pyproject.toml` dev group includes pytest-xdist and `uv.lock` is in sync (`uv lock --check`) (5.1)
+- [x] `specs/ck.json` verify runs pytest with `-n auto` (5.2)
+- [x] Collecting the suite with two different `PYTHONHASHSEED` values gives identical ids (5.3)
+- [x] The suite gives the same (nodeid, outcome) set under `-n auto` as serially, with no test skipped, deselected or lost relative to serial (TC-41 compare run) (5.4)
 
 **Dependencies:** Task 15 (its tests are the oracle)
 **Complexity:** Low
