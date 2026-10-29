@@ -84,7 +84,7 @@ Add self-checks to `tests/test_stats_helpers.py` that exercise only the harness 
 ---
 
 ### Task 3: Add the pure agent-mode rules (role grammar, run ids, markers, outcome, backfill grouping)
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.1, 2.2, 2.3, 3.4, 3.7, 3.13, 3.14, 3.17, 4.1, 4.2, 4.3, 4.4, 4.6, 6.1, 6.2, 6.6, 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.8
 **Description:** Implement every pure Decision Seam of design.md except A15/A16. No I/O, no clock, no network; every input is an argument. This task owns the Harness Contract seams `SPEC_AGENT_TYPES`, `AGENT_CREATE_STEPS`, `is_agent_run_id`, `new_agent_run_id`, `parse_agent_description`, `implement_outcome`, `implement_summary`, `open_manifest_due`, `classify_manifest` and `group_backfill` (see the naming rule above) and adds all of them to `claude_kiro.analytics._EXPORTS`.
@@ -99,16 +99,16 @@ Add self-checks to `tests/test_stats_helpers.py` that exercise only the harness 
 **Verify:** `uv run pytest -q tests/test_stats_properties_agents.py` `uv run pytest -q -n auto tests/test_stats_roles.py tests/test_stats_properties_roles.py tests/test_stats_label_corpus.py`
 **Verified by:** Task 2 (properties over every seam this task owns)
 **Acceptance:**
-- [ ] `valid_run_id` / `is_agent_run_id` accept only strings fully matching `ag_[0-9a-f]{8}`; `new_run_id` never returns an id in `taken` and raises after the attempt budget
-- [ ] `parse_marker` matches only at index 0; `select_marked` keeps exactly the metas carrying the given run's marker, in input order, regardless of agent type
-- [ ] Every template in the design table, rendered with sample values, is `matched` by `match_agent` for each spec agent type and `general-purpose`, with role, task, attempt (`retry k` -> `k + 1`) and round as specified; `create <step>` gives the same role and phase as the equivalent spec-create label
-- [ ] Unmatched descriptions give role `other`, `matched=False`, and no task/attempt/round
-- [ ] `template_violations` flags any placeholder outside `{run_id, N, k}` (so `<step>`, `<lens>`, `<p>` are flagged too) and any template not starting with `[ck:<run_id>] `
-- [ ] `implement_outcome` returns all-None for an unusable report and maps failed -> `failed`, blocked/not started -> `blocked`, else `complete`, judged over `run_tasks` only when given (tasks the run never named never change it; an empty set gives None); merged excludes `done_at_start`, or (unknown) any merge outside `[start_ms, end_ms]`
-- [ ] `classify_open_manifest` returns `collect` only when strictly older than 6 h, `malformed` on a failed check; `check_manifest` fails on a missing, naive or unparseable `startTime`
-- [ ] `decide_collect_args` exits 2 on every forbidden combination and bad `--gap`, points `--run ag_...` at `--agents`, and returns exit 0 for id errors under `--auto`
-- [ ] `candidate_reason` admits only unmarked spec-agent-type metas outside `subagents/workflows/` and returns the Harness reason strings otherwise; `group_agents` is deterministic (same input -> same group ids) and splits only where the end-to-start gap exceeds the threshold; a spec-less joiner never moves its group's `start_ms`/`end_ms`
-- [ ] `match_label` behaviour and all existing role tests are unchanged
+- [x] `valid_run_id` / `is_agent_run_id` accept only strings fully matching `ag_[0-9a-f]{8}`; `new_run_id` never returns an id in `taken` and raises after the attempt budget
+- [x] `parse_marker` matches only at index 0; `select_marked` keeps exactly the metas carrying the given run's marker, in input order, regardless of agent type
+- [x] Every template in the design table, rendered with sample values, is `matched` by `match_agent` for each spec agent type and `general-purpose`, with role, task, attempt (`retry k` -> `k + 1`) and round as specified; `create <step>` gives the same role and phase as the equivalent spec-create label
+- [x] Unmatched descriptions give role `other`, `matched=False`, and no task/attempt/round
+- [x] `template_violations` flags any placeholder outside `{run_id, N, k}` (so `<step>`, `<lens>`, `<p>` are flagged too) and any template not starting with `[ck:<run_id>] `
+- [x] `implement_outcome` returns all-None for an unusable report and maps failed -> `failed`, blocked/not started -> `blocked`, else `complete`, judged over `run_tasks` only when given (tasks the run never named never change it; an empty set gives None); merged excludes `done_at_start`, or (unknown) any merge outside `[start_ms, end_ms]`
+- [x] `classify_open_manifest` returns `collect` only when strictly older than 6 h, `malformed` on a failed check; `check_manifest` fails on a missing, naive or unparseable `startTime`
+- [x] `decide_collect_args` exits 2 on every forbidden combination and bad `--gap`, points `--run ag_...` at `--agents`, and returns exit 0 for id errors under `--auto`
+- [x] `candidate_reason` admits only unmarked spec-agent-type metas outside `subagents/workflows/` and returns the Harness reason strings otherwise; `group_agents` is deterministic (same input -> same group ids) and splits only where the end-to-start gap exceeds the threshold; a spec-less joiner never moves its group's `start_ms`/`end_ms`
+- [x] `match_label` behaviour and all existing role tests are unchanged
 **Dependencies:** Task 2 (its tests are the oracle)
 **Complexity:** High
 **Risk:** normal
