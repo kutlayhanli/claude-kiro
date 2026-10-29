@@ -499,7 +499,7 @@ Each file declares its `PROPERTIES` map (`P-17`, `P-18` in `test_gate_xdist.py`;
 ---
 
 ### Task 17: Add the xdist module and cap pytest-xdist workers across concurrent ck gates
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 7.1, 7.2, 7.3
 **Description:** Owns Harness Contract item 10 (gate; design renames `gate.xdist_env`/`gate.machine_cores`/`CK_GATE_RUNDIR` to `xdist.worker_cap`/`verify_env`/`core_count`/`CK_GATE_REGISTRY`) and the seam of item 11 (`xdist.suggestion`, renamed from `config.xdist_suggestion`). Create `src/claude_kiro/xdist.py` per design.md "`ck gate` environment" and "Decision Seams":
