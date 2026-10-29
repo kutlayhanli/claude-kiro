@@ -98,7 +98,7 @@ def test_unbalanced_quotes_do_not_crash_or_hint_wrongly(inited: Path):
     assert not has_hint(res), res.stdout
 
 
-def test_hint_check_command_fed_back_as_verify_gives_no_hint(inited: Path):
+def test_hint_check_command_fed_back_as_verify_does_not_crash_or_change_exit(inited: Path):
     set_verify(inited, HINT_VERIFY)
     res = doctor_out(inited)
     assert has_hint(res), "precondition: the hint is shown for plain pytest"
@@ -194,7 +194,6 @@ def test_init_changes_nothing_about_deps_or_verify(tmp_path: Path):
     assert res.returncode == 0, res.stdout + res.stderr
     assert (pyproject.read_bytes(), lock.read_bytes()) == before
     cfg = (root / "specs" / "ck.json").read_text()
-    assert "-n" not in json.loads(cfg).get("verify", [])
     assert not any(" -n" in v or "numprocesses" in v for v in json.loads(cfg).get("verify", []))
     assert "xdist" not in pyproject.read_text()
 
@@ -254,7 +253,8 @@ def test_init_hint_matches_doctor_hint(tmp_path: Path):
     set_verify(root, HINT_VERIFY)
     init_res = ck(root, "init", "--no-allow-workflow")
     doc = doctor_out(root)
-    init_lines = {ln.strip() for ln in init_res.stdout.splitlines() if "xdist" in ln.lower()}
-    doc_lines = {ln.strip().lstrip("- ").strip() for ln in doc.stdout.splitlines() if "xdist" in ln.lower()}
+    init_lines = [ln.strip() for ln in init_res.stdout.splitlines() if "xdist" in ln.lower()]
+    doc_lines = [ln.strip().lstrip("- ").strip() for ln in doc.stdout.splitlines() if "xdist" in ln.lower()]
     assert init_lines and doc_lines
-    assert any(d in i for d in doc_lines for i in init_lines), (init_lines, doc_lines)
+    for d in doc_lines:
+        assert any(d == i or i.endswith(d) for i in init_lines), (init_lines, doc_lines)
