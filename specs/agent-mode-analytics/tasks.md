@@ -62,7 +62,7 @@ Add self-checks to `tests/test_stats_helpers.py` that exercise only the harness 
 ---
 
 ### Task 2: Property tests for the pure agent-mode decision seams
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.2, 2.1, 3.1, 3.4, 3.13, 3.17, 4.1, 4.2, 4.3, 4.4, 6.1, 6.2, 6.3, 6.6, 7.1, 7.2, 7.3, 7.4, 7.5, 7.6
 **Properties:** P-1, P-2, P-3, P-4, P-5, P-7, P-8, P-9, P-10, P-11, P-12, P-18
@@ -72,11 +72,11 @@ Add self-checks to `tests/test_stats_helpers.py` that exercise only the harness 
 **Verify:** `uv run pytest -q tests/test_stats_properties_agents.py`
 **Verifies:** Task 3 (owns every seam these properties call)
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in each P-row (near-miss ids, marker variants, old-style descriptions, timezone forms)
-- [ ] Settings are deterministic (`derandomize=True`, `database=None`)
-- [ ] Tests call the decision seams directly, not the CLI, and mock nothing
-- [ ] `PROPERTIES` lists exactly P-1 to P-5, P-7 to P-12 and P-18, each pointing at an existing test name, so `ck gate` sees full coverage
-- [ ] Before the implementation exists each test fails with `AttributeError` from `claude_kiro.analytics` (missing seam), not a collection error
+- [x] Generators cover every surface form and negative listed in each P-row (near-miss ids, marker variants, old-style descriptions, timezone forms)
+- [x] Settings are deterministic (`derandomize=True`, `database=None`)
+- [x] Tests call the decision seams directly, not the CLI, and mock nothing
+- [x] `PROPERTIES` lists exactly P-1 to P-5, P-7 to P-12 and P-18, each pointing at an existing test name, so `ck gate` sees full coverage
+- [x] Before the implementation exists each test fails with `AttributeError` from `claude_kiro.analytics` (missing seam), not a collection error
 **Dependencies:** Task 1 (uses `SPEC_TYPES`, `OLD_DESCRIPTIONS`, `described`)
 **Complexity:** High
 **Risk:** normal
