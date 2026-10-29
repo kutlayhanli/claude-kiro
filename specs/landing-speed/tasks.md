@@ -226,7 +226,7 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 ---
 
 ### Task 8: Write tests that run the task prompt's worktree commands through the real CLI
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.1, 2.2, 2.3, 2.4
 **Description:** Implement TC-15, TC-16, TC-19 in `tests/test_landing_worktree_cli.py`. Set up a real git repo (shape of `tests/test_worktree_cli.py::repo`) with spec `demo` and branch `integrate/demo`. Get the `task 1` prompt the real script produces via `bridge.run` with `root`/`worktreeDir`/`into` pointing at that repo; extract the `worktree create` and `worktree claim` command lines from the prompt text; run them through the real `ck` CLI (`python -m claude_kiro.cli` subprocess, argv split with `shlex`).
@@ -245,10 +245,17 @@ Separately, in `tests/test_worktree_create_lock.py` (no script involved, so Task
 **Verifies:** Task 9, Task 12
 
 **Acceptance:**
-- [ ] Commands come from the prompt the real script produced, and run through the real `ck` CLI on real git; no string-only assertions stand in for execution
-- [ ] Before implementation the prompt tests fail because the task prompt has no create/claim lines, and TC-64 fails because a failed `git worktree add` prints no JSON ERROR entry, not from fixture errors; the concurrent case is red-before only if the collision was reproduced (its docstring says which)
-- [ ] TC-19 shows the BUSY worktree's contents are left untouched
-- [ ] No mocks of `claude_kiro`, git or the filesystem
+- [x] Commands come from the prompt the real script produced, and run through the real `ck` CLI on real git; no string-only assertions stand in for execution
+- [x] Before implementation the prompt tests fail because the task prompt has no create/claim lines, and TC-64 fails because a failed `git worktree add` prints no JSON ERROR entry, not from fixture errors; the concurrent case is red-before only if the collision was reproduced (its docstring says which)
+- [x] TC-19 shows the BUSY worktree's contents are left untouched
+- [x] No mocks of `claude_kiro`, git or the filesystem
+
+**Implementation notes (Task 8):**
+- Concurrent creates: 12 threads x 5 rounds (60 `ck worktree create --install --base main --json` subprocesses on one repo) did not reproduce a git lock-file collision without `create_lock`, so `test_concurrent_creates_all_succeed_and_installs_overlap` is a regression guard and passes before Task 9 (its docstring says so).
+- The prompt tests extract the whole `ck -C \S+ worktree create demo 1 ...` command and the first whole `ck -C \S+ worktree claim demo 1 ...` command after it, every flag included, up to the end of the command (newline, closing quote or backtick, sentence punctuation, a double space or a " (" aside), and run them as written; they also assert the create carries `--json` and runs from `root` with `--install --base integrate/demo`, and the claim targets `<worktreeDir>/demo-task-1` (test-plan Harness Contract 5). TC-19(b) also asserts the first-attempt claim carries no `--takeover`. TC-19(a) also asserts some paragraph of the prompt pairs BUSY with "stop" / "do not claim".
+- The install step in the fixture writes `.venv/installed-by-ck` (ignored), so a rerun still sees a clean worktree.
+- Extra case beyond the TC rows: `test_tc64_other_tasks_in_the_same_call_keep_their_own_outcome` (design: other tasks in the same call still get their own outcome).
+- Verified the command-running paths once against a synthetic design-shaped prompt (scratch test, not committed): all four prompt tests pass, so before Task 12 they fail only on the missing prompt lines.
 
 **Dependencies:** Task 1 (bridge)
 **Complexity:** Medium
