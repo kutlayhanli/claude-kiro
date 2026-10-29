@@ -474,7 +474,7 @@ Each file declares its `PROPERTIES` map (`P-17`, `P-18` in `test_gate_xdist.py`;
 ---
 
 ### Task 16: Red-team Story 6's SHALL NOT clause (a gone gate is never counted)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.5
 **Description:** Try to break each SHALL NOT clause of Story 6 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Write from requirements.md only, with real `ck gate` subprocesses and a per-test `CK_GATE_REGISTRY` (set in the test's own fixture, not relying on Task 15's conftest). Ideas: a gate SIGKILLed mid-verify; a gate whose verify command forks a long-lived child that outlives it; leftover registry entries copied from a live gate's directory listing (the system's own files fed back) after that gate ends; stray non-gate files and subdirectories in the registry (must survive untouched); a registry entry file made read-only; two gates started in the same millisecond; a registry path containing spaces and unicode. After each, a fresh gate must see `PYTEST_XDIST_AUTO_NUM_WORKERS == str(core_count())` (or only live gates counted), and the gate must still run its verify commands.
@@ -484,9 +484,11 @@ Each file declares its `PROPERTIES` map (`P-17`, `P-18` in `test_gate_xdist.py`;
 **Verifies:** Task 17
 
 **Acceptance:**
-- [ ] Every case uses real `ck gate` processes and the real filesystem; no `claude_kiro` mocks
-- [ ] Each test fails before implementation for missing behaviour, not test code errors
-- [ ] Teardown kills every process group it started
+- [x] Every case uses real `ck gate` processes and the real filesystem; no `claude_kiro` mocks
+- [x] Each test fails before implementation for missing behaviour, not test code errors
+- [x] Teardown kills every process group it started
+
+**Implementation notes:** 11 cases in `tests/test_gate_xdist_redteam.py`: gate+verify SIGKILLed as a group (3 times; and 4 holding gates at once); only the gate process SIGKILLed while its verify child lives on; a verify command that forks a detached child outliving the gate; two gates started back to back; a live gate's registry entries copied and restored after it ends (two rounds with two different live gates, then both sets written back together); gate-shaped leftovers naming live non-gate PIDs (this test, pid 1, parent); a read-only leftover entry; a dangling gate-named symlink; stray files, near-miss names, `.reg-*`, a nested and a gate-named subdirectory (all must survive byte-identical); a registry path with spaces, unicode, a quote and `$HOME`. The probe's output directory and hold file travel through `PROBE_OUT` (relative names), because tmp paths contain "pytest" and `ck gate` would otherwise treat the probe as a pytest command and run it as the collection check. Before Task 17 every case fails with the probe seeing `None` for `PYTEST_XDIST_AUTO_NUM_WORKERS`. Because the 6.6 fallback also yields the full core count, every gate run asserts the output has no `gate registry ... unusable` line, and every case ends with `assert_counts_live`: with the planted entries still present (re-planted where a correct implementation removes them), a gate beside a live holding gate must see `cores // 2`, then `cores` once it ends. The module is skipped on machines with fewer than 2 cores, where `cores // 2 == cores`.
 
 **Dependencies:** None
 **Complexity:** Medium
