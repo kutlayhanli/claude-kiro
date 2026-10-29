@@ -474,7 +474,7 @@ Each file declares its `PROPERTIES` map (`P-17`, `P-18` in `test_gate_xdist.py`;
 ---
 
 ### Task 16: Red-team Story 6's SHALL NOT clause (a gone gate is never counted)
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 6.5
 **Description:** Try to break each SHALL NOT clause of Story 6 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Write from requirements.md only, with real `ck gate` subprocesses and a per-test `CK_GATE_REGISTRY` (set in the test's own fixture, not relying on Task 15's conftest). Ideas: a gate SIGKILLed mid-verify; a gate whose verify command forks a long-lived child that outlives it; leftover registry entries copied from a live gate's directory listing (the system's own files fed back) after that gate ends; stray non-gate files and subdirectories in the registry (must survive untouched); a registry entry file made read-only; two gates started in the same millisecond; a registry path containing spaces and unicode. After each, a fresh gate must see `PYTEST_XDIST_AUTO_NUM_WORKERS == str(core_count())` (or only live gates counted), and the gate must still run its verify commands.
