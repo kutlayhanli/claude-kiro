@@ -275,7 +275,7 @@ Every other state, detail and exit code (CREATED/EXISTS/BUSY, install ERROR) and
 ---
 
 ### Task 10: Write the scheduler property tests through the bridge
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 1.2, 1.4, 1.5, 2.1, 2.3, 2.5, 3.1, 3.2, 3.3, 3.4, 3.5, 3.9, NFR-1, NFR-6
 **Properties:** P-6, P-7, P-8, P-9, P-10, P-11, P-21, P-22, P-23
@@ -296,10 +296,18 @@ No property uses a wall-clock tolerance. Settings `@settings(derandomize=True, m
 **Verifies:** Task 12
 
 **Acceptance:**
-- [ ] Generators cover the domains in each row: DAGs and independent graphs, `maxConcurrent` 1-4/None, `mergeBatch` 1-4, `slots` 1-6/None, review durations shorter and longer than tasks, `checkRed`, review `changes`, `failUntil`, `relink`, `fullGateEvery`
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] Properties judge by the fake runtime's own `trace` and the script's result, not by script internals
-- [ ] Before implementation they fail for missing behaviour (plan storms, no deferral, worktree created by plan), not test bugs
+- [x] Generators cover the domains in each row: DAGs and independent graphs, `maxConcurrent` 1-4/None, `mergeBatch` 1-4, `slots` 1-6/None, review durations shorter and longer than tasks, `checkRed`, review `changes`, `failUntil`, `relink`, `fullGateEvery`
+- [x] Settings are deterministic (derandomized, no database)
+- [x] Properties judge by the fake runtime's own `trace` and the script's result, not by script internals
+- [x] Before implementation they fail for missing behaviour (plan storms, no deferral, worktree created by plan), not test bugs
+
+**Implementation notes (Task 10):**
+- On today's script P-6 (plan storm: 8 plan agents for 4 landings), P-7 (plan prompt creates worktrees), P-8 (task requested while `land 2` queued), P-11 (ready task waits for a plan agent), P-22 (decision marker missing) and P-23 (task request with all slots busy) fail for the missing behaviour. P-9, P-10 and P-21 pass on today's script: today never delays a finish-type request, ignores `finishFirst`, and already stops a task whose blocker says `worktree busy`; they guard that Task 12 keeps it so.
+- Every scenario runs with script readiness: `args.deps`/`args.remaining` are the scenario's graph and order. `prepare()` also gives every plan agent 1 ms (`planDurations`), as a real plan agent takes time.
+- The fake answers full gate, fix, re-check, resolve, final gate and report at once (no timer), so their `end` can fall between a trigger and the script's follow-up request inside one microtask flush. P-9 and P-11 therefore read "the next `end`" as the next `end` of a timer-driven agent (task, review, land, plan); ends of those instant agents in between are allowed. Without this a correct script fails P-9 (seen on today's script: `fix 1` requested after a queued plan that started and ended inside the land's flush).
+- P-10 runs on real timers, and about 1 example in 13 gives a different event order when the same configuration is run twice (timers falling due in the same millisecond). A mismatch is re-run: the relation holds when some on-run is identical to some off-run, up to six runs of each. A difference caused by the setting shows in every on-run.
+- P-11 and P-21 leave `relink` out: with a relink, which tasks merge can depend on timing, so two runs' merged sets could differ without a fault. P-11's slot rule is checked at every `end` with a readiness model rebuilt from `trace` (a land's tasks are Done when the land ends, or when its full gate ends; `checkRed` tasks are RED on their first landing).
+- P-21's reference run is the same scenario with S's tasks failing every attempt (`failUntil` 99).
 
 **Dependencies:** Task 1 (bridge, `scenarios()`)
 **Complexity:** High

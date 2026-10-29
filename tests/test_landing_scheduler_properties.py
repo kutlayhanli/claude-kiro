@@ -84,6 +84,16 @@ def kind(label: str) -> str:
 
 FINISH_TYPE = {"review", "revise", "land"}  # the unblockers finish-first gives slots to (3.1)
 IMPLEMENTER = {"task", "retry", "revise"}  # agents that hold an implementing slot (maxConcurrent)
+# Agents the fake project answers at once, with no timer: they start and end inside the microtask flush that
+# started them, so their `end` can fall between a trigger and the script's follow-up request without the script
+# having waited for anything. Every other fake agent (task, review, land, and plan with `planDurations`, which
+# `prepare` always sets) ends from a timer, so a new flush always begins with one of their `end` events.
+INSTANT = {"full gate", "fix", "re-check", "resolve", "final gate", "report"}
+PLAN_MS = {str(k): 1 for k in range(1, 400)}  # plan k takes 1 ms, as a real plan agent takes time
+
+
+def is_instant(label: str) -> bool:
+    return kind(label) in INSTANT or label.startswith("cross-test")
 
 
 def first_task(label: str) -> Optional[str]:
@@ -124,8 +134,9 @@ _KEEP = object()
 
 def prepare(sc: Dict[str, Any], slots: Any = _KEEP, drop_relink: bool = False, **args: Any) -> Dict[str, Any]:
     """A deep copy of a `scenarios()` draw with script readiness on (args.deps, args.remaining from the scenario's
-    graph, as the skill copies them from `ck plan --json`), plus overrides."""
+    graph, as the skill copies them from `ck plan --json`), plus overrides. Plan agents take 1 ms (`PLAN_MS`)."""
     sc = copy.deepcopy(sc)
+    sc["project"]["planDurations"] = dict(PLAN_MS)
     deps = sc["project"]["deps"]
     sc["args"]["deps"] = {t: list(ds) for t, ds in deps.items()}
     sc["args"]["remaining"] = list(deps)
@@ -302,12 +313,21 @@ def test_p9_finish_type_agents_are_requested_at_their_trigger(bridge, sc, slots)
     `end` of any agent, whether or not a task start is being deferred."""
     sc = prepare(sc, slots=slots)
     out = run(bridge, sc)
-    last_end: Optional[str] = None
+    ends: List[str] = []  # labels of the `end` events so far
     for i, e in enumerate(out["trace"]):
         if e["ev"] == "end":
-            last_end = e["label"]
+            ends.append(e["label"])
         elif e["ev"] == "request" and kind(e["label"]) in ("review", "revise", "land", "full gate", "fix", "re-check"):
-            assert trigger_ok(e["label"], last_end), f"request {e['label']} at event {i}: the last end before it is {last_end!r}, not its trigger: {events(out)}"
+            # Walk back to the trigger. Only ends of INSTANT agents may lie between it and the request (they end
+            # inside the trigger's own microtask flush); any other end means the request waited for an agent.
+            between = []
+            for label in reversed(ends):
+                if trigger_ok(e["label"], label):
+                    break
+                assert is_instant(label), f"request {e['label']} at event {i} comes after end of {label}, past its trigger (ends since: {between}): {events(out)}"
+                between.append(label)
+            else:
+                raise AssertionError(f"request {e['label']} at event {i} has no trigger before it: {events(out)}")
 
 
 # --- P-10 ------------------------------------------------------------------------------------------------------
@@ -320,18 +340,22 @@ def test_p10_finish_first_changes_nothing_when_nothing_queues(bridge, sc, agent_
     and off.
 
     Each run uses real timers, so two runs of one configuration can differ when two timers fall due in the same
-    millisecond on a loaded machine. A mismatch is therefore re-run (up to three on/off pairs); a real difference
-    caused by the setting shows in every pair."""
+    millisecond (about 1 example in 13 here, more on a loaded machine). So a mismatch is re-run: the relation holds
+    when some on-run is identical to some off-run (up to six of each). A difference the setting causes shows in
+    every on-run, so no pair can match."""
     base = prepare(sc, slots=None)
     if agent_slots is not None:
         base["args"]["agentSlots"] = agent_slots
-    for _ in range(3):
-        on = run(bridge, with_finish_first(base, True))
-        off = run(bridge, with_finish_first(base, False))
-        if events(on) == events(off) and on["result"] == off["result"]:
+    ons: List[Dict[str, Any]] = []
+    offs: List[Dict[str, Any]] = []
+    key = lambda out: (events(out), out["result"])  # noqa: E731
+    for _ in range(6):
+        ons.append(run(bridge, with_finish_first(base, True)))
+        offs.append(run(bridge, with_finish_first(base, False)))
+        if any(key(a) == key(b) for a in ons for b in offs):
             return
-    assert events(on) == events(off)
-    assert on["result"] == off["result"]
+    assert events(ons[0]) == events(offs[0])
+    assert ons[0]["result"] == offs[0]["result"]
 
 
 # --- P-11 ------------------------------------------------------------------------------------------------------
@@ -352,7 +376,7 @@ def merge_resolutions(trace: List[Dict[str, Any]], check_red: Set[str]) -> List[
                 merged.add(t)
         at = i
         for j in range(i + 1, len(trace)):
-            if trace[j]["ev"] == "end":
+            if trace[j]["ev"] == "end" and not is_instant(trace[j]["label"]):
                 break
             if trace[j]["ev"] == "request" and kind(trace[j]["label"]) == "full gate":
                 at = next(k for k in range(j + 1, len(trace)) if trace[k]["ev"] == "end" and trace[k]["label"] == trace[j]["label"])
@@ -364,7 +388,9 @@ def merge_resolutions(trace: List[Dict[str, Any]], check_red: Set[str]) -> List[
 def assert_starts_at_first_free_slot(out: Dict[str, Any], sc: Dict[str, Any]) -> None:
     """3.2, 3.9: at every `end` e after which a task is ready, an implementing slot is free (maxConcurrent), and the
     agents requested and not ended plus the non-task requests the script makes before the next `end` leave a
-    runtime slot free, a first-attempt task request comes before the next `end`."""
+    runtime slot free, a first-attempt task request comes before the next `end`. "Next end" skips INSTANT agents,
+    which end inside e's own microtask flush; counting their requests and keeping them in flight only makes the
+    check apply less often."""
     trace = out["trace"]
     deps = sc["project"]["deps"]
     order = sc["args"]["remaining"]
@@ -388,7 +414,8 @@ def assert_starts_at_first_free_slot(out: Dict[str, Any], sc: Dict[str, Any]) ->
         ready = [t for t in order if t not in requested and all(d in done for d in deps[t])]
         if not ready:
             continue
-        nxt = next((j for j in range(i + 1, len(trace)) if trace[j]["ev"] == "end"), len(trace))
+        # The next end that starts a new flush (INSTANT agents end inside the current one).
+        nxt = next((j for j in range(i + 1, len(trace)) if trace[j]["ev"] == "end" and not is_instant(trace[j]["label"])), len(trace))
         window = trace[i + 1: nxt]
         window_requests = [w["label"] for w in window if w["ev"] == "request"]
         in_flight = sum(c for c in not_ended.values() if c > 0) + sum(1 for w in window_requests if not first_task(w))
