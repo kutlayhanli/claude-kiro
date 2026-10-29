@@ -35,7 +35,10 @@ class World:
         self.gh_log = self.tmp / "gh.jsonl"
         fake_gh(self.bin, self.gh_log)
         self.checkout, self.bare = kiro_checkout(self.tmp)
-        self.env = {"CLAUDE_CONFIG_DIR": str(home.root), "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}
+        # Each world gets its own local store: two worlds in one test reuse run ids, and the export ledger is keyed
+        # by run id, so a shared store would make the second world's export find nothing new.
+        self.env = {"CLAUDE_CONFIG_DIR": str(home.root), "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
+                    "XDG_DATA_HOME": str(self.tmp / "xdg-data")}
 
     def ck(self, *args: str):
         return ck_sub(*args, env=self.env, cwd=self.checkout)
