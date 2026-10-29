@@ -174,11 +174,11 @@ Add self-checks to `tests/test_stats_helpers.py` that exercise only the harness 
 **Verified by:** None
 Foundation task: its tests drive `ck stats begin` / `collect`, so its criteria are verified at Task 13 (Tasks 9, 10).
 **Acceptance:**
-- [ ] `write_manifest` creates `runs-open/<run_id>.json` with mode 0600 and the directory with mode 0700 when it creates it
-- [ ] `read_manifest` reports `open`, `closed`, `missing` or `malformed` correctly and never raises on bad JSON
-- [ ] `close_manifest` moves the file to `runs-closed/` with `closedAt` set, so `iter_open_manifests` no longer lists it
-- [ ] `taken_run_ids` contains every id in runs-open, runs-closed and runs
-- [ ] Existing record-store behaviour and tests are unchanged
+- [x] `write_manifest` creates `runs-open/<run_id>.json` with mode 0600 and the directory with mode 0700 when it creates it
+- [x] `read_manifest` reports `open`, `closed`, `missing` or `malformed` correctly and never raises on bad JSON
+- [x] `close_manifest` moves the file to `runs-closed/` with `closedAt` set, so `iter_open_manifests` no longer lists it
+- [x] `taken_run_ids` contains every id in runs-open, runs-closed and runs
+- [x] Existing record-store behaviour and tests are unchanged
 **Dependencies:** None
 **Complexity:** Low
 **Risk:** normal
