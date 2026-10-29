@@ -205,11 +205,19 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 **Verifies:** Task 12
 
 **Acceptance:**
-- [ ] Workflow tests exercise the real script against the fake runtime queue
-- [ ] Before implementation the tests fail because no deferral happens, not from test bugs
-- [ ] TC-23 is non-vacuous (asserts a deferral actually occurred)
-- [ ] TC-65 shows that at saturation a finished implementer's review gets the next slot and no task start is queued ahead of it, and is non-vacuous against the `finishFirst: false` run (3.9)
-- [ ] No assertion compares wall-clock times; TC-25/TC-26 use event order on `trace`
+- [x] Workflow tests exercise the real script against the fake runtime queue
+- [x] Before implementation the tests fail because no deferral happens, not from test bugs
+- [x] TC-23 is non-vacuous (asserts a deferral actually occurred)
+- [x] TC-65 shows that at saturation a finished implementer's review gets the next slot and no task start is queued ahead of it, and is non-vacuous against the `finishFirst: false` run (3.9)
+- [x] No assertion compares wall-clock times; TC-25/TC-26 use event order on `trace`
+
+**Implementation notes (Task 7):**
+- On today's script: TC-23/TC-28 fail on the land-2 queue (today's scheduler never builds that queue), TC-24 on "slot free after land 2, no task request before the next end", TC-65 on "a third task requested at start", TC-26 and TC-29 on "no `finish-first` log line". TC-25, TC-27 and TC-63 already pass (today's script ignores `finishFirst`/`agentSlots`).
+- Every case passes `args.deps`/`args.remaining` (as the skill does) except TC-63, which keeps the hand-built args of the existing case.
+- TC-25 gives every timed fake agent (tasks, landings) the same 10 ms: Node fires timers of one duration in insertion order, so the two runs' event order cannot drift apart on a loaded machine. Durations are not fixed by the test plan for the TC-5 graph.
+- TC-26 wraps the fake project so plan, full gate, fix, re-check and resolve agents sleep 1 ms first (the fake ends them without a timer; a queued one would otherwise start and end in the same microtask run as the agent whose end freed its slot, ahead of that agent's own follow-up). It adds one revision of task 1 (`reviews: {1: ['changes', 'approve']}`) and a second run with `fullRed: true` so revise, full-gate fix and re-check are exercised; it also asserts a `finish-first` line, since the case is "during a deferral".
+- TC-29 builds its periods with one runtime slot (`slots: 1`, `agentSlots: 1`, `maxConcurrent: 1`): the next ready task is held while the previous task's review, land and landing plan run (≥ 3 ends, checked on `trace`); 2 tasks give one period, 3 tasks two. These periods come from the free-slot cap (3.9) rather than a queued finish-type agent: with FIFO and one freed slot per end, a queued finish agent sees ≥ 3 ends only behind a queue of ≥ 2, which the TC-23 shape cannot build without also creating other periods whose count would depend on scheduling details.
+- `finish_first.test.mjs` ends with `process.exit` and bounds each run at 20 s, so a run that never settles fails the suite instead of hanging it.
 
 **Dependencies:** Task 1 (runWorkflow `slots`/`trace`, fake_project.mjs)
 **Complexity:** Medium
