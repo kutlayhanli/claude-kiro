@@ -1680,7 +1680,7 @@ exits non-zero, no branch, gh not called, files unchanged and no file added for 
 ---
 
 ### Task 45: Add ck stats submit to the command group
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9, 10.10, 10.11, 9.4
 **Description:** In `cli/stats.py`, add `submit [--to CHECKOUT] [--note] [--yes]`, following the design Data Flow.
@@ -1702,11 +1702,11 @@ print the PR URL. On failure print the error, leave the files for manual commit,
 These suites also verify the git/gh criteria of Task 37 and the end-to-end leak criteria of Task 34.
 
 **Acceptance:**
-- [ ] The diff and leak check run before the prompt; declining leaves no branch, commit or PR
-- [ ] Confirming opens one draft PR against `kutlayhanli/claude-kiro` via `gh` and prints its URL
-- [ ] A second submit does not include already submitted records; nothing new exits 0
-- [ ] A dirty checkout, existing destination, wrong repo or gh failure refuses or rolls back and marks nothing submitted
-- [ ] Files left by a decline or a gh failure are accepted by the next submit; deleted ones are re-exported (10.10); an approved note is confirmed at a terminal, and withheld (rest submitted, file left untracked and accepted by later submits) without one (10.5, 10.11)
+- [x] The diff and leak check run before the prompt; declining leaves no branch, commit or PR
+- [x] Confirming opens one draft PR against `kutlayhanli/claude-kiro` via `gh` and prints its URL
+- [x] A second submit does not include already submitted records; nothing new exits 0
+- [x] A dirty checkout, existing destination, wrong repo or gh failure refuses or rolls back and marks nothing submitted
+- [x] Files left by a decline or a gh failure are accepted by the next submit; deleted ones are re-exported (10.10); an approved note is confirmed at a terminal, and withheld (rest submitted, file left untracked and accepted by later submits) without one (10.5, 10.11)
 
 **Dependencies:** Task 42 (edits cli/stats.py and calls its export step), Task 37 (calls submit functions), Task 43 (its tests are the oracle), Task 44 (its tests are the oracle)
 **Complexity:** High

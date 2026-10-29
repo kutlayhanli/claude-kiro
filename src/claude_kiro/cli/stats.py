@@ -395,20 +395,27 @@ def _review_note(rid: str, local: dict, codes: List[str], terms) -> Optional[str
 def export_cmd(to: Optional[str], reexport: Tuple[str, ...], note: bool, yes: bool):
     """Write shareable records into a claude-kiro checkout (nothing leaves this machine)."""
     from ..analytics import export as ex
-    from ..analytics import issues, leak
 
     checkout = Path(to) if to else Path.cwd()
     if not checkout.is_dir() or not any(ex.is_target_repo(u) for _n, u in ex.remote_urls(checkout)):
         click.echo("❌ not a kutlayhanli/claude-kiro checkout; nothing written")
         sys.exit(1)
-    checkout = checkout.resolve()
+    _export_into(checkout.resolve(), reexport, note, yes)
+
+
+def _export_into(checkout: Path, reexport, note: bool, yes: bool, announce_nothing: bool = True) -> bool:
+    """The export step shared with `submit`: True when something was planned and written."""
+    from ..analytics import export as ex
+    from ..analytics import issues, leak
+
     records, _bad = store.load_records_counted()
     ledger = store.load_ledger()
     cid = _checkout_id(checkout)
     plan = ex.plan_export(records, ledger, list(reexport), cid, _present_files(checkout, ledger))
     if plan.nothing_new:
-        click.echo("ℹ️ nothing new to export")
-        return
+        if announce_nothing:
+            click.echo("ℹ️ nothing new to export")
+        return False
     if plan.restore:
         click.echo(f"ℹ️ re-exported {len(plan.restore)} record(s) whose files were missing")
 
@@ -446,3 +453,150 @@ def export_cmd(to: Optional[str], reexport: Tuple[str, ...], note: bool, yes: bo
     store.save_ledger(ledger)
     for f in files:
         click.echo(f"✓ wrote {f.rel_path}")
+    return True
+
+
+# --------------------------------------------------------------------------- submit
+
+
+def _git_lines(checkout: Path, *args: str) -> List[str]:
+    import subprocess
+
+    proc = subprocess.run(["git", "-C", str(checkout), *args], capture_output=True, text=True)
+    return [l for l in proc.stdout.split("\n") if l]
+
+
+def _unsubmitted_entries(ledger: dict, cid: str) -> dict:
+    submitted = ledger.get("submitted") or {}
+    out = {}
+    for entry in (ledger.get("exported") or {}).values():
+        if isinstance(entry, dict) and entry.get("checkout_id") == cid and entry.get("record_id") not in submitted:
+            out[entry.get("record_id")] = entry
+    return out
+
+
+def _echo_diff(files) -> None:
+    import difflib
+
+    for f in files:
+        lines = f.text.splitlines()
+        for l in difflib.unified_diff([], lines, fromfile="/dev/null", tofile=f.rel_path, lineterm=""):
+            click.echo(l)
+
+
+@stats.command("submit")
+@click.option("--to", "to", default=None, type=click.Path(), help="The claude-kiro checkout to use (default: here)")
+@click.option("--note", "--notes", "note", is_flag=True, help="Draft an issues note per record (interactive only)")
+@click.option("--yes", is_flag=True, help="Do not ask (a note still needs a terminal to be approved)")
+def submit_cmd(to: Optional[str], note: bool, yes: bool):
+    """Open a draft PR with the exported run records against kutlayhanli/claude-kiro."""
+    import secrets as _secrets
+
+    from ..analytics import export as ex
+    from ..analytics import leak, submit as sb
+
+    checkout = Path(to) if to else Path.cwd()
+    remotes = ex.remote_urls(checkout) if checkout.is_dir() else []
+    remote = sb.target_remote(remotes)
+    if remote is None:
+        click.echo("❌ not a kutlayhanli/claude-kiro checkout; nothing written")
+        sys.exit(1)
+    checkout = checkout.resolve()
+    tty = sys.stdin.isatty() and sys.stdout.isatty()
+    if sb.decide_confirmation(yes, tty, False) == "refuse_noninteractive":
+        click.echo("❌ no terminal to confirm on: pass --yes to submit without asking; nothing written")
+        sys.exit(1)
+
+    cid = _checkout_id(checkout)
+    ledger = store.load_ledger()
+    pending = _unsubmitted_entries(ledger, cid)
+    candidates = set()
+    for entry in pending.values():
+        candidates.update(f for f in entry.get("files", []) if isinstance(f, str))
+    for sub in (ledger.get("submitted") or {}).values():
+        if isinstance(sub, dict):
+            candidates.update(f for f in sub.get("withheld", []) if isinstance(f, str))
+    tracked = frozenset(_git_lines(checkout, "ls-files", "--", *sorted(candidates))) if candidates else frozenset()
+    own = frozenset(f for f in candidates if f not in tracked and (checkout / f).is_file())
+    tracked_dest = frozenset(f for f in tracked
+                             if any(f in e.get("files", []) for e in pending.values()))
+    porcelain = _git_lines(checkout, "status", "--porcelain", "--untracked-files=all")
+    pre = sb.decide_preflight(porcelain, own, tracked_dest, True)
+    if not pre.ok:
+        click.echo(f"❌ {checkout}: {pre.reason}; nothing changed")
+        sys.exit(1)
+
+    _export_into(checkout, (), note, yes, announce_nothing=False)
+
+    ledger = store.load_ledger()
+    ids = sb.select_batch(ledger, cid)
+    if not ids:
+        click.echo("ℹ️ nothing new to submit")
+        return
+    by_record = _unsubmitted_entries(ledger, cid)
+    files = []
+    shareables = []
+    for rid in ids:
+        entry = by_record[rid]
+        for rel in sorted(entry.get("files", [])):
+            path = checkout / rel
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError as e:
+                click.echo(f"❌ cannot read {rel}: {e}; nothing submitted")
+                sys.exit(1)
+            files.append(ex.PendingFile(rel, text, "", rid, rel.endswith(".md")))
+            if rel.endswith(".json"):
+                try:
+                    shareables.append(json.loads(text))
+                except ValueError:
+                    pass
+    has_notes = any(f.is_note for f in files)
+    decision = sb.decide_confirmation(yes, tty, has_notes)
+    if decision == "refuse_noninteractive":
+        click.echo("❌ no terminal to confirm on: pass --yes to submit without asking; nothing submitted")
+        sys.exit(1)
+    withheld = []
+    if decision == "skip_withhold_notes":
+        withheld = [f.rel_path for f in files if f.is_note]
+        files = [f for f in files if not f.is_note]
+        click.echo("⚠ issues note withheld: needs interactive approval")
+    summary = sb.summarize(shareables, store.machine_label())
+    token = _secrets.token_hex(4)
+    text = {"<branch>": sb.branch_name(token), "<commit>": sb.commit_message(summary),
+            "<pr-title>": sb.pr_title(summary), "<pr-body>": sb.pr_body(summary)}
+
+    records, _bad = store.load_records_counted()
+    identity = leak.git_identity(checkout)
+    terms = leak.build_terms(records, identity, leak.non_ck_workflow_names(bench.claude_home()))
+    hits = leak.scan({**{f.rel_path: f.text for f in files}, **text}, terms)
+    if hits:
+        for h in hits:
+            _echo_hit(h.file, h)
+        click.echo("❌ leak check failed; nothing committed")
+        sys.exit(1)
+    _echo_diff(files)
+    click.echo(f"✓ leak check passed ({len(files)} file(s))")
+
+    if decision == "ask":
+        try:
+            ok = click.confirm("Open a draft PR with these files?", default=False)
+        except click.Abort:
+            ok = False
+        if not ok:
+            click.echo("ℹ️ not submitted")
+            return
+    result = sb.submit_batch(checkout, remote, files, summary, sb.subprocess_runner, token=token)
+    if not result.ok:
+        click.echo(f"❌ {result.error}")
+        click.echo("files are left in the checkout for manual commit; nothing marked submitted")
+        sys.exit(1)
+    stamp = _utc_iso()
+    submitted = ledger.setdefault("submitted", {})
+    for rid in ids:
+        submitted[rid] = {"pr_url": result.pr_url, "branch": result.branch, "submitted_at": stamp,
+                          "withheld": [w for w in withheld if by_record[rid].get("files") and w in by_record[rid]["files"]]}
+    store.save_ledger(ledger)
+    if result.error:
+        click.echo(f"⚠ {result.error}")
+    click.echo(f"✓ opened draft PR: {result.pr_url}")
