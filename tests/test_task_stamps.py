@@ -29,9 +29,9 @@ def counted(monkeypatch):
     ran = []
     real = gate_mod._run
 
-    def run(command, project_dir, timeout):
+    def run(command, project_dir, timeout, *rest):
         ran.append(command)
-        return real(command, project_dir, timeout)
+        return real(command, project_dir, timeout, *rest)
 
     monkeypatch.setattr(gate_mod, "_run", run)
     return ran

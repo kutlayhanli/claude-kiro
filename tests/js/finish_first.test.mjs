@@ -317,4 +317,13 @@ await test('TC-29: one finish-first log line per deferral period, however many a
   assert.ok(held(b.trace, 1, 2) >= 3 && held(b.trace, 2, 3) >= 3, 'each period had at least 3 agent ends')
 })
 
+await test('NFR-6: slots 1 with a cross-test in flight and a held start: the ready impl task still starts and merges', async () => {
+  const deps = { 1: [], 2: [], 3: ['1', '2'] }
+  const p = project({ deps, durations: { 1: 5, 2: 30 } })
+  const agents = { ...REVIEW_ON, reviewer: { ...REVIEW_ON.reviewer, cross_test: true } }
+  const slowCross = async (prompt, opts) => { if (/^cross-test/.test(opts && opts.label)) await sleep(80); return p.agent(prompt, opts) }
+  const { result } = await run({ agent: slowCross }, { ...baseArgs, ...graphArgs(deps), wave: { 1: 1, 2: 1, 3: 2 }, tracks: { 1: 'test', 2: 'test', 3: 'impl' }, mergeBatch: 1, agents, agentSlots: 1, finishFirst: true }, 1)
+  assert.deepEqual([...result.merged].sort(), ['1', '2', '3'])
+})
+
 process.exit(process.exitCode ?? 0)

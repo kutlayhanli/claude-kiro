@@ -38,7 +38,7 @@ function fake({ deps, failUntil = {}, reviews = {}, conflictRounds = {}, redLand
       if (planFailFirst && planCalls === 1) return null
       const ready = Object.keys(deps).filter(n => !done.has(n) && deps[n].every(d => done.has(d)))
       const exclude = ((prompt.match(/--exclude ([\d,]+)/) || [])[1] || '').split(',').filter(Boolean)
-      return { done: [...done], ready: ready.filter(n => !exclude.includes(n)), busy: [], remaining: Object.keys(deps).filter(n => !done.has(n)), cycles: [], verifyCycles: [] }
+      return { done: [...done], deps, ready: ready.filter(n => !exclude.includes(n)), busy: [], remaining: Object.keys(deps).filter(n => !done.has(n)), cycles: [], verifyCycles: [] }
     }
     if (l.startsWith('task')) {
       const n = l.match(/task (\d+)/)[1]
