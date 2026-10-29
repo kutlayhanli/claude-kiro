@@ -113,7 +113,7 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 ---
 
 ### Task 4: Write the `run.finish_first` setting and runtime agent-slot tests
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 3.5, 3.6, 3.8, NFR-6
 **Properties:** P-12
@@ -124,9 +124,9 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 **Verifies:** Task 5
 
 **Acceptance:**
-- [ ] CLI tests run real `ck agents` on real config files
-- [ ] P-12 generators cover every surface form and negative in its row; settings deterministic; the property calls the coercion seam, not a server
-- [ ] Before implementation the tests fail because `run.finish_first` is an unknown setting and `runtime` is absent, not from test bugs
+- [x] CLI tests run real `ck agents` on real config files
+- [x] P-12 generators cover every surface form and negative in its row; settings deterministic; the property calls the coercion seam, not a server
+- [x] Before implementation the tests fail because `run.finish_first` is an unknown setting and `runtime` is absent, not from test bugs
 
 **Dependencies:** None
 **Complexity:** Medium
@@ -135,7 +135,7 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 ---
 
 ### Task 5: Add the run.finish_first setting and runtime agent slots to ck agents
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 3.1, 3.5, 3.6, 3.8
 **Description:** Owns Harness Contract item 8 (setting `run.finish_first`, seam `agents._coerce`). In `src/claude_kiro/agents.py` add `DEFAULTS["run"]["finish_first"] = True`, add `"finish_first"` to `ROLE_KEYS["run"]`, and put it in the boolean branch of `_coerce` so true/false/yes/no/on/off (case-insensitive) and bools are accepted and anything else raises `AgentConfigError("run.finish_first must be true or false (also yes/no, on/off)")` before `write_setting` writes anything (config file byte-identical on refusal). `null`/`none`/`default` reset to the default like every other setting: add a None pass-through to the boolean branch of `_coerce` before its bool check (today that branch raises on None), so it returns None and `write_setting` pops the key (P-12). This applies to every boolean setting, so `reviewer.enabled none` etc. also reset instead of erroring. Add `runtime_agent_slots(cpus: Optional[int], env: Mapping[str, str]) -> int`: `CK_AGENT_SLOTS` if it parses as a positive int, else `max(1, min(16, cpus - 2))`, with `cpus` None -> 1. In `src/claude_kiro/cli/agents.py`, `ck agents --json` adds top-level `"runtime": {"cpus": <int>, "agentSlots": <int>}` (cpus from the affinity mask where available, else `os.cpu_count()`, the same rule as `xdist.core_count`; `runtime_agent_slots` is the one place the documented runtime cap min(16, CPUs - 2) is computed, requirements Constraints), and the text view shows `run.finish_first` as on/off like `analytics`.
@@ -146,11 +146,11 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 **Verified by:** Task 4
 
 **Acceptance:**
-- [ ] With no setting, `ck agents --json` shows `roles.run.finish_first: true` (3.6)
-- [ ] `ck agents set run.finish_first off` (global and `--project`) stores false and the run reads it as off (3.5)
-- [ ] `null`/`none`/`default` reset `run.finish_first` to its default (true) and remove the stored key (P-12)
-- [ ] An invalid value (e.g. `maybe`, `1`, `ture`) exits non-zero with a message containing `true or false` and naming yes/no, on/off, and leaves the config file byte-identical (3.8)
-- [ ] `ck agents --json` includes `runtime.cpus` and `runtime.agentSlots`; `CK_AGENT_SLOTS=5` makes `agentSlots` 5; nothing hard-codes the runtime cap outside `runtime_agent_slots` (3.1)
+- [x] With no setting, `ck agents --json` shows `roles.run.finish_first: true` (3.6)
+- [x] `ck agents set run.finish_first off` (global and `--project`) stores false and the run reads it as off (3.5)
+- [x] `null`/`none`/`default` reset `run.finish_first` to its default (true) and remove the stored key (P-12)
+- [x] An invalid value (e.g. `maybe`, `1`, `ture`) exits non-zero with a message containing `true or false` and naming yes/no, on/off, and leaves the config file byte-identical (3.8)
+- [x] `ck agents --json` includes `runtime.cpus` and `runtime.agentSlots`; `CK_AGENT_SLOTS=5` makes `agentSlots` 5; nothing hard-codes the runtime cap outside `runtime_agent_slots` (3.1)
 
 **Dependencies:** Task 4 (its tests are the oracle)
 **Complexity:** Low
@@ -377,7 +377,7 @@ No property uses a wall-clock tolerance. Settings `@settings(derandomize=True, m
 ---
 
 ### Task 13: Write `ck stats` queue-wait tests (collection, display, JSON, old records, seam properties)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7
 **Properties:** P-13, P-14, P-15, P-16
@@ -393,11 +393,11 @@ No property uses a wall-clock tolerance. Settings `@settings(derandomize=True, m
 **Verifies:** Task 14
 
 **Acceptance:**
-- [ ] Example tests go through the real `ck stats` CLI over real run files (FakeClaudeHome); no `claude_kiro` module is mocked
-- [ ] The fixture record is produced by the pre-change collector and committed before implementation
-- [ ] Property generators cover every surface form and negative listed in P-13..P-16; settings deterministic; properties call the seams directly
-- [ ] Before implementation the tests fail because `queuedAt` is not collected and the seams/sections do not exist, not from helper bugs
-- [ ] Existing stats suites still pass with the helper additions (defaults unchanged)
+- [x] Example tests go through the real `ck stats` CLI over real run files (FakeClaudeHome); no `claude_kiro` module is mocked
+- [x] The fixture record is produced by the pre-change collector and committed before implementation
+- [x] Property generators cover every surface form and negative listed in P-13..P-16; settings deterministic; properties call the seams directly
+- [x] Before implementation the tests fail because `queuedAt` is not collected and the seams/sections do not exist, not from helper bugs
+- [x] Existing stats suites still pass with the helper additions (defaults unchanged)
 
 **Dependencies:** None
 **Complexity:** High
@@ -507,14 +507,14 @@ Each file declares its `PROPERTIES` map (`P-17`, `P-18` in `test_gate_xdist.py`;
 - `core_count()`: `len(os.sched_getaffinity(0))` where available, else `os.cpu_count()`.
 - `worker_cap(preset, cores, running)`: None if `preset` is not None (key present, any value, including ""); else `str(max(1, c // r))` with c, r clamped to ≥ 1 (None/0/negative -> 1).
 - `verify_env(base, registry)`: `dict(base)` plus `PYTEST_XDIST_AUTO_NUM_WORKERS` from `worker_cap(...)` when not None; other keys untouched.
-- `has_pytest_without_n(verify)`: first command invoking pytest (a `pytest` token, path ending in `/pytest`, or `-m pytest`) with none of `-n`, `-n<x>`, `-n=<x>`, `--numprocesses`, `--numprocesses=<x>`; `shlex.split` with `str.split` fallback; handle chained commands (`&&`, `;`) per segment so `pytest -q && ruff check .` counts and `ruff check tests/test_pytest_plugin.py` / `pip install pytest-xdist` do not.
+- `has_pytest_without_n(verify)`: first command invoking pytest (pytest in command position: after chain separators, leading `VAR=value` assignments and wrappers such as `uv run` / `poetry run` / `env` / `python -m`; the token is `pytest`, a path ending in `/pytest`, or follows `-m`; so `pip install pytest` and `echo pytest` do not count; a leading `PYTEST_ADDOPTS=` value containing a `-n` form counts as parallel) with none of `-n`, `-n<x>`, `-n=<x>`, `--numprocesses`, `--numprocesses=<x>`; `shlex.split` with `str.split` fallback; handle chained commands (`&&`, `;`) per segment so `pytest -q && ruff check .` counts and `ruff check tests/test_pytest_plugin.py` / `pip install pytest-xdist` do not.
 - `suggestion(verify)`: the exact hint text from design.md with `<cmd>` = the pytest prefix of that command (as `config.collect_command` derives it), or None.
 In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole run (printing one line `ck gate: gate registry <path> unusable (<reason>); counting only this gate for xdist workers` when the slot or count is unavailable, at most once per gate run however many verify commands it has, 6.6), `_run(command, project_dir, timeout, env=None)` passes `env` to `subprocess.run`, and before each verify command `run_gate` builds the env with `xdist.verify_env(os.environ, registry)`. Commands are never rewritten (6.7). This covers `ck gate`, the in-process landing gate and the done-verify hook since all call `run_gate`.
 **Files:**
 - `src/claude_kiro/xdist.py` - new module: registry, worker cap, env, core count, doctor/init hint
 - `src/claude_kiro/gate.py` - `gate_slot` around `run_gate`; `_run` env parameter; `verify_env` per verify command
-**Verify:** `uv run pytest -q tests/test_gate_xdist.py tests/test_xdist_hint.py tests/test_gate_xdist_redteam.py`
-**Verified by:** Task 15, Task 16
+**Verify:** `uv run pytest -q tests/test_gate_xdist.py tests/test_xdist_hint.py tests/test_gate_xdist_redteam.py` and, for the command-position rule, the `has_pytest_without_n` cases of `tests/test_doctor_xdist_redteam.py`
+**Verified by:** Task 15, Task 16, Task 20
 
 **Acceptance:**
 - [ ] With `PYTEST_XDIST_AUTO_NUM_WORKERS` unset and one other live gate, a verify command sees `str(max(1, cores // 2))`; alone it sees `str(cores)`; with more gates than cores it sees `"1"` (6.1, 6.3, 6.4)
@@ -558,7 +558,7 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 ---
 
 ### Task 19: Write `ck doctor` / `ck init` xdist hint tests (Story 7)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.1, 7.2, 7.3, 7.4, 7.5
 **Properties:** P-20
@@ -569,9 +569,9 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 **Verifies:** Task 21
 
 **Acceptance:**
-- [ ] Tests run real `ck doctor` / `ck init` and execute the hint's command in a real shell against real pytest projects
-- [ ] P-20 covers every combination in its row with real subprocesses
-- [ ] Before implementation the tests fail because no hint is printed and `claude_kiro.xdist` is missing, not from fixture bugs
+- [x] Tests run real `ck doctor` / `ck init` and execute the hint's command in a real shell against real pytest projects
+- [x] P-20 covers every combination in its row with real subprocesses
+- [x] Before implementation the tests fail because no hint is printed and `claude_kiro.xdist` is missing, not from fixture bugs
 
 **Dependencies:** None
 **Complexity:** Medium
@@ -580,7 +580,7 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 ---
 
 ### Task 20: Red-team Story 7's SHALL NOT clauses (no false hint, init changes nothing, doctor exit unchanged)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.3, 7.4, 7.5
 **Description:** Try to break each SHALL NOT clause of Story 7 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Write from requirements.md only, through real `ck doctor` / `ck init`. Ideas: verify commands that already parallelise in odd forms (`-n0`, `-n=auto`, `--numprocesses auto`, `-n` inside `PYTEST_ADDOPTS=-n auto pytest`); commands that only mention pytest (`pip install pytest`, `echo pytest`, `ruff check tests/test_pytest_x.py`, `pytest-free`); unbalanced quotes that break `shlex`; the hint's own check command fed back as the verify command; verify not a list or containing non-strings; `ck init` run twice and on an existing `specs/ck.json` (verify, pyproject and lock files byte-identical); doctor exit codes compared with and without hint across healthy and broken states.
@@ -590,9 +590,11 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 **Verifies:** Task 21
 
 **Acceptance:**
-- [ ] Cases run the real CLI on real temp repos
-- [ ] Each test fails before implementation for missing behaviour (or documents a current pass that must stay a pass), not test code errors
-- [ ] Files `ck init` must not change are compared byte for byte
+- [x] Cases run the real CLI on real temp repos
+- [x] Each test fails before implementation for missing behaviour (or documents a current pass that must stay a pass), not test code errors
+- [x] Files `ck init` must not change are compared byte for byte
+
+**Notes:** Non-string verify items already crash ck doctor (main.py Verify commands line) independent of the hint, so those shapes are not asserted. Task 21 must decide whether `doctor` tolerates non-string verify items, since it will call `xdist.suggestion` on the same unvalidated list; the malformed-verify test covers str/dict/null only.
 
 **Dependencies:** None
 **Complexity:** Low
