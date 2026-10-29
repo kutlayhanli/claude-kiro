@@ -217,6 +217,7 @@ def test_tc13_marked_agents_of_five_roles_are_collected(env):
     ]
     ta = add_agents(w, mp, marked + noise)
     w.sess.implement_run()  # a workflow run in the same session
+    manifest_start = start_ms(mp)  # read before collect: a collected run's manifest is closed (3.8)
     out = collect_agents(env, rid, cwd=w.repo)
     assert out.exit_code == 0, out.output
     data = json.loads(out.stdout)
@@ -234,7 +235,7 @@ def test_tc13_marked_agents_of_five_roles_are_collected(env):
     assert not [m for m in rec["missing"] if m.get("what") == "result"]
     assert isinstance(rec["wallMs"], int) and rec["wallMs"] > 0
     first_start = min(a["startedAtMs"] for a in rec["agents"])
-    assert first_start > start_ms(mp)
+    assert first_start > manifest_start
     text = collect_agents(env, rid, cwd=w.repo, as_json=False)
     assert text.exit_code == 0 and str(record_path(env, rid)) in text.stdout
 
@@ -887,7 +888,7 @@ def test_tc31_non_template_descriptions_are_other_and_shown_in_stats(env):
     rec = load_record(env.xdg, rid)
     assert [a["role"] for a in rec["agents"]] == ["other"] * 4
     assert rec["byRole"]["other"]["agents"] == 4
-    out = stats("show", env=env, cwd=w.repo)
+    out = stats("show", rid, env=env, cwd=w.repo)  # the per-run view carries the `other:` line
     assert out.exit_code == 0, out.output
     lines = [ln for ln in out.stdout.splitlines() if ln.startswith("other:")]
     assert len(lines) == 1 and "4 agents" in lines[0], out.stdout

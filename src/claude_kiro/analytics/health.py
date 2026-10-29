@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Literal, Mapping, Optional, Sequence
 
-from . import runfile
+from . import agentrun, runfile, store
 
 
 @dataclass(frozen=True)
@@ -15,7 +15,8 @@ class DoctorFinding:
     message: str
 
 
-def decide(newest: Optional[runfile.FormatCheck], auto_collect: bool, uncollected: int) -> List[DoctorFinding]:
+def decide(newest: Optional[runfile.FormatCheck], auto_collect: bool, uncollected: int,
+           stale_manifests: int = 0, bad_manifests: int = 0) -> List[DoctorFinding]:
     out: List[DoctorFinding] = []
     if newest is not None and not newest.ok:
         detail = "; ".join(newest.problems)
@@ -30,6 +31,12 @@ def decide(newest: Optional[runfile.FormatCheck], auto_collect: bool, uncollecte
     if uncollected > 0:
         out.append(DoctorFinding(
             "warning", f"{uncollected} finished ck run(s) not collected - run ck stats collect --all"))
+    if stale_manifests > 0:
+        out.append(DoctorFinding(
+            "warning", f"{stale_manifests} agent-mode run(s) older than 6 h not collected - run ck stats collect --all"))
+    if bad_manifests > 0:
+        out.append(DoctorFinding(
+            "warning", f"{bad_manifests} agent-mode run manifest(s) could not be read"))
     return out
 
 
@@ -57,7 +64,8 @@ def _start_ms(data: Any, path: Path) -> float:
         return 0.0
 
 
-def doctor_findings(home: Path, auto_collect: bool, records: Sequence[Mapping]) -> List[DoctorFinding]:
+def doctor_findings(home: Path, auto_collect: bool, records: Sequence[Mapping],
+                    now_ms: Optional[int] = None) -> List[DoctorFinding]:
     """Never raises: an unreadable Claude home just gives no run-based findings."""
     newest_check: Optional[runfile.FormatCheck] = None
     uncollected = 0
@@ -81,4 +89,23 @@ def doctor_findings(home: Path, auto_collect: bool, records: Sequence[Mapping]) 
             newest_check = runfile.check_format(newest_data)
     except Exception:  # noqa: BLE001 - doctor must not fail on an unreadable home
         pass
-    return decide(newest_check, auto_collect, uncollected)
+    stale = bad = 0
+    try:
+        now = int(now_ms) if now_ms is not None else int(datetime.now(timezone.utc).timestamp() * 1000)
+        for path in store.iter_open_manifests():
+            try:
+                data, state = store.read_manifest(path.stem)
+                if state == "malformed" or data is None:
+                    bad += 1
+                    continue
+                verdict = agentrun.classify_open_manifest(agentrun.check_manifest(data, path.stem), now)
+            except Exception:  # noqa: BLE001
+                bad += 1
+                continue
+            if verdict == "collect":
+                stale += 1
+            elif verdict == "malformed":
+                bad += 1
+    except Exception:  # noqa: BLE001
+        pass
+    return decide(newest_check, auto_collect, uncollected, stale, bad)

@@ -177,9 +177,9 @@ def test_tc52_worktree_values_are_terms_and_cover_the_probe(w, mode):
 
 def test_tc53_manifest_values_and_the_run_id_are_terms(w):
     am = agent_mode_run(w.env, w.home, w.tmp)
+    manifest = json.loads(am.manifest.read_text())  # read before collect: a collected run's manifest is closed (3.8)
     data = collect_agents(w.env, am.run_id)
     record = json.loads(Path(data["path"]).read_text())
-    manifest = json.loads(am.manifest.read_text())
     assert manifest["spec"] == SPEC and manifest["into"] == INTO
 
     from claude_kiro.analytics import confidential_terms
