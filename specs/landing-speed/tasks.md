@@ -204,7 +204,7 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 ---
 
 ### Task 7: Write finish-first workflow examples (Story 3, script side)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 3.2, 3.3, 3.4, 3.6, 3.7, 3.9, NFR-6
 **Description:** `tests/js/finish_first.test.mjs` (real script, fake runtime with `slots`; picked up by the glob): TC-23, TC-24, TC-25, TC-26, TC-27, TC-28 (script part), TC-29, TC-63, TC-65. Every slot-pressure case passes `args.agentSlots` equal to `slots` so the script's queued estimate matches the fake queue; assertions judge by the fake runtime's own `trace`. No assertion uses a wall-clock tolerance: every timing claim is an event-order relation on `trace`, so the suite stays deterministic under `-n auto` and concurrent gates. TC-23 builds its queue from one freed slot getting two requests (land 1 ends while task 3 runs, so the landing plan and land 2 are requested together and land 2 queues behind the 60 ms plan, `planDurations`), because a new task start can no longer queue (3.9); it must prove non-vacuity (`start land 2` comes after `request land 2` with another `end` between, and task 4 is requested only after `start land 2`). TC-24: after `start land 2`, at the first `end` after which the non-task requests made before the next `end` leave a runtime slot free, a first-attempt task request comes before the next `end`. TC-65 (saturation, 3.9): `slots: 2`, `maxConcurrent: 3`, deps `{1..4: []}`, task 1 5 ms, task 2 80 ms, review 1 5 ms; only 2 tasks are requested at start; when task 1 ends with all slots busy, `request review 1` precedes any further first-attempt task request and `start review 1` follows `end task 1` with no other `start` between; at every first-attempt task request fewer than `slots` agents are requested and not ended; the run terminates with every task merged; non-vacuous because with `finishFirst: false` task 3 is requested before any `end`. TC-25 compares `finishFirst: true` vs `false` without `slots`, passing `agentSlots: 1000` (larger than any in-flight count): identical sequences of `request`/`start`/`end` trace events, deep-equal results. TC-26 checks each finish-type request comes after its trigger and before the next `end` trace event of any agent (`review N` after `task N end`, revise after review end, `land` after approval or, when a landing step is in flight, after that step's last agent ends (its land, or the full gate and any fix/re-check it runs), `full gate` after its land, `fix k` after the red land or full gate that calls for it, `re-check` after its fix) with `checkRed: ['2']`, `fullGateEvery: 2`. TC-63: the existing hand-built-args case (no `agentSlots`, `finishFirst` absent, `maxConcurrent: 1`, reviews on, slow merge of 1, slow review of 2) still starts task 2 before task 1's land ends and task 3 before `review 2 end` (no `agentSlots` = nothing presumed queued). TC-27 uses `finishFirst: false` and expects at least one first-attempt task request while `slots` agents are already requested and not ended, and no `finish-first` log line. TC-28 omits `finishFirst` and expects the deferral. TC-29: exactly one log line containing `finish-first` per deferral period (one period with ≥ 3 agent ends → 1 line; two periods → 2). The `ck agents` setting side is Task 4.
@@ -214,11 +214,19 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 **Verifies:** Task 12
 
 **Acceptance:**
-- [ ] Workflow tests exercise the real script against the fake runtime queue
-- [ ] Before implementation the tests fail because no deferral happens, not from test bugs
-- [ ] TC-23 is non-vacuous (asserts a deferral actually occurred)
-- [ ] TC-65 shows that at saturation a finished implementer's review gets the next slot and no task start is queued ahead of it, and is non-vacuous against the `finishFirst: false` run (3.9)
-- [ ] No assertion compares wall-clock times; TC-25/TC-26 use event order on `trace`
+- [x] Workflow tests exercise the real script against the fake runtime queue
+- [x] Before implementation the tests fail because no deferral happens, not from test bugs
+- [x] TC-23 is non-vacuous (asserts a deferral actually occurred)
+- [x] TC-65 shows that at saturation a finished implementer's review gets the next slot and no task start is queued ahead of it, and is non-vacuous against the `finishFirst: false` run (3.9)
+- [x] No assertion compares wall-clock times; TC-25/TC-26 use event order on `trace`
+
+**Implementation notes (Task 7):**
+- On today's script: TC-23/TC-28 fail on the land-2 queue (today's scheduler never builds that queue), TC-24 on "slot free after land 2, no task request before the next end", TC-65 on "a third task requested at start", TC-26 and TC-29 on "no `finish-first` log line". TC-25, TC-27 and TC-63 already pass (today's script ignores `finishFirst`/`agentSlots`).
+- Every case passes `args.deps`/`args.remaining` (as the skill does) except TC-63, which keeps the hand-built args of the existing case.
+- TC-25 gives every timed fake agent (tasks, landings) the same 10 ms: Node fires timers of one duration in insertion order, so the two runs' event order cannot drift apart on a loaded machine. Durations are not fixed by the test plan for the TC-5 graph.
+- TC-26 wraps the fake project so plan, full gate, fix, re-check and resolve agents sleep 1 ms first (the fake ends them without a timer; a queued one would otherwise start and end in the same microtask run as the agent whose end freed its slot, ahead of that agent's own follow-up). It adds one revision of task 1 (`reviews: {1: ['changes', 'approve']}`) and a second run with `fullRed: true` so revise, full-gate fix and re-check are exercised; it also asserts a `finish-first` line, since the case is "during a deferral".
+- TC-29 builds its periods with one runtime slot (`slots: 1`, `agentSlots: 1`, `maxConcurrent: 1`): the next ready task is held while the previous task's review, land and landing plan run (≥ 3 ends, checked on `trace`); 2 tasks give one period, 3 tasks two. These periods come from the free-slot cap (3.9) rather than a queued finish-type agent: with FIFO and one freed slot per end, a queued finish agent sees ≥ 3 ends only behind a queue of ≥ 2, which the TC-23 shape cannot build without also creating other periods whose count would depend on scheduling details.
+- The suite ends with `process.exit` and bounds each run at 20 s, so a run that never settles fails the suite instead of hanging it.
 
 **Dependencies:** Task 1 (runWorkflow `slots`/`trace`, fake_project.mjs)
 **Complexity:** Medium
