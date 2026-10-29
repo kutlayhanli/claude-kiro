@@ -1680,7 +1680,7 @@ exits non-zero, no branch, gh not called, files unchanged and no file added for 
 ---
 
 ### Task 45: Add ck stats submit to the command group
-**Status:** Done
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9, 10.10, 10.11, 9.4
 **Description:** In `cli/stats.py`, add `submit [--to CHECKOUT] [--note] [--yes]`, following the design Data Flow.
