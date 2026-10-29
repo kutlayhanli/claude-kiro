@@ -49,7 +49,7 @@ Test tasks follow design.md where it renames a test-plan Harness Contract name. 
 ---
 
 ### Task 2: Write the readiness contract property tests
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.2, 1.10, NFR-2
 **Properties:** P-1, P-2, P-3, P-4, P-5
@@ -66,11 +66,13 @@ Settings: `@settings(derandomize=True, max_examples=200, database=None, deadline
 **Verifies:** Task 3
 
 **Acceptance:**
-- [ ] P-1 compares the script's real `readyTasks` (from the real script source) against the real `ck plan` CLI on a real git repo, over at least 200 derandomized examples
-- [ ] Generators cover every surface form in the P-1..P-5 rows: non-contiguous multi-digit ids, empty dep lists, diamonds, long chains, duplicate deps, deps on Done or excluded tasks, dangling deps, Done/exclude subsets including absent ids
-- [ ] Properties call the decision seam through the bridge, not the whole workflow
-- [ ] Before implementation every test fails because `readyTasks`/the decision markers are missing, not because of test code errors
-- [ ] No mocks of `claude_kiro` code
+- [x] P-1 compares the script's real `readyTasks` (from the real script source) against the real `ck plan` CLI on a real git repo, over at least 200 derandomized examples
+- [x] Generators cover every surface form in the P-1..P-5 rows: non-contiguous multi-digit ids, empty dep lists, diamonds, long chains, duplicate deps, deps on Done or excluded tasks, dangling deps, Done/exclude subsets including absent ids
+- [x] Properties call the decision seam through the bridge, not the whole workflow
+- [x] Before implementation every test fails because `readyTasks`/the decision markers are missing, not because of test code errors
+- [x] No mocks of `claude_kiro` code
+
+**Notes (Task 2):** Before Task 3, all five tests fail with the bridge's `decision marker missing ... "// --- decisions (pure; loaded by tests) ---"`. To check the test logic, I ran them once against a throwaway reference decisions block (not committed), loaded through the bridge's `script` hook: all five passed. Two mutations of it were caught: treating a dependency missing from the `deps` keys as met (P-2 fails), and ordering ids as strings (P-1 fails on `{'2', '100'}`). P-2 also checks that t *would* be ready without d, so the property cannot pass vacuously. P-5 lifts the exclusions when the drawn ready list is empty.
 
 **Dependencies:** Task 1 (bridge, `dags()`, `write_spec`, `ck_plan`)
 **Complexity:** Medium
@@ -449,7 +451,7 @@ View (`src/claude_kiro/analytics/show.py`):
 ---
 
 ### Task 15: Write parallel-suite, gate worker-cap and xdist hint seam tests (Stories 5-6, Story 7 seam)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.1, 5.2, 5.3, 5.4, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 7.1, 7.2, 7.3, NFR-4
 **Properties:** P-17, P-18, P-19
@@ -468,11 +470,13 @@ Each file declares its `PROPERTIES` map (`P-17`, `P-18` in `test_gate_xdist.py`;
 **Verifies:** Task 17, Task 18
 
 **Acceptance:**
-- [ ] Gate tests run real `ck gate` subprocesses with real verify commands and real signals; only the core count is varied, and only at the seam
-- [ ] P-17 and P-19 generators cover every form and near-miss in their rows; settings deterministic; they call `worker_cap`/`verify_env`/`suggestion`, not a gate or doctor
-- [ ] Before implementation the tests fail because `ck gate` sets no `PYTEST_XDIST_AUTO_NUM_WORKERS`, `claude_kiro.xdist` is missing and pyproject/ck.json lack xdist, not from fixture bugs
-- [ ] Holding gates always get released and process groups killed in teardown (no stray processes)
-- [ ] TC-41 is skipped without `CK_COMPARE_PARALLEL=1` and never recurses
+- [x] Gate tests run real `ck gate` subprocesses with real verify commands and real signals; only the core count is varied, and only at the seam
+- [x] P-17 and P-19 generators cover every form and near-miss in their rows; settings deterministic; they call `worker_cap`/`verify_env`/`suggestion`, not a gate or doctor
+- [x] Before implementation the tests fail because `ck gate` sets no `PYTEST_XDIST_AUTO_NUM_WORKERS`, `claude_kiro.xdist` is missing and pyproject/ck.json lack xdist, not from fixture bugs
+- [x] Holding gates always get released and process groups killed in teardown (no stray processes)
+- [x] TC-41 is skipped without `CK_COMPARE_PARALLEL=1` and never recurses
+
+**Implementation notes:** The probe project replaces `specs/calc/tasks.md` with one Done impl task (so `ck gate calc` runs the configured verify) and sets `"collect": ""` so only the probe commands run. Probe options are argv tokens (`HOLD=<file>`, `SLEEP=<s>`, `EXIT=<code>`) added only where a case needs them, so TC-48/P-18 argv stay exact. The tests were checked against a throwaway scratch `xdist.py` + `run_gate` wiring written from design.md (all 26 gate tests and the hint tests passed; the scratch code was not committed). TC-40 passes today (ids already stable); TC-43 passes today too (an inherited preset passes through without any cap), and must stay a pass.
 
 **Dependencies:** None
 **Complexity:** High
@@ -481,7 +485,7 @@ Each file declares its `PROPERTIES` map (`P-17`, `P-18` in `test_gate_xdist.py`;
 ---
 
 ### Task 16: Red-team Story 6's SHALL NOT clause (a gone gate is never counted)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.5
 **Description:** Try to break each SHALL NOT clause of Story 6 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Write from requirements.md only, with real `ck gate` subprocesses and a per-test `CK_GATE_REGISTRY` (set in the test's own fixture, not relying on Task 15's conftest). Ideas: a gate SIGKILLed mid-verify; a gate whose verify command forks a long-lived child that outlives it; leftover registry entries copied from a live gate's directory listing (the system's own files fed back) after that gate ends; stray non-gate files and subdirectories in the registry (must survive untouched); a registry entry file made read-only; two gates started in the same millisecond; a registry path containing spaces and unicode. After each, a fresh gate must see `PYTEST_XDIST_AUTO_NUM_WORKERS == str(core_count())` (or only live gates counted), and the gate must still run its verify commands.
@@ -491,9 +495,11 @@ Each file declares its `PROPERTIES` map (`P-17`, `P-18` in `test_gate_xdist.py`;
 **Verifies:** Task 17
 
 **Acceptance:**
-- [ ] Every case uses real `ck gate` processes and the real filesystem; no `claude_kiro` mocks
-- [ ] Each test fails before implementation for missing behaviour, not test code errors
-- [ ] Teardown kills every process group it started
+- [x] Every case uses real `ck gate` processes and the real filesystem; no `claude_kiro` mocks
+- [x] Each test fails before implementation for missing behaviour, not test code errors
+- [x] Teardown kills every process group it started
+
+**Implementation notes:** 11 cases in `tests/test_gate_xdist_redteam.py`: gate+verify SIGKILLed as a group (3 times; and 4 holding gates at once); only the gate process SIGKILLed while its verify child lives on; a verify command that forks a detached child outliving the gate; two gates started back to back; a live gate's registry entries copied and restored after it ends (two rounds with two different live gates, then both sets written back together); gate-shaped leftovers naming live non-gate PIDs (this test, pid 1, parent); a read-only leftover entry; a dangling gate-named symlink; stray files, near-miss names, `.reg-*`, a nested and a gate-named subdirectory (all must survive byte-identical); a registry path with spaces, unicode, a quote and `$HOME`. The probe's output directory and hold file travel through `PROBE_OUT` (relative names), because tmp paths contain "pytest" and `ck gate` would otherwise treat the probe as a pytest command and run it as the collection check. Before Task 17 every case fails with the probe seeing `None` for `PYTEST_XDIST_AUTO_NUM_WORKERS`. Because the 6.6 fallback also yields the full core count, every gate run asserts the output has no `gate registry ... unusable` line, and every case ends with `assert_counts_live`: with the planted entries still present (re-planted where a correct implementation removes them), a gate beside a live holding gate must see `cores // 2`, then `cores` once it ends. The module is skipped on machines with fewer than 2 cores, where `cores // 2 == cores`.
 
 **Dependencies:** None
 **Complexity:** Medium
