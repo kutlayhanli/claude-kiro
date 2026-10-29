@@ -49,7 +49,7 @@ Test tasks follow design.md where it renames a test-plan Harness Contract name. 
 ---
 
 ### Task 2: Write the readiness contract property tests
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 1.2, 1.10, NFR-2
 **Properties:** P-1, P-2, P-3, P-4, P-5
