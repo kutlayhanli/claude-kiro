@@ -55,7 +55,7 @@ def _vocabulary() -> FrozenSet[str]:
         words.update(seg for seg in re.split(r"[.\[\]]+", pattern) if seg and seg != "*")
     for group in (
         _share.MODEL_FAMILIES, _share.OUTCOMES, _share.VERDICTS, _share.EFFORTS, _share.STACK_HINTS, _share.WORKFLOWS,
-        _share.VARIANTS, _share.CONFIG_ROLES, _share.TRACKS, _share.RISKS, _share.COST_SOURCES, _share.MISSING_KINDS,
+        _share.VARIANTS, _share.CONFIG_ROLES, _share.TRACKS, _share.RISKS, _share.COST_SOURCES, _share.SOURCES, _share.MISSING_KINDS,
         _share.PHASES, _share.COUNT_KEYS, _share.USAGE_KEYS, ROLES, ISSUE_CODES, ALLOWLISTED_WORKFLOWS,
     ):
         words.update(str(m) for m in group)
@@ -76,6 +76,7 @@ GENERIC_PATTERNS: Tuple[Tuple[str, str, "re.Pattern"], ...] = (
      re.compile(r"(?:^|[\s\"'(])(?:/(?:home|Users|root|var|tmp|mnt|opt|srv|etc)/|[A-Za-z]:\\|~/)", _I)),
     ("uuid", "id", re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", _I)),
     ("run_id", "id", re.compile(r"wf_[A-Za-z0-9_-]{6,}", _I)),
+    ("agent_run_id", "id", re.compile(r"\bag_[0-9a-f]{8}\b", re.I)),
     ("timestamp", "timestamp", re.compile(r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2})?", _I)),
     ("epoch_ms", "timestamp", re.compile(r"\b1[5-9]\d{11}\b", _I)),
     ("key_shape", "secret",
