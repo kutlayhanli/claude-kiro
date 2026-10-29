@@ -159,7 +159,7 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 ---
 
 ### Task 6: Write workflow example tests for script-side readiness and task-owned worktrees (Stories 1-2)
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 1.10, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 3.1, 3.5, NFR-1, NFR-3
 **Description:** Create `tests/js/landing_speed.test.mjs` (runs the real script source under `runWorkflow` with `fake_project.mjs`; the glob in `test_workflow_scripts.py` picks it up). Implement TC-1, TC-2, TC-4, TC-5, TC-6, TC-7, TC-8, TC-9, TC-10, TC-11, TC-12, TC-13, TC-14, TC-17, TC-18, TC-20, TC-21, TC-22, TC-55 and TC-62 exactly as the test-plan rows describe, asserting only on requested labels, their order, prompts, `result` and the log. Pass `args.deps` and `args.remaining` (from the fake plan) except in TC-12, which omits both but keeps normal plan answers (1.9 is about args, not plan answers). Specifics:
