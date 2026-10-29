@@ -135,7 +135,7 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 ---
 
 ### Task 5: Add the run.finish_first setting and runtime agent slots to ck agents
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 3.1, 3.5, 3.6, 3.8
 **Description:** Owns Harness Contract item 8 (setting `run.finish_first`, seam `agents._coerce`). In `src/claude_kiro/agents.py` add `DEFAULTS["run"]["finish_first"] = True`, add `"finish_first"` to `ROLE_KEYS["run"]`, and put it in the boolean branch of `_coerce` so true/false/yes/no/on/off (case-insensitive) and bools are accepted and anything else raises `AgentConfigError("run.finish_first must be true or false (also yes/no, on/off)")` before `write_setting` writes anything (config file byte-identical on refusal). `null`/`none`/`default` reset to the default like every other setting: add a None pass-through to the boolean branch of `_coerce` before its bool check (today that branch raises on None), so it returns None and `write_setting` pops the key (P-12). This applies to every boolean setting, so `reviewer.enabled none` etc. also reset instead of erroring. Add `runtime_agent_slots(cpus: Optional[int], env: Mapping[str, str]) -> int`: `CK_AGENT_SLOTS` if it parses as a positive int, else `max(1, min(16, cpus - 2))`, with `cpus` None -> 1. In `src/claude_kiro/cli/agents.py`, `ck agents --json` adds top-level `"runtime": {"cpus": <int>, "agentSlots": <int>}` (cpus from the affinity mask where available, else `os.cpu_count()`, the same rule as `xdist.core_count`; `runtime_agent_slots` is the one place the documented runtime cap min(16, CPUs - 2) is computed, requirements Constraints), and the text view shows `run.finish_first` as on/off like `analytics`.
@@ -146,11 +146,11 @@ Do not wire these into the scheduler yet (Task 12 does); existing behaviour must
 **Verified by:** Task 4
 
 **Acceptance:**
-- [ ] With no setting, `ck agents --json` shows `roles.run.finish_first: true` (3.6)
-- [ ] `ck agents set run.finish_first off` (global and `--project`) stores false and the run reads it as off (3.5)
-- [ ] `null`/`none`/`default` reset `run.finish_first` to its default (true) and remove the stored key (P-12)
-- [ ] An invalid value (e.g. `maybe`, `1`, `ture`) exits non-zero with a message containing `true or false` and naming yes/no, on/off, and leaves the config file byte-identical (3.8)
-- [ ] `ck agents --json` includes `runtime.cpus` and `runtime.agentSlots`; `CK_AGENT_SLOTS=5` makes `agentSlots` 5; nothing hard-codes the runtime cap outside `runtime_agent_slots` (3.1)
+- [x] With no setting, `ck agents --json` shows `roles.run.finish_first: true` (3.6)
+- [x] `ck agents set run.finish_first off` (global and `--project`) stores false and the run reads it as off (3.5)
+- [x] `null`/`none`/`default` reset `run.finish_first` to its default (true) and remove the stored key (P-12)
+- [x] An invalid value (e.g. `maybe`, `1`, `ture`) exits non-zero with a message containing `true or false` and naming yes/no, on/off, and leaves the config file byte-identical (3.8)
+- [x] `ck agents --json` includes `runtime.cpus` and `runtime.agentSlots`; `CK_AGENT_SLOTS=5` makes `agentSlots` 5; nothing hard-codes the runtime cap outside `runtime_agent_slots` (3.1)
 
 **Dependencies:** Task 4 (its tests are the oracle)
 **Complexity:** Low
