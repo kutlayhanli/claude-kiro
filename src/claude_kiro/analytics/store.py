@@ -34,6 +34,71 @@ def record_path(run_id: str, env: Optional[Mapping[str, str]] = None) -> Path:
     return runs_dir(env) / f"{run_id}.json"
 
 
+def open_manifests_dir(env: Optional[Mapping[str, str]] = None) -> Path:
+    return data_dir(env) / "runs-open"
+
+
+def closed_manifests_dir(env: Optional[Mapping[str, str]] = None) -> Path:
+    return data_dir(env) / "runs-closed"
+
+
+def manifest_path(run_id: str, env: Optional[Mapping[str, str]] = None) -> Optional[Path]:
+    open_path = open_manifests_dir(env) / f"{run_id}.json"
+    if open_path.is_file():
+        return open_path
+    closed_path = closed_manifests_dir(env) / f"{run_id}.json"
+    if closed_path.is_file():
+        return closed_path
+    return None
+
+
+def write_manifest(manifest: Mapping[str, Any], env: Optional[Mapping[str, str]] = None) -> Path:
+    path = open_manifests_dir(env) / f"{manifest['runId']}.json"
+    write_private_json(path, dict(manifest))
+    return path
+
+
+def read_manifest(run_id: str, env: Optional[Mapping[str, str]] = None) -> Tuple[Optional[dict], str]:
+    path = manifest_path(run_id, env)
+    if path is None:
+        return None, "missing"
+    where = "open" if path.parent == open_manifests_dir(env) else "closed"
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None, "malformed"
+    if not isinstance(data, dict):
+        return None, "malformed"
+    return data, where
+
+
+def iter_open_manifests(env: Optional[Mapping[str, str]] = None) -> List[Path]:
+    d = open_manifests_dir(env)
+    if not d.is_dir():
+        return []
+    return sorted(d.glob("*.json"))
+
+
+def close_manifest(run_id: str, closed_at: str, env: Optional[Mapping[str, str]] = None) -> None:
+    open_path = open_manifests_dir(env) / f"{run_id}.json"
+    data, _ = read_manifest(run_id, env)
+    if data is None or manifest_path(run_id, env) != open_path:
+        raise FileNotFoundError(f"no open manifest for run {run_id}")
+    data["closedAt"] = closed_at
+    write_private_json(open_path, data)
+    closed_dir = closed_manifests_dir(env)
+    _mkdir_private(closed_dir)
+    os.replace(open_path, closed_dir / open_path.name)
+
+
+def taken_run_ids(env: Optional[Mapping[str, str]] = None) -> set:
+    taken = set()
+    for d in (open_manifests_dir(env), closed_manifests_dir(env), runs_dir(env)):
+        if d.is_dir():
+            taken.update(p.stem for p in d.glob("*.json"))
+    return taken
+
+
 def _mkdir_private(path: Path) -> None:
     missing: List[Path] = []
     p = path
