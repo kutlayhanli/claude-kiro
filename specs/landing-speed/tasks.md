@@ -377,7 +377,7 @@ No property uses a wall-clock tolerance. Settings `@settings(derandomize=True, m
 ---
 
 ### Task 13: Write `ck stats` queue-wait tests (collection, display, JSON, old records, seam properties)
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7
 **Properties:** P-13, P-14, P-15, P-16
