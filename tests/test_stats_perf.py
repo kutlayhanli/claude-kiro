@@ -86,3 +86,16 @@ def test_agent_mode_collect_of_100_agents_under_5_seconds():
 
         assert result.exit_code == 0, result.output
         assert elapsed < 5, f"collect --agents took {elapsed:.1f}s (limit 5s)"
+
+
+def test_backfill_dry_run_of_50_sessions_under_30_seconds():
+    """TC-57"""
+    with fresh_env() as env:
+        stats_helpers.backfill_home(env, 50, 6)
+
+        t0 = time.monotonic()
+        result = stats_helpers.stats("collect", "--agents-backfill", "--dry-run", env=env, cwd=env.root)
+        elapsed = time.monotonic() - t0
+
+        assert result.exit_code == 0, result.output
+        assert elapsed < 30, f"--agents-backfill --dry-run took {elapsed:.1f}s (limit 30s)"
