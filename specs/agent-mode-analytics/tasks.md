@@ -295,7 +295,7 @@ Age is controlled by backdating whole hours (5 h vs 7 h); the clock is not faked
 ---
 
 ### Task 11: Test agent-mode privacy end to end and the CLI-wide properties
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.2, 5.2, 8.1, 8.2, 8.5, 9.1, 9.2, 9.3, 9.4
 **Properties:** P-15, P-16, P-17
@@ -308,12 +308,12 @@ Age is controlled by backdating whole hours (5 h vs 7 h); the clock is not faked
 **Verify:** `uv run pytest -q -n auto tests/test_stats_agents_share.py` `uv run pytest -q -n auto tests/test_stats_properties_agents_cli.py`
 **Verifies:** Task 13 (the `begin` / `collect --agents` / export CLI these tests drive, built on Tasks 5 and 7)
 **Acceptance:**
-- [ ] Export tests run the real `ck stats collect` and `ck stats export` against a real git kiro checkout and a fake `gh`; the note test runs under a pty with the fake `claude` drafter
-- [ ] Leak assertions scan raw bytes of every exported file, not parsed fields only
-- [ ] Property generators cover every surface form and negative listed in the P-15 to P-17 rows; each example has its own isolated env
-- [ ] The decision is checked against `ck cost` and `confidential_terms`, not re-implemented in the test
-- [ ] `PROPERTIES` lists P-15, P-16, P-17, each pointing at an existing test name
-- [ ] Before the implementation exists the tests fail for the right reason (unknown `--agents` option, `worktreePath` not in terms), not broken fixtures or generators
+- [x] Export tests run the real `ck stats collect` and `ck stats export` against a real git kiro checkout and a fake `gh`; the note test runs under a pty with the fake `claude` drafter
+- [x] Leak assertions scan raw bytes of every exported file, not parsed fields only
+- [x] Property generators cover every surface form and negative listed in the P-15 to P-17 rows; each example has its own isolated env
+- [x] The decision is checked against `ck cost` and `confidential_terms`, not re-implemented in the test
+- [x] `PROPERTIES` lists P-15, P-16, P-17, each pointing at an existing test name
+- [x] Before the implementation exists the tests fail for the right reason (unknown `--agents` option, `worktreePath` not in terms), not broken fixtures or generators
 **Dependencies:** Task 1 (uses `ToolAgentSpec` with worktree keys, `AgentSpec.extra_meta`, `begin`, `set_manifest`, `read_only`, `kiro_checkout`)
 **Complexity:** High
 **Risk:** safety (guards confidential project names, paths and branches from leaving the machine in exported records and issue notes)
