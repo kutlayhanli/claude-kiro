@@ -14,7 +14,7 @@ from stats_helpers import (
     fake_editor, fake_gh, flatten_paths, fresh_env, gh_calls, git, git_project, implement_result, kiro_checkout,
     path_without_gh, run_tty, seeded_home, seeded_local_record, stats, store_files, TaskSpec,
     OLD_DESCRIPTIONS, SPEC_TYPES, ToolAgentSpec, backdate_manifest, backfill_home, described, fail, land, logging_git,
-    mark_done, marker, read_only, set_manifest, spec_repo,
+    mark_done, marker, read_only, set_manifest, spec_repo, to_ms, parse_iso,
 )
 
 
@@ -310,16 +310,22 @@ def test_tool_agents_write_the_real_layout_and_meta_keys(tmp_path):
     assistants = [l for l in lines if l["type"] == "assistant"]
     assert len(assistants) == 2 and {l["requestId"] for l in assistants} == {"rq1"}
     assert assistants[0]["message"]["usage"]["output_tokens"] == 2
-    assert to_ms_(lines[-1]["timestamp"]) - to_ms_(lines[0]["timestamp"]) == 90_000
+    assert to_ms(lines[-1]["timestamp"]) - to_ms(lines[0]["timestamp"]) == 90_000
     uses = [blk for l in map(json.loads, session.transcript_path.read_text().splitlines()) if l.get("type") == "assistant"
             for blk in l["message"]["content"] if blk.get("name") == "Agent"]
     assert [u["id"] for u in uses][0] == meta["toolUseId"] and len(uses) == 2
     assert uses[0]["input"]["description"] == meta["description"]
 
 
-def to_ms_(value):
-    from stats_helpers import to_ms
-    return to_ms(value)
+def test_tool_agent_none_description_and_type_leave_the_keys_out(tmp_path):
+    home = FakeClaudeHome(tmp_path / "h")
+    session = home.session(cwd=tmp_path)
+    ta = session.tool_agents([ToolAgentSpec(None, agent_type=None)])
+    meta = json.loads(ta.meta_path(0).read_text())
+    assert "description" not in meta and "agentType" not in meta
+    use = [blk for l in map(json.loads, session.transcript_path.read_text().splitlines()) if l.get("type") == "assistant"
+           for blk in l["message"]["content"] if blk.get("name") == "Agent"][0]
+    assert "description" not in use["input"] and "subagent_type" not in use["input"]
 
 
 def test_tool_agent_fault_injectors_leave_exactly_the_named_damage(tmp_path):
@@ -372,7 +378,7 @@ def test_spec_repo_with_landing_helpers_gives_the_expected_report(tmp_path):
     data = _report(repo)
     merged = {e["task"]: e for e in data["merged"]}
     assert list(merged) == ["1"] and merged["1"]["subject"] == "Merge feat/demo-task-1 (task 1)" and merged["1"]["done"] is True
-    assert parse_iso_(merged["1"]["mergedAt"]).timestamp() >= before
+    assert parse_iso(merged["1"]["mergedAt"]).timestamp() >= before
     assert [e["task"] for e in data["done"]] == ["5"]
     assert [e["task"] for e in data["failed"]] == ["2"]
     assert sorted(e["task"] for e in data["blocked"]) == ["3", "4"] and data["unstarted"] == []
@@ -380,10 +386,6 @@ def test_spec_repo_with_landing_helpers_gives_the_expected_report(tmp_path):
     assert "3" in {e["task"] for e in _report(repo)["merged"]}
     assert git(repo, "branch", "--show-current") == "main"
 
-
-def parse_iso_(value):
-    from stats_helpers import parse_iso
-    return parse_iso(value)
 
 
 def test_logging_git_logs_argv_and_runs_the_real_git(tmp_path):
@@ -415,7 +417,7 @@ def test_backdate_and_set_manifest_arithmetic(tmp_path):
     p.write_text(json.dumps({"startTime": "2026-01-01T00:00:00Z", "kind": "implement", "doneAtStart": []}))
     backdate_manifest(p, 7)
     d = json.loads(p.read_text())
-    age = (datetime.now(timezone.utc) - parse_iso_(d["startTime"])).total_seconds()
+    age = (datetime.now(timezone.utc) - parse_iso(d["startTime"])).total_seconds()
     assert d["startTime"].endswith("Z") and abs(age - 7 * 3600) < 5 and d["kind"] == "implement"
     set_manifest(p, sessionId="s1", doneAtStart=None)
     d = json.loads(p.read_text())

@@ -127,8 +127,8 @@ def described(run_id: str, rest: str) -> str:
 class ToolAgentSpec:
     """One Agent-tool subagent (no Workflow tool). `requests` has the `AgentSpec` tuple shape."""
 
-    description: str
-    agent_type: str = "spec:implementer"
+    description: Optional[str]  # None leaves the key out of the meta and the Agent tool_use input
+    agent_type: Optional[str] = "spec:implementer"  # None leaves the key out
     model: str = "claude-sonnet-5-5"  # transcript model
     meta_model: Optional[str] = None  # meta `model` when set
     requests: Optional[List[Tuple[str, int, int, int, int]]] = None
@@ -535,8 +535,8 @@ class FakeSession:
         d = self.dir / "subagents"
         agent_ids: List[str] = []
         orchestrator: List[dict] = []
-        n0 = len(self.home.run_counter)
-        self.home.run_counter.append(1)
+        n0 = len(self.home.tool_counter)
+        self.home.tool_counter.append(1)
         for idx, spec in enumerate(specs):
             aid = spec.agent_id or "a" + _hex(self.session_id, n0, idx, "tool")
             agent_ids.append(aid)
@@ -546,9 +546,13 @@ class FakeSession:
             tool_id = "toolu_" + _hex(self.session_id, aid, "agent")
             if spec.meta:
                 meta: Dict[str, Any] = {
-                    "agentType": spec.agent_type, "description": spec.description, "toolUseId": tool_id, "spawnDepth": 1,
+                    "toolUseId": tool_id, "spawnDepth": 1,
                     "requestShape": "tool", "requestNonInteractive": False, "isBuiltIn": False,
                 }
+                if spec.agent_type is not None:
+                    meta["agentType"] = spec.agent_type
+                if spec.description is not None:
+                    meta["description"] = spec.description
                 if spec.meta_model is not None:
                     meta["model"] = spec.meta_model
                 if spec.worktree_path is not None:
@@ -557,11 +561,16 @@ class FakeSession:
                     meta["worktreeBranch"] = spec.worktree_branch
                 meta.update(spec.extra_meta)
                 (d / f"agent-{aid}.meta.json").write_text(json.dumps(meta))
+            tool_input: Dict[str, Any] = {"prompt": "Implement the task."}
+            if spec.description is not None:
+                tool_input["description"] = spec.description
+            if spec.agent_type is not None:
+                tool_input["subagent_type"] = spec.agent_type
             orchestrator.append(self._base({
                 "type": "assistant", "timestamp": iso_ms(started - 2_000), "requestId": "req_" + _hex(aid, "agent"),
                 "message": {"id": "msg_" + _hex(aid, "agent"), "role": "assistant", "model": "claude-sonnet-5-5",
                             "content": [{"type": "tool_use", "id": tool_id, "name": "Agent",
-                                         "input": {"description": spec.description, "subagent_type": spec.agent_type, "prompt": "Implement the task."}}]}}))
+                                         "input": tool_input}]}}))
         self.append(orchestrator)
         return FakeToolAgents(self, agent_ids)
 
@@ -618,6 +627,7 @@ class FakeClaudeHome:
         self.projects = self.root / "projects"
         self.projects.mkdir(parents=True, exist_ok=True)
         self.run_counter: List[int] = []
+        self.tool_counter: List[int] = []
         self.sessions: List[FakeSession] = []
 
     def session(self, slug: str = "-work-acme", session_id: Optional[str] = None, *, cwd: Optional[Path] = None,
