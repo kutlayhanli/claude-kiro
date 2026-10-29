@@ -13,7 +13,7 @@ Test tasks follow design.md where it renames a test-plan Harness Contract name. 
 ## Task Breakdown
 
 ### Task 1: Build the workflow test harness (fake project module, queued fake runtime, decision loader, Node bridge, Hypothesis strategies)
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 1.2, 1.4, 2.1, 3.1, NFR-1, NFR-2
 **Description:** Build the shared infrastructure from test-plan.md "Test Infrastructure / To add" items 1-6 (Harness Contract items 12 and 13), which Tasks 2, 6, 7, 8, 10 and 11 depend on. No TC of its own; it must leave every existing suite green.
