@@ -243,7 +243,7 @@ Foundation task: Task 10 reaches this code only through the CLI of Task 13, so i
 ---
 
 ### Task 9: Test `ck stats begin` and `ck stats collect --agents` (grouping, pricing, outcome, attribution, `--auto`)
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.7, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 3.10, 3.11, 3.12, 3.13, 3.14, 3.15, 3.16, 3.17, 3.18, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 5.2, 5.3, 5.4, 5.5
 **Description:** Implement the run-start and collector boundaries through the real CLI inside `fresh_env()` with `no_network`. Implement-run fixtures call `begin` after `spec_repo` and land tasks with `land` / `fail` / `mark_done` afterwards, as a real run does; landing before `begin` is how a test builds a resumed spec.
