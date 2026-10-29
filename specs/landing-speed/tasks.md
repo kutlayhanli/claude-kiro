@@ -406,7 +406,7 @@ No property uses a wall-clock tolerance. Settings `@settings(derandomize=True, m
 ---
 
 ### Task 14: Record and show queue-wait metrics and the review/landing wait split in ck stats
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7
 **Description:** Owns Harness Contract item 9 (stats; design renames the seams to `collect.queue_ms`, `collect.wait_split`, `show.queue_summary(rows)`, `show.agent_kind` and the JSON keys to `queueWait`/`waitSplit`). Collector (`src/claude_kiro/analytics/collect.py`):

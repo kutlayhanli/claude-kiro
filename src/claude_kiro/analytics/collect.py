@@ -9,6 +9,7 @@ at once: its name and id are kept nowhere.
 import hashlib
 import hmac
 import json
+import math
 import re
 import subprocess
 import threading
@@ -126,6 +127,49 @@ def _int(v: Any) -> Optional[int]:
     if isinstance(v, float) and v == v and abs(v) != float("inf"):
         return int(v)
     return None
+
+
+def _real(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def queue_ms(queued_at: Any, started_at: Any) -> Optional[int]:
+    """Runtime-slot wait: started minus queued. None unless both are finite numbers with started >= queued."""
+    if not (_real(queued_at) and _real(started_at)) or started_at < queued_at:
+        return None
+    try:
+        return int(round(started_at - queued_at))
+    except (OverflowError, ValueError):
+        return None
+
+
+def wait_split(finished_ms: Any, merged_ms: Any, intervals: Sequence[Tuple[Any, Any]]) -> Tuple[Optional[int], Optional[int]]:
+    """(review, landing) parts of the finish-to-merge wait. Review is the union of the review/revise intervals
+    clipped to [finished, merged], so overlaps count once; landing is the rest. (None, None) when a bound or an
+    interval end/start is unknown, or when merged < finished."""
+    if not (_real(finished_ms) and _real(merged_ms)) or merged_ms < finished_ms:
+        return None, None
+    f, m = int(round(finished_ms)), int(round(merged_ms))
+    clipped: List[Tuple[int, int]] = []
+    for a, b in intervals:
+        if not (_real(a) and _real(b)):
+            return None, None
+        lo, hi = max(int(round(a)), f), min(int(round(b)), m)
+        if hi > lo:
+            clipped.append((lo, hi))
+    clipped.sort()
+    review = 0
+    cur: Optional[List[int]] = None
+    for lo, hi in clipped:
+        if cur is None or lo > cur[1]:
+            if cur is not None:
+                review += cur[1] - cur[0]
+            cur = [lo, hi]
+        else:
+            cur[1] = max(cur[1], hi)
+    if cur is not None:
+        review += cur[1] - cur[0]
+    return review, (m - f) - review
 
 
 def _to_ms(v: Any) -> Optional[int]:
@@ -316,6 +360,7 @@ class _Agent:
     tokens: Optional[int]
     transcript: Optional[Path]
     meta_path: Optional[Path]
+    queued_ms: Optional[int] = None
 
 
 def _build_agent(a: _Agent, workflow_name: str, pricing: dict, missing: List[dict],
@@ -391,6 +436,7 @@ def _build_agent(a: _Agent, workflow_name: str, pricing: dict, missing: List[dic
         "input": usage["input"] if usage else None, "output": usage["output"] if usage else None,
         "cacheRead": usage["cacheRead"] if usage else None, "cacheCreation": usage["cacheCreation"] if usage else None,
         "transcript": status,
+        "queuedAtMs": a.queued_ms, "queueMs": queue_ms(a.queued_ms, a.started_ms),
     }
     if status == "truncated":
         # a cut file cannot show that a figure is really 0: report it as unknown
@@ -529,7 +575,17 @@ def _implement_metrics(result: Mapping, rows: List[dict], workflow_name: str, tr
         review = t.get("review") if isinstance(t.get("review"), dict) else {}
         resolves, inferred = conflict_count(t, resolver_labels)
         merged_ms, finished_ms = _to_ms(t.get("mergedAt")), _to_ms(t.get("finishedAt"))
-        tasks.append({
+        # review and revise intervals of this task: from queued (or started) to the end of the agent
+        ivs: List[Tuple[Any, Any]] = []
+        for r in rows:
+            if r.get("task") is None or str(r["task"]) != key:
+                continue
+            if not (r["role"] == "reviewer" or (r["role"] in ("implementer", "test-writer") and r["round"] is not None)):
+                continue
+            start = r["queuedAtMs"] if r["queuedAtMs"] is not None else r["startedAtMs"]
+            end = r["startedAtMs"] + r["ms"] if r["startedAtMs"] is not None and r["ms"] is not None else None
+            ivs.append((start, end))
+        review_wait, landing_wait = wait_split(finished_ms, merged_ms, ivs)        tasks.append({
             "task": t.get("task"), "title": t.get("title") if isinstance(t.get("title"), str) else None,
             "track": track, "reason": t.get("reason") if isinstance(t.get("reason"), str) else None,
             "wave": _int(t.get("wave")), "ok": t.get("ok") if isinstance(t.get("ok"), bool) else None,
@@ -544,6 +600,7 @@ def _implement_metrics(result: Mapping, rows: List[dict], workflow_name: str, tr
             "agentMinutes": _num(t.get("agentMinutes")), "toMergedMinutes": _num(t.get("toMergedMinutes")),
             "riskTag": t.get("riskTag") if isinstance(t.get("riskTag"), str) else None,
             "idleBeforeMergeMs": (merged_ms - finished_ms) if merged_ms is not None and finished_ms is not None else None,
+            "reviewWaitMs": review_wait, "landingWaitMs": landing_wait,
         })
     landings = [{"size": _int(l.get("size")), "merged": _count(l.get("merged")), "red": _count(l.get("red")),
                  "conflict": _count(l.get("conflict")), "bisected": bool(l.get("bisected")),
@@ -837,6 +894,7 @@ def _collect_file(path: Path, run_id: str, name: Optional[str], pricing: dict, f
             state=entry.get("state") if isinstance(entry.get("state"), str) else None,
             started_ms=_int(entry.get("startedAt")), duration_ms=_int(entry.get("durationMs")),
             tokens=_int(entry.get("tokens")), transcript=tx, meta_path=meta,
+            queued_ms=_int(entry.get("queuedAt")),
         ))
     record = _build_record(
         run_id=run_id, workflow_name=name, run_data=data, session_dir=session_dir, agent_dir=agent_dir,
