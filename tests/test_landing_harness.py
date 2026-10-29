@@ -77,6 +77,23 @@ def test_load_decisions_names_a_missing_function(tmp_path):
 
 
 @needs_node
+def test_bridge_reports_a_script_without_markers_as_ok_false(bridge, tmp_path):
+    script = tmp_path / "no-markers.js"
+    script.write_text("function readyTasks() {}\n")
+    out = bridge.request({"op": "ready", "script": str(script), "order": ["1"], "deps": {"1": []}, "done": [], "exclude": []})
+    assert out["ok"] is False and "decision marker missing" in out["error"]
+
+
+@needs_node
+@pytest.mark.parametrize("state", ["CREATED", "EXISTS"])
+def test_fake_worktree_created_or_exists_ends_once_after_its_request(bridge, state):
+    out = bridge.run({"deps": {"1": [], "2": ["1"]}, "durations": {"1": 20}, "worktree": {"1": {"state": state}}})
+    assert out["events"].count("task 1 end") == 1
+    assert out["events"].index("task 1") < out["events"].index("task 1 end") < out["events"].index("task 2")
+    assert sorted(out["result"]["merged"]) == ["1", "2"]
+
+
+@needs_node
 def test_bridge_ready_fails_clearly_on_todays_script_or_returns_a_list(bridge):
     # Before the decisions block exists this is the expected failure; after, it must answer.
     try:

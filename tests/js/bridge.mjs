@@ -12,7 +12,7 @@ const baseArgs = { spec: 'demo', root: '/repo', into: 'integrate/demo', targetDi
 
 async function handle(req) {
   if (req.op === 'ready') {
-    const { readyTasks } = loadDecisions()
+    const { readyTasks } = req.script ? loadDecisions(req.script) : loadDecisions()  // req.script: test hook for a script without markers
     return { ready: readyTasks({ order: req.order ?? Object.keys(req.deps), deps: req.deps, done: req.done ?? [], exclude: req.exclude ?? [], blocked: req.blocked ?? [] }) }
   }
   if (req.op === 'run') {

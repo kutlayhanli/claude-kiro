@@ -35,7 +35,7 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
   const ready = exclude => {
     const chain = chainLengths(state.deps, state.done)
     return Object.keys(state.deps)
-      .filter(n => !state.done.has(n) && !exclude.includes(n) && !verifyCycles.some(v => v.task === n) && state.deps[n].every(d => state.done.has(d)))
+      .filter(n => !state.done.has(n) && !exclude.includes(n) && !verifyCycles.some(v => v.task === n) && state.deps[n].every(d => state.done.has(d) || !(d in state.deps)))  // dangling ids are dropped, as `ck plan` does
       // Longest remaining chain first, then numeric id: what `ck plan` prints.
       .sort((a, b) => (chain[b] ?? 1) - (chain[a] ?? 1) || Number(a) - Number(b))
   }
@@ -77,14 +77,12 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
       state.maxRunning = Math.max(state.maxRunning, state.running)
       const startedAt = stamp()
       const wt = worktree[n]
-      if (wt && state.attempts[n] === 1) {
+      if (wt && state.attempts[n] === 1 && (wt.state === 'BUSY' || wt.state === 'ERROR')) {
         state.running--
         state.events.push(`${l} end`)
-        const out = { task: n, status: 'in_progress', gatePassed: false, summary: `worktree ${wt.state}`, commits: '', startedAt, finishedAt: stamp(), worktree: { state: wt.state, detail: wt.detail ?? '' } }
-        if (wt.state === 'BUSY' || wt.state === 'ERROR') return { ...out, status: 'blocked', blocker: wt.state === 'BUSY' ? `worktree busy: ${wt.detail ?? ''}` : `worktree create failed: ${wt.detail ?? ''}` }
-        // CREATED / EXISTS: carry on as a normal attempt below, reporting the worktree outcome.
-        state.running++
+        return { task: n, status: 'blocked', gatePassed: false, summary: `worktree ${wt.state}`, commits: '', startedAt, finishedAt: stamp(), worktree: { state: wt.state, detail: wt.detail ?? '' }, blocker: wt.state === 'BUSY' ? `worktree busy: ${wt.detail ?? ''}` : `worktree create failed: ${wt.detail ?? ''}` }
       }
+      // CREATED / EXISTS: a normal attempt below, reporting the worktree outcome.
       await sleep(durations[n] ?? 5)
       state.running--
       state.events.push(`${l} end`)

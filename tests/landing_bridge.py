@@ -34,6 +34,13 @@ class Bridge:
         self.proc = subprocess.Popen(
             ["node", str(BRIDGE_JS)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
         )
+        self._stderr: List[str] = []
+        # Drain stderr so a chatty node process can never fill the pipe and block.
+        self._drain = threading.Thread(target=lambda: self._stderr.extend(iter(self.proc.stderr.readline, "")), daemon=True)
+        self._drain.start()
+
+    def stderr_tail(self) -> str:
+        return "".join(self._stderr[-50:])
 
     def request(self, req: Dict[str, Any]) -> Dict[str, Any]:
         """Send one request and return the raw response object (including ok: false)."""
@@ -46,7 +53,8 @@ class Bridge:
         finally:
             timer.cancel()
         if not line:
-            raise BridgeError("bridge process ended without answering: " + self.proc.stderr.read())
+            self._drain.join(timeout=2)
+            raise BridgeError("bridge process ended without answering: " + self.stderr_tail())
         return json.loads(line)
 
     def _ok(self, req: Dict[str, Any]) -> Dict[str, Any]:
@@ -72,6 +80,7 @@ class Bridge:
             self.proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             self.proc.kill()
+        self._drain.join(timeout=2)
         for stream in (self.proc.stdout, self.proc.stderr):
             with contextlib.suppress(Exception):
                 stream.close()
