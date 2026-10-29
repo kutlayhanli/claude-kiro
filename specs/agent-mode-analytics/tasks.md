@@ -382,7 +382,7 @@ In `health.py`, extend `decide(newest, auto_collect, uncollected, stale_manifest
 ---
 
 ### Task 14: Test the agent-mode instruction documents and their templates
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 1.6, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 5.1, 5.4, 7.9
 **Properties:** P-6
