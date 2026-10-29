@@ -12,6 +12,7 @@ import click
 
 from .. import agents as ag
 from .. import bench
+from ..analytics import agentcollect, agentrun
 from ..analytics import collect as col
 from ..analytics import runfile, store
 
@@ -104,7 +105,7 @@ def collect_auto(run_id: str, *, home: Optional[Path] = None) -> int:
             return 0
         if outcome.kind == "collected":
             path, _kind = _write(outcome)
-            partial = any(m.get("what") == "runfile" for m in (outcome.record or {}).get("missing", []))
+            partial = _is_partial(outcome.record)
             click.echo(f"✓ {run_id}: wrote {path}" + (" (partial: run file missing)" if partial else ""))
             return 0
         reason = _failure_text(run_id, outcome, home)
@@ -198,32 +199,217 @@ def show_cmd(run_id: Optional[str], kind: Optional[str], since: Optional[str], u
             click.echo(f"⚠ {unreadable} record file(s) could not be read")
 
 
+def _is_partial(record: Optional[dict]) -> bool:
+    return any(m.get("what") in ("runfile", "manifest") for m in (record or {}).get("missing", []))
+
+
+@stats.command("begin")
+@click.option("--kind", required=True, type=click.Choice(["implement", "create", "review"]), help="Kind of agent-mode run")
+@click.option("--spec", default=None, help="The spec this run works on")
+@click.option("--into", default=None, help="Target branch of the run")
+@click.option("--session", "session_id", default=None, help="Claude Code session id (default: the newest one here)")
+@click.option("--override", "overrides", multiple=True, metavar="ROLE.KEY=VALUE", help="Per-run agent setting")
+@click.option("--json", "as_json", is_flag=True)
+def begin_cmd(kind: str, spec: Optional[str], into: Optional[str], session_id: Optional[str], overrides: Tuple[str, ...], as_json: bool):
+    """Start an agent-mode run: print its id (ag_...) and write a run manifest."""
+    if not spec or not spec.strip():
+        click.echo("❌ --spec is required and must not be empty (--kind is one of: implement, create, review)")
+        sys.exit(2)
+    res = agentcollect.begin_run(kind=kind, spec=spec.strip(), cwd=Path.cwd(), into=into or None, session_id=session_id or None,
+                                 overrides=list(overrides), home=bench.claude_home(), now=_now())
+    if res.warning:
+        click.echo(res.warning, err=True)
+    if as_json:
+        click.echo(json.dumps({"run_id": res.run_id, "manifest": str(res.manifest_path) if res.manifest_path else None}))
+    else:
+        click.echo(res.run_id)
+
+
 @stats.command("collect")
 @click.option("--run", "run_id", default=None, metavar="RUN_ID", help="Collect one run")
 @click.option("--all", "collect_everything", is_flag=True, help="Collect every ck run under the Claude home")
+@click.option("--agents", "agents_id", default=None, metavar="RUN_ID", help="Collect one agent-mode run (ag_...)")
+@click.option("--agents-backfill", "backfill_flag", is_flag=True, help="Recover old unmarked implement-mode runs")
+@click.option("--dry-run", "dry_run", is_flag=True, help="With --agents-backfill: list, write nothing")
+@click.option("--gap", default=None, metavar="MINUTES", help="With --agents-backfill: idle gap that splits a run")
 @click.option("--auto", is_flag=True, help="Quiet mode for ck run and the skills: always exits 0")
 @click.option("--json", "as_json", is_flag=True)
-def collect_cmd(run_id: Optional[str], collect_everything: bool, auto: bool, as_json: bool):
+def collect_cmd(run_id: Optional[str], collect_everything: bool, agents_id: Optional[str], backfill_flag: bool,
+                dry_run: bool, gap: Optional[str], auto: bool, as_json: bool):
     """Collect a finished run into a local record (never leaves this machine)."""
-    if bool(run_id) == bool(collect_everything):
-        click.echo("❌ give exactly one of --run RUN_ID or --all")
-        sys.exit(2)
+    decision = agentrun.decide_collect_args(run_id, collect_everything, agents_id, backfill_flag, auto, dry_run, gap)
+    if not decision.ok:
+        if decision.exit_code == 0:
+            shown = agents_id if agents_id is not None else run_id
+            click.echo(f"⚠ could not collect {shown}: {decision.message}; retry: ck stats collect --agents {shown}")
+        else:
+            click.echo(f"❌ {decision.message}")
+        sys.exit(decision.exit_code)
+    if decision.mode == "agents":
+        if auto:
+            sys.exit(collect_agents_auto(agents_id))
+        home = bench.claude_home()
+        if _classify(home) == "sandboxed":
+            click.echo(f"❌ {_sandbox_text(home)}")
+            sys.exit(1)
+        _collect_agents_one(home, agents_id, as_json)
+        return
     if run_id is not None and not auto and not RUN_ID_RE.match(run_id):
         click.echo("❌ RUN_ID must look like wf_ followed by letters, digits, - or _")
         sys.exit(2)
     if auto:
-        if run_id is None:
-            click.echo("❌ --auto needs --run RUN_ID")
-            sys.exit(2)
         sys.exit(collect_auto(run_id))
     home = bench.claude_home()
     if _classify(home) == "sandboxed":
         click.echo(f"❌ {_sandbox_text(home)}")
         sys.exit(1)
-    if run_id is not None:
+    if decision.mode == "backfill":
+        _collect_backfill(home, decision.gap_minutes, dry_run, as_json)
+    elif run_id is not None:
         _collect_one(home, run_id, as_json)
     else:
         _collect_all(home, as_json)
+
+
+def _collect_agents_one(home: Path, run_id: str, as_json: bool) -> None:
+    try:
+        outcome = agentcollect.collect_agent_run(home, run_id, now=_now())
+    except Exception as e:  # noqa: BLE001
+        outcome = col.CollectOutcome(run_id, "failed", reason=f"{type(e).__name__}: {str(e)[:200]}", error="error")
+    if outcome.kind == "collected":
+        try:
+            path, kind = agentcollect.finish_collected(outcome)
+        except Exception as e:  # noqa: BLE001
+            reason = f"{type(e).__name__}: {str(e)[:200]}"
+            click.echo(json.dumps({"run_id": run_id, "result": "failed", "error": reason}) if as_json else f"❌ {reason}")
+            sys.exit(1)
+        partial = _is_partial(outcome.record)
+        why = _partial_why(outcome.record)
+        if as_json:
+            click.echo(json.dumps({"run_id": run_id, "result": kind, "path": str(path), "partial": partial}))
+        else:
+            click.echo(f"✓ {run_id}: wrote {path}" + (f" (partial: {why})" if partial else ""))
+        return
+    reason = outcome.reason or "could not be collected"
+    click.echo(json.dumps({"run_id": run_id, "result": "failed", "error": outcome.error or reason}) if as_json
+               else f"❌ {reason}")
+    sys.exit(1)
+
+
+def _partial_why(record: Optional[dict]) -> str:
+    whats = [m.get("what") for m in (record or {}).get("missing", [])]
+    if "manifest" in whats:
+        return "run manifest missing"
+    if "runfile" in whats:
+        return "run file missing"
+    return "incomplete"
+
+
+def collect_agents_auto(run_id: str, home: Optional[Path] = None) -> int:
+    """`collect --agents RUN_ID --auto`: always 0; a failure is logged and the retry command printed."""
+    retry = f"ck stats collect --agents {run_id}"
+    try:
+        try:
+            enabled = col.auto_collect_enabled(ag.resolve(Path.cwd())["roles"]["run"])
+        except ag.AgentConfigError:
+            enabled = True
+        if not enabled:
+            click.echo("ℹ️ auto-collect is off (ck agents set run.analytics true)")
+            return 0
+        home = home or bench.claude_home()
+        if _classify(home) == "sandboxed":
+            if os.environ.get("CK_RUN_SANDBOXED") == "1":
+                click.echo(f"ℹ️ {run_id}: ck run collects this run after the session exits "
+                           f"(without a run manifest: {retry})")
+                return 0
+            reason = _sandbox_text(home)
+            store.append_collect_log(f"{_utc_iso()} {run_id} sandboxed: {reason}")
+            click.echo(f"⚠ could not collect {run_id}: {reason}; retry: {retry}")
+            return 0
+        outcome = agentcollect.collect_agent_run(home, run_id, now=_now(), fresh=True)
+        if outcome.kind == "collected":
+            path, _kind = agentcollect.finish_collected(outcome)
+            click.echo(f"✓ {run_id}: wrote {path}")
+            return 0
+        reason = outcome.reason or "could not be collected"
+        store.append_collect_log(f"{_utc_iso()} {run_id} {outcome.error or 'failed'}: {reason}")
+        click.echo(f"⚠ could not collect {run_id}: {reason}; retry: {retry}")
+    except Exception as e:  # noqa: BLE001 - auto collection must never change the caller's result
+        msg = f"{type(e).__name__}: {str(e)[:200]}"
+        try:
+            store.append_collect_log(f"{_utc_iso()} {run_id} error: {msg}")
+        except Exception:  # noqa: BLE001
+            pass
+        click.echo(f"⚠ could not collect {run_id}: {msg}; retry: {retry}")
+    return 0
+
+
+def _collect_backfill(home: Path, gap_minutes: Optional[int], dry_run: bool, as_json: bool) -> None:
+    from ..analytics import roles as _roles
+
+    gap = gap_minutes or agentrun.DEFAULT_GAP_MINUTES
+    plan = agentcollect.plan_backfill(home, gap_minutes=gap)
+    groups, excluded = plan.plan.groups, plan.plan.excluded
+    if not groups:
+        if as_json:
+            if dry_run:
+                click.echo(json.dumps({"groups": [], "excluded": [{"agentId": a, "reason": r} for a, _s, r in excluded]}))
+            else:
+                click.echo(json.dumps({"results": [], "collected": 0, "already_had": 0, "updated": 0, "failed": 0,
+                                       "excluded": len(excluded)}))
+            return
+        click.echo("ℹ️ no unmarked spec-agent runs to backfill")
+        if dry_run:
+            for aid, _sid, reason in excluded:
+                click.echo(f"left out: {aid}  {reason}")
+        else:
+            click.echo(f"left out: {len(excluded)}")
+        return
+
+    def wall(g) -> int:
+        return int(round((g.end_ms - g.start_ms) / 60000))
+
+    def iso(ms: int) -> str:
+        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    if dry_run:
+        if as_json:
+            click.echo(json.dumps({
+                "groups": [{"id": g.record_id, "session": g.session_id, "spec": g.spec, "agents": len(g.agent_ids),
+                            "start": iso(g.start_ms), "wallMinutes": wall(g), "usd": plan.est_usd.get(g.record_id)}
+                           for g in groups],
+                "excluded": [{"agentId": a, "reason": r} for a, _s, r in excluded]}))
+            return
+        for g in groups:
+            usd = plan.est_usd.get(g.record_id)
+            click.echo(f"group {g.record_id}  session {g.session_id}  spec {g.spec}  agents {len(g.agent_ids)}  "
+                       f"start {iso(g.start_ms)}  wall {wall(g)} min  est. " + (f"${usd:.2f}" if usd is not None else "$?"))
+            for aid in g.agent_ids:
+                af = plan.files.get(aid)
+                role = _roles.match_legacy(af.meta.description, af.meta.agent_type).role if af else "?"
+                click.echo(f"  {aid}  {role}")
+        for aid, _sid, reason in excluded:
+            click.echo(f"left out: {aid}  {reason}")
+        return
+
+    outcomes = agentcollect.collect_backfill(home, plan, now=_now())
+    counts = {"collected": 0, "unchanged": 0, "updated": 0, "failed": 0}
+    for o in outcomes:
+        counts[o.kind if o.kind in counts else "failed"] += 1
+    if as_json:
+        click.echo(json.dumps({"results": [{"id": o.run_id, "result": o.kind if o.kind in counts else "failed"} for o in outcomes],
+                               "collected": counts["collected"], "already_had": counts["unchanged"],
+                               "updated": counts["updated"], "failed": counts["failed"], "excluded": len(excluded)}))
+    else:
+        click.echo(f"collected: {counts['collected']}")
+        click.echo(f"already had: {counts['unchanged']}")
+        click.echo(f"updated: {counts['updated']}")
+        click.echo(f"failed: {counts['failed']}")
+        for o in outcomes:
+            if o.kind == "failed":
+                click.echo(f"  {o.run_id}: {o.reason or 'failed'}")
+        click.echo(f"left out: {len(excluded)}")
+    sys.exit(1 if counts["failed"] else 0)
 
 
 def _collect_one(home: Path, run_id: str, as_json: bool) -> None:
@@ -233,7 +419,7 @@ def _collect_one(home: Path, run_id: str, as_json: bool) -> None:
         return
     if outcome.kind == "collected":
         path, kind = _write(outcome)
-        partial = any(m.get("what") == "runfile" for m in (outcome.record or {}).get("missing", []))
+        partial = _is_partial(outcome.record)
         if as_json:
             click.echo(json.dumps({"run_id": run_id, "result": kind, "path": str(path), "partial": partial}))
         else:
@@ -246,16 +432,27 @@ def _collect_one(home: Path, run_id: str, as_json: bool) -> None:
 
 def _collect_all(home: Path, as_json: bool) -> None:
     summary = col.collect_all(home, now=_now())
+    try:
+        agent_outcomes = agentcollect.collect_open_manifests(home, now=_now())
+    except Exception:  # noqa: BLE001
+        agent_outcomes = ()
     kinds: List[str] = []
     failures: List[Tuple[str, str]] = []
     skipped = 0
-    for o in summary.outcomes:
+    abandoned: List[str] = []
+    for o in list(summary.outcomes) + list(agent_outcomes):
         if o.kind == "skipped_non_ck":
             skipped += 1
             continue
+        if o.kind == "abandoned":
+            abandoned.append(o.run_id)
+            continue
         if o.kind == "collected":
             try:
-                _path, k = _write(o)
+                if o.run_id.startswith("ag_"):
+                    _path, k = agentcollect.finish_collected(o)
+                else:
+                    _path, k = _write(o)
             except Exception as e:  # noqa: BLE001
                 kinds.append("failed")
                 failures.append((o.run_id, f"{type(e).__name__}: {str(e)[:200]}"))
@@ -267,20 +464,27 @@ def _collect_all(home: Path, as_json: bool) -> None:
                 failures.append((o.run_id, o.reason or "failed"))
     counts, code = col.summarize_outcomes(kinds, skipped)
     if as_json:
-        click.echo(json.dumps({"collected": counts.collected, "already_had": counts.unchanged, "updated": counts.updated,
-                               "unfinished": counts.unfinished, "failed": counts.failed,
-                               "failures": [{"run_id": r, "reason": m} for r, m in failures],
-                               "skipped_non_ck": counts.skipped_non_ck}))
+        payload = {"collected": counts.collected, "already_had": counts.unchanged, "updated": counts.updated,
+                   "unfinished": counts.unfinished, "failed": counts.failed,
+                   "failures": [{"run_id": r, "reason": m} for r, m in failures],
+                   "skipped_non_ck": counts.skipped_non_ck}
+        if abandoned:
+            payload["abandoned"] = len(abandoned)
+        click.echo(json.dumps(payload))
         sys.exit(code)
-    if not kinds:
+    if not kinds and not abandoned:
         click.echo(f"ℹ️ no ck spec runs found under {home} ({skipped} other workflow runs skipped)")
         click.echo(f"skipped non-ck: {skipped}")
         sys.exit(0)
+    for rid in abandoned:
+        click.echo(f"ℹ️ {rid}: abandoned (no agents carry the marker)")
     click.echo(f"collected: {counts.collected}")
     click.echo(f"already had: {counts.unchanged}")
     click.echo(f"updated: {counts.updated}")
     click.echo(f"unfinished: {counts.unfinished}")
     click.echo(f"failed: {counts.failed}")
+    if abandoned:
+        click.echo(f"abandoned: {len(abandoned)}")
     for rid, reason in failures:
         click.echo(f"  {rid}: {reason}")
     click.echo(f"skipped non-ck: {counts.skipped_non_ck}")

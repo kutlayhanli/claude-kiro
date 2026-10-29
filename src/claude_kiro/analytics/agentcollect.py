@@ -293,6 +293,14 @@ def collect_agent_run(home: Path, run_id: str, *, now: datetime, pricing: Option
                            f"[ck:{run_id}] under {home / 'projects'}")
         return _failed(run_id, "no_agents", f"no agents carry the marker [ck:{run_id}]")
 
+    def _started(af: AgentFile) -> Tuple[int, str]:
+        try:
+            first_ts = collect._timestamps(af.transcript)[0] if af.transcript.is_file() else None
+        except OSError:
+            first_ts = None
+        return (first_ts if first_ts is not None else 1 << 62, af.meta.agent_id)
+
+    files = sorted(files, key=_started)  # rows run in start order, like a workflow run's progress list
     first = next((f for f in files if f.meta.session_id == session), files[0])
     agent_dir = first.meta_path.parent
     session_dir = agent_dir.parent

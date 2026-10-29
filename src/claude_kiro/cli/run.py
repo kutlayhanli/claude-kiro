@@ -129,9 +129,9 @@ def spend_report(cwd: Path, session_id: Optional[str], started: float) -> List[s
     except Exception as e:  # a report must never fail the run
         return [f"Spend: could not read the transcripts ({e})"]
 
-def _collect_line(run_id: str, text: str) -> str:
+def _collect_line(run_id: str, text: str, retry_cmd: Optional[str] = None) -> str:
     """One log line from what `ck stats collect --auto` printed for a run."""
-    retry = f"retry: ck stats collect --run {run_id}"
+    retry = f"retry: {retry_cmd or f'ck stats collect --run {run_id}'}"
     text = text.strip()
     marker = f"✓ {run_id}: wrote "
     if text.startswith(marker):
@@ -186,8 +186,37 @@ def auto_collect_after_run(cwd: Path, session_id: Optional[str], started: float,
                     store.append_collect_log(f"{st._utc_iso()} - unrecognised")
                 except Exception:  # noqa: BLE001
                     break
+        lines.extend(_collect_agent_runs_after_run(home, sid, started))
     except Exception as e:  # a collection failure must never change the run
         lines.append(f"stats: could not collect this session's runs ({type(e).__name__}); retry: ck stats collect --all")
+    return lines
+
+
+def _collect_agent_runs_after_run(home: Path, sid: str, started: float) -> List[str]:
+    """Collect the session's agent-mode runs that have a manifest. Never raises."""
+    import contextlib
+    import io
+
+    from ..analytics import agentcollect
+    from . import stats as st
+
+    lines: List[str] = []
+    try:
+        ids = agentcollect.session_agent_runs(home, sid, int(started * 1000) - 5000)
+    except Exception:  # noqa: BLE001
+        return lines
+    for rid in ids:
+        buf = io.StringIO()
+        saved = os.environ.pop("CK_RUN_SANDBOXED", None)
+        try:
+            with contextlib.redirect_stdout(buf):
+                st.collect_agents_auto(rid, home=home)
+            lines.append(_collect_line(rid, buf.getvalue(), f"ck stats collect --agents {rid}"))
+        except Exception as e:  # noqa: BLE001
+            lines.append(f"stats: {rid} not collected ({type(e).__name__}); retry: ck stats collect --agents {rid}")
+        finally:
+            if saved is not None:
+                os.environ["CK_RUN_SANDBOXED"] = saved
     return lines
 
 

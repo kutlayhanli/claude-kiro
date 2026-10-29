@@ -346,7 +346,7 @@ Age is controlled by backdating whole hours (5 h vs 7 h); the clock is not faked
 ---
 
 ### Task 13: Wire `ck stats begin`, `collect --agents`, `--agents-backfill`, the merged `--all` and the doctor warnings into the CLI
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 1.1, 1.3, 1.4, 1.5, 3.8, 3.11, 3.12, 3.13, 3.14, 3.16, 5.2, 5.3, 5.5, 6.1, 6.2, 6.4, 6.5, 6.6, 7.1, 7.6, 7.7, 7.8, 7.9
 **Description:** This task owns the Harness Contract CLI (`begin`, `collect --agents`, `--agents-backfill`, the `--all` summary, the `ck doctor` warnings). Exact texts are in design.md Public Interfaces (CLI) and Error Handling; JSON keys follow the Harness Contract.

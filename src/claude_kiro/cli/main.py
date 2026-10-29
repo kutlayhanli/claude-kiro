@@ -856,7 +856,8 @@ def doctor(unattended: bool):
             auto_on = _col.auto_collect_enabled(_ag.resolve(project_dir)["roles"]["run"])
         except _ag.AgentConfigError:
             auto_on = True
-        for finding in _health.doctor_findings(_bench.claude_home(), auto_on, _store.load_records()):
+        for finding in _health.doctor_findings(_bench.claude_home(), auto_on, _store.load_records(),
+                                           now_ms=int(__import__("time").time() * 1000)):
             if finding.level == "warning":
                 warnings.append(finding.message)
             else:
