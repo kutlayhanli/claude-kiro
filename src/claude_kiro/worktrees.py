@@ -225,6 +225,38 @@ def heartbeat(path: Path) -> None:
             os.utime(lock)
 
 
+def _create_one(
+    root: Path, num: str, path: Path, branch: str, rel: str, base: str, reuse_dirty: bool
+) -> Outcome:
+    """The git side of `create` for one task; the caller holds `create_lock`.
+
+    Returns CREATED/EXISTS (install still to run), or BUSY/ERROR (done with this task).
+    A failed `git worktree add` is an ERROR outcome carrying git's message, so
+    `--json` callers can read it and the other tasks still get their own outcome.
+    """
+    if path.exists():
+        reason = lock_reason(root, path)
+        stale = stale_claim(root, path) if reason else None
+        if stale:  # its agent is gone; its commits stay on the branch for the next one
+            git(root, "worktree", "unlock", str(path))
+            reason = None
+        dirty = dirty_files(path)
+        if reason:
+            return Outcome(num, "BUSY", f"claimed: {reason}", rel, branch)
+        if dirty and not reuse_dirty:
+            return Outcome(num, "BUSY", f"{len(dirty)} uncommitted change(s); commit or clean, or pass --reuse-dirty", rel, branch)
+        return Outcome(num, "EXISTS", f"reused; released stale claim: {stale}" if stale else "reused", rel, branch)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if branch_exists(root, branch):
+            git(root, "worktree", "add", str(path), branch)
+            return Outcome(num, "CREATED", "re-attached existing branch", rel, branch)
+        git(root, "worktree", "add", "-b", branch, str(path), base)
+        return Outcome(num, "CREATED", f"from {base}", rel, branch)
+    except WorktreeError as e:
+        return Outcome(num, "ERROR", str(e), rel, branch)
+
+
 def create(
     root: Path,
     spec: str,
@@ -242,28 +274,13 @@ def create(
     for num in nums:
         path, branch = task_path(root, spec, num), task_branch(spec, num)
         rel = rel_path(root, path)
-        if path.exists():
-            reason = lock_reason(root, path)
-            stale = stale_claim(root, path) if reason else None
-            if stale:  # its agent is gone; its commits stay on the branch for the next one
-                git(root, "worktree", "unlock", str(path))
-                reason = None
-            dirty = dirty_files(path)
-            if reason:
-                outcomes.append(Outcome(num, "BUSY", f"claimed: {reason}", rel, branch))
-                continue
-            if dirty and not reuse_dirty:
-                outcomes.append(Outcome(num, "BUSY", f"{len(dirty)} uncommitted change(s); commit or clean, or pass --reuse-dirty", rel, branch))
-                continue
-            outcome = Outcome(num, "EXISTS", f"reused; released stale claim: {stale}" if stale else "reused", rel, branch)
-        else:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            if branch_exists(root, branch):
-                git(root, "worktree", "add", str(path), branch)
-                outcome = Outcome(num, "CREATED", "re-attached existing branch", rel, branch)
-            else:
-                git(root, "worktree", "add", "-b", branch, str(path), base)
-                outcome = Outcome(num, "CREATED", f"from {base}", rel, branch)
+        # Serialize the git side (worktree add, unlock) across concurrent `ck worktree
+        # create` runs; the install below runs outside the lock so installs overlap.
+        with create_lock(root):
+            outcome = _create_one(root, num, path, branch, rel, base, reuse_dirty)
+        if outcome.state not in ("CREATED", "EXISTS"):
+            outcomes.append(outcome)
+            continue
         if install:
             proc = subprocess.run(install, shell=True, cwd=path, capture_output=True, text=True)
             if proc.returncode != 0:
@@ -400,6 +417,25 @@ def _now() -> str:
 
 def _common_dir(root: Path) -> Path:
     return Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
+
+
+@contextlib.contextmanager
+def create_lock(root: Path) -> Iterator[Path]:
+    """Serialize `git worktree add`/unlock across concurrent `ck worktree create` runs.
+
+    Blocking flock on <git common dir>/ck-create.lock (like `land_lock`, but it waits):
+    many agents creating their own worktrees at once would otherwise collide on git's
+    own lock files. The kernel drops the flock when the holder exits.
+    """
+    import fcntl
+
+    path = _common_dir(root) / "ck-create.lock"
+    with open(path, "a+") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            yield path
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 @contextlib.contextmanager

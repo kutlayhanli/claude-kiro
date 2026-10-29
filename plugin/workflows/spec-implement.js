@@ -23,6 +23,11 @@ export const meta = {
 //   onFailure: 'continue' | 'halt',        // default continue: other ready tasks keep starting; a red target always halts
 //   maxConcurrent: null,                   // cap on tasks with an implementing agent at work (null = none); review and merge queue don't count
 //   fullGateEvery: 10,                     // run the full `ck gate <spec>` every N merges (0 = only at the end)
+//   deps: { '1': [], '2': ['1'] },         // "deps" from ck plan: when present the script decides readiness itself
+//   remaining: ['1', '2'],                 // "remaining" from ck plan (informational; the start plan is re-read)
+//   agentSlots: 4,                         // runtime.agentSlots from ck agents --json (null/absent: nothing presumed queued)
+//   finishFirst: true,                     // run.finish_first from ck agents --json (absent = true): hold new task starts
+//                                          //   while a review, revision or landing waits for a runtime slot
 //   mergeBatch: 4,                         // most tasks landed together (one `ck worktree land`, one gate); the window
 //                                          //   halves after a red batch (min 1) and grows by 1 after a green one, up to this
 //   agents: { implementer, test_writer, reviewer, fixer, orchestrator, resolver }  // "roles" from `ck agents --json`
@@ -63,6 +68,15 @@ const BRIEF = !A.brief
   : String(A.brief).startsWith('/') ? String(A.brief) : `${ROOT}/${String(A.brief).replace(/^\.\//, '')}`
 
 if (!SPEC || !ROOT) throw new Error('spec-implement needs args.spec and args.root')
+
+// Scheduling args (from `ck plan --json` and `ck agents --json`). deps: the dependency map, so the script
+// decides readiness itself; without it the run asks a plan agent on every freed slot (hand-built args).
+// agentSlots: the runtime's agent slots (null = nothing presumed queued). finishFirst: absent means on.
+const FINISH_FIRST = A.finishFirst == null ? true : A.finishFirst
+if (typeof FINISH_FIRST !== 'boolean') throw new Error('spec-implement: finishFirst must be true or false')
+const AGENT_SLOTS = A.agentSlots == null ? null : A.agentSlots
+if (AGENT_SLOTS !== null && !(Number.isInteger(AGENT_SLOTS) && AGENT_SLOTS >= 1)) throw new Error('spec-implement: agentSlots must be a whole number of 1 or more')
+const SCRIPT_READINESS = !!A.deps && typeof A.deps === 'object' && !Array.isArray(A.deps)
 
 // Model and effort per role, from `ck agents --json` (args.agents). "inherit" or
 // unset means the session's. args.model / args.effort override every code-writing
@@ -174,12 +188,14 @@ const PLAN = {
   type: 'object',
   properties: {
     done: { type: 'array', items: { type: 'string' }, description: '"done" from ck plan' },
-    ready: { type: 'array', items: { type: 'string' }, description: 'task numbers (the "task" field, e.g. "12", never a path) whose worktree is CREATED or EXISTS (from ck worktree create)' },
+    remaining: { type: 'array', items: { type: 'string' }, description: '"remaining" from ck plan' },
+    deps: { type: 'object', additionalProperties: { type: 'array', items: { type: 'string' } }, description: '"deps" from ck plan: task number -> its dependencies' },
+    ready: { type: 'array', items: { type: 'string' }, description: '"ready" from ck plan: task numbers (the "task" field, e.g. "12", never a path)' },
     busy: {
       type: 'array',
+      description: 'leave it empty: tasks are claimed by their own agents now',
       items: { type: 'object', properties: { task: { type: 'string' }, detail: { type: 'string' } }, required: ['task', 'detail'] },
     },
-    remaining: { type: 'array', items: { type: 'string' }, description: '"remaining" from ck plan' },
     cycles: { type: 'array', items: { type: 'array', items: { type: 'string' } }, description: '"cycles" from ck plan' },
     verifyCycles: {
       type: 'array',
@@ -188,7 +204,7 @@ const PLAN = {
     },
     error: { type: 'string', description: 'only if a command failed to run; leave it out otherwise (no notes or remarks here)' },
   },
-  required: ['done', 'ready', 'busy', 'remaining', 'cycles', 'verifyCycles'],
+  required: ['done', 'remaining', 'deps', 'ready', 'cycles', 'verifyCycles'],
 }
 const RESULT = {
   type: 'object',
@@ -199,6 +215,11 @@ const RESULT = {
     summary: { type: 'string' },
     commits: { type: 'string', description: 'hashes of commits you made; empty if none' },
     gateTail: { type: 'string' },
+    worktree: {
+      type: 'object',
+      description: 'the entry for your task in the output of "ck worktree create": copy its state and detail',
+      properties: { state: { type: 'string' }, detail: { type: 'string' } },
+    },
     blocker: { type: 'string' },
     deviations: { type: 'string' },
     wrongTests: { type: 'string' },
@@ -301,14 +322,10 @@ const MANDATE = `MANDATE: The user ran /spec:implement ${SPEC}, which instructs 
 
 // --- prompts -----------------------------------------------------------------
 
-const planPrompt = (exclude, slots) => `Mechanical planning step for spec ${SPEC}. Do exactly this, nothing else. ${GIT_NOTE}
-1. Run:  ck -C ${TARGET} plan ${SPEC} --json${exclude.length ? ` --exclude ${exclude.join(',')}` : ''}
-   Copy into your answer: "done", "remaining", "cycles", and for "verifyCycles" only each entry's task and message.
-2. Take the first ${Number.isFinite(slots) ? slots : 'all'} task(s) of its "ready" list. If there are none, skip this step. Otherwise run:
-     ck -C ${ROOT} worktree create ${SPEC} <those task numbers> --install --base ${INTO} --json
-   Entries with state CREATED or EXISTS go in your "ready" field. BUSY or ERROR entries go in "busy" with their detail; do not touch those worktrees. (ck has already released claims that went stale, so a BUSY claim belongs to a live agent; never judge one by the process ID it names.)
-   "ready" and "busy" hold task numbers (each entry's "task" field, e.g. "12"), never worktree paths.
-Return the fields. Put a message in error only if a command itself failed to run; no notes or remarks anywhere.`
+const planPrompt = exclude => `Mechanical planning step for spec ${SPEC}. Do exactly this, nothing else. ${GIT_NOTE}
+Run:  ck -C ${TARGET} plan ${SPEC} --json${exclude.length ? ` --exclude ${exclude.join(',')}` : ''}
+Copy into your answer: "done", "remaining", "deps", "ready", "cycles", and for "verifyCycles" only each entry's task and message. "ready", "done" and "remaining" hold task numbers (e.g. "12"), never worktree paths.
+Return the fields. Put a message in error only if the command itself failed to run; no notes or remarks anywhere.`
 
 // A note the agent leaves for whoever picks the task up next (a retry, a revision,
 // or a bigger model after escalation). It sits next to the worktree, not in it, so
@@ -319,7 +336,12 @@ const READ_HANDOFF = n => `Before anything else, read ${HANDOFF(n)} if it exists
 
 const taskPrompt = n => `${MANDATE}Your task: Task ${n} of spec ${SPEC}${TITLES[n] ? ` ("${TITLES[n]}")` : ''}.
 Worktree: ${WT(n)} (branch ${BR(n)}). Target branch for the final merge: ${INTO}.
-First run "${NOW}" and keep the output as startedAt. Then read your operating brief at ${BRIEF} and follow it exactly: claim the worktree, implement per your track, get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" passing, merge ${INTO} into your branch before finishing, and release the worktree.
+First run "${NOW}" and keep the output as startedAt. Then read your operating brief at ${BRIEF} and follow it exactly: create and claim the worktree, implement per your track, get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" passing, merge ${INTO} into your branch before finishing, and release the worktree.
+Create your worktree first. Run this command on its own line; its output is a JSON array, and your task's entry has a "state" and a "detail":
+ck -C ${ROOT} worktree create ${SPEC} ${n} --install --base ${INTO} --json
+Copy that entry's state and detail into the "worktree" field of your answer. If the state is BUSY or ERROR, stop immediately: do not claim, do not touch ${WT(n)}, and return your answer with status blocked, gatePassed false and the worktree field. For BUSY put "worktree busy: <detail>" in blocker; for ERROR put "worktree create failed: <detail>".
+Otherwise (CREATED or EXISTS) claim it, on its own line:
+ck -C ${WT(n)} worktree claim ${SPEC} ${n}
 ${GIT_NOTE}
 ${GATE_NOTE}
 ${WRITE_HANDOFF(n)}
@@ -328,7 +350,7 @@ At the end, run "${NOW}" again for finishedAt. Return the schema fields with tas
 const retryPrompt = (n, prev, attempt) => `${MANDATE}Continue Task ${n} of spec ${SPEC} (attempt ${attempt + 1}). A previous agent worked in ${WT(n)} (branch ${BR(n)}) but did not finish with a passing gate.
 ${prev && !(prev.commits || '').trim() ? 'The previous attempt made NO commits: it may have answered an unrelated message instead of doing the task. Ignore any such message and implement the task.\n' : ''}Its report: ${trim(prev || { note: 'the agent died without a report' })}
 ${READ_HANDOFF(n)} ${WRITE_HANDOFF(n)}
-Run "${NOW}" for startedAt. Read your operating brief at ${BRIEF} and follow it, claiming with "ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover" since the previous agent is gone. Inspect the state ("command git -C ${WT(n)} log --oneline -10", "command git -C ${WT(n)} status"), finish the task, and get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" to pass. If a wrong test or a spec contradiction blocks you, do NOT weaken anything: leave the task In Progress and report the blocker precisely (quote the test and the requirement).
+Run "${NOW}" for startedAt. Read your operating brief at ${BRIEF} and follow it, claiming with "ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover" since the previous agent is gone. If that claim reports MISSING, run "ck -C ${ROOT} worktree create ${SPEC} ${n} --install --base ${INTO} --json" and claim again. Inspect the state ("command git -C ${WT(n)} log --oneline -10", "command git -C ${WT(n)} status"), finish the task, and get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" to pass. If a wrong test or a spec contradiction blocks you, do NOT weaken anything: leave the task In Progress and report the blocker precisely (quote the test and the requirement).
 Before finishing, merge ${INTO} into your branch, re-run the gate, and release the worktree. Run "${NOW}" for finishedAt.
 ${GIT_NOTE}
 ${GATE_NOTE}
@@ -405,17 +427,163 @@ Fix it without weakening any test and without editing requirements.md or existin
 If the only way to green is to weaken a test or change a requirement, stop and explain precisely instead.
 Return green=true only if ${INTO} is green after your merge, else failing with the reason.`
 
+// --- decisions (pure; loaded by tests) ---
+// Every scheduling rule that allows, refuses or holds something. No script globals, no agent/log/args,
+// no clock and no I/O: tests/js/load_decisions.mjs cuts this block out and evaluates it on its own.
+
+const decisionIds = v => [...(v || [])].map(x => String(x && typeof x === 'object' ? x.task : x))
+const hasKey = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k)
+
+// Port of cli/worktree.py::_chain_lengths: for each open task, the number of open tasks on its longest
+// chain of dependents, itself included. Tasks are visited in `order` (tasks.md order, as ck plan's deps
+// keys are), never in JS object-key order, so memoization, ties and cycles match ck plan.
+function chainLengths(order, deps, done) {
+  deps = deps || {}
+  const doneSet = new Set(decisionIds(done))
+  const keys = []
+  const seen = new Set()
+  for (const n of [...decisionIds(order), ...Object.keys(deps)]) {
+    if (hasKey(deps, n) && !seen.has(n)) { seen.add(n); keys.push(n) }
+  }
+  const dependents = new Map(keys.map(n => [n, []]))
+  for (const n of keys) {
+    for (const d of decisionIds(deps[n])) {
+      if (dependents.has(d) && !doneSet.has(n)) dependents.get(d).push(n)
+    }
+  }
+  const lengths = new Map()
+  const length = (n, stack) => {
+    if (!lengths.has(n)) {
+      const below = dependents.get(n).filter(m => !stack.has(m)).map(m => length(m, new Set([...stack, m])))
+      lengths.set(n, 1 + Math.max(0, ...below))
+    }
+    return lengths.get(n)
+  }
+  const out = {}
+  for (const n of keys) if (!doneSet.has(n)) out[n] = length(n, new Set([n]))
+  return out
+}
+
+// Which tasks may start, in ck plan's order: longest open chain first, then numeric id, stable over `order`.
+// A dependency is met only if it is a key of `deps` AND Done: a dependency the script has no entry for is
+// never met, even when `done` lists it (never start on a guess, 1.10).
+function readyTasks({ order, deps, done, exclude, blocked } = {}) {
+  deps = deps || {}
+  const doneSet = new Set(decisionIds(done))
+  const skip = new Set([...decisionIds(exclude), ...decisionIds(blocked)])
+  const met = d => hasKey(deps, d) && doneSet.has(d)
+  const seen = new Set()
+  const ready = []
+  for (const n of decisionIds(order)) {
+    if (seen.has(n)) continue
+    seen.add(n)
+    if (!hasKey(deps, n) || doneSet.has(n) || skip.has(n)) continue
+    if (decisionIds(deps[n]).every(met)) ready.push(n)
+  }
+  const chain = chainLengths(order, deps, [...doneSet])
+  const num = n => (/^[0-9]+$/.test(n) ? Number(n) : 0)
+  const rank = new Map(ready.map((n, i) => [n, i]))
+  return ready.slice().sort((a, b) =>
+    ((chain[b] ?? 1) - (chain[a] ?? 1)) || (num(a) - num(b)) || (rank.get(a) - rank.get(b)))
+}
+
+const blockedOf = view => [
+  ...decisionIds(view && view.verifyCycles),
+  ...((view && view.cycles) || []).flatMap(c => decisionIds(c)),
+]
+
+// The scheduler's view after a plan returns. Merges never un-happen: Done = plan.done ∪ mergedInRun (1.6).
+function applyPlanView(plan, mergedInRun) {
+  return {
+    order: decisionIds(plan.remaining),
+    deps: plan.deps || {},
+    done: new Set([...decisionIds(plan.done), ...decisionIds(mergedInRun)]),
+    cycles: (plan.cycles || []).map(c => decisionIds(c)),
+    verifyCycles: [...(plan.verifyCycles || [])],
+  }
+}
+
+// Whether a plan agent's copy holds together: our readiness over its view equals its ready list (minus
+// tasks the stricter 1.10 rule holds back), and every remaining task has a deps entry (1.6, 1.8).
+function planConsistent(plan, exclude) {
+  if (!plan || typeof plan !== 'object') return false
+  const deps = plan.deps
+  if (!deps || typeof deps !== 'object' || Array.isArray(deps)) return false
+  if (![plan.remaining, plan.done, plan.ready].every(Array.isArray)) return false
+  const remaining = decisionIds(plan.remaining)
+  if (!remaining.every(n => hasKey(deps, n))) return false
+  const ours = readyTasks({ order: remaining, deps, done: plan.done, exclude: exclude || [], blocked: blockedOf(plan) })
+  const theirs = decisionIds(plan.ready).filter(n => decisionIds(deps[n]).every(d => hasKey(deps, d)))
+  return ours.length === theirs.length && ours.every((n, i) => n === theirs[i])
+}
+
+// Whether a plan agent runs for this trigger. Only an eligible trigger coalesces while one is in flight.
+function planDecision({ trigger, scriptReadiness, planInFlight, idleArmed, freeSlot, readyCount, openCount, stopLaunching } = {}) {
+  if (stopLaunching && trigger !== 'start') return 'none'
+  let eligible
+  if (trigger === 'start' || trigger === 'landing') eligible = true
+  else if (trigger === 'idle') eligible = !!freeSlot && readyCount === 0 && openCount > 0 && !!idleArmed
+  else if (trigger === 'freed' || trigger === 'finished') eligible = !scriptReadiness
+  else eligible = false
+  if (!eligible) return 'none'
+  return planInFlight ? 'coalesce' : 'run'
+}
+
+const isSlotCount = s => Number.isInteger(s) && s > 0
+
+// In-flight agents presumed queued: those after the first `slots` in request order. None without slots.
+function queuedAgents(inFlight, slots) {
+  if (!isSlotCount(slots)) return []
+  return [...(inFlight || [])].sort((a, b) => a.seq - b.seq).slice(slots)
+}
+
+const UNBLOCKER_KINDS = ['review', 'revise', 'land']
+
+// Which ready tasks start now (3.1, 3.3, 3.5, 3.9). Asked only about new task starts.
+function startDecision({ finishFirst, inFlight, slots, ready, working, maxConcurrent, stopLaunching } = {}) {
+  const none = (deferred, waiting) => ({ start: [], deferred, waiting })
+  if (stopLaunching) return none(false, 0)
+  const list = [...(ready || [])]
+  const flight = inFlight || []
+  if (finishFirst) {
+    const waiting = queuedAgents(flight, slots).filter(e => UNBLOCKER_KINDS.includes(e && e.kind)).length
+    if (waiting > 0) return none(true, waiting)
+  }
+  const cap = typeof maxConcurrent === 'number' && Number.isFinite(maxConcurrent) ? maxConcurrent : Infinity
+  const allowed = Math.max(0, cap - (working || 0))
+  const free = finishFirst && isSlotCount(slots) ? Math.max(0, slots - flight.length) : Infinity
+  const count = Math.min(allowed, free, list.length)
+  return { start: list.slice(0, count), deferred: free < Math.min(allowed, list.length), waiting: 0 }
+}
+
+// How a task agent's worktree creation step ended (2.2, 2.3, 2.4).
+function worktreeOutcome(result) {
+  const proceed = { kind: 'proceed', reason: null }
+  if (!result || typeof result !== 'object') return proceed
+  const wt = result.worktree && typeof result.worktree === 'object' ? result.worktree : null
+  const state = wt ? String(wt.state || '').toUpperCase() : ''
+  const detail = wt && wt.detail != null ? String(wt.detail) : ''
+  const blocker = typeof result.blocker === 'string' ? result.blocker : ''
+  if (state === 'BUSY') return { kind: 'busy', reason: `worktree busy: ${detail}` }
+  if (state !== 'ERROR' && /worktree busy/i.test(blocker)) {
+    const fromBlocker = blocker.replace(/^\s*worktree busy\s*:?\s*/i, '') || blocker
+    return { kind: 'busy', reason: `worktree busy: ${detail || fromBlocker}` }
+  }
+  if (state === 'ERROR') return { kind: 'error', reason: `worktree create failed: ${detail || blocker}` }
+  return proceed
+}
+
+// --- end decisions ---
+
 // --- scheduler ---------------------------------------------------------------
 
 const running = new Map()    // task -> promise of its record
 // Tasks holding a slot: an implementing agent (first attempt, retry, revision) is at work.
 // Review and the merge queue don't hold one, so a slow merge never keeps a ready task waiting.
 const working = new Set()
-let slotFreed = false
-let wakeLoop = null
 const records = {}           // task -> record
 const failed = new Map()     // task -> reason
-const busyReported = new Set()
+const mergedInRun = new Set()  // tasks this run landed: they stay Done whatever a plan snapshot says (1.6)
 let stopLaunching = false
 let stopReason = null
 let redTarget = false
@@ -452,7 +620,7 @@ function maybeCrossTest(n, atEnd = false) {
   crossTestRuns.push((async () => {
     let r = null
     try {
-      r = await agent(crossTestPrompt(merged), { label: `cross-test wave ${w}`, phase: phaseOf(merged[0]), schema: REVIEW_SCHEMA, ...RISKY_REVIEW })
+      r = await call('cross-test', crossTestPrompt(merged), { label: `cross-test wave ${w}`, phase: phaseOf(merged[0]), schema: REVIEW_SCHEMA, ...RISKY_REVIEW })
     } catch (e) {
       r = null
     }
@@ -473,32 +641,103 @@ const taskId = v => {
   const m = s.match(/-task-([0-9A-Za-z_]+)\/?$/) || s.match(/^(?:task\s+)?([0-9A-Za-z_]+)$/i)
   return m ? m[1] : s
 }
-const usablePlan = p => !!p && ['done', 'ready', 'busy', 'remaining', 'cycles', 'verifyCycles'].every(k => Array.isArray(p[k]))
+const usablePlan = p => !!p && ['done', 'ready', 'remaining', 'cycles', 'verifyCycles'].every(k => Array.isArray(p[k])) && !!p.deps && typeof p.deps === 'object' && !Array.isArray(p.deps)
 function normalizePlan(p) {
   const remaining = p.remaining.map(taskId)
   const known = n => !remaining.length || remaining.includes(n)
+  // deps are kept exactly as ck plan printed them: a near-miss id ("Task 2", " 2") must stay unknown (1.10).
+  const deps = {}
+  for (const [k, v] of Object.entries(p.deps)) deps[k] = Array.isArray(v) ? v.map(String) : []
   return {
     ...p,
     done: p.done.map(taskId),
     remaining,
+    deps,
     ready: [...new Set(p.ready.map(taskId))].filter(known),
-    busy: p.busy.map(b => ({ ...b, task: taskId(b && b.task) })).filter(b => known(b.task)),
+    busy: (Array.isArray(p.busy) ? p.busy : []).map(b => ({ ...b, task: taskId(b && b.task) })).filter(b => known(b.task)),
+    cycles: p.cycles.map(c => (Array.isArray(c) ? c.map(taskId) : [taskId(c)])),
     verifyCycles: p.verifyCycles.map(v => ({ ...v, task: taskId(v && v.task) })),
   }
 }
 
-async function plan() {
+// Every agent call goes through here: it keeps the list of calls in flight (request order), which
+// is how the script estimates what waits for a runtime slot, and wakes the main loop when one settles.
+const inFlight = []   // { seq, kind }
+let callSeq = 0
+let poked = false
+let wakeLoop = null
+function poke() {
+  poked = true
+  if (wakeLoop) { const w = wakeLoop; wakeLoop = null; w() }
+}
+const signal = () => (poked ? Promise.resolve() : new Promise(resolve => { wakeLoop = resolve }))
+function call(kind, prompt, opts) {
+  const entry = { seq: ++callSeq, kind }
+  inFlight.push(entry)
+  return (async () => {
+    try {
+      return await agent(prompt, opts)
+    } finally {
+      const i = inFlight.indexOf(entry)
+      if (i >= 0) inFlight.splice(i, 1)
+      poke()
+    }
+  })()
+}
+
+// The scheduler's view of the plan (applyPlanView) and what runs now.
+let view = { order: [], deps: {}, done: new Set(), cycles: [], verifyCycles: [] }
+let current = null          // the last plan applied
+let fallbackReady = []      // without args.deps: the ready list of the plan that just returned, used once
+let planRun = null          // the plan agent in flight, if any
+let queuedTrigger = null    // a trigger that arrived while one was in flight: one follow-up
+let idleArmed = true
+let recordSeq = 0           // task records seen so far: a landing plan disarms the idle plan only if none arrived while it ran
+let deferring = false
+const excluded = () => new Set([...running.keys(), ...failed.keys(), ...mergedInRun])
+function planContext() {
+  const exclude = excluded()
+  const ready = SCRIPT_READINESS ? readyTasks({ order: view.order, deps: view.deps, done: view.done, exclude, blocked: blockedOf(view) }) : []
+  const open = view.order.filter(n => !view.done.has(n) && !exclude.has(n)).length
+  const freeSlot = working.size < MAX_CONCURRENT && (!isSlotCount(AGENT_SLOTS) || inFlight.length < AGENT_SLOTS)
+  return { exclude, ready, open, freeSlot }
+}
+
+// The Workflow API has no non-agent step, so `ck plan` runs in a cheap agent. Its answer is
+// checked, not trusted: it must hold together (planConsistent), and a failed attempt is retried once.
+// The exclude list is captured when the prompt is built and used for that attempt's check, since
+// tasks start and finish while the plan agent runs.
+async function runPlan(trigger) {
   refills++
-  const exclude = [...running.keys(), ...failed.keys()]
-  const slots = MAX_CONCURRENT - working.size
+  const seqAtPrompt = recordSeq
   for (let attempt = 0; attempt < 2; attempt++) {
     const label = `plan ${refills}${attempt ? ' retry' : ''}`
+    const exclude = [...excluded()]
     let p = null
-    try { p = await agent(planPrompt(exclude, slots), { label, phase: 'Plan', schema: PLAN, ...LOW }) } catch (e) { p = { error: e && e.message } }
+    try { p = await call('plan', planPrompt(exclude), { label, phase: 'Plan', schema: PLAN, ...LOW }) } catch (e) { p = { error: e && e.message } }
     // An "error" next to a usable plan is a remark, not a failure; an empty plan with an error is a failure.
     if (usablePlan(p) && !(p.error && !p.done.length && !p.remaining.length)) {
-      if (p.error) log(`${label}: the planning agent left a note (not a failure): ${trim(p.error, 300)}`)
-      return normalizePlan(p)
+      const n = normalizePlan(p)
+      // A task a plan reports as busy is left out of its ready list: it is not a mismatch.
+      if (planConsistent(n, [...exclude, ...n.busy.map(b => b.task)])) {
+        if (p.error) log(`${label}: the planning agent left a note (not a failure): ${trim(p.error, 300)}`)
+        current = n
+        view = applyPlanView(n, mergedInRun)
+        // Task agents own BUSY detection; a busy list from the plan agent is ignored in script-readiness mode.
+        for (const b of SCRIPT_READINESS ? [] : n.busy) {
+          if (!failed.has(b.task) && !running.has(b.task)) {
+            failed.set(b.task, `worktree busy: ${b.detail}`)
+            records[b.task] = { task: b.task, wave: waveOf(b.task), ok: false, reason: `worktree busy: ${b.detail}` }
+          }
+        }
+        if (trigger !== 'start') applyLint(n)  // the start plan's cycle refusal is explicit, below
+        fallbackReady = n.ready
+        if (trigger === 'landing' && recordSeq === seqAtPrompt) idleArmed = false  // this plan just re-read tasks.md after a landing
+        return n
+      }
+      planFailures++
+      log(`${label}: the plan is inconsistent (its ready list does not follow from its dependencies)${attempt ? '' : ', retrying'}`)
+      continue
     }
     planFailures++
     log(`${label}: no usable plan (${(p && p.error && trim(p.error, 300)) || 'no result'})${attempt ? '' : ', retrying'}`)
@@ -506,28 +745,106 @@ async function plan() {
   return null
 }
 
-// A task's implementing agent finished; wake the scheduler to fill the slot.
-function releaseSlot(n) {
-  if (!working.delete(n)) return
-  slotFreed = true
-  if (wakeLoop) { wakeLoop({ freed: n }); wakeLoop = null }
+// At most one plan agent in flight; an eligible trigger arriving meanwhile coalesces into one follow-up.
+function requestPlan(trigger) {
+  const ctx = planContext()
+  const d = planDecision({ trigger, scriptReadiness: SCRIPT_READINESS, planInFlight: !!planRun, idleArmed, freeSlot: ctx.freeSlot, readyCount: ctx.ready.length, openCount: ctx.open, stopLaunching })
+  if (d === 'none') return null
+  if (d === 'coalesce') { queuedTrigger = queuedTrigger || trigger; return planRun }
+  if (trigger === 'idle') {
+    idleArmed = false
+    log(`plan ${refills + 1} (idle): nothing ready, ${ctx.open} task(s) open; re-reading the plan`)
+  }
+  planRun = (async () => {
+    let p = null
+    try { p = await runPlan(trigger) } catch (e) { p = null } finally { planRun = null }
+    if (!p && trigger !== 'start') { stopLaunching = true; stopReason = stopReason || PLAN_FAILED }
+    const q = queuedTrigger
+    queuedTrigger = null
+    if (q) requestPlan(q)
+    poke()
+    return p
+  })()
+  return planRun
 }
 
-function slotSignal() {
-  return slotFreed ? Promise.resolve({ freed: true }) : new Promise(resolve => { wakeLoop = resolve })
+// A task's implementing agent finished; its slot is free.
+function releaseSlot(n) {
+  if (!working.delete(n)) return
+  requestPlan('freed')
+  poke()
+}
+
+function startTask(n) {
+  working.add(n)
+  running.set(n, runTask(n).then(rec => finishTask(n, rec)))
+}
+
+function finishTask(n, rec) {
+  releaseSlot(n)
+  running.delete(n)
+  records[n] = rec
+  recordSeq++
+  maybeCrossTest(n)
+  if (!rec.ok) idleArmed = true  // a merged task was already followed by its landing plan; a failed one may change what is ready
+  if (!rec.ok) {
+    failed.set(n, rec.reason)
+    log(`Task ${n}: not merged (${rec.reason})`)
+    if (!CONTINUE && !rec.busy) { stopLaunching = true; stopReason = stopReason || `Task ${n} failed` }
+  }
+  requestPlan('finished')
+  poke()
+  return { n, rec }
+}
+
+// Starts what may start now, and re-reads the plan when nothing is ready and a slot is free.
+function schedule() {
+  const ctx = planContext()
+  let ready = ctx.ready
+  if (!SCRIPT_READINESS) {
+    // Without args.deps only the plan agent's ready list counts, and only once.
+    ready = fallbackReady.map(String).filter(n => !ctx.exclude.has(n) && !view.done.has(n))
+    fallbackReady = []
+  }
+  const d = startDecision({ finishFirst: FINISH_FIRST, inFlight, slots: AGENT_SLOTS, ready, working: working.size, maxConcurrent: MAX_CONCURRENT, stopLaunching })
+  for (const n of d.start) if (!running.has(n)) startTask(n)
+  if (d.start.length) deferring = false
+  if (d.deferred) {
+    if (!deferring) {
+      deferring = true
+      log(d.waiting > 0 ? `finish-first: holding new task starts while ${d.waiting} review/revise/land agent(s) wait for a slot` : `finish-first: holding new task starts while all ${AGENT_SLOTS} runtime slots are busy`)
+    }
+  } else deferring = false
+  if (SCRIPT_READINESS && !stopLaunching && !planRun) requestPlan('idle')
+}
+
+function applyLint(p) {
+  for (const vc of p.verifyCycles || []) {
+    const n = String(vc.task)
+    if (!failed.has(n) && !running.has(n)) {
+      failed.set(n, `verify-order cycle: ${vc.message}`)
+      records[n] = { task: n, wave: waveOf(n), ok: false, reason: `verify-order cycle: ${vc.message}` }
+      log(`Task ${n}: skipped, verify-order cycle (fix tasks.md; the next plan step picks it up)`)
+      if (!CONTINUE) { stopLaunching = true; stopReason = stopReason || `verify-order cycle at Task ${n}` }
+    }
+  }
+  if ((p.cycles || []).length) {
+    stopLaunching = true
+    stopReason = stopReason || `dependency cycle: ${p.cycles.map(c => c.join(' -> ')).join('; ')}`
+  }
 }
 
 async function fixAndRecheck(what, failure, n) {
   const ph = n ? phaseOf(n) : 'Final gate'
   fixCount++
-  let fix = await agent(fixPrompt(fixCount, what, failure), { label: `fix ${fixCount} (${what})`, phase: ph, schema: VERIFY, ...FIX })
-  let recheck = await agent(recheckPrompt(n), { label: `re-check ${fixCount}`, phase: ph, schema: VERIFY, ...ORCH })
+  let fix = await call('fix', fixPrompt(fixCount, what, failure), { label: `fix ${fixCount} (${what})`, phase: ph, schema: VERIFY, ...FIX })
+  let recheck = await call('recheck', recheckPrompt(n), { label: `re-check ${fixCount}`, phase: ph, schema: VERIFY, ...ORCH })
   for (const model of FIX_UP) {
     if (recheck && recheck.green) break
     fixCount++
     log(`${what}: still red after the fix, escalating the fixer to ${model}`)
-    fix = await agent(fixPrompt(fixCount, what, recheck), { label: `fix ${fixCount} (${what}) [${model}]`, phase: ph, schema: VERIFY, ...escalated(FIX, model) })
-    recheck = await agent(recheckPrompt(n), { label: `re-check ${fixCount}`, phase: ph, schema: VERIFY, ...ORCH })
+    fix = await call('fix', fixPrompt(fixCount, what, recheck), { label: `fix ${fixCount} (${what}) [${model}]`, phase: ph, schema: VERIFY, ...escalated(FIX, model) })
+    recheck = await call('recheck', recheckPrompt(n), { label: `re-check ${fixCount}`, phase: ph, schema: VERIFY, ...ORCH })
     fixerEscalations.push({ what, model, green: !!(recheck && recheck.green) })
   }
   return { fix, recheck, green: !!(recheck && recheck.green) }
@@ -557,7 +874,7 @@ async function landBatch(batch) {
   const used = batchWindow
   let res = null
   try {
-    res = await agent(landPrompt(tasks), { label: `land ${tasks.join(' ')}`, phase: phaseOf(tasks[0]), schema: LAND, ...LOW })
+    res = await call('land', landPrompt(tasks), { label: `land ${tasks.join(' ')}`, phase: phaseOf(tasks[0]), schema: LAND, ...LOW })
   } catch (e) {
     res = { tasks: [], error: e && e.message }
   }
@@ -583,7 +900,7 @@ async function landBatch(batch) {
   if (entry.bisected || entry.red.length) log(`Landing ${tasks.join(' ')}: red, bisected; ${entry.red.length ? `culprit(s) ${entry.red.join(', ')}` : 'no culprit (flaky?)'}; window now ${batchWindow}`)
 
   if (entry.merged.length && FULL_EVERY > 0 && Math.floor(mergedCount / FULL_EVERY) > Math.floor(before / FULL_EVERY)) {
-    let v = await agent(verifyPrompt(`full gate after ${mergedCount} merges`), { label: `full gate @${mergedCount}`, phase: phaseOf(tasks[0]), schema: VERIFY, ...ORCH })
+    let v = await call('gate', verifyPrompt(`full gate after ${mergedCount} merges`), { label: `full gate @${mergedCount}`, phase: phaseOf(tasks[0]), schema: VERIFY, ...ORCH })
     if (!v || !v.green) {
       log(`Full gate red after ${mergedCount} merges, one fix attempt`)
       const f = await fixAndRecheck(`full gate after ${mergedCount} merges`, v)
@@ -595,6 +912,14 @@ async function landBatch(batch) {
       stopLaunching = true
       stopReason = stopReason || `${INTO} is red: full gate after ${mergedCount} merges`
     }
+  }
+  for (const [b, t] of outcomes) {
+    if (t.state === 'MERGED') { mergedInRun.add(b.n); view.done.add(b.n) }  // Done for the scheduler at once; the plan below confirms it
+  }
+  if (outcomes.length) {
+    idleArmed = true
+    requestPlan('landing')
+    poke()
   }
   for (const [b, t] of outcomes) b.resolve(t)
 }
@@ -617,7 +942,7 @@ async function landTask(n, rec) {
       resolves++
       rec.resolves = resolves
       log(`Task ${n}: conflicts with ${INTO}, handing it to the resolver`)
-      const r = await agent(resolvePrompt(n, (t.files || []).join(', ') || t.detail), { label: `resolve ${n}${resolves > 1 ? ` round ${resolves}` : ''}`, phase: phaseOf(n), schema: RESOLVED, ...RESOLVE })
+      const r = await call('resolve', resolvePrompt(n, (t.files || []).join(', ') || t.detail), { label: `resolve ${n}${resolves > 1 ? ` round ${resolves}` : ''}`, phase: phaseOf(n), schema: RESOLVED, ...RESOLVE })
       if (!r || !r.resolved) return { merged: false, error: `conflict not resolved: ${(r && r.error) || 'no result'}` }
       continue
     }
@@ -631,7 +956,7 @@ async function landTask(n, rec) {
         fixCount++
         rec.fixes = fixes
         log(`Task ${n}: red on landing (not merged; ${INTO} stays green), fix ${fixes}${model ? ` on ${model}` : ''}`)
-        const f = await agent(landFixPrompt(fixCount, n, failure), { label: `fix ${fixCount} (Task ${n} red on landing)${model ? ` [${model}]` : ''}`, phase: phaseOf(n), schema: VERIFY, ...(model ? escalated(FIX, model) : FIX) })
+        const f = await call('fix', landFixPrompt(fixCount, n, failure), { label: `fix ${fixCount} (Task ${n} red on landing)${model ? ` [${model}]` : ''}`, phase: phaseOf(n), schema: VERIFY, ...(model ? escalated(FIX, model) : FIX) })
         if (model) { lastEscalation = { what: `landing Task ${n}`, model, green: false }; fixerEscalations.push(lastEscalation) }
         fixedGreen = !!(f && f.green)
         if (!fixedGreen) failure = (f && f.failing) || failure
@@ -646,7 +971,7 @@ async function landTask(n, rec) {
 
 async function runTask(n) {
   const rec = { task: n, wave: waveOf(n), title: TITLES[n], attempts: 0, ok: false, escalations: [], resolves: 0 }
-  const busy = r => !!(r && r.blocker && /worktree busy/i.test(r.blocker))
+  const busy = r => worktreeOutcome(r).kind === 'busy'
   rec.riskTag = isSafety(n) ? 'safety' : 'normal'
   rec.startModel = codeOpts(n).model || 'inherited'
   rec.reviewModel = REVIEW_ON ? reviewOpts(n).model || 'inherited' : null
@@ -655,44 +980,59 @@ async function runTask(n) {
     log(`Task ${n}: risk ${rec.riskTag}${COMPLEXITY[n] ? `, complexity ${String(COMPLEXITY[n]).toLowerCase()}` : ''}, start ${desc(codeOpts(n))}${routed ? ' (routed)' : ''}${up(ladderOf(n))}, review ${REVIEW_ON ? desc(reviewOpts(n)) : 'off'}`)
   }
   try {
-    let r = await agent(taskPrompt(n), { label: label(n), phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
+    let r = await call('task', taskPrompt(n), { label: label(n), phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
     rec.attempts = 1
     rec.startedAt = r && r.startedAt
+    // The task agent creates its own worktree first: a busy or failed creation ends the task here (2.3, 2.4).
+    const wo = worktreeOutcome(r)
+    if (wo.kind === 'busy' || wo.kind === 'error') {
+      rec.result = r
+      rec.finishedAt = r && r.finishedAt
+      rec.reason = wo.reason
+      if (wo.kind === 'busy') rec.busy = true
+      releaseSlot(n)
+      return rec
+    }
     while (!ok(r) && rec.attempts <= MAX_RETRIES && !busy(r)) {
       log(`Task ${n}: ${r && !(r.commits || '').trim() ? 'no commits' : 'gate not passed'}, retry ${rec.attempts}/${MAX_RETRIES}`)
-      r = await agent(retryPrompt(n, r, rec.attempts), { label: `${label(n)} retry ${rec.attempts}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
+      r = await call('task', retryPrompt(n, r, rec.attempts), { label: `${label(n)} retry ${rec.attempts}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
       rec.attempts++
       rec.startedAt = rec.startedAt || (r && r.startedAt)
     }
     for (const model of ladderOf(n)) {
       if (ok(r) || busy(r)) break
       log(`Task ${n}: still failing after ${rec.attempts} attempt(s), escalating to ${model}`)
-      r = await agent(retryPrompt(n, r, rec.attempts), { label: `${label(n)} retry ${rec.attempts} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
+      r = await call('task', retryPrompt(n, r, rec.attempts), { label: `${label(n)} retry ${rec.attempts} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
       rec.attempts++
       rec.escalations.push({ stage: 'retry', model })
       rec.startedAt = rec.startedAt || (r && r.startedAt)
     }
+    if (!ok(r) && busy(r)) {
+      const bo = worktreeOutcome(r)
+      rec.busy = true
+      rec.reason = bo.reason
+    }
     releaseSlot(n)
     if (ok(r) && REVIEW_ON) {
-      let review = await agent(reviewPrompt(n, r), { label: `review ${n}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
+      let review = await call('review', reviewPrompt(n, r), { label: `review ${n}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
       let round = 0
       while (review && review.verdict === 'changes' && round < REVIEW_ROUNDS && ok(r)) {
         round++
         log(`Task ${n}: reviewer asked for changes, revision ${round}/${REVIEW_ROUNDS}`)
         working.add(n)  // a revision takes a slot but never waits for one: the task is nearly done
-        r = await agent(revisePrompt(n, review, round), { label: `${label(n)} revise ${round}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
+        r = await call('revise', revisePrompt(n, review, round), { label: `${label(n)} revise ${round}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
         releaseSlot(n)
-        if (ok(r)) review = await agent(reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
+        if (ok(r)) review = await call('review', reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
       }
       for (const model of ladderOf(n)) {
         if (!(review && review.verdict === 'changes' && ok(r))) break
         round++
         log(`Task ${n}: blocking findings remain, escalating the revision to ${model}`)
         working.add(n)
-        r = await agent(revisePrompt(n, review, round), { label: `${label(n)} revise ${round} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
+        r = await call('revise', revisePrompt(n, review, round), { label: `${label(n)} revise ${round} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
         releaseSlot(n)
         rec.escalations.push({ stage: 'revise', model })
-        if (ok(r)) review = await agent(reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
+        if (ok(r)) review = await call('review', reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
       }
       // model/effort: who judged the task, so an audit can count escapes (approved bugs) per reviewer tier.
       const by = { model: reviewOpts(n).model || 'inherited', effort: reviewOpts(n).effort || 'inherited', riskTag: rec.riskTag }
@@ -708,7 +1048,7 @@ async function runTask(n) {
     rec.result = r
     rec.finishedAt = r && r.finishedAt
     if (!ok(r)) {
-      rec.reason = r ? r.blocker || `gate not passed (status ${r.status})` : 'agent died without a report'
+      if (!rec.busy) rec.reason = r ? r.blocker || `gate not passed (status ${r.status})` : 'agent died without a report'
       return rec
     }
     const m = await landTask(n, rec)
@@ -727,87 +1067,36 @@ async function runTask(n) {
   }
 }
 
-function launch(p) {
-  for (const b of p.busy || []) {
-    const n = String(b.task)
-    if (!busyReported.has(n) && !running.has(n)) {
-      busyReported.add(n)
-      failed.set(n, `worktree busy: ${b.detail}`)
-      records[n] = { task: n, wave: waveOf(n), ok: false, reason: `worktree busy: ${b.detail}` }
-    }
-  }
-  for (const n of p.ready.map(String)) {
-    if (stopLaunching || working.size >= MAX_CONCURRENT) break
-    if (running.has(n) || failed.has(n) || (records[n] && records[n].ok) || p.done.includes(n)) continue
-    working.add(n)
-    running.set(n, runTask(n).then(rec => { working.delete(n); return { n, rec } }))
-  }
-}
-
-function applyLint(p) {
-  for (const vc of p.verifyCycles || []) {
-    const n = String(vc.task)
-    if (!failed.has(n) && !running.has(n)) {
-      failed.set(n, `verify-order cycle: ${vc.message}`)
-      records[n] = { task: n, wave: waveOf(n), ok: false, reason: `verify-order cycle: ${vc.message}` }
-      log(`Task ${n}: skipped, verify-order cycle (fix tasks.md; the next plan step picks it up)`)
-      if (!CONTINUE) { stopLaunching = true; stopReason = stopReason || `verify-order cycle at Task ${n}` }
-    }
-  }
-  if ((p.cycles || []).length) {
-    stopLaunching = true
-    stopReason = stopReason || `dependency cycle: ${p.cycles.map(c => c.join(' -> ')).join('; ')}`
-  }
-}
-
 phase('Plan')
-let current = await plan()
-if (!current) return { halted: true, refused: false, reason: PLAN_FAILED, into: INTO }
-if (current.cycles.length || current.verifyCycles.length) {
+const startPlan = await requestPlan('start')
+if (!startPlan) return { halted: true, refused: false, reason: PLAN_FAILED, into: INTO }
+if (startPlan.cycles.length || startPlan.verifyCycles.length) {
   log('Refusing to launch: the plan has a cycle. Fix tasks.md (see `ck lint`) and run again.')
   return {
     halted: true,
     refused: true,
     reason: 'plan has a cycle; nothing was started',
-    cycles: current.cycles,
-    verifyCycles: current.verifyCycles,
+    cycles: startPlan.cycles,
+    verifyCycles: startPlan.verifyCycles,
     into: INTO,
   }
 }
-const initialPlan = current
-const initiallyDone = current.done.length
-doneAtStart = new Set(current.done.map(String))
-log(`${current.remaining.length} task(s) remaining, ${initiallyDone} already Done; starting ${Math.min(current.ready.length, MAX_CONCURRENT)}`)
-launch(current)
+const initialPlan = startPlan
+const initiallyDone = startPlan.done.length
+doneAtStart = new Set(startPlan.done.map(String))
+log(`${startPlan.remaining.length} task(s) remaining, ${initiallyDone} already Done; starting ${Math.min(startPlan.ready.length, MAX_CONCURRENT)}`)
+schedule()
+poked = false
 
-while (running.size) {
-  const event = await Promise.race([...running.values(), slotSignal()])
-  if (event.freed) {
-    // A task moved on to review or the merge queue: fill its slot now.
-    slotFreed = false
-    if (stopLaunching || working.size >= MAX_CONCURRENT) continue
-    const next = await plan()
-    if (!next) { stopLaunching = true; stopReason = stopReason || PLAN_FAILED; continue }
-    current = next
-    applyLint(current)
-    launch(current)
-    continue
-  }
-  const { n, rec } = event
-  running.delete(n)
-  records[n] = rec
-  maybeCrossTest(n)
-  if (!rec.ok) {
-    failed.set(n, rec.reason)
-    log(`Task ${n}: not merged (${rec.reason})`)
-    if (!CONTINUE) { stopLaunching = true; stopReason = stopReason || `Task ${n} failed` }
-  }
-  if (stopLaunching) continue  // let running tasks finish and merge
-  const next = await plan()
-  if (!next) { stopLaunching = true; stopReason = stopReason || PLAN_FAILED; continue }
-  current = next
-  applyLint(current)
-  launch(current)
+// Wakes on a settled agent call, a freed slot, a plan result or a finished task. The wake-up waits a few
+// microtask hops, so the continuation of the call that settled makes its own follow-up request (a review
+// after an implementer, a land after an approval) before free slots are counted (3.9).
+// A held start with agents still in flight stays alive too: any of them settling re-runs the start decision (NFR-6).
+while (running.size || planRun || (deferring && inFlight.length)) {
+  await signal()
+  poked = false
+  for (let i = 0; i < 10; i++) await null
+  schedule()
 }
 await landingIdle
 for (const n of Object.keys(records)) maybeCrossTest(n, true)  // waves whose other test tasks never finished
@@ -817,7 +1106,7 @@ await Promise.all(crossTestRuns)
 let finalGate = null
 if (mergedCount && !redTarget) {
   phase('Final gate')
-  finalGate = await agent(verifyPrompt('final'), { label: 'final gate', phase: 'Final gate', schema: VERIFY, ...ORCH })
+  finalGate = await call('gate', verifyPrompt('final'), { label: 'final gate', phase: 'Final gate', schema: VERIFY, ...ORCH })
   if (!finalGate || !finalGate.green) {
     log(`Final gate red, one fix attempt`)
     const f = await fixAndRecheck('final gate', finalGate)
@@ -888,7 +1177,7 @@ Command:  ck -C ${ROOT} worktree report ${SPEC} --into ${INTO} --json
 Copy "head", "merged" (task, commit, mergedAt), "done", "failed" (task, branch, ahead, claim), "blocked" (task, on) and "unstarted" exactly as printed, every entry. Put a message in error only if the command printed no JSON (say what it printed, or that it was refused).`
 phase('Report')
 let gitReport = null
-try { gitReport = await agent(reportPrompt(), { label: 'report', phase: 'Report', schema: REPORT, ...LOW }) } catch (e) { gitReport = { error: e && e.message } }
+try { gitReport = await call('report', reportPrompt(), { label: 'report', phase: 'Report', schema: REPORT, ...LOW }) } catch (e) { gitReport = { error: e && e.message } }
 const GIT_LISTS = ['merged', 'done', 'failed', 'blocked', 'unstarted']
 const fromGit = !!gitReport && !gitReport.error && GIT_LISTS.every(k => Array.isArray(gitReport[k]))
 const ids = list => (list || []).map(e => taskId(e && typeof e === 'object' ? e.task : e))
