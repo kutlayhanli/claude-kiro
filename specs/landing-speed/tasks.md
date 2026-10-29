@@ -550,7 +550,7 @@ Each file declares its `PROPERTIES` map (`P-17`, `P-18` in `test_gate_xdist.py`;
 ---
 
 ### Task 17: Add the xdist module and cap pytest-xdist workers across concurrent ck gates
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 7.1, 7.2, 7.3
 **Description:** Owns Harness Contract item 10 (gate; design renames `gate.xdist_env`/`gate.machine_cores`/`CK_GATE_RUNDIR` to `xdist.worker_cap`/`verify_env`/`core_count`/`CK_GATE_REGISTRY`) and the seam of item 11 (`xdist.suggestion`, renamed from `config.xdist_suggestion`). Create `src/claude_kiro/xdist.py` per design.md "`ck gate` environment" and "Decision Seams":
@@ -566,23 +566,28 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 **Files:**
 - `src/claude_kiro/xdist.py` - new module: registry, worker cap, env, core count, doctor/init hint
 - `src/claude_kiro/gate.py` - `gate_slot` around `run_gate`; `_run` env parameter; `verify_env` per verify command
-**Verify:** `uv run pytest -q tests/test_gate_xdist.py tests/test_xdist_hint.py tests/test_gate_xdist_redteam.py` and, for the command-position rule, the `has_pytest_without_n` cases of `tests/test_doctor_xdist_redteam.py`
+**Verify:** `uv run pytest -q tests/test_gate_xdist.py tests/test_xdist_hint.py tests/test_gate_xdist_redteam.py` `uv run pytest -q tests/test_doctor_xdist_redteam.py -k no_hint_for_near_miss`
 **Verified by:** Task 15, Task 16, Task 20
 
 **Acceptance:**
-- [ ] With `PYTEST_XDIST_AUTO_NUM_WORKERS` unset and one other live gate, a verify command sees `str(max(1, cores // 2))`; alone it sees `str(cores)`; with more gates than cores it sees `"1"` (6.1, 6.3, 6.4)
-- [ ] A preset value (including the empty string) passes through unchanged (6.2)
-- [ ] A gate that passed, failed, timed out or was SIGKILLed is no longer counted by the next gate (6.5)
-- [ ] With the registry path pointing at a regular file or an unreadable directory, the gate still runs its verify commands, counts only itself, prints one line naming the unusable registry, and its result follows the command's exit code (6.6)
-- [ ] Gates with different `TMPDIR` values count each other through the default registry, and no registry file is ever written under `TMPDIR`, `/tmp` or the cwd (6.1, TC-60)
-- [ ] A gate is counted from the moment its `gate-*.lock` exists; a concurrent counter never removes a live gate's file (6.1, TC-61)
-- [ ] Verify argv and the gate report's command strings are verbatim (no `-n` added/removed) (6.7)
-- [ ] `running_gates` never deletes a file that does not match `gate-*.lock`
-- [ ] `suggestion` returns the hint for pytest commands without `-n` and None for `-n`/`--numprocesses` forms, non-pytest commands and empty lists, independent of command order; the hint names the collection-mismatch error and contains the PYTHONHASHSEED one-line check (7.1, 7.2, 7.3)
+- [x] With `PYTEST_XDIST_AUTO_NUM_WORKERS` unset and one other live gate, a verify command sees `str(max(1, cores // 2))`; alone it sees `str(cores)`; with more gates than cores it sees `"1"` (6.1, 6.3, 6.4)
+- [x] A preset value (including the empty string) passes through unchanged (6.2)
+- [x] A gate that passed, failed, timed out or was SIGKILLed is no longer counted by the next gate (6.5)
+- [x] With the registry path pointing at a regular file or an unreadable directory, the gate still runs its verify commands, counts only itself, prints one line naming the unusable registry, and its result follows the command's exit code (6.6)
+- [x] Gates with different `TMPDIR` values count each other through the default registry, and no registry file is ever written under `TMPDIR`, `/tmp` or the cwd (6.1, TC-60)
+- [x] A gate is counted from the moment its `gate-*.lock` exists; a concurrent counter never removes a live gate's file (6.1, TC-61)
+- [x] Verify argv and the gate report's command strings are verbatim (no `-n` added/removed) (6.7)
+- [x] `running_gates` never deletes a file that does not match `gate-*.lock`
+- [x] `suggestion` returns the hint for pytest commands without `-n` and None for `-n`/`--numprocesses` forms, non-pytest commands and empty lists, independent of command order; the hint names the collection-mismatch error and contains the PYTHONHASHSEED one-line check (7.1, 7.2, 7.3)
 
 **Dependencies:** Task 15, Task 16 (its tests are the oracle)
 **Complexity:** Medium
 **Risk:** safety (deletes registry lock files; must remove only ended `gate-*.lock` files in the registry dir)
+
+**Implementation notes (Task 17):**
+- Verify line: the original line put prose in backticks (`has_pytest_without_n`, `tests/test_doctor_xdist_redteam.py`), which the gate ran as shell commands (exit 127/126). It now runs the doctor red-team's near-miss (command-position) cases as a real command.
+- `gate_slot(registry=None, errors=None)`: the optional `errors` list receives the reason when registration fails, for `run_gate`'s one-line note. `run_gate` wraps a private `_run_gate`; the note goes to stderr (stdout of the done-verify hook may be parsed).
+- TC-61 was blocked on a test race (counter never awaited); fixed upstream (counter signals ready after its first count). Now passes.
 
 ---
 
@@ -656,7 +661,7 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 ---
 
 ### Task 21: Show the xdist hint in ck doctor and ck init
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 7.1, 7.2, 7.3, 7.4, 7.5
 **Description:** Owns the doctor/init side of Harness Contract item 11 (doctor appends the string to `warnings`, init prints the same string). In `src/claude_kiro/cli/main.py`, `doctor` appends `xdist.suggestion(load_config(project_dir)["verify"])` to `warnings` when it is not None; warnings never change the exit status, which stays driven by `issues` only. `init` prints the same suggestion after the config step, computed for the effective `verify` (newly written or existing `specs/ck.json`), and writes nothing extra: no `-n` added to verify, no change to `pyproject.toml`.
@@ -666,10 +671,10 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 **Verified by:** Task 19, Task 20
 
 **Acceptance:**
-- [ ] `ck doctor` with verify `["uv run pytest -q"]` shows a Warnings bullet equal to `xdist.suggestion(verify)` and no Issues bullet about xdist (7.1, 7.2)
-- [ ] No bullet for `-n auto`, `--numprocesses=4`, non-pytest or empty verify (7.3)
-- [ ] `ck init` in a pytest project prints the same text, leaves `specs/ck.json` verify without `-n` and `pyproject.toml` byte-identical; no suggestion for a package.json-only project (7.4)
-- [ ] Doctor exit codes are identical with and without the hint, healthy or with an issue (7.5)
+- [x] `ck doctor` with verify `["uv run pytest -q"]` shows a Warnings bullet equal to `xdist.suggestion(verify)` and no Issues bullet about xdist (7.1, 7.2)
+- [x] No bullet for `-n auto`, `--numprocesses=4`, non-pytest or empty verify (7.3)
+- [x] `ck init` in a pytest project prints the same text, leaves `specs/ck.json` verify without `-n` and `pyproject.toml` byte-identical; no suggestion for a package.json-only project (7.4)
+- [x] Doctor exit codes are identical with and without the hint, healthy or with an issue (7.5)
 
 **Dependencies:** Task 17 (calls `xdist.suggestion`), Task 19, Task 20 (its tests are the oracle)
 **Complexity:** Low

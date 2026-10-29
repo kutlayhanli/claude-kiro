@@ -14,7 +14,7 @@ from typing import Optional
 
 import click
 
-from .. import plugin
+from .. import plugin, xdist
 from ..config import initial_config, load_config
 from ..paths import CONFIG_FILE, LEGACY_SPECS_DIR, SPECS_DIR, spec_roots
 from .agents import agents
@@ -557,6 +557,9 @@ def init(force: bool, allow_workflow: Optional[bool], vendor: bool):
             f"\n💡 Unattended runs (cloud, claude -p) can stall on a Workflow permission prompt. "
             f"Run 'ck init --allow-workflow' or add \"{WORKFLOW_RULE}\" to permissions.allow in {SHARED_SETTINGS}."
         )
+    xdist_hint = xdist.suggestion(load_config(project_dir).get("verify") or [])
+    if xdist_hint:
+        click.echo(f"\n💡 {xdist_hint}")
     click.echo(f"\n📝 Specs are written to {SPECS_DIR}/ (outside .claude/, so no approval prompts)")
     if (project_dir / LEGACY_SPECS_DIR).is_dir():
         click.echo(f"⚠️  Found specs in {LEGACY_SPECS_DIR}/ - run 'ck migrate' to move them")
@@ -718,6 +721,12 @@ def doctor(unattended: bool):
         click.echo("✓ ck command is installed")
     else:
         issues.append("ck command not found in PATH")
+
+    # The xdist hint is a warning about the verify config, so it is shown whatever the .claude state.
+    if (project_dir / CONFIG_FILE).exists():
+        xdist_hint = xdist.suggestion(load_config(project_dir).get("verify") or [])
+        if xdist_hint:
+            warnings.append(xdist_hint)
 
     if not claude_dir.exists():
         issues.append(".claude directory not found - run 'ck init'")
