@@ -556,7 +556,7 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 ---
 
 ### Task 19: Write `ck doctor` / `ck init` xdist hint tests (Story 7)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.1, 7.2, 7.3, 7.4, 7.5
 **Properties:** P-20
@@ -567,9 +567,9 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 **Verifies:** Task 21
 
 **Acceptance:**
-- [ ] Tests run real `ck doctor` / `ck init` and execute the hint's command in a real shell against real pytest projects
-- [ ] P-20 covers every combination in its row with real subprocesses
-- [ ] Before implementation the tests fail because no hint is printed and `claude_kiro.xdist` is missing, not from fixture bugs
+- [x] Tests run real `ck doctor` / `ck init` and execute the hint's command in a real shell against real pytest projects
+- [x] P-20 covers every combination in its row with real subprocesses
+- [x] Before implementation the tests fail because no hint is printed and `claude_kiro.xdist` is missing, not from fixture bugs
 
 **Dependencies:** None
 **Complexity:** Medium
