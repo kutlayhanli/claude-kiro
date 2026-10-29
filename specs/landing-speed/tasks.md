@@ -578,7 +578,7 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 ---
 
 ### Task 20: Red-team Story 7's SHALL NOT clauses (no false hint, init changes nothing, doctor exit unchanged)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.3, 7.4, 7.5
 **Description:** Try to break each SHALL NOT clause of Story 7 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Write from requirements.md only, through real `ck doctor` / `ck init`. Ideas: verify commands that already parallelise in odd forms (`-n0`, `-n=auto`, `--numprocesses auto`, `-n` inside `PYTEST_ADDOPTS=-n auto pytest`); commands that only mention pytest (`pip install pytest`, `echo pytest`, `ruff check tests/test_pytest_x.py`, `pytest-free`); unbalanced quotes that break `shlex`; the hint's own check command fed back as the verify command; verify not a list or containing non-strings; `ck init` run twice and on an existing `specs/ck.json` (verify, pyproject and lock files byte-identical); doctor exit codes compared with and without hint across healthy and broken states.
@@ -588,9 +588,11 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 **Verifies:** Task 21
 
 **Acceptance:**
-- [ ] Cases run the real CLI on real temp repos
-- [ ] Each test fails before implementation for missing behaviour (or documents a current pass that must stay a pass), not test code errors
-- [ ] Files `ck init` must not change are compared byte for byte
+- [x] Cases run the real CLI on real temp repos
+- [x] Each test fails before implementation for missing behaviour (or documents a current pass that must stay a pass), not test code errors
+- [x] Files `ck init` must not change are compared byte for byte
+
+**Notes:** Non-string verify items already crash ck doctor (main.py Verify commands line) independent of the hint, so those shapes are not asserted.
 
 **Dependencies:** None
 **Complexity:** Low
