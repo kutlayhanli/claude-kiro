@@ -295,7 +295,7 @@ Age is controlled by backdating whole hours (5 h vs 7 h); the clock is not faked
 ---
 
 ### Task 11: Test agent-mode privacy end to end and the CLI-wide properties
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 3.2, 5.2, 8.1, 8.2, 8.5, 9.1, 9.2, 9.3, 9.4
 **Properties:** P-15, P-16, P-17
