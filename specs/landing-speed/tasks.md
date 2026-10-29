@@ -536,7 +536,7 @@ In `src/claude_kiro/gate.py`, `run_gate` holds `xdist.gate_slot()` for its whole
 ---
 
 ### Task 18: Switch this project's verify to pytest-xdist
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 5.1, 5.2, 5.3, 5.4
 **Description:** Add `pytest-xdist>=3.6` to `[dependency-groups] dev` in `pyproject.toml` and re-lock with `uv lock` (commit `uv.lock`). Change `specs/ck.json` `verify` to `["uv run pytest -q -n auto"]`; leave the collection command as is (it uses `--collect-only`). Confirm test ids are stable across processes: run `PYTHONHASHSEED=1 uv run pytest --collect-only -q > /tmp/ids1 && PYTHONHASHSEED=2 uv run pytest --collect-only -q > /tmp/ids2 && diff /tmp/ids1 /tmp/ids2`; if any id depends on pid, hash seed or time, give that parametrization fixed `ids=` in the source under test only if it is not a test-plan-owned file, otherwise report it as a blocker. Confirm with `CK_COMPARE_PARALLEL=1 uv run pytest -q tests/test_parallel_suite.py -k compare` that the suite gives the same results under `-n auto` as serially. The task Verify deliberately does not run the whole suite: tests written ahead of other open impl tasks are still red at this point, identically in both modes; the final gate runs the whole suite under the new verify.
