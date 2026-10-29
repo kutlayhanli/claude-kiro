@@ -136,9 +136,9 @@ def test_p16_worktree_and_manifest_values_are_confidential_terms(values, spec, w
             ToolAgentSpec(described(run_id, "review task 1"), agent_type="spec:reviewer"),
         ]
         session.tool_agents(specs)
+        manifest = json.loads(manifest_path.read_text())  # read before collect: a collected run's manifest is closed (3.8)
         data = collect_json(env, run_id)
         record = json.loads(Path(data["path"]).read_text())
-        manifest = json.loads(manifest_path.read_text())
 
         from claude_kiro.analytics import confidential_terms
 
