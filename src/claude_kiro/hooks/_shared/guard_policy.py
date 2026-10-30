@@ -33,6 +33,7 @@ class TargetFacts:
     is_test: bool
     exists_on_base: Optional[bool]  # None = could not tell
     owned: bool  # listed by an In Progress test-track task in that checkout
+    given: Optional[str] = None  # the target as the command named it, when it was a directory
 
 
 @dataclass(frozen=True)
@@ -81,6 +82,7 @@ class _Segment:
     words: List[str]
     writes: List[str]  # targets of write redirects (not /dev/null, not fd duplication)
     tee: bool = False
+    paren: Optional[str] = None  # "(" or ")" for a subshell boundary marker (no words)
 
 
 _SEP_CHARS = ";&|()\n"
@@ -181,9 +183,15 @@ def _scan(command: str, strict: bool = False) -> List[_Segment]:
                 while j < n and text[j] in " \t":
                     j += 1
                 k = j
-                while k < n and text[k] not in " \t\n;&|()":
+                while k < n and text[k] not in " \t\n;&|()<>":
                     k += 1
-                i = k  # >&2, >&- : duplication, not a file write
+                word = text[j:k]
+                if word == "-" or (word and word.isdigit()):
+                    i = k  # >&2, >&- : duplication, not a file write
+                    continue
+                # >&WORD with a file name: stdout and stderr to WORD, like &>
+                pending_redirect = True
+                i = j
                 continue
             pending_redirect = True
             i = j
@@ -191,6 +199,11 @@ def _scan(command: str, strict: bool = False) -> List[_Segment]:
         if c in " \t\r":
             end_word()
             i += 1
+            continue
+        if c == "#" and not have:
+            # an unquoted '#' at the start of a word starts a comment up to the end of the line
+            eol = text.find("\n", i)
+            i = n if eol < 0 else eol
             continue
         if c in _SEP_CHARS:
             if c == "&" and i + 1 < n and text[i + 1] == ">":
@@ -202,6 +215,8 @@ def _scan(command: str, strict: bool = False) -> List[_Segment]:
                     i += 1
                 continue
             end_segment()
+            if c in "()":
+                segments.append(_Segment([], [], paren=c))
             i += 1
             if c == "\n" and heredocs:
                 for delim in heredocs:
@@ -223,12 +238,36 @@ def _scan(command: str, strict: bool = False) -> List[_Segment]:
     return segments
 
 
+# Shell reserved words and plain wrappers that run the next word as the program.
+_PREFIX_WORDS = frozenset(
+    "command rtk then do else elif if while until { } ! exec nohup fi done esac".split()
+)
+# Wrappers whose own options come before the program: {wrapper: options that take a value}.
+_OPT_WRAPPERS = {
+    "time": frozenset(["-o", "--output", "-f", "--format"]),
+    "sudo": frozenset("-u -g -h -p -C -D -R -T -U --user --group --host --prompt".split()),
+    "env": frozenset("-u -C -S --unset --chdir --split-string".split()),
+}
+
+
 def _strip_prefix(words: Sequence[str]) -> List[str]:
-    """Drop env assignments and `command`/`rtk` wrappers from the front of a segment."""
+    """Drop env assignments, reserved words and wrappers (`command`, `rtk`, `sudo`, `env`,
+    `time`, `then`, `do`, ...) from the front of a segment, leaving the program first."""
     out = list(words)
     while out:
-        if _ASSIGN.match(out[0]) or out[0] in ("command", "rtk"):
+        w = out[0]
+        if _ASSIGN.match(w) or w in _PREFIX_WORDS:
             out.pop(0)
+            continue
+        if w in _OPT_WRAPPERS:
+            value_flags = _OPT_WRAPPERS[w]
+            out.pop(0)
+            while out and out[0].startswith("-") and out[0] != "-":
+                flag = out.pop(0)
+                if flag == "--":
+                    break
+                if flag in value_flags and out:
+                    out.pop(0)
             continue
         break
     return out
@@ -283,8 +322,16 @@ def destroy_targets(command: str, cwd: str) -> List[DestroyTarget]:
     except Exception:  # defensive: fall back to whitespace split
         segments = [_Segment(s.split(), []) for s in re.split(r"&&|\|\||[;|\n]", command or "")]
     cur = cwd
+    stack: List[str] = []  # cwd saved at each open subshell
     targets: List[DestroyTarget] = []
     for seg in segments:
+        if seg.paren == "(":
+            stack.append(cur)
+            continue
+        if seg.paren == ")":
+            if stack:
+                cur = stack.pop()
+            continue
         words = _strip_prefix(seg.words)
         if not words:
             continue
@@ -311,7 +358,10 @@ def destroy_targets(command: str, cwd: str) -> List[DestroyTarget]:
             paths = _operands(args, ("-s", "--size", "-r", "--reference"))
         elif name in ("mv", "git mv"):
             op = "move"
-            if any(a in ("-t",) or a.startswith("--target-directory") for a in args):
+            if any(
+                (a.startswith("-t") and not a.startswith("--")) or a.startswith("--target-directory")
+                for a in args
+            ):
                 paths = _operands(args, ("-t", "--target-directory", "-S", "--suffix"))
             else:
                 ops = _operands(args, ("-S", "--suffix"))
@@ -337,6 +387,10 @@ _CK_READ = frozenset(["gate", "plan", "lint"])
 def _segment_read_only(seg: _Segment) -> bool:
     if seg.writes or seg.tee:
         return False
+    if any(w == "--output" or w.startswith("--output=") for w in seg.words):
+        return False  # git diff/show --output=<file>, time --output <file>
+    if "time" in seg.words[:3] and "-o" in seg.words:
+        return False  # time -o <file>
     words = _strip_prefix(seg.words)
     if not words:
         return True
@@ -379,6 +433,20 @@ def may_write(command: str) -> bool:
 
 
 _PYTHON = re.compile(r"^python(\d+(\.\d+)?)?$")
+# The rest of the bundle is this flag's value (-l and -0 take only digits, so they are not here).
+_PERL_VALUE_FLAGS = frozenset("MmIeEdDxFC")
+
+
+def _perl_in_place(arg: str) -> bool:
+    """True when a perl short-option bundle sets -i before any value-taking flag."""
+    if not arg.startswith("-") or arg.startswith("--"):
+        return False
+    for ch in arg[1:]:
+        if ch == "i":
+            return True
+        if ch in _PERL_VALUE_FLAGS:
+            return False
+    return False
 
 
 def command_family(command: Optional[str]) -> str:
@@ -401,7 +469,7 @@ def command_family(command: Optional[str]) -> str:
         prog, args = first[0], first[1:]
         if prog == "sed":
             return "sed"
-        if prog == "perl" and any(a.startswith("-") and not a.startswith("--") and "i" in a[1:] for a in args):
+        if prog == "perl" and any(_perl_in_place(a) for a in args):
             return "sed"
         if prog in ("rm", "unlink", "truncate"):
             return "rm"
@@ -452,17 +520,27 @@ def decide_bash(targets: Sequence[TargetFacts], caller: Caller, mode: Optional[s
     hits = [t for t in targets if t.is_test and t.exists_on_base is True and not t.owned]
     if not hits:
         return GuardDecision(False)
+    # S7: each directory as given, then up to 3 of its test files; plain file targets as they are.
     paths: List[str] = []
+    per_dir: dict = {}
     for t in hits:
+        if t.given:
+            if t.given not in paths:
+                paths.append(t.given)
+            if per_dir.get(t.given, 0) >= 3 or t.rel in paths:
+                continue
+            per_dir[t.given] = per_dir.get(t.given, 0) + 1
         if t.rel not in paths:
             paths.append(t.rel)
+    if not per_dir:
+        paths = paths[:4]
     kinds: List[str] = []
     for t in hits:
         kind = DELETES_KIND if t.op == "delete" else MOVES_KIND
         if kind not in kinds:
             kinds.append(kind)
     category = "test_delete" if any(t.op == "delete" for t in hits) else "test_move"
-    return GuardDecision(True, eff, tuple(paths[:4]), tuple(kinds), category)
+    return GuardDecision(True, eff, tuple(paths), tuple(kinds), category)
 
 
 def decide_edit(facts: EditFacts, caller: Caller, mode: Optional[str]) -> GuardDecision:
