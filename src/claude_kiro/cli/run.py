@@ -33,17 +33,19 @@ Claude Code docs these settings follow (checked October 2026):
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 
 import click
 
 from .. import agents as ag
-from .worktree import _spec_dir
+from ..paths import LEGACY_SPECS_DIR, SPECS_DIR
 
 # --- SECURITY -----------------------------------------------------------------
 
@@ -110,7 +112,8 @@ def run_budget(run_role: Mapping[str, Any], spec_dir: Path) -> float:
     if per_task:
         from ..hooks._shared.spec_parser import parse_tasks
 
-        left = sum(1 for t in parse_tasks(spec_dir / "tasks.md") if not t.done)
+        tasks_md = spec_dir / "tasks.md"
+        left = sum(1 for t in parse_tasks(tasks_md) if not t.done) if tasks_md.exists() else 1
         return round(float(per_task) * max(left, 1), 2)
     return DEFAULT_BUDGET_USD
 
@@ -355,6 +358,78 @@ def _number(value: float) -> str:
     return str(int(value)) if float(value).is_integer() else str(value)
 
 
+COMMAND_PROMPTS = {
+    "implement": "/spec:implement {spec} all",
+    "create": "/spec:create {spec}",
+    "review": "/spec:review {spec}",
+}
+
+
+class RunRefused(Exception):
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+@dataclass
+class RunPlan:
+    name: str
+    command: str
+    cwd: Path
+    spec_dir: Path
+    sandboxed: bool
+    wt_dir: Optional[Path]
+    run_role: Dict[str, Any]
+    warnings: List[str] = field(default_factory=list)
+
+
+def _find_spec_dir(cwd: Path, spec: str, command: str) -> Optional[Path]:
+    """The spec directory: with tasks.md for implement and review, any existing directory for create."""
+    from ..paths import spec_roots
+
+    candidate = Path(spec) if Path(spec).is_absolute() else cwd / spec
+    candidates = [candidate, *(root / spec for root in spec_roots(cwd))]
+    for c in candidates:
+        if (c / "tasks.md").exists():
+            return c
+    if command == "create":
+        for c in [*(root / spec for root in spec_roots(cwd)), *([candidate] if Path(spec).is_absolute() else [])]:
+            if c.is_dir():
+                return c
+    return None
+
+
+def preflight(cwd: Path, spec: str, command: str, unsandboxed: bool) -> RunPlan:
+    """Every check before a run starts. Raises RunRefused(reason); trust and path problems stay warnings."""
+    if command not in COMMAND_PROMPTS:
+        raise RunRefused(f"unknown command {command!r}: use implement, create or review")
+    if _linked_worktree(cwd):
+        raise RunRefused("Run `ck run` from the main checkout, not from a worktree: a worktree-isolated session refuses "
+                         "the commands the workflow needs, and the workflow creates its own task worktrees.")
+    spec_dir = _find_spec_dir(cwd, spec, command)
+    if spec_dir is None:
+        need = "a spec directory" if command == "create" else "tasks.md"
+        raise RunRefused(f"No {need} found for '{spec}' (looked in {SPECS_DIR}/ and {LEGACY_SPECS_DIR}/)")
+    warnings: List[str] = []
+    missing = missing_sandbox_tools()
+    if missing and not unsandboxed:
+        raise RunRefused(sandbox_refusal(missing))
+    try:
+        from ..worktrees import WorktreeError, main_root, worktrees_dir
+        wt_dir: Optional[Path] = worktrees_dir(main_root(cwd), spec_dir.name)
+    except WorktreeError:
+        wt_dir = None
+    if wt_dir is not None and (wt_dir.resolve() / "x").is_relative_to(cwd.resolve() / ".claude"):
+        warnings.append(f"Task worktrees go to {wt_dir}, under .claude/, which Claude Code's Bash sandbox keeps "
+                        "read-only: agents cannot commit or test there. Set \"worktree_dir\" in specs/ck.json "
+                        "(default .ck/worktrees) once this spec's old worktrees are landed or removed.")
+    try:
+        run_role = ag.resolve(cwd)["roles"]["run"]
+    except ag.AgentConfigError as e:
+        raise RunRefused(str(e))
+    return RunPlan(spec_dir.name, command, cwd, spec_dir, not unsandboxed, wt_dir, run_role, warnings)
+
+
 @click.command(context_settings={"ignore_unknown_options": True})
 @click.argument("spec")
 @click.argument("extra", nargs=-1, type=click.UNPROCESSED)
@@ -369,6 +444,8 @@ def _number(value: float) -> str:
 @click.option("--unsandboxed", is_flag=True,
               help="Run without Claude Code's Bash sandbox (not recommended: shell commands see your files, "
                    "environment and network). Without it, `ck run` refuses to start when bwrap or socat is missing")
+@click.option("--command", "command", type=click.Choice(list(COMMAND_PROMPTS)), default="implement", show_default=True,
+              help="Which spec skill to run: implement (every task), create (write the spec) or review (review the spec)")
 @click.option("--dry-run", is_flag=True, help="Print the command instead of running it")
 @click.option("--json", "as_json", is_flag=True, help="With --dry-run: print the command as JSON")
 @click.option("--output-format", type=click.Choice(["text", "json", "stream-json"]), default="text", show_default=True,
@@ -376,7 +453,7 @@ def _number(value: float) -> str:
 @click.option("--session-id", default=None, help="Session UUID for the claude session (used by ck bench to find its transcripts)")
 @click.option("--log", "log_path", type=click.Path(dir_okay=False), default=None, help="Log file (default .claude/ck-runs/<spec>-<time>.log)")
 def run(spec: str, extra: tuple, model: str, effort: str, budget: float, max_turns: int, unsandboxed: bool,
-        dry_run: bool, as_json: bool, output_format: str, session_id: str, log_path: str):
+        command: str, dry_run: bool, as_json: bool, output_format: str, session_id: str, log_path: str):
     """Run every task of SPEC unattended: headless, no permission prompts, sandboxed.
 
     \b
@@ -387,33 +464,14 @@ def run(spec: str, extra: tuple, model: str, effort: str, budget: float, max_tur
     `ck doctor --unattended` checks this machine for unattended runs.
     """
     cwd = Path.cwd()
-    if _linked_worktree(cwd):
-        click.echo("❌ Run `ck run` from the main checkout, not from a worktree: a worktree-isolated session refuses "
-                   "the commands the workflow needs, and the workflow creates its own task worktrees.")
-        sys.exit(2)
-    name = _spec_dir(cwd, spec).name  # exits 2 if the spec has no tasks.md
-    warnings: List[str] = []
-    missing = missing_sandbox_tools()
-    if missing and not unsandboxed:
-        click.echo(f"❌ {sandbox_refusal(missing)}")
-        sys.exit(2)
-    sandboxed = not unsandboxed
     try:
-        from ..worktrees import WorktreeError, main_root, worktrees_dir
-        wt_dir: Optional[Path] = worktrees_dir(main_root(cwd), name)
-    except WorktreeError:
-        wt_dir = None
-    if wt_dir is not None and (wt_dir.resolve() / "x").is_relative_to(cwd.resolve() / ".claude"):
-        warnings.append(f"Task worktrees go to {wt_dir}, under .claude/, which Claude Code's Bash sandbox keeps "
-                        "read-only: agents cannot commit or test there. Set \"worktree_dir\" in specs/ck.json "
-                        "(default .ck/worktrees) once this spec's old worktrees are landed or removed.")
-    try:
-        run_role = ag.resolve(cwd)["roles"]["run"]
-    except ag.AgentConfigError as e:
-        click.echo(f"❌ {e}")
+        plan = preflight(cwd, spec, command, unsandboxed)
+    except RunRefused as e:
+        click.echo(f"❌ {e.reason}")
         sys.exit(2)
+    name, wt_dir, run_role, warnings, sandboxed = plan.name, plan.wt_dir, plan.run_role, plan.warnings, plan.sandboxed
     if budget is None:
-        budget = run_budget(run_role, _spec_dir(cwd, spec))
+        budget = run_budget(run_role, plan.spec_dir)
     settings = None
     if sandboxed:
         settings = sandbox_settings(cwd, run_role["allowed_domains"], wt_dir)
@@ -431,7 +489,7 @@ def run(spec: str, extra: tuple, model: str, effort: str, budget: float, max_tur
     if trust:
         warnings.append(trust)
 
-    prompt = " ".join([f"/spec:implement {name} all", *extra])
+    prompt = " ".join([COMMAND_PROMPTS[command].format(spec=name), *(shlex.quote(a) for a in extra)])
     argv = [
         "claude", "-p", prompt,
         "--permission-mode", PERMISSION_MODE,
@@ -449,7 +507,7 @@ def run(spec: str, extra: tuple, model: str, effort: str, budget: float, max_tur
         argv += ["--output-format", output_format] + (["--verbose"] if output_format == "stream-json" else [])
     if session_id:
         argv += ["--session-id", session_id]
-    env = dict(ENV)
+    env = {**ENV, "CK_RUN_HEADLESS": "1"}
     isolation = "sandbox" if sandboxed else "none"
     log = Path(log_path).absolute() if log_path else cwd / ".claude" / "ck-runs" / f"{name}-{time.strftime('%Y%m%d-%H%M%S')}.log"
     # A machine-readable result must not be interleaved with stderr or with our own header.
