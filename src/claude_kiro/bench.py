@@ -666,6 +666,68 @@ def _sh(argv: Sequence[str], cwd: Path, env: Dict[str, str], timeout: Optional[f
     return subprocess.run(list(argv), cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout)
 
 
+def _terminal_record(runs: Path, since: float) -> bool:
+    """Whether a run record written after SINCE has reached a terminal status."""
+    if not runs.is_dir():
+        return False
+    for path in runs.glob("*/record.json"):
+        try:
+            if path.stat().st_mtime < since:
+                continue
+            data = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and data.get("status") in ("done", "failed", "partial"):
+            return True
+    return False
+
+
+def _run_opencode(
+    argv: Sequence[str], cwd: Path, env: Dict[str, str], state: Path, timeout: Optional[float], log: Path
+) -> tuple[Optional[int], bool, bool]:
+    """Run an OpenCode session until its workflow record closes, not until the CLI stops talking.
+
+    Returns (exit_code, timed_out, stopped_for_record). A model can keep the CLI busy after the
+    probe returned; the record is the authority, so terminate once it is terminal.
+    """
+    runs = state / "runs"
+    started = time.time()
+    deadline = started + (timeout or 2 * 60 * 60)
+    timed_out = False
+    stopped_for_record = False
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("w", encoding="utf-8") as fh:
+        try:
+            proc = subprocess.Popen(
+                list(argv), cwd=str(cwd), env=dict(env), stdout=fh, stderr=subprocess.STDOUT, text=True
+            )
+        except OSError as e:
+            raise BenchError(f"could not run {argv[0]}: {e}") from e
+        try:
+            while time.time() < deadline:
+                if proc.poll() is not None:
+                    break
+                if _terminal_record(runs, started):
+                    stopped_for_record = True
+                    time.sleep(1)  # let the plugin flush result/bench-output/record
+                    break
+                time.sleep(1)
+            if proc.poll() is None:
+                if not stopped_for_record:
+                    timed_out = True
+                proc.terminate()
+                try:
+                    proc.wait(10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+    return proc.returncode, timed_out, stopped_for_record
+
+
 def run_arm(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[str], None] = print) -> Dict[str, Any]:
     """Clone, set up, launch and collect one arm; writes and returns results/<id>.json."""
     spec = next(s for s in cfg["specs"] if s["name"] == arm["spec"])
@@ -823,6 +885,15 @@ def run_arm_opencode(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[s
     shutil.rmtree(state_root, ignore_errors=True)
     state = state_root / "claude-kiro" / "opencode"
     state.mkdir(parents=True, exist_ok=True)
+    # A shell exec shim makes OpenCode's async plugin setup reliable under a pipe-spawned parent;
+    # a bare `opencode` command raced it and the warmup model could start before tools registered.
+    if "/" not in opencode_bin:
+        shim_dir = state_root / "bin"
+        shim_dir.mkdir(parents=True, exist_ok=True)
+        shim = shim_dir / "opencode"
+        shim.write_text(f'#!/bin/sh\nexec {shlex.quote(opencode_bin)} "$@"\n')
+        shim.chmod(0o755)
+        opencode_bin = str(shim)
     env["XDG_STATE_HOME"] = str(state_root)
     env["CK_RUN_HEADLESS"] = "1"
     env["CK_BENCH_STATE"] = str(state)
@@ -863,14 +934,15 @@ def run_arm_opencode(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[s
     argv = [opencode_bin, "run", "--standalone", "--model", arm_model, "--format", "json", prompt]
     echo(f"▶ {arm['id']}: {' '.join(shlex.quote(a) for a in argv)}  (in {clone})")
     started = time.time()
-    try:
-        launched = _sh(argv, clone, env, timeout)
-        exit_code, launch_out = launched.returncode, launched.stdout + launched.stderr
-    except subprocess.TimeoutExpired as e:
-        exit_code, launch_out = None, f"timed out after {timeout}s\n{e.stdout or ''}{e.stderr or ''}"
+    exit_code, timed_out, stopped_for_record = _run_opencode(argv, clone, env, state, timeout, log)
     finished = time.time()
+    if stopped_for_record:
+        exit_code = 0  # the record is the deliverable; the model's final prose is not
+    if timed_out:
+        exit_code = None
+    launch_out = log.read_text() if log.is_file() else ""
     combined = f"--- warmup (exit {warm_code}) ---\n{warm_out}\n--- run (exit {exit_code}) ---\n{launch_out}"
-    log.write_text(combined if isinstance(combined, str) else combined.decode(errors="replace"))
+    log.write_text(combined)
 
     runs = state / "runs"
     records = [p for p in runs.glob("*/record.json")] if runs.is_dir() else []
