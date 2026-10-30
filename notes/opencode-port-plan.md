@@ -347,17 +347,21 @@ the `spec-implement` args (`bench_opencode.workflow_args`), installs the probe, 
 `opencode run --standalone`, imports `bench-output.json`, and overlays native tokens/cost. Guard
 denials, a non-`done` record, a timeout or a nonzero exit mark the arm fail-closed. Release is 0.11.0.
 
-**Live E2E (demo spec, one arm):** record `done` with `plan 1`, `task 1`, `land 1`, `plan 2` and
-`report` all `ok`; bench result `merged 1, failed 0, 1.323 min, $0.00`; 64,759 input / 3,056 output /
-534,144 cache-read tokens; no guard events; `ck bench score` accepts the result (it warns that no
-hidden suite is configured). This is harness proof, not a benchmark number — E0 on a strong model is
-still the first measurement.
+**Live E2E (demo spec, one arm, final run):** record `done` with `plan 1`, `task 1`, `land 1`,
+`plan 2`, `final gate` and `report` all `ok`; bench result `merged 1, failed 0, 1.12 min, $0.00`;
+final gate green; 54,831 input / 4,094 output / 752,832 cache-read tokens; peak context 20,887
+(copied from the native `peakContext`); no guard events; `ck bench score` accepts the result (it
+warns that no hidden suite is configured). This is harness proof, not a benchmark number — E0 on a
+strong model is still the first measurement.
 
 Four startup fixes were needed for a real arm: a warmup prompt plus a shell `sleep` before `bench_run`,
 because OpenCode can start the model before an async plugin setup registers tools; `.opencode/plugins/`
 must stay visible to the loader (excluding the whole `.opencode/` directory hid it); `PWD` must be set
 to the clone because `subprocess(cwd=...)` does not update it; and the CLI is stopped once the run
 record reaches `done`/`failed`/`partial`, because a model can keep the process busy long after the
+probe returned. A failed intermediate run also showed that a task worktree with untracked
+`__pycache__/` is "busy" and cannot merge; the experiment template sets `PYTHONDONTWRITEBYTECODE=1`
+and disables pytest's cache on both harnesses.
 probe returned.
 
 - `ck bench run --harness opencode`: launcher in `bench.py` (`run_arm_opencode`) and a collector
@@ -388,7 +392,7 @@ release is 0.11.0. The E0 command is ready; top up the OpenCode account or wait 
 window, then run `ck bench run bench-opencode.json --harness opencode --only <spec>--sonnet-5-5--r1`
 before the cheap arms.
 
-**Full suite (post-merge, 0.11.0):** `uv run pytest -q -n auto` → **2930 passed, 16 skipped** in 4:57.
+**Full suite (post-merge, 0.11.0):** `uv run pytest -q -n auto` → **2938 passed, 16 skipped** in 4:03.
 `opencode/test/*.test.ts` → **142 passed**. `tsc --noEmit` clean.
 
 ---
