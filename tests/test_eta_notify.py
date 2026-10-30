@@ -87,6 +87,7 @@ class Run:
         elif notify in ("ok", "fail", "slow"):
             self.configure(notify_script(tmp / "bin", notify, self.tmp / "ok.json"))
         self.p90 = 0.0
+        self.file: Optional[Path] = None
 
     def configure(self, command: str) -> None:
         done = set_notify(command)
@@ -94,6 +95,7 @@ class Run:
 
     def begin(self, minute: float = 0, kind: str = "implement", spec: str = "demo") -> dict:
         out = h.begin(base_env(), self.repo, spec, kind, now=stamp(minute))
+        self.file = Path(out["file"])
         first = progress_lines(out["file"])[0]
         self.p90 = float(first["launch"]["remainingMin"][2])  # the launch p90 the slip is measured from
         return out
@@ -132,31 +134,51 @@ def start_running(run: Run) -> None:
 # --------------------------------------------------------------------------- TC-57(a)
 
 
-def slip_level(run: Run, minute: float, waited: float = 0.0, threshold: int = 15) -> Tuple[float, int]:
-    """(slip minutes, level) at `minute`, read from the real `ck eta --json` and S7: slip = p50 finish - waited - launch p90,
+def cached_view(run: Run) -> dict:
+    """The EtaView the last event's `after_event` decided on: the run's `<key>.eta.json` sidecar (same directory and stem
+    as the progress file), written before `notify_decision` runs. A fresh `ck eta --json` would not do: the `notified`
+    line appended after a send changes the events digest, so it would re-simulate with another default seed."""
+    assert run.file is not None
+    sidecar = run.file.parent / f"{run.file.stem}.eta.json"
+    assert sidecar.exists(), sidecar
+    body = json.loads(sidecar.read_text())
+    return body if "finish" in body else body["view"]
+
+
+def slip_level(run: Run, waited: float = 0.0, threshold: int = 15) -> Tuple[float, int]:
+    """(slip minutes, level) of the view the last event decided on, by S7: slip = p50 finish - waited - launch p90,
     level = the largest whole k with slip > k x threshold (0 when there is none)."""
-    view = h.eta_json(base_env(), run.repo, "demo", now=stamp(minute))
+    view = cached_view(run)
     finish = datetime.fromisoformat(view["finish"]["p50"])
     launch = datetime.fromisoformat(view["launchAt"].replace("Z", "+00:00"))
     slip = (finish - launch).total_seconds() / 60 - waited - run.p90
     return slip, (max(0, math.ceil(slip / threshold) - 1) if slip > 0 else 0)
 
 
-def test_tc57a_slips_arrive_at_p16_p31_and_p47_only(tmp_path):
-    """One message per new 15-minute level of slip (P+16 is the first time a slip can exceed 15, since the p50 finish is
-    never before now). The expected levels come from the real `ck eta --json` and S7, with the one-task spec leaving no
-    pending tail to hide in."""
+def sent_slip_levels(run: Run) -> List[Optional[int]]:
+    """The `level` of each sent slip, from the run's `notified` events."""
+    return [e.get("level") for e in progress_lines(str(run.file))
+            if e.get("kind") == "notified" and e.get("notice") == "slip" and e.get("outcome") == "sent"]
+
+
+def test_tc57a_one_slip_per_new_threshold_level(tmp_path):
+    """One message per new 15-minute level of slip. The P+16/P+31/P+47 timeline of TC-57(a) cannot happen literally,
+    since the p50 finish is never before now, so it is replaced by the S7 level rule: the expected level after each event
+    comes from the cached view that event decided on, with the one-task spec leaving no pending tail to hide in."""
     run = Run(tmp_path, tasks=1)
     start_running(run)
     sent_level = expected = 0
+    levels: List[int] = []
     for offset in range(0, 76, 3):
         minute = run.p90 + offset
         run.ev("unpark", minute, task=1)
-        slip, level = slip_level(run, minute)
+        slip, level = slip_level(run)
         if level > sent_level:  # a new level sends exactly one message, however many levels it jumped
             sent_level, expected = level, expected + 1
+            levels.append(level)
         assert len(run.messages()) == expected, (offset, slip, level, run.messages())
     assert sent_level >= 3, sent_level  # the estimate cannot finish before `now`, so P+75 is at least 60 minutes of slip
+    assert sent_slip_levels(run) == levels
     for msg in run.messages():
         assert SLIP_RE.match(msg), msg
 
@@ -190,15 +212,18 @@ def test_tc57a_approval_minutes_never_count_as_a_slip(tmp_path):
     assert run.messages() == []  # nothing while the approval is open
     run.ev("approval-end", 33)  # 30 waited minutes
     sent_level = expected = 0
+    levels: List[int] = []
     for minute in (max(run.p90 + 16, 40), max(run.p90 + 30, 50)):
         run.ev("unpark", minute, task=1)
-        naive, naive_level = slip_level(run, minute)
-        slip, level = slip_level(run, minute, waited=30)
+        naive, naive_level = slip_level(run)
+        slip, level = slip_level(run, waited=30)
         assert naive_level >= 1, naive  # without the subtraction this would have sent a slip (p50 is never before now)
         assert slip == pytest.approx(naive - 30, abs=0.01)
         if level > sent_level:
             sent_level, expected = level, expected + 1
+            levels.append(level)
         assert len(run.messages()) == expected, (minute, slip, level, run.messages())
+    assert sent_slip_levels(run) == levels
 
 
 # --------------------------------------------------------------------------- TC-57(b)
@@ -411,9 +436,9 @@ def test_tc60_a_failing_command_is_named_once_and_the_exit_stays_zero(tmp_path):
     run.ev("merge", 4, task=1)
     done = run.end(5)
     assert done.exit_code == 0
-    lines = [ln for ln in done.stdout.splitlines() if FAIL_WARNING in ln]
+    lines = [ln for ln in done.output.splitlines() if FAIL_WARNING in ln]  # stdout and stderr: design names no stream
     assert len(lines) == 1, done.output
-    assert lines[0].startswith(FAIL_WARNING)
+    assert re.match(r"^⚠ notification failed: .+", lines[0]), lines[0]
 
 
 def test_tc60_a_slow_command_returns_within_13_seconds(tmp_path):
