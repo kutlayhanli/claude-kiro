@@ -299,7 +299,7 @@ Every other `collect`, `--all`, `--agents`, backfill and doctor output stays the
 ---
 
 ### Task 9: Write the progress-file properties (reader and line builder)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.6, 3.8
 **Description:** Write properties P-14 and P-15 over the pure progress seams, so they run as soon as `claude_kiro.progress` exists.
@@ -313,11 +313,11 @@ Settings `derandomize=True, max_examples=200, database=None, deadline=None`. Dec
 **Properties:** P-14, P-15
 **Verifies:** Task 10 (`read_events`, `append`)
 **Acceptance:**
-- [ ] Generators cover every malformed-line form and every extra-key form listed in the test-plan rows
-- [ ] Settings are deterministic, and the tests call `read_events` / `append` directly, not a CLI or server
-- [ ] Before implementation they fail at import of `claude_kiro.progress` (missing behaviour)
-- [ ] No mocks of project code
-- [ ] The file sets `pytestmark` with `no_network`
+- [x] Generators cover every malformed-line form and every extra-key form listed in the test-plan rows
+- [x] Settings are deterministic, and the tests call `read_events` / `append` directly, not a CLI or server
+- [x] Before implementation they fail at import of `claude_kiro.progress` (missing behaviour)
+- [x] No mocks of project code
+- [x] The file sets `pytestmark` with `no_network`
 **Dependencies:** Task 1 (event and malformed-line strategies, kind constants)
 **Complexity:** Medium
 **Risk:** normal
@@ -409,7 +409,7 @@ Seams: `match_pool` (S1); `size_factor` (S2); `fit_size` (S3); `start_model` (S1
 ---
 
 ### Task 13: Write the simulator properties over collected history
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.5, 1.9, 2.1, 2.2, 2.4, 2.5, 4.3, 4.5
 **Description:** Write properties P-1, P-2, P-3, P-4, P-10, P-12 and P-13 in `tests/test_eta_estimate_properties.py`, calling `claude_kiro.eta.simulate.simulate_implement(graph, model, state, now_min=, n=, seed=)` / `simulate_create(...)` and `simulate.conditional_sample`, with the model from `claude_kiro.eta.history.fit_model(records, defaults)`, the state from `claude_kiro.progress.fold(events)` and `Graph` built from its documented fields.
@@ -422,12 +422,12 @@ Seams: `match_pool` (S1); `size_factor` (S2); `fit_size` (S3); `start_model` (S1
 **Properties:** P-1, P-2, P-3, P-4, P-10, P-12, P-13
 **Verifies:** Task 14 (`simulate_implement`, `simulate_create`, `conditional_sample`)
 **Acceptance:**
-- [ ] Properties call the pure seams directly with history the real collector wrote, not a server or CLI
-- [ ] Generators cover the P-rows' surface forms: duplicated deps, e far above p90, presence 0 and 1, nested and permuted subsets
-- [ ] Settings are deterministic, and every simulator call has a fixed seed
-- [ ] Before implementation they fail at import of `claude_kiro.eta.simulate` (missing behaviour)
-- [ ] No mocks of project code
-- [ ] The file sets `pytestmark` with `no_network`
+- [x] Properties call the pure seams directly with history the real collector wrote, not a server or CLI
+- [x] Generators cover the P-rows' surface forms: duplicated deps, e far above p90, presence 0 and 1, nested and permuted subsets
+- [x] Settings are deterministic, and every simulator call has a fixed seed
+- [x] Before implementation they fail at import of `claude_kiro.eta.simulate` (missing behaviour)
+- [x] No mocks of project code
+- [x] The file sets `pytestmark` with `no_network`
 **Dependencies:** Task 2 (history pools), Task 1 (strategies)
 **Complexity:** High
 **Risk:** normal
