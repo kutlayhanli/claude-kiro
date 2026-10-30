@@ -16,7 +16,7 @@ the protected `.claude/` copies).
 ## Task Breakdown
 
 ### Task 1: Build the shared test harness for guard, park, hand-off and interruption tests
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.2, 9.1, 10.1, 6.1, 7.1
 **Description:** Build the test-owned infrastructure from test-plan.md "Test Infrastructure → Add", except the
@@ -63,11 +63,11 @@ bodies only, so all files collect before the implementation exists.
 **Verify:** `uv run pytest -q -n auto` `uv run pytest -q tests/test_workflow_scripts.py tests/test_landing_scheduler_properties.py` `bash -n tests/fixtures/hook_inputs/capture.sh`
 **Verifies:** None
 **Acceptance:**
-- [ ] The whole existing suite still collects and stays green.
-- [ ] `_not_headless` removes `CK_RUN_HEADLESS` and `CLAUDE_CODE_ENTRYPOINT` for every test; verified by a run with
+- [x] The whole existing suite still collects and stays green.
+- [x] `_not_headless` removes `CK_RUN_HEADLESS` and `CLAUDE_CODE_ENTRYPOINT` for every test; verified by a run with
       both set in the outer environment.
-- [ ] `capture.sh` follows the test-plan procedure step by step and needs no change to run in Task 2.
-- [ ] Helpers exercise real boundaries (real git, real `bash -c`, real `execute_hook`, real `ck worktree`); no
+- [x] `capture.sh` follows the test-plan procedure step by step and needs no change to run in Task 2.
+- [x] Helpers exercise real boundaries (real git, real `bash -c`, real `execute_hook`, real `ck worktree`); no
       project code is mocked.
 **Dependencies:** None
 **Complexity:** High
@@ -102,7 +102,7 @@ recorded answer to 3.4: Task 11 and Task 14 build the fallback marker only when 
 ---
 
 ### Task 3: Test the Bash pre-check and the guard seams, and update the existing guard tests
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 2.2, 4.1, 4.2, 4.3, 5.1, 5.2, 10.2
 **Properties:** P-1, P-2, P-3, P-4, P-5, P-6, P-12, P-13, P-24
@@ -135,17 +135,17 @@ test files, so this task makes them while In Progress.
 - `tests/test_guard.py` - split the Bash ask test; five frozen-spec tests become task-agent tests with main-session twins
 - `tests/test_plugin_modes.py` - plugin-silence test uses a git repo with the test on the base
 **Verify:** `uv run pytest -q -n auto tests/test_guard_bash.py tests/test_guard.py tests/test_guard_properties.py tests/test_guard_properties_hook.py tests/test_plugin_modes.py`
-**Verifies:** Task 11 (the rewritten pre-tool guard; its pure properties also cover foundation Task 10's seams)
+**Verifies:** Task 11 (the rewritten pre-tool guard; its pure properties also cover foundation Task 10's seams), Task 15 (P-24: `share.COMMAND_FAMILIES`)
 **Acceptance:**
-- [ ] Every delete/move verb in TC-1, including the directory forms, asks (main, `ask`), denies (main, `deny`) and
+- [x] Every delete/move verb in TC-1, including the directory forms, asks (main, `ask`), denies (main, `deny`) and
       denies (task, `ask`); the file is untouched after each call.
-- [ ] Every TC-2 in-place/script/redirect form returns `None` for both callers; TC-3 near-misses (branch-only,
+- [x] Every TC-2 in-place/script/redirect form returns `None` for both callers; TC-3 near-misses (branch-only,
       owned, real `__pycache__`, `.pytest_cache`, `find -delete` of `.pyc`) return `None`.
-- [ ] TC-71's absolute-path deletes in a claimed task worktree are denied for a task agent.
-- [ ] Generators cover every form in the P-rows; settings are deterministic; `PROPERTIES` maps every P-id here.
-- [ ] The edited existing tests now assert the new rules (task agent deny, main session pass) and fail before the
+- [x] TC-71's absolute-path deletes in a claimed task worktree are denied for a task agent.
+- [x] Generators cover every form in the P-rows; settings are deterministic; `PROPERTIES` maps every P-id here.
+- [x] The edited existing tests now assert the new rules (task agent deny, main session pass) and fail before the
       implementation for the right reason; no assertion is weakened beyond what test-plan.md lists.
-- [ ] Tests exercise the real hook and real git; no mocks of project code.
+- [x] Tests exercise the real hook and real git; no mocks of project code.
 **Dependencies:** Task 1 (guard_helpers, `_not_headless`, `claimed_task_worktree`)
 **Complexity:** High
 **Risk:** safety (oracle for blocking irreversible deletion of existing test files)
@@ -247,7 +247,7 @@ TC-53 plants a log just under `guardlog.GUARD_LOG_LIMIT`; TC-55 runs real `ck st
 ---
 
 ### Task 6: Test the hand-off of whole-spec runs to `ck run`
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.2, 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9
 **Properties:** P-19, P-20, P-31
@@ -271,15 +271,15 @@ worktree spec and taken branch refusals (both checkouts unchanged); TC-85 an ide
 **Verify:** `uv run pytest -q -n auto tests/test_handoff.py tests/test_handoff_properties.py tests/test_run.py`
 **Verifies:** Task 12 (`ck run --command`, `ck handoff`; P-19/P-20 also cover foundation Task 10's `decide_handoff`)
 **Acceptance:**
-- [ ] A whole-spec run from `.claude/worktrees/` launches from the main checkout and prints checkout, an existing
+- [x] A whole-spec run from `.claude/worktrees/` launches from the main checkout and prints checkout, an existing
       log path, follow command and report hint; the prompt never holds `--log`.
-- [ ] create/review runs get the same headless, sandboxed, prompt-free argv and refusals as implement.
-- [ ] Every launch failure, including an early child exit, prints the reason and the manual command and runs
+- [x] create/review runs get the same headless, sandboxed, prompt-free argv and refusals as implement.
+- [x] Every launch failure, including an early child exit, prints the reason and the manual command and runs
       nothing in the worktree.
-- [ ] The child's sandbox preflight never depends on this machine's bwrap/socat.
-- [ ] A spec only on the worktree's branch runs on `<spec>-run` at the worktree's HEAD; a dirty main checkout or a
+- [x] The child's sandbox preflight never depends on this machine's bwrap/socat.
+- [x] A spec only on the worktree's branch runs on `<spec>-run` at the worktree's HEAD; a dirty main checkout or a
       taken branch refuses with the recovery commands and changes nothing; an identical spec runs as before.
-- [ ] Generators cover every row form; settings are deterministic; no mocks of project code.
+- [x] Generators cover every row form; settings are deterministic; no mocks of project code.
 **Dependencies:** Task 1 (worktree_of, sleeping_fake_claude, fake_sandbox_tools)
 **Complexity:** Medium
 **Risk:** safety (launches a paid headless claude run)
@@ -287,7 +287,7 @@ worktree spec and taken branch refusals (both checkouts unchanged); TC-85 an ide
 ---
 
 ### Task 7: Test `ck worktree park`, `ck worktree resolve`, notification, report and the ladder CLI
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.1, 6.2, 6.4, 7.1, 7.2, 7.3, 7.4, 7.5, 7.8, 7.9, 7.11, 7.12
 **Properties:** P-17, P-18
@@ -314,15 +314,15 @@ all `derandomize=True, database=None`; `PROPERTIES` map.
 **Verify:** `uv run pytest -q -n auto tests/test_guard_park.py tests/test_redteam_notify.py tests/test_park_properties.py`
 **Verifies:** Task 13 (notifier, ladder CLI, park and resolve)
 **Acceptance:**
-- [ ] Exactly one notification per park, on stdin and in `CK_NOTIFY_MESSAGE`, naming spec, task and "decision",
+- [x] Exactly one notification per park, on stdin and in `CK_NOTIFY_MESSAGE`, naming spec, task and "decision",
       with no quoted text in any channel.
-- [ ] Not configured / failing / slow / missing notify commands never fail the park (exit 0, within 15 s) and are
+- [x] Not configured / failing / slow / missing notify commands never fail the park (exit 0, within 15 s) and are
       named in the output and the report.
-- [ ] Parked tasks appear only in `needsInput`; resolve clears that, keeps the answer for later attempts, and a
+- [x] Parked tasks appear only in `needsInput`; resolve clears that, keeps the answer for later attempts, and a
       re-run treats the task as unfinished with its worktree reused.
-- [ ] The ladder CLI returns the strict-above models whatever `implementer.escalate` says.
-- [ ] Inside `ck run`, the notification comes once per note from `ck run`'s process; the sandbox is not widened.
-- [ ] Tests run the real CLI, real git and a real subprocess notify command; no mocks of project code.
+- [x] The ladder CLI returns the strict-above models whatever `implementer.escalate` says.
+- [x] Inside `ck run`, the notification comes once per note from `ck run`'s process; the sandbox is not widened.
+- [x] Tests run the real CLI, real git and a real subprocess notify command; no mocks of project code.
 **Dependencies:** Task 1 (notify_script, set_notify, parking_fake_claude, fake_sandbox_tools)
 **Complexity:** Medium
 **Risk:** safety (sends the user's push notification through a configured command)
@@ -379,7 +379,7 @@ agents --guard-ladder` agree), P-15 (with `guardStopIn`), P-16; bridge `max_exam
 ---
 
 ### Task 9: Test interruption counts in run records, shared records and `ck stats show`
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.6, 9.6, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 11.1, 11.2, 11.3, 11.4, 11.5
 **Properties:** P-22, P-23, P-25, P-26, P-27, P-28, P-29, P-30
@@ -404,14 +404,14 @@ P-28 CLI-backed): P-23, P-25, P-26, P-28, P-30. `tests/test_stats_properties_sha
 **Verify:** `uv run pytest -q -n auto tests/test_stats_interruptions.py tests/test_redteam_shared.py tests/test_stats_properties_interruptions.py tests/test_stats_properties_shared.py` `uv run pytest -q -n auto tests/test_stats_*.py`
 **Verifies:** Task 15 (interruption records, shared object and show line)
 **Acceptance:**
-- [ ] Every interruption kind is counted from real transcript shapes, by role and family, in Workflow and agent
+- [x] Every interruption kind is counted from real transcript shapes, by role and family, in Workflow and agent
       mode alike; a gate-only `hook_blocking_error` counts nothing.
-- [ ] Wait time, log join and differences (within the run window), malformed lines and pre-feature records behave
+- [x] Wait time, log join and differences (within the run window), malformed lines and pre-feature records behave
       as specified; a never-created log is `ok` with zero events and not missing, an unreadable or rotated-away log
       is listed as missing (TC-62).
-- [ ] Shared records carry only enum-keyed numbers under `ck-run-analytics/1`; no planted value leaks; show prints
+- [x] Shared records carry only enum-keyed numbers under `ck-run-analytics/1`; no planted value leaks; show prints
       one interruptions line.
-- [ ] Existing collect, show, export and submit tests stay green; no mocks of project code.
+- [x] Existing collect, show, export and submit tests stay green; no mocks of project code.
 **Dependencies:** Task 1 (stats_helpers line builders, write_guard_log, interruption_strategy)
 **Complexity:** High
 **Risk:** safety (shareable records and submit leave the machine; tests guard against content leaks)
@@ -509,8 +509,9 @@ snapshot", "Guard event").
 - `src/claude_kiro/hooks/_shared/run_marker.py` - new, only when the capture shows no `agent_id`: session workflow marker
 - `src/claude_kiro/cli/guard.py` - new, only with `run_marker`: `ck guard workflow-begin|workflow-end`
 - `src/claude_kiro/cli/main.py` - register `guard` when it exists
-**Verify:** `uv run pytest -q -n auto tests/test_guard_properties.py tests/test_caller_properties.py tests/test_guard_bash.py tests/test_guard.py tests/test_guard_callers.py tests/test_guard_postcheck.py tests/test_redteam_postcheck.py tests/test_postcheck_properties.py tests/test_guard_properties_hook.py tests/test_guard_log.py tests/test_plugin_modes.py tests/test_plugin.py tests/test_stats_leak.py tests/test_stats_export.py`
-**Verified by:** Task 3, Task 4, Task 5
+**Verify:** `uv run pytest -q -n auto tests/test_guard_properties.py tests/test_caller_properties.py tests/test_guard_bash.py tests/test_guard.py tests/test_guard_callers.py tests/test_guard_postcheck.py tests/test_redteam_postcheck.py tests/test_postcheck_properties.py tests/test_guard_properties_hook.py tests/test_guard_log.py tests/test_plugin_modes.py tests/test_plugin.py tests/test_stats_leak.py tests/test_stats_export.py -k "not test_p24_family_names_are_the_documented_set"`
+**Verified by:** Task 4, Task 5
+Run note (2026-10-30): P-24 (`test_p24_family_names_are_the_documented_set`) reads `share.COMMAND_FAMILIES`, which Task 15 adds and Task 15 depends on this task, so it runs under Task 15's Verify, not here. Task 3 is linked to Task 15 for P-24; its other tests still run in this task's Verify above.
 **Acceptance:**
 - [ ] As a task agent, each NFR replay case gives no output; `rm` / `rm -rf tests` of existing unowned tests is
       denied for a task agent and uses the configured mode for the main session, also through `cd` and by absolute
@@ -713,8 +714,8 @@ omitted when absent; `guardLog` and differences never leave). Regenerate `analyt
 - `src/claude_kiro/analytics/share.py` - enums, `_TREE.interruptions`, `_interruptions`
 - `analytics/SCHEMA.md` - regenerated field list
 - `src/claude_kiro/analytics/show.py` - `interruptions_view`, `interruptions_line`, render and JSON
-**Verify:** `uv run pytest -q -n auto tests/test_stats_interruptions.py tests/test_stats_properties_interruptions.py tests/test_stats_properties_shared.py tests/test_redteam_shared.py tests/test_stats_roles.py tests/test_stats_agents_collect.py tests/test_stats_collect.py tests/test_stats_show.py tests/test_stats_export.py tests/test_stats_properties_share.py`
-**Verified by:** Task 9, Task 8
+**Verify:** `uv run pytest -q -n auto tests/test_stats_interruptions.py tests/test_stats_properties_interruptions.py tests/test_stats_properties_shared.py tests/test_redteam_shared.py tests/test_stats_roles.py tests/test_stats_agents_collect.py tests/test_stats_collect.py tests/test_stats_show.py tests/test_stats_export.py tests/test_stats_properties_share.py` `uv run pytest -q tests/test_guard_properties.py::test_p24_family_names_are_the_documented_set`
+**Verified by:** Task 9, Task 8, Task 3
 **Acceptance:**
 - [ ] A workflow run and an agent-mode run with seeded interruptions get the matching totals by role and family
       (`other` for non-shell); a gate-only block counts nothing.

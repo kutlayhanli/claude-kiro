@@ -24,12 +24,16 @@ function chainLengths(deps, done) {
 //   planDurations: {k: ms}                 plan call k takes that long
 //   externalDone: {atPlan: k, tasks}       from plan call k on, those tasks are Done on the target (never started here)
 //   planFail: [k, ...]                     plan call k and its retry answer {error: 'boom'} with empty arrays
+//   guardStops: {n: ceiling|'always'}      task n returns guardStop on every attempt whose model is at or below ceiling
+//                                          (haiku < sonnet < opus < fable); 'always' never resolves
+//   guardStopIn: {n: 'revise'}             the guard stop of task n happens in its first revise call, not its task call
+//   parkOutcome: {parked, notification, detail}  answer of the `park <N>` agent (default parked, sent, '')
 //   worktree: {n: {state, detail}}         the first task agent of n returns that worktree outcome (default CREATED)
-export function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [], gitReport = null, conflictRounds = {}, planDurations = {}, externalDone = null, planFail = [], worktree = {} }) {
+export function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [], gitReport = null, conflictRounds = {}, planDurations = {}, externalDone = null, planFail = [], worktree = {}, guardStops = {}, guardStopIn = {}, parkOutcome = null }) {
   let rechecksLeftRed = recheckRed
   // RED landings left per task: checkRed tasks are red on their first landing, redLands sets a count.
   const redLeft = { ...Object.fromEntries(checkRed.map(n => [n, 1])), ...redLands }
-  const state = { deps: { ...deps }, done: new Set(done), merged: new Set(), events: [], prompts: {}, opts: {}, reviewCount: {}, attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0, landings: [], resolved: new Set(), conflictsHit: {} }
+  const state = { deps: { ...deps }, done: new Set(done), merged: new Set(), events: [], prompts: {}, opts: {}, reviewCount: {}, attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0, landings: [], parks: [], revises: {}, resolved: new Set(), conflictsHit: {} }
   let clock = Date.parse('2026-10-04T10:00:00Z')
   const stamp = () => new Date((clock += 60000)).toISOString().replace('.000', '')
   const ready = exclude => {
@@ -38,6 +42,14 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
       .filter(n => !state.done.has(n) && !exclude.includes(n) && !verifyCycles.some(v => v.task === n) && state.deps[n].every(d => state.done.has(d) || !(d in state.deps)))  // dangling ids are dropped, as `ck plan` does
       // Longest remaining chain first, then numeric id: what `ck plan` prints.
       .sort((a, b) => (chain[b] ?? 1) - (chain[a] ?? 1) || Number(a) - Number(b))
+  }
+  const MODEL_RANK = { haiku: 0, sonnet: 1, opus: 2, fable: 3 }
+  const guardStopFor = (n, opts) => {
+    const ceiling = guardStops[n]
+    const model = String(opts.model ?? '').toLowerCase()
+    const rank = Object.keys(MODEL_RANK).find(m => model.includes(m))
+    const within = ceiling === 'always' || (rank !== undefined && MODEL_RANK[rank] <= MODEL_RANK[ceiling])
+    return within ? { file: 'tests/test_guarded.py', kind: 'test', test: 'tests/test_guarded.py::test_x', requirement: '1.1' } : null
   }
   const agent = async (prompt, opts) => {
     const l = opts.label
@@ -90,6 +102,12 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
       if (noCommitsFirst.includes(n) && state.attempts[n] === 1) {
         return { task: n, status: 'blocked', gatePassed: false, summary: 'answered the wave question', commits: '', blocker: 'user asked a question', startedAt, finishedAt: stamp(), ...wtField }
       }
+      const isRevise = / revise /.test(l)
+      if (isRevise) state.revises[n] = (state.revises[n] || 0) + 1
+      if (n in guardStops && (guardStopIn[n] === 'revise') === isRevise && (!isRevise || state.revises[n] === 1)) {
+        const gs = guardStopFor(n, opts)
+        if (gs) return { task: n, status: 'blocked', gatePassed: false, summary: 'guard stop', commits: '', blocker: 'guard stop', startedAt, finishedAt: stamp(), guardStop: gs, ...wtField }
+      }
       const pass = state.attempts[n] > (failUntil[n] || 0)
       return { task: n, status: pass ? 'done' : 'in_progress', gatePassed: pass, summary: `attempt ${state.attempts[n]}`, commits: 'abc123', startedAt, finishedAt: stamp(), ...wtField }
     }
@@ -126,6 +144,12 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
       const n = l.match(/resolve (\d+)/)[1]
       state.resolved.add(n)
       return { resolved: true, conflicts: 'specs/demo/tasks.md: kept both task sections' }
+    }
+    if (l.startsWith('park ')) {
+      const n = l.match(/park (\d+)/)[1]
+      state.parks.push(n)
+      state.events.push(`${l} end`)
+      return { parked: true, notification: 'sent', detail: '', ...(parkOutcome ?? {}) }
     }
     if (l.startsWith('review')) {
       const n = l.match(/review (\d+)/)[1]
