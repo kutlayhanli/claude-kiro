@@ -195,7 +195,7 @@ metamorphic rule) and P-32 (`run_marker` lifecycle with an injected clock, skipp
 ---
 
 ### Task 5: Test the shell post-check and the private guard event log
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 1.6, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 2.10, 3.4, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6
 **Properties:** P-7, P-8, P-9, P-10, P-21
@@ -228,23 +228,29 @@ TC-53 plants a log just under `guardlog.GUARD_LOG_LIMIT`; TC-55 runs real `ck st
 **Verify:** `uv run pytest -q -n auto tests/test_guard_postcheck.py tests/test_redteam_postcheck.py tests/test_postcheck_properties.py tests/test_guard_log.py`
 **Verifies:** Task 11 (the guard hooks, the post-check and the guard log)
 **Acceptance:**
-- [ ] A real `sed -i` deleting an assertion, a python heredoc adding a skip, a `python -c` dropping a test, the same
+- [x] A real `sed -i` deleting an assertion, a python heredoc adding a skip, a `python -c` dropping a test, the same
       in a task worktree by absolute path, and the same followed by `git commit` are each reported with file and
       kind; non-weakening, new-on-branch and owned changes are not.
-- [ ] `find -exec sed` weakening and `find -delete` of an existing test are caught after the command; `find ...
+- [x] `find -exec sed` weakening and `find -delete` of an existing test are caught after the command; `find ...
       '*.pyc' -delete` is not.
-- [ ] Concurrent pairs on one session each catch their own weakening exactly once; a script-built path into
+- [x] Concurrent pairs on one session each catch their own weakening exactly once; a script-built path into
       another worktree is left to the gate, which fails.
-- [ ] A merge that brings in the target's test change reports nothing; a weakening after it is reported.
-- [ ] Every forced failure and red-team case leaves no blocking output, exit 0, within 5 s through `done-verify`.
-- [ ] One event per ask/deny/catch with every 9.1 field; none for passing calls; the log is 0600 in 0700, rotates,
+- [x] A merge that brings in the target's test change reports nothing; a weakening after it is reported.
+- [x] Every forced failure and red-team case leaves no blocking output, exit 0, within 5 s through `done-verify`.
+- [x] One event per ask/deny/catch with every 9.1 field; none for passing calls; the log is 0600 in 0700, rotates,
       never changes a decision when unwritable, and feeds the leak check.
-- [ ] Tests exercise both real hooks, real shell commands and real git; no mocks of project code.
+- [x] Tests exercise both real hooks, real shell commands and real git; no mocks of project code.
 **Dependencies:** Task 1 (run_bash, fake_git, big_repo, claimed_task_worktree, guard_events), Task 2 (TC-19 reads its capture summary)
 **Complexity:** High
 **Risk:** safety (oracle for catching shell-made test weakening and for keeping confidential command text local)
 
 ---
+
+**Implementation notes (task 5):**
+- Shared CLI helpers (`cli_hook`, `cli_cycle`, `py_heredoc`) live in `tests/test_guard_postcheck.py` and are imported by the red-team and guard-log files.
+- TC-75(b) deviation: the plan checks out `main`'s version of the test after `feature` added an assertion. That version equals the base ref's content, which D19 exempts, so the case as written contradicts TC-82/D19. The test first moves `main` on with a weaker version (no longer the merge-base's content), so the checkout brings in content that is neither the base ref's nor an incoming merge ref's, and still exercises "HEAD moves, file clean afterwards".
+- TC-55: the machine label (slug-only) is the free-text slot a record carries, so the refusal-on-export-and-submit half plants a slug-shaped value; command, path and reason texts are covered through the note flow.
+- Red team: non-JSON stdin is left to the hook runner (TC-24 covers it); the red-team cases send well-formed JSON with hostile contents, plus invalid UTF-8 inside the JSON string.
 
 ### Task 6: Test the hand-off of whole-spec runs to `ck run`
 **Status:** Done
