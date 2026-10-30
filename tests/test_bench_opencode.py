@@ -121,17 +121,24 @@ def test_prepare_probe_writes_the_files_and_excludes_them(tmp_path):
     assert probe.read_bytes() == (PACKAGE_ROOT / "scripts" / "bench-probe.mjs").read_bytes()
 
     lines = (clone / ".git" / "info" / "exclude").read_text().splitlines()
-    for entry in (".opencode/", "AGENTS.md", ".bench-args.json"):
+    for entry in (".opencode/agents/", ".opencode/ck/", "AGENTS.md", ".bench-args.json"):
         assert entry in lines
+    # The plugin loader must still see .opencode/plugins; excluding the whole directory hides it.
+    assert ".opencode/" not in lines
+    assert ".opencode/plugins/" not in lines
 
     # A second preparation is idempotent and does not duplicate exclude entries.
     bo.prepare_probe(clone, PACKAGE_ROOT, args, state)
     again = (clone / ".git" / "info" / "exclude").read_text().splitlines()
-    for entry in (".opencode/", "AGENTS.md", ".bench-args.json"):
+    for entry in (".opencode/agents/", ".opencode/ck/", "AGENTS.md", ".bench-args.json"):
         assert again.count(entry) == 1
 
-    # The setup-generated files never show up as changes in the arm's tree.
-    assert git(clone, "status", "--porcelain") == ""
+    # The setup-generated files do not dirty the setup commit; the probe files stay visible to the
+    # OpenCode loader (excluding .opencode/plugins/ would hide them) and are untracked.
+    status = git(clone, "status", "--porcelain")
+    assert ".opencode/" in status
+    assert "AGENTS.md" not in status
+    assert ".opencode/agents/" not in status
 
 
 def test_workflow_args_raises_bench_error_when_ck_plan_fails(tmp_path):

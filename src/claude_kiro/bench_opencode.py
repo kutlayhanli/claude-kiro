@@ -25,7 +25,7 @@ from .bench import BenchError
 
 ARGS_FILE = ".bench-args.json"
 STATE_FILE = ".bench-state.json"
-EXCLUDE_ENTRIES = (".opencode/", "AGENTS.md", ARGS_FILE, STATE_FILE)
+EXCLUDE_ENTRIES = (".opencode/agents/", ".opencode/ck/", "AGENTS.md", ARGS_FILE, STATE_FILE)
 
 _UNAVAILABLE_RE = re.compile(
     r"no such (?:command|option)|unknown option|unexpected extra argument|invalid value",
