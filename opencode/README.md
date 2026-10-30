@@ -65,6 +65,14 @@ two rewritten resources under `.opencode/ck/`, and installs an `AGENTS.md` block
 `<state>` is `opencode.run.stateDir` or `$XDG_STATE_HOME/claude-kiro/opencode`
 (`~/.local/state/...` when unset). Harness artefacts stay outside the worktree under test.
 
+Ingest a finished run into the local stats store:
+
+```sh
+ck stats record <state>/runs/<runId>/record.json
+ck stats show <runId>
+ck cost --run <runId>
+```
+
 ## Configuration
 
 Settings are read from the `opencode` key of `~/.config/claude-kiro/config.json` and

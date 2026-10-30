@@ -43,7 +43,7 @@ opencode/
 └── test/                          node --test + captured fixtures
 ```
 
-Python side (in `src/claude_kiro/`): `ck analytics record`, the `_build_record` refactor, the
+Python side (in `src/claude_kiro/`): `ck stats record`, the `_build_record` refactor, the
 `opencode` pricing section, `ck doctor --harness opencode`, and the bench collector later.
 
 **Why a separate package and not `ck init`:** D10 chose the npm package. `ck` keeps caring only
@@ -282,7 +282,7 @@ shares pricing/aggregation with the transcript path. Live-ingested the three-age
 - Fields: label, phase, role, agent, `model`, `requestedEffort`, `resolvedEffort`, `variant`,
   `startedAt`/`endedAt`, tokens `{input, output, reasoning, cache{read, write}}`, cost, status,
   guard events, retries, throttles, peak context (max `input + cache.read` per step).
-- Python side: `ck analytics record <file>` builds `ck-run-local/1` through the refactored
+- Python side: `ck stats record <file>` builds `ck-run-local/1` through the refactored
   `_build_record`; pricing gains an `opencode` section with explicit `free: true`; the new fields are
   added additively to `SHAREABLE_SCHEMA` + `analytics/SCHEMA.md` (D7 amendment).
 - `harness: "opencode"`, `claudeCodeVersion: null`, `collectorVersion` = plugin version.

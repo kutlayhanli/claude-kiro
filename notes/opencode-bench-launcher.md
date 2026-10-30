@@ -51,7 +51,7 @@ ck bench run --harness opencode ...
   6. node opencode/scripts/arm.mjs --url ... --dir <clone> --model <provider/model#variant>
        --command spec/implement --text <spec> --state <bench state>/opencode
   7. read the new <state>/runs/<runId>/record.json (native ingest) and/or bench-output.json
-  8. ck analytics record <record.json>  (or ck bench import <bench-output.json>)
+  8. ck stats record <record.json>  (or ck bench import <bench-output.json>)
   9. kill the server; keep the clone until scoring, then remove it
 ```
 

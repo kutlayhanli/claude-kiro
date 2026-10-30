@@ -140,7 +140,7 @@ Two consequences to keep in view:
 
 ### D7 — Telemetry: native ingest into ck's run records
 
-- The bridge emits run data and `ck` builds the record itself: a new `ck analytics record` entry point
+- The bridge emits run data and `ck` builds the record itself: a new `ck stats record` entry point
   (working name) produces `ck-run-local/1` from the bridge's JSON (label, phase, role, model, requested
   and resolved effort, start/end, tokens by model, status) — **no Claude transcripts, no fabricated
   `.claude/` artifacts**.
@@ -152,7 +152,7 @@ Two consequences to keep in view:
   haiku/sonnet/opus, so every non-Anthropic model currently prices as `None`.
 - New fields: `harness: "opencode"` at run level; `requestedEffort` / `resolvedEffort` / `variant` per
   agent row; `throttles` / `retries` at run level; all added to `SHAREABLE_SCHEMA`.
-- Identity: run id = the workflow run id, so `ck cost <runId>` works unchanged; `claudeCodeVersion` is
+- Identity: run id = the workflow run id, so `ck cost --run <runId>` works unchanged; `claudeCodeVersion` is
   null on OpenCode runs and `collectorVersion` carries the bridge version.
 - Ingestion trigger: an `unfinished` / `partial` record is written at spawn and closed on completion, so
   a crashed run still appears (mirrors the existing open-manifest sweep).

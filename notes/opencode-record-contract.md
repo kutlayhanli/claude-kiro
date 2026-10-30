@@ -12,7 +12,7 @@ Two artefacts per workflow run, both under the run state directory (outside the 
 ```
 
 `<state>` is `opencode.run.stateDir` or `$XDG_STATE_HOME/claude-kiro/opencode`
-(`~/.local/state/...` when unset). `runId` is the workflow run id (`wf-...`), so `ck cost <runId>`
+(`~/.local/state/...` when unset). `runId` is the workflow run id (`wf-...`), so `ck cost --run <runId>`
 and `ck stats` keep working.
 
 ## `record.json` — `ck-opencode-run/1`
@@ -118,7 +118,7 @@ and `ck stats` keep working.
 
 At spawn: `status: "running"`, `endedAt: null`, `result: null`, `agents: []` (or the rows completed
 so far). On `done`/`error`: `status: "done"|"failed"`, `endedAt`, `result`, all agent rows. A process
-that dies leaves a `running` record; `ck analytics record` accepts it and marks the run `partial`.
+that dies leaves a `running` record; `ck stats record` accepts it and marks the run `partial`.
 The plugin rewrites the file atomically (write a temp file, then rename) after each agent row, so a
 crash never truncates the last completed row.
 
