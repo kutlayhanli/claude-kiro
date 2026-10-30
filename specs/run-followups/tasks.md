@@ -99,7 +99,7 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 ---
 
 ### Task 3: Extend the Node test harness: execCk agents, a create op and a virtual clock
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.4, 8.1, 8.2, 12.1, 12.3
 **Description:** Build the test-only JS harness the Workflow tests and the deterministic P-10 need (test-plan Test Infrastructure item 2, Harness Contract H-15). The virtual clock is test infrastructure: nothing in `plugin/` or `.claude/` changes (12.3).
@@ -120,12 +120,12 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 **Verify:** `uv run pytest -q tests/test_bridge_harness.py` `node tests/js/spec_create.test.mjs` `node tests/js/spec_implement.test.mjs` `node tests/js/landing_speed.test.mjs` `node tests/js/finish_first.test.mjs`
 **Verifies:** None
 **Acceptance:**
-- [ ] The existing JS suites and `tests/test_landing_scheduler_properties.py` pass unchanged
-- [ ] No file under `plugin/workflows/` or `.claude/workflows/` is touched
-- [ ] `execCk` runs the real CLI as a subprocess, and the landing sets it records come from the fake project's own result. Agents are the only fakes
-- [ ] `sleep(ms)` resolves exactly at `now() + ms` virtual time, in (due, creation) order, and virtual time advances only after pending microtasks drain
-- [ ] Without a `clock`, the bridge and the JS suites run on real timers exactly as today
-- [ ] Harness self-tests pass against today's workflow scripts
+- [x] The existing JS suites and `tests/test_landing_scheduler_properties.py` pass unchanged
+- [x] No file under `plugin/workflows/` or `.claude/workflows/` is touched
+- [x] `execCk` runs the real CLI as a subprocess, and the landing sets it records come from the fake project's own result. Agents are the only fakes
+- [x] `sleep(ms)` resolves exactly at `now() + ms` virtual time, in (due, creation) order, and virtual time advances only after pending microtasks drain
+- [x] Without a `clock`, the bridge and the JS suites run on real timers exactly as today
+- [x] Harness self-tests pass against today's workflow scripts
 **Dependencies:** None
 **Complexity:** Medium
 **Risk:** normal
