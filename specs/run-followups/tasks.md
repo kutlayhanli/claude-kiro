@@ -768,7 +768,7 @@ Skip permission cases as root.
 ---
 
 ### Task 26: Test both Workflow scripts, the skills and the agent-mode documents writing the same events
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 3.1, 3.2, 3.4, 3.7, 5.4, 8.1, 8.2, 8.7, 8.8, 13.3
 **Description:** Implement TC-25, TC-26, TC-29(b), TC-51, TC-52, TC-54 (bridge part), TC-60 (bridge part), TC-87, TC-98 and the document part of TC-78, plus property P-24.
