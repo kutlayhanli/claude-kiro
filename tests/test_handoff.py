@@ -139,7 +139,7 @@ def run_processes_with(log: str):
         if not p.name.isdigit():
             continue
         try:
-            args = (p / "cmdline").read_bytes().decode(errors="replace").split("\0")
+            args = (p / "cmdline").read_bytes().decode(errors="replace").rstrip("\0").split("\0")
         except OSError:
             continue
         if log in args and "claude_kiro.cli" in " ".join(args):
