@@ -379,7 +379,7 @@ agents --guard-ladder` agree), P-15 (with `guardStopIn`), P-16; bridge `max_exam
 ---
 
 ### Task 9: Test interruption counts in run records, shared records and `ck stats show`
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 6.6, 9.6, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 11.1, 11.2, 11.3, 11.4, 11.5
 **Properties:** P-22, P-23, P-25, P-26, P-27, P-28, P-29, P-30
