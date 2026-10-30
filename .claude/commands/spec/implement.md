@@ -67,7 +67,7 @@ How each mode applies them:
      "remaining": "<remaining from ck plan --json>",
      "agentSlots": "<runtime.agentSlots from ck agents --json>",
      "finishFirst": "<run.finish_first from ck agents --json>",
-     "interactive": "<interactive from ck handoff --json (step 0)>",
+     "interactive": false,
      "maxRetries": 1,
      "onFailure": "continue",
      "maxConcurrent": "<run.max_concurrent from ck agents --json>",
@@ -81,7 +81,7 @@ How each mode applies them:
    - **risk / complexity:** copy them from `ck plan` as they are. Tell me how many tasks are safety (and which), since they run on the strong model and the risky reviewer. If `ck lint` warned about a task touching a risk path without `**Risk:** safety`, mention it: it is routed as safety anyway, but the tag belongs in tasks.md.
    - **deps / remaining:** copy them from `ck plan <spec> --json` as they are. With `deps` the script decides which tasks are ready itself, instead of asking a planning agent after every task.
    - **agentSlots / finishFirst:** `runtime.agentSlots` and `run.finish_first` from `ck agents --json`. While a review, revision or landing waits for a runtime slot, no new task starts (`finishFirst`); `agentSlots` is how many agents the runtime runs at once.
-   - **interactive:** the `interactive` field of the step 0 `ck handoff` answer: true when I am at the session, false for an unattended run. It decides whether a task still guard-stopped after fable is parked (false) or put to me (true).
+   - **interactive:** the `interactive` field of the step 0 `ck handoff` answer, passed as the JSON boolean `true` or `false`, not a string: true when I am at the session, false for an unattended run. It decides whether a task still guard-stopped after fable is parked (false) or put to me (true).
    - **onFailure:** by default a failed task doesn't stop the run. Tasks that don't depend on it keep starting, its dependents never start and are reported, and a red target branch always halts. Use `"onFailure": "halt"` if I asked to stop at the first failure.
    - **mergeBatch:** the most finished tasks landed together in one step (default 4). Pass 1 if I asked for one merge at a time, or if the target's gate is often red (each red batch costs extra gates to find the culprit).
    - **maxConcurrent:** how many tasks may have an implementing agent at work at once; review and the merge queue don't hold a slot. Pass `run.max_concurrent` from `ck agents --json` (null means no cap). If I said the test suite is memory-heavy or asked to go easy on usage, pass a lower number (for example 4) for this run, and mention `ck agents set run.max_concurrent N` to make it stick.

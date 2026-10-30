@@ -65,7 +65,7 @@ const CONTINUE = A.onFailure !== 'halt'
 const MAX_CONCURRENT = A.maxConcurrent && A.maxConcurrent > 0 ? A.maxConcurrent : Infinity
 const FULL_EVERY = Number.isInteger(A.fullGateEvery) ? A.fullGateEvery : 10
 const MERGE_BATCH = Number.isInteger(A.mergeBatch) && A.mergeBatch > 0 ? A.mergeBatch : 4
-const INTERACTIVE = A.interactive === true
+const INTERACTIVE = A.interactive === true || A.interactive === 'true'
 const BRIEF = !A.brief
   ? `${ROOT}/.claude/workflows/spec-implement-brief.md`
   : String(A.brief).startsWith('/') ? String(A.brief) : `${ROOT}/${String(A.brief).replace(/^\.\//, '')}`
@@ -1052,6 +1052,7 @@ async function runTask(n) {
     let stop = guardStopOf(r)   // set after every call; a guard stop leaves the retry, escalate and revise loops at once
     let guardK = 0
     const triedGuard = new Set()
+    const retryNo = () => rec.attempts - guardK   // attempts that spent the retry budget: guard attempts do not count
     // Climb the guard ladder (S17) from the model that stopped: each higher model once, at the role's effort, no
     // retry or escalate step spent. Returns the last result; `stop` stays set if the top of the ladder stopped too.
     const climbGuard = async attempted => {
@@ -1060,7 +1061,7 @@ async function runTask(n) {
         triedGuard.add(model)
         guardK++
         log(`Task ${n}: guard stop, trying ${model} (guard ${guardK})`)
-        r = await call('task', retryPrompt(n, r, rec.attempts), { label: `${label(n)} guard ${guardK} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
+        r = await call('task', retryPrompt(n, r, retryNo()), { label: `${label(n)} guard ${guardK} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
         rec.attempts++
         rec.escalations.push({ stage: 'guard', model })
         rec.startedAt = rec.startedAt || (r && r.startedAt)
@@ -1094,7 +1095,7 @@ async function runTask(n) {
         entry.notificationDetail = (p && (p.detail || p.error)) || ''
         if (!p || p.parked === false) {
           entry.notification = 'failed'
-          entry.notificationDetail = (p && (p.error || p.detail)) || 'the park step returned nothing'
+          entry.notificationDetail = 'park failed: ' + ((p && (p.error || p.detail)) || 'the park step returned nothing')
         } else rec.parked = true
       }
       rec.needsInput = entry
@@ -1116,9 +1117,9 @@ async function runTask(n) {
     let escIdx = 0
     const rungs = ladderOf(n)
     for (;;) {
-      while (!ok(r) && !stop && rec.attempts <= MAX_RETRIES && !busy(r)) {
-        log(`Task ${n}: ${r && !(r.commits || '').trim() ? 'no commits' : 'gate not passed'}, retry ${rec.attempts}/${MAX_RETRIES}`)
-        r = await call('task', retryPrompt(n, r, rec.attempts), { label: `${label(n)} retry ${rec.attempts}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
+      while (!ok(r) && !stop && retryNo() <= MAX_RETRIES && !busy(r)) {
+        log(`Task ${n}: ${r && !(r.commits || '').trim() ? 'no commits' : 'gate not passed'}, retry ${retryNo()}/${MAX_RETRIES}`)
+        r = await call('task', retryPrompt(n, r, retryNo()), { label: `${label(n)} retry ${retryNo()}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
         rec.attempts++
         lastModel = codeOpts(n).model
         stop = guardStopOf(r)
@@ -1126,8 +1127,8 @@ async function runTask(n) {
       }
       while (escIdx < rungs.length && !ok(r) && !stop && !busy(r)) {
         const model = rungs[escIdx++]
-        log(`Task ${n}: still failing after ${rec.attempts} attempt(s), escalating to ${model}`)
-        r = await call('task', retryPrompt(n, r, rec.attempts), { label: `${label(n)} retry ${rec.attempts} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
+        log(`Task ${n}: still failing after ${retryNo()} attempt(s), escalating to ${model}`)
+        r = await call('task', retryPrompt(n, r, retryNo()), { label: `${label(n)} retry ${retryNo()} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
         rec.attempts++
         rec.escalations.push({ stage: 'retry', model })
         lastModel = model

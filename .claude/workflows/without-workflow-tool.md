@@ -31,7 +31,6 @@ Write each description exactly as one of these templates, with only `<run_id>`, 
 | same | `[ck:<run_id>] implement task <N> retry <k>` | retry or escalation number `k` (attempt `k + 1`) |
 | same | `[ck:<run_id>] revise task <N> round <k>` | revision after review round `k` |
 | same | `[ck:<run_id>] implement task <N> guard <k>` | guard-ladder attempt number `k` (see Guard stops) |
-| same | `[ck:<run_id>] implement task <N> guard <k>` | guard-ladder attempt number `k` (see Guard stops) |
 | `ck-reviewer` | `[ck:<run_id>] review task <N> round <k>` | review of a task's diff |
 | `ck-resolver` | `[ck:<run_id>] resolve task <N>` or `[ck:<run_id>] resolve task <N> round <k>` | merge conflict |
 | `ck-fixer` | `[ck:<run_id>] fix <k>` | red target branch, attempt `k` |

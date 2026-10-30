@@ -730,7 +730,11 @@ and `tasks[].parked`, which the design's result additions require (key additions
 `src/claude_kiro/analytics/roles.py` got the minimal `guard <k>` (Workflow label and agent description) and `park <N>`
 forms, because this task's Verify runs `test_stats_agents_docs.py` and `test_guard_agent_mode_docs.py`, which parse them;
 Task 15 owns that file and extends it. The capture summary says Workflow agents carry `agent_id`, so the skills carry no
-marker wrap.
+marker wrap. FROZEN_RULE is static conditional text (read by the reviser), so the absent-when-every-task-is-Not-Started clause
+of TC-87 cannot be tested from the Workflow stub. Review round 1: guard attempts are counted apart from the retry budget
+(`retryNo()` = attempts minus guard attempts); a failed `park` call is reported in `notifications.failed` with the detail prefixed
+`park failed:` (no new result key); `interactive` also accepts the string "true". Task 15: the `guard`/`park` forms already exist in
+roles.py, extend them; a guard attempt on a path-id task now records `step="guard"` instead of `path_id`.
 
 ---
 
