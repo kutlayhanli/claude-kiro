@@ -725,6 +725,13 @@ landed by hand outside the sandbox.
 **Complexity:** High
 **Risk:** safety (triggers push notifications and paid model escalations up to Fable)
 
+**Implementation notes:** `tests/js/spec_implement.test.mjs` (TC-73) key snapshot gained `needsInput`, `notifications.*`
+and `tasks[].parked`, which the design's result additions require (key additions only; no assertion weakened).
+`src/claude_kiro/analytics/roles.py` got the minimal `guard <k>` (Workflow label and agent description) and `park <N>`
+forms, because this task's Verify runs `test_stats_agents_docs.py` and `test_guard_agent_mode_docs.py`, which parse them;
+Task 15 owns that file and extends it. The capture summary says Workflow agents carry `agent_id`, so the skills carry no
+marker wrap.
+
 ---
 
 ### Task 15: Count interruptions in run records, share them and print them in `ck stats show`
