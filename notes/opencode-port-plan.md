@@ -335,11 +335,24 @@ informational. Runs automatically at the start of `/spec/implement`.
 
 ### 4.2 Step 2 (launcher + collector, after the first results)
 
-**Status:** code-complete, tested with a fake `opencode`; no real arm has run because E0 is blocked
-on quota. `ck bench run --harness opencode` clones at the base, writes the arm's alias map, assembles
+**Status:** code-complete and **live-verified end to end** on `opencode-go/beam-free`.
+`ck bench run --harness opencode` clones at the base, writes the arm's alias map, assembles
 the `spec-implement` args (`bench_opencode.workflow_args`), installs the probe, runs
 `opencode run --standalone`, imports `bench-output.json`, and overlays native tokens/cost. Guard
 denials, a non-`done` record, a timeout or a nonzero exit mark the arm fail-closed. Release is 0.11.0.
+
+**Live E2E (demo spec, one arm):** record `done` with `plan 1`, `task 1`, `land 1`, `plan 2` and
+`report` all `ok`; bench result `merged 1, failed 0, 1.323 min, $0.00`; 64,759 input / 3,056 output /
+534,144 cache-read tokens; no guard events; `ck bench score` accepts the result (it warns that no
+hidden suite is configured). This is harness proof, not a benchmark number — E0 on a strong model is
+still the first measurement.
+
+Four startup fixes were needed for a real arm: a warmup prompt plus a shell `sleep` before `bench_run`,
+because OpenCode can start the model before an async plugin setup registers tools; `.opencode/plugins/`
+must stay visible to the loader (excluding the whole `.opencode/` directory hid it); `PWD` must be set
+to the clone because `subprocess(cwd=...)` does not update it; and the CLI is stopped once the run
+record reaches `done`/`failed`/`partial`, because a model can keep the process busy long after the
+probe returned.
 
 - `ck bench run --harness opencode`: launcher in `bench.py` (`run_arm_opencode`) and a collector
   that reads the native record; the probe path is used because `opencode run` cannot dispatch slash
@@ -368,6 +381,9 @@ account funds"; `opencode/deepseek-v4.1-flash-free` returns 429 with `retryAfter
 release is 0.11.0. The E0 command is ready; top up the OpenCode account or wait for the free-tier
 window, then run `ck bench run bench-opencode.json --harness opencode --only <spec>--sonnet-5-5--r1`
 before the cheap arms.
+
+**Full suite (post-merge, 0.11.0):** `uv run pytest -q -n auto` → **2930 passed, 16 skipped** in 4:57.
+`opencode/test/*.test.ts` → **142 passed**. `tsc --noEmit` clean.
 
 ---
 
