@@ -12,6 +12,7 @@ import os
 import stat
 import sys
 import textwrap
+import time
 import types
 from pathlib import Path
 
@@ -115,6 +116,32 @@ def test_run_arm_opencode_imports_the_record_and_bench_output(tmp_path):
     assert (Path(cfg["results_dir"]) / f"{arm['id']}.json").is_file()
     clone = Path(result["clone"])
     assert (clone / ".bench-args.json").is_file()
+
+
+def test_run_opencode_stops_when_the_record_closes(tmp_path):
+    state = tmp_path / "state"
+    run = state / "runs" / "wf"
+    run.mkdir(parents=True)
+    script = tmp_path / "fake-opencode.py"
+    script.write_text(
+        textwrap.dedent(
+            f"""
+            import json, pathlib, subprocess, sys, time
+            child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+            (pathlib.Path({str(tmp_path / "child.pid")!r})).write_text(str(child.pid))
+            time.sleep(0.5)
+            pathlib.Path({str(run / "record.json")!r}).write_text(json.dumps({{"status": "done"}}))
+            time.sleep(120)
+            """
+        )
+    )
+    started = time.time()
+    _, timed_out, stopped = bench._run_opencode(
+        [sys.executable, str(script)], tmp_path, dict(os.environ), state, 30, tmp_path / "run.log"
+    )
+    assert stopped is True
+    assert timed_out is False
+    assert time.time() - started < 15
 
 
 def test_run_arm_opencode_fails_without_a_record(tmp_path, monkeypatch):

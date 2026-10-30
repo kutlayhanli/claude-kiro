@@ -25,6 +25,7 @@ import random
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -698,11 +699,29 @@ def _run_opencode(
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("w", encoding="utf-8") as fh:
         try:
+            # A new session lets the cleanup kill OpenCode's `serve --stdio` child too; otherwise a
+            # terminated CLI can leave a server behind for the next arm.
             proc = subprocess.Popen(
-                list(argv), cwd=str(cwd), env=dict(env), stdout=fh, stderr=subprocess.STDOUT, text=True
+                list(argv), cwd=str(cwd), env=dict(env), stdout=fh, stderr=subprocess.STDOUT,
+                text=True, start_new_session=True,
             )
         except OSError as e:
             raise BenchError(f"could not run {argv[0]}: {e}") from e
+
+        def stop(sig: int) -> None:
+            if hasattr(os, "killpg"):
+                try:
+                    os.killpg(proc.pid, sig)
+                    return
+                except ProcessLookupError:
+                    return
+                except OSError:
+                    pass
+            if sig == signal.SIGTERM:
+                proc.terminate()
+            else:
+                proc.kill()
+
         try:
             while time.time() < deadline:
                 if proc.poll() is not None:
@@ -715,15 +734,15 @@ def _run_opencode(
             if proc.poll() is None:
                 if not stopped_for_record:
                     timed_out = True
-                proc.terminate()
+                stop(signal.SIGTERM)
                 try:
                     proc.wait(10)
                 except subprocess.TimeoutExpired:
-                    proc.kill()
+                    stop(signal.SIGKILL)
                     proc.wait()
         finally:
             if proc.poll() is None:
-                proc.kill()
+                stop(signal.SIGKILL)
                 proc.wait()
     return proc.returncode, timed_out, stopped_for_record
 
