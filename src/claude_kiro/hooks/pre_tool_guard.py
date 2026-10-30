@@ -12,8 +12,9 @@ session gets the mode set in specs/ck.json "guard". The guard blocks, before it 
 For a Bash command that may write, it also takes a snapshot of the dirty test files, so the
 post-check (hooks/post_bash_check.py) can tell afterwards what the command changed.
 
-Every target is judged in its own checkout, so an absolute path into a task worktree uses that
-worktree's config, base and owned files. Every ask or deny is appended to the private guard log.
+Every target is judged in its own checkout: the guard mode comes from the session's own checkout,
+while the patterns, base and owned files come from the target's checkout (so an absolute path into
+a task worktree uses that worktree's). Every ask or deny is appended to the private guard log.
 """
 
 import difflib
@@ -132,7 +133,7 @@ def _check_file_edit(tool_name: str, tool_input: Mapping[str, Any], cwd: Path, c
     raw = tool_input.get("file_path")
     if not isinstance(raw, str) or not raw:
         return None
-    path = Path(raw) if os.path.isabs(raw) else cwd / raw
+    path = Path(os.path.abspath(raw if os.path.isabs(raw) else cwd / raw))
     checkout = _checkout_of(path, cwd)
     if checkout is None:
         return None
@@ -142,16 +143,18 @@ def _check_file_edit(tool_name: str, tool_input: Mapping[str, Any], cwd: Path, c
     config = load_config(checkout)
 
     # requirements.md and test-plan.md are frozen once implementation starts.
-    if path.name in FROZEN_SPEC_FILES:
-        kind = FROZEN_SPEC_FILES[path.name]
+    # Judged on the resolved path (`..` and symlinks gone), as the test-file check below is.
+    real = checkout / rel
+    if real.name in FROZEN_SPEC_FILES:
+        kind = FROZEN_SPEC_FILES[real.name]
         mode = session_mode(cwd, kind)
-        spec_dir = path.parent
+        spec_dir = real.parent
         if mode is None or spec_dir.parent not in spec_roots(checkout):
             return None
         started = _implementation_started(spec_dir)
         only_adds = True
         if started and caller == "task_agent":
-            texts = _old_and_new(tool_name, tool_input, path)
+            texts = _old_and_new(tool_name, tool_input, real)
             only_adds = texts is not None and _only_adds(*texts)
         facts = guard_policy.EditFacts(rel, kind, (), False, None, started, only_adds)  # type: ignore[arg-type]
         decision = guard_policy.decide_edit(facts, caller, mode)  # type: ignore[arg-type]
@@ -210,7 +213,7 @@ def _check_bash(command: str, cwd: Path, caller: str) -> Optional[_Block]:
     targets = guard_policy.destroy_targets(command, str(cwd))
     mode = session_mode(cwd, "tests")
     groups: Dict[str, tuple] = {}
-    for target in targets[:200]:
+    for target in targets:
         got = _target_facts(target, cwd)
         if got is None:
             continue

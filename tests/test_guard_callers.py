@@ -290,6 +290,18 @@ def test_tc25_tc26_task_agent_requirement_reword_is_denied(project, session):
     assert "requirement" in reason_of(result)
 
 
+def test_tc25_tc26_redteam_dotdot_and_symlink_paths_to_frozen_spec_are_denied(project, session):
+    started(project)
+    reword = dict(old_string=REQ_OLD, new_string=REQ_OLD.replace("subtract", "subtract or return 0"))
+    dotdot = project / "specs" / "calc" / ".." / "calc" / "requirements.md"
+    result = fire(recorded("agent-tool-subagent", project, session, "Edit", file_path=str(dotdot), **reword))
+    assert decision(result) == "deny"
+    (project / "specs_link").symlink_to(project / "specs")
+    linked = project / "specs_link" / "calc" / "requirements.md"
+    result = fire(recorded("agent-tool-subagent", project, session, "Edit", file_path=str(linked), **reword))
+    assert decision(result) == "deny"
+
+
 def test_tc25_tc26_task_agent_test_plan_row_deletion_is_denied(project, session):
     started(project)
     path = project / "specs/calc/test-plan.md"
