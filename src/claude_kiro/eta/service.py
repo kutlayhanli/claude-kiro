@@ -482,15 +482,16 @@ def _core(project_dir: Path, spec: str, kind: str, *, key: Optional[str], events
 
     # ---- basis and confidence
     basis_src = str(model.basis.get("source", "none"))
+    parts = [p for p in model.bundled_parts if (p == "phases") == (kind == "create")]
     view["basis"] = {"source": basis_src, "tasks": int(model.basis.get("tasks", 0)),
                      "runs": int(model.basis.get("runs" if kind == "implement" else "createRuns", 0)),
-                     "widestMatch": "none", "bundledParts": list(model.bundled_parts),
+                     "widestMatch": "none", "bundledParts": parts,
                      "sizeSignal": "off" if model.size.source == "none" else model.size.source}
     view["retryRate"], view["escalationRate"] = model.rates.get("retry"), model.rates.get("escalation")
     if basis_src == "bundled":
         notes.append("low confidence: no local history")
-    elif model.bundled_parts:
-        notes.append("bundled defaults used for: %s" % ", ".join(model.bundled_parts))
+    elif parts:
+        notes.append("bundled defaults used for: %s" % ", ".join(parts))
     if kind == "implement" and model.size.source == "none":
         notes.append("size signal not used")
 
@@ -507,8 +508,8 @@ def _core(project_dir: Path, spec: str, kind: str, *, key: Optional[str], events
             if status == "pending" and t in held:
                 status = "held"
             minutes = None
-            if status == "running" and tp is not None and tp.last_start_min is not None:
-                minutes = round(max(0.0, now_eff - progress.effective_min(state.waits, tp.last_start_min)), 1)
+            if status == "running" and tp is not None and tp.first_start_min is not None:
+                minutes = round(max(0.0, now_eff - progress.effective_min(state.waits, tp.first_start_min)), 1)
             rows.append({"task": t, "state": status, "step": tp.step if tp else None,
                          "model": tp.model if tp else None, "minutes": minutes, "medianMinutes": None,
                          "waitsOn": [d for d in graph.deps.get(t, ()) if d not in graph.done]})
@@ -531,6 +532,9 @@ def _core(project_dir: Path, spec: str, kind: str, *, key: Optional[str], events
             hold = decide.Hold("none", None, None, (), (), False)
             aux.hold = hold
         _fill_phases(view, kind, model, state, None)
+        usd = (state.launch or {}).get("usd") if isinstance(state.launch, dict) else None
+        if isinstance(usd, list) and len(usd) == 2 and all(isinstance(x, (int, float)) for x in usd):
+            view["cost"] = {"p10": _round2(usd[0]), "p50": None, "p90": _round2(usd[1])}
         return view, aux
     if stale:
         view["state"] = "stale"
@@ -645,8 +649,7 @@ def _ended_block(project_dir: Path, spec: str, kind: str, state: progress.RunSta
                              "vsLaunch": place, "next": None, "nothingLeft": False}
     if kind == "implement":
         try:
-            fresh = _build_graph(project_dir, spec, [t for t, p in state.tasks.items() if p.status == "merged"],
-                                 settings["slots"], settings["source"])
+            fresh = _build_graph(project_dir, spec, [], settings["slots"], settings["source"])
         except NoEstimate:
             fresh = None
         remaining = [t for t in fresh.order if t not in fresh.done] if fresh is not None else []
@@ -654,8 +657,7 @@ def _ended_block(project_dir: Path, spec: str, kind: str, state: progress.RunSta
             block["nothingLeft"] = True
         else:
             try:
-                carried = [ev for ev in events if ev.get("kind") == "merge"]
-                nxt, _ = _core(project_dir, spec, kind, key=None, events=carried, skipped=0, progress_file=None,
+                nxt, _ = _core(project_dir, spec, kind, key=None, events=[], skipped=0, progress_file=None,
                                now=now, seed=None, env=env, model=model, settings=settings)
                 block["next"] = nxt
             except (EtaError, _Timeout):
@@ -996,8 +998,10 @@ def _basis_text(view: Mapping[str, Any]) -> str:
     size = {"local": "on", "bundled": "bundled", "off": "off"}.get(b.get("sizeSignal"), "off")
     if view.get("runKind") == "create":
         return "basis: %s create runs · confidence %s" % (b.get("runs", 0), view.get("confidence"))
-    text = "basis: %s past tasks, %s runs · size signal %s · confidence %s" % (
-        b.get("tasks", 0), b.get("runs", 0), size, view.get("confidence"))
+    match = b.get("widestMatch")
+    text = "basis: %s past tasks, %s runs%s · size signal %s · confidence %s" % (
+        b.get("tasks", 0), b.get("runs", 0), " · matched at %s" % match if match and match != "none" else "", size,
+        view.get("confidence"))
     if b.get("bundledParts"):
         text += " · bundled: %s" % ", ".join(b["bundledParts"])
     return text
@@ -1062,13 +1066,15 @@ def render(view: Mapping[str, Any]) -> str:
         if end.get("usd") is not None:
             text += ", $%.2f" % end["usd"]
         lines.append(text)
+        if end.get("usd") is None and (view.get("cost") or {}).get("p10") is not None:
+            lines.append(_cost_text(view).replace("(p10–p90)", "(launch estimate)"))
         lines.append("vs launch estimate: %s" % {"below p10": "before p10", "above p90": "after p90",
                                                   "within p10-p90": "inside p10-p90"}.get(end.get("vsLaunch"), ""))
         if end.get("nothingLeft"):
             lines.append("nothing left to run")
         elif end.get("next"):
             lines.append("remaining work:")
-            lines.extend("  " + ln for ln in render(end["next"]).splitlines()[1:])
+            lines.extend("  " + ln for ln in render(end["next"]).splitlines()[1:] if ln != "not started")
         return "\n".join(lines)
     if kind == "implement" and view.get("open") == 0 and state == "not-started":
         lines.append("nothing left to run")

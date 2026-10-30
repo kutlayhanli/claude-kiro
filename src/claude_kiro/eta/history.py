@@ -495,8 +495,8 @@ def fit_model(records: Sequence[Mapping], defaults: Optional[Mapping], *,
     local_enough = n_tasks >= MIN_MATCH
     if not local_enough and bundled_tasks:
         parts += ["durations", "retries", "escalations"]
-    n_review = sum(1 for t in flat if t[3] is not None)
-    n_landing = sum(1 for t in flat if t[4] is not None)
+    n_review = sum(1 for t in flat if t[3] is not None and t[3] > 0)  # zero waits are no wait data
+    n_landing = sum(1 for t in flat if t[4] is not None and t[4] > 0)
     n_priced = sum(1 for t in flat if t[5] is not None)
     if n_review < MIN_MATCH and "reviewMinutes" in bundled_waits:
         parts.append("review wait")
@@ -636,6 +636,26 @@ def model_from_json(d: Mapping) -> Optional[Model]:
 # --------------------------------------------------------------------------- build_defaults
 
 
+MAX_PLAUSIBLE = 1e5  # minutes (about 70 days) or any other aggregate input: a bigger value is a timestamp or junk
+
+
+def _plausible(ex: "_Extract") -> "_Extract":
+    """Drop record-sized values (epoch timestamps in a duration field) before they can reach a bundled aggregate."""
+    def ok(v: Any) -> bool:
+        return v is None or (isinstance(v, (int, float)) and abs(v) < MAX_PLAUSIBLE)
+
+    tuples = []
+    for k, t in ex.tuples:
+        if not ok(t[0]):
+            continue
+        t = (t[0], t[1], t[2], t[3] if ok(t[3]) else None, t[4] if ok(t[4]) else None,
+             t[5] if ok(t[5]) else None, t[6] if ok(t[6]) else None)
+        tuples.append((k, t))
+    timed = [{title: v for title, v in s.items() if ok(v[0]) and ok(v[1])} for s in ex.create_timed]
+    return _Extract(tuples=tuples, impl_runs=ex.impl_runs, create_timed=[s for s in timed if s],
+                    create_totals=[v for v in ex.create_totals if ok(v)], create_runs=ex.create_runs)
+
+
 def build_defaults(records: Sequence[Mapping], *, min_runs: int = MIN_DEFAULT_RUNS,
                    tasks_md_reader: Optional[Callable[[str, str], Optional[Dict[str, Tuple[int, int]]]]] = None) -> DefaultsResult:
     """Aggregate `ck-eta-defaults/1` from records: quantiles and rates only. Raises ValueError below `min_runs` runs."""
@@ -643,6 +663,7 @@ def build_defaults(records: Sequence[Mapping], *, min_runs: int = MIN_DEFAULT_RU
     if n < min_runs:
         raise ValueError(f"{n} runs in history, need {min_runs}")
     ex = _extract(records, tasks_md_reader)
+    ex = _plausible(ex)
     tasks: Dict[str, dict] = {}
     for track in TRACKS:
         for risk in ("normal", "safety"):

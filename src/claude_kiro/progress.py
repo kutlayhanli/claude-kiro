@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import secrets
+import stat
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -167,10 +168,27 @@ def append(key: str, event: Mapping[str, Any], env: Optional[Mapping[str, str]] 
 
 # --------------------------------------------------------------------------- read
 
+def _read_regular(path: Path) -> bytes:
+    """The bytes of a regular file; a FIFO, device or directory in its place raises OSError (never blocks)."""
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"not a regular file: {path.name}")
+        chunks = []
+        while True:
+            chunk = os.read(fd, 1 << 20)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
 def read_events(path: Path) -> Tuple[List[dict], int]:
     """(valid events in order, number of lines skipped). Malformed, unknown-schema and unknown-kind lines count."""
     try:
-        raw = Path(path).read_bytes()
+        raw = _read_regular(Path(path))
     except FileNotFoundError:
         return [], 0
     events: List[dict] = []
@@ -331,7 +349,8 @@ def fold(events: Sequence[Mapping[str, Any]]) -> RunState:
                 last_start_min=minute)
             desc = f"task {task} {'start' if kind == 'task-start' else kind}"
             if kind != "task-start" and _int_or_none(ev.get("attempt")) is not None:
-                desc += f" {ev['attempt']}"
+                # `attempt` counts from 1 (the first run): the first retry is attempt 2
+                desc += f" {ev['attempt'] - 1 if kind == 'retry' else ev['attempt']}"
             cause = desc
         elif kind == "merge" and task is not None:
             put(task, status="merged")

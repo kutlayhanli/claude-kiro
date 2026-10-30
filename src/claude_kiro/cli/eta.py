@@ -127,7 +127,16 @@ def _watch(root: Path, spec: str, kind: Optional[str], seed: Optional[int], as_j
     last_check = time.monotonic()
     path: Optional[str] = None
     key: Optional[str] = None
+    first_draw = True
     try:
+        # The first slip check runs before the first draw: a draw refreshes the cache for this very `now`, and a
+        # slip that comes from time alone is told apart by a cache computed for an earlier `now` (D14).
+        try:
+            key0 = prog.active_run(spec, root, env, now=prog.clock_now(env))
+            if key0 and not _spooled(str(prog.run_file(key0, env))):
+                svc.after_event(key0, now=prog.clock_now(env), env=env)
+        except Exception:  # noqa: BLE001
+            pass
         while True:
             tick = time.monotonic()
             sig = _signature(path)
@@ -140,6 +149,8 @@ def _watch(root: Path, spec: str, kind: Optional[str], seed: Optional[int], as_j
                 click.echo("")
                 sys.stdout.flush()
                 last_draw, last_sig = tick, _signature(path)
+                if first_draw:
+                    first_draw, last_check = False, time.monotonic()  # the first check comes a full interval later
                 if view.get("state") == "done":
                     return
             if key and time.monotonic() - last_check >= recheck:
@@ -213,8 +224,8 @@ def _supersede_unfinished(root: Path, spec: str, env: Mapping[str, str], now: da
         merged = sum(1 for p in state.tasks.values() if p.status == "merged")
         total = start.get("total") if isinstance(start.get("total"), int) else None
         err = prog.append(key, {"kind": "end", "at": _utc_iso(now), "outcome": "superseded",
-                                "merged": merged if state.run_kind != "create" else len(state.phases_done),
-                                "total": total, "usd": None}, env)
+                                "merged": merged if state.run_kind != "create" else None,
+                                "total": total if state.run_kind != "create" else None, "usd": None}, env)
         if err is None:
             svc.send_done_for_superseded(key, now=now, env=env, root=None if env.get("CK_PROGRESS_DIR") else root)
 
@@ -477,9 +488,11 @@ def progress_end(spec: str, run_key: Optional[str], outcome: str, record: Option
             events, _ = prog.read_events(prog.run_file(key, env))
             state = prog.fold(events)
             start = next((e for e in events if e.get("kind") == "start"), {})
-            merged = len(state.phases_done) if state.run_kind == "create" else sum(
-                1 for p in state.tasks.values() if p.status == "merged")
-            total = start.get("total") if isinstance(start.get("total"), int) else None
+            merged: Optional[int] = None
+            total = None
+            if state.run_kind != "create":
+                merged = sum(1 for p in state.tasks.values() if p.status == "merged")
+                total = start.get("total") if isinstance(start.get("total"), int) else None
             usd = _record_usd(record, env) if record else None
             err = prog.append(key, {"kind": "end", "at": _utc_iso(now), "outcome": outcome, "merged": merged,
                                     "total": total, "usd": usd}, env)

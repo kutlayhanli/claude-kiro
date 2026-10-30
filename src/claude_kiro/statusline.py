@@ -6,6 +6,7 @@ wrapped in `try/except BaseException`: it always exits 0 and writes nothing to s
 
 import json
 import os
+import stat
 import sys
 from pathlib import Path
 from typing import Any, List, Optional
@@ -27,15 +28,27 @@ def _current_dir(raw: str) -> str:
     return os.getcwd()
 
 
+def _open(path: Path):
+    """Open a regular file for reading; a FIFO or device in its place raises instead of blocking."""
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError("not a regular file")
+        return os.fdopen(fd, "rb")
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 def _first_line(path: Path) -> Optional[dict]:
-    with open(path, "rb") as fh:
+    with _open(path) as fh:
         line = fh.readline(65536)
     obj = json.loads(line.decode("utf-8"))
     return obj if isinstance(obj, dict) and obj.get("kind") == "start" else None
 
 
 def _tail_events(path: Path) -> List[dict]:
-    with open(path, "rb") as fh:
+    with _open(path) as fh:
         fh.seek(0, os.SEEK_END)
         size = fh.tell()
         fh.seek(max(0, size - _TAIL))
@@ -56,7 +69,8 @@ def _tail_events(path: Path) -> List[dict]:
 
 def _cache(path: Path) -> Optional[dict]:
     try:
-        obj = json.loads(path.with_name(path.stem + ".eta.json").read_text(encoding="utf-8"))
+        with _open(path.with_name(path.stem + ".eta.json")) as fh:
+            obj = json.loads(fh.read(1 << 20).decode("utf-8"))
     except (OSError, ValueError):
         return None
     return obj if isinstance(obj, dict) else None
