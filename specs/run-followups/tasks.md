@@ -44,7 +44,7 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 ## Task Breakdown
 
 ### Task 1: Write the ETA event constants and Hypothesis strategies
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.6, 5.1, 12.4
 **Description:** Create `tests/eta_strategies.py`, the small test-owned module the property tasks and the P-10 task need first (test-plan Test Infrastructure item 1). It imports no project code at module level.
@@ -58,10 +58,10 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 **Verify:** `uv run pytest -q -n auto tests/test_eta_strategies.py`
 **Verifies:** None
 **Acceptance:**
-- [ ] Every event, schema and model name appears exactly once, as a constant
-- [ ] Importing the module imports no `claude_kiro` module
-- [ ] The smoke test passes against today's code
-- [ ] `tests/test_eta_strategies.py` sets `pytestmark` with `no_network`
+- [x] Every event, schema and model name appears exactly once, as a constant
+- [x] Importing the module imports no `claude_kiro` module
+- [x] The smoke test passes against today's code
+- [x] `tests/test_eta_strategies.py` sets `pytestmark` with `no_network`
 **Dependencies:** None
 **Complexity:** Low
 **Risk:** normal
