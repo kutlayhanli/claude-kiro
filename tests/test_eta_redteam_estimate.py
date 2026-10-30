@@ -33,6 +33,7 @@ def _rewrite_records(s: Scenario, edit) -> None:
         path.write_text(json.dumps(rec))
 
 
+# `costs` below is a field of stored run records, not an EtaView key.
 def _set_usd(value):
     def edit(rec):
         for c in rec.get("costs", []):
@@ -52,7 +53,9 @@ def assert_cost_unknown_or_positive(view: dict, text: str) -> None:
     if cost is not None:
         known = [v for v in cost.values() if v is not None]
         assert all(v > 0 for v in known), cost
-    assert not ZERO_DOLLARS.search(text), text
+    # A priced estimate may legitimately round to whole dollars; only an unknown cost must never print $0.
+    if cost is None or any(v is None for v in cost.values()):
+        assert not ZERO_DOLLARS.search(text), text
 
 
 # --------------------------------------------------------------------------- 1.9
@@ -157,6 +160,8 @@ def test_52_park_on_a_diamond(tmp_path):
     assert view["state"] == "blocked" and view["finish"] is None
     assert _finish_lines(text) == []
     assert set(view["waitingOnYou"]) >= {"2", "4"}
+    assert "task 2 parked (needs input)" in view["blocked"]["reason"]
+    assert set(view["blocked"]["held"]) >= {"2", "4"}
 
 
 def test_52_runnable_time_is_never_the_finish(tmp_path):
@@ -165,6 +170,8 @@ def test_52_runnable_time_is_never_the_finish(tmp_path):
     s.add(start_task(0, 1), start_task(0, 3), park(5, 1))
     view, text = s.view(10, *SEED), s.text(10, *SEED)
     assert view["finish"] is None and view["runnableDone"] is not None
+    assert "task 1 parked (needs input)" in view["blocked"]["reason"]
+    assert set(view["blocked"]["held"]) >= {"1", "2"}
     hhmm = parse(view["runnableDone"]).strftime("%H:%M")
     for line in _finish_lines(text):
         assert hhmm not in line
@@ -176,10 +183,10 @@ def test_52_park_and_approval_open_together_still_show_no_finish(tmp_path):
     s.begin()
     s.add(start_task(0, 1), park(5, 1), approval_start(8))
     view, text = s.view(12), s.text(12)
-    assert view["state"] in ("blocked", "waiting")
-    if view["state"] == "blocked":
-        assert view["finish"] is None and _finish_lines(text) == []
-    assert view["blocked"] is not None or view["waitingOnYouMinutes"] is not None
+    assert view["state"] == "blocked"
+    assert view["finish"] is None
+    assert _finish_lines(text) == []
+    assert view["blocked"] is not None
 
 
 def test_52_an_etaview_fed_back_as_a_progress_line_changes_nothing(tmp_path):

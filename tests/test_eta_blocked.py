@@ -58,6 +58,7 @@ def test_tc40_branch_park(tmp_path):
     assert view["state"] == "blocked" and view["finish"] is None
     assert "task 3 parked (needs input)" in view["blocked"]["reason"]
     assert set(view["waitingOnYou"]) == {"3", "4"}
+    assert set(view["blocked"]["held"]) >= {"3", "4"}
 
     only12 = Scenario(tmp_path, [h.TaskDef(1), h.TaskDef(2, deps=(1,))], name="only12")
     only12.begin()

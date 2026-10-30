@@ -322,7 +322,7 @@ def test_tc35_view_schema_for_every_state(tmp_path, state):
     for key in ("launchAt", "finish", "remainingMinutes", "cost", "confidence", "basis", "criticalPath", "blocked",
                 "waitingOnYouMinutes", "staleSince", "notes", "now"):
         assert key in view, key
-    assert ("tasks" in view) or ("phases" in view)
+    assert isinstance(view["tasks"], list) and isinstance(view["phases"], list)
     if view["finish"] is not None:
         for p in ("p10", "p50", "p90"):
             parse(view["finish"][p])
@@ -330,7 +330,8 @@ def test_tc35_view_schema_for_every_state(tmp_path, state):
         parse(view["launchAt"])
     if view["remainingMinutes"] is not None:
         assert set(view["remainingMinutes"]) >= {"p10", "p50", "p90"}
-    assert view["cost"] is None or {"p10", "p90"} <= set(view["cost"])
+    assert isinstance(view["cost"], dict) and set(view["cost"]) >= {"p10", "p50", "p90"}
+    assert all(v is None or isinstance(v, (int, float)) for v in view["cost"].values())
     assert view["confidence"] in ("normal", "low", "none")
     assert (view["blocked"] is not None) == (state == "blocked")
     assert (view["waitingOnYouMinutes"] is not None) == (state == "waiting")
@@ -344,6 +345,7 @@ def test_tc36_cache_hit_then_miss(tmp_path):
     s.begin()
     s.add(start_task(0, 1), start_task(0, 2))
     first = s.view(5)
+    assert first["cached"] is False
     second = s.view(5)
     assert second["cached"] is True
     for key in ("cached", "now", "progressFile"):
