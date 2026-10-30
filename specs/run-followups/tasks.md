@@ -69,7 +69,7 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 ---
 
 ### Task 2: Build the ETA CLI helpers, spec builder and collected history pools
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 1.1, 1.2, 2.1, 3.1, 6.1, 7.1
 **Description:** Create `tests/eta_helpers.py`, the harness every ETA CLI test imports (test-plan Test Infrastructure item 1). It must never import `claude_kiro.cli`. The only project modules it may import are `claude_kiro.progress` (to append setup events in tests whose boundary is the reader) and the pure seams, and only inside functions. It does not import `tests/eta_strategies.py`, so this task does not wait for Task 1.
