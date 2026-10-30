@@ -420,3 +420,10 @@ def agent_cost_label(transcript_agents: int, estimated_agents: int, unpriced_age
     if cost_label(transcript_agents, estimated_agents, unpriced_agents) == "priced_from_transcripts":
         return "agent_transcripts"
     return "estimate"
+
+
+def auto_id_log_line(raw_id: str, reason: str, now_iso: str) -> str:
+    """S17: one collect.log line for a refused run id: id cut to 64 characters, odd characters shown as `?`."""
+    safe = re.sub(r"[^A-Za-z0-9_.:-]", "?", str(raw_id)[:64])
+    one_line = " ".join(str(reason).split())
+    return f"{now_iso} {safe} invalid_id: {one_line}"

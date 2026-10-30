@@ -259,7 +259,7 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 ---
 
 ### Task 8: Harden agent-mode analytics and store task size counts in local records
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 6.1, 6.2, 9.1, 9.2, 9.3, 9.4, 10.1, 10.2, 10.3, 11.1, 11.2, 11.3, 11.4
 **Description:** The D7 fixes from the agent-mode-analytics review plus the D4 size inputs, in one change set because they share `analytics/collect.py`, `agentcollect.py` and `cli/stats.py`. This task owns Harness Contract H-12.
@@ -282,16 +282,16 @@ Every other `collect`, `--all`, `--agents`, backfill and doctor output stays the
 **Verify:** `uv run python -c "from claude_kiro.hooks._shared.spec_parser import SpecTask; assert SpecTask('1','t').requirements == []"` `uv run pytest -q -n auto tests/test_stats_followups.py tests/test_stats_followups_redteam.py` `uv run pytest -q -n auto tests/test_stats_*.py tests/test_stats_doctor.py tests/test_doctor_xdist.py`
 **Verified by:** Task 7 (TC-62..TC-72, red-team 9.1, 9.3, 10.1)
 **Acceptance:**
-- [ ] `SpecTask.requirements` holds the criterion ids from `**Requirements:**`, deduplicated, in order
-- [ ] A local implement record collected from a run whose spec has tasks.md carries `filesCount` and `criteriaCount` per task; a task missing from tasks.md, or an unreadable tasks.md, gives `null` for both; shareable records contain neither field
-- [ ] Backfill against an unreadable store (including an untraversable data directory) writes no record, names the store and the error, exits non-zero
-- [ ] Backfill with a malformed record file writes no record, names the file, exits non-zero; `--dry-run` lists the groups with `overlaps not checked`, exits non-zero
-- [ ] A backfill group with a missing or unreadable session transcript is written with `outcome: null` and an `outcome` entry in `missing`
-- [ ] `collect --agents <id> --json` in the sandbox prints one JSON object with `run_id`, `result: "failed"` and a sandbox error, exit 1, no plain text
-- [ ] `collect --agents <bad id> --auto` appends one collect.log line naming the id and reason, prints the retry hint, exits 0; without `--auto` it errors with exit 1 as today
-- [ ] `collect --all` with a failing open-manifest sweep reports the failure, counts it, exits 1, and still reports every workflow-run outcome; it chooses the writer from the record's `source`
-- [ ] Each agent transcript is opened as often in agent-mode collection as in workflow collection
-- [ ] Existing stats, backfill and doctor tests pass unchanged and records are byte-identical for unchanged inputs
+- [x] `SpecTask.requirements` holds the criterion ids from `**Requirements:**`, deduplicated, in order
+- [x] A local implement record collected from a run whose spec has tasks.md carries `filesCount` and `criteriaCount` per task; a task missing from tasks.md, or an unreadable tasks.md, gives `null` for both; shareable records contain neither field
+- [x] Backfill against an unreadable store (including an untraversable data directory) writes no record, names the store and the error, exits non-zero
+- [x] Backfill with a malformed record file writes no record, names the file, exits non-zero; `--dry-run` lists the groups with `overlaps not checked`, exits non-zero
+- [x] A backfill group with a missing or unreadable session transcript is written with `outcome: null` and an `outcome` entry in `missing`
+- [x] `collect --agents <id> --json` in the sandbox prints one JSON object with `run_id`, `result: "failed"` and a sandbox error, exit 1, no plain text
+- [x] `collect --agents <bad id> --auto` appends one collect.log line naming the id and reason, prints the retry hint, exits 0; without `--auto` it errors with exit 1 as today
+- [x] `collect --all` with a failing open-manifest sweep reports the failure, counts it, exits 1, and still reports every workflow-run outcome; it chooses the writer from the record's `source`
+- [x] Each agent transcript is opened as often in agent-mode collection as in workflow collection
+- [x] Existing stats, backfill and doctor tests pass unchanged and records are byte-identical for unchanged inputs
 **Dependencies:** Task 7 (its tests are the oracle)
 **Complexity:** High
 **Risk:** safety (adds record fields that must never reach exported or shared records sent off the machine)

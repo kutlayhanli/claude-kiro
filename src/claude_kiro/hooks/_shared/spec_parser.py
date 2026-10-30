@@ -215,6 +215,7 @@ class SpecTask:
     risk_reason: Optional[str] = None
     complexity: Optional[str] = None  # **Complexity:** low | medium | high
     properties: List[str] = field(default_factory=list)  # **Properties:** P-1, P-2 (test tasks)
+    requirements: List[str] = field(default_factory=list)  # **Requirements:** 1.2, 13.6 (criterion ids)
 
     @property
     def done(self) -> bool:
@@ -328,6 +329,7 @@ def parse_tasks_text(content: str) -> List[SpecTask]:
         task.dependencies = [num for num, _ in dep_items]
         task.dependency_reasons = dict(dep_items)
         task.properties = list(dict.fromkeys(re.findall(r"\bP-\d+\b", _field(block, "Properties") or "")))
+        task.requirements = list(dict.fromkeys(re.findall(r"\b\d+\.\d+\b", _field(block, "Requirements") or "")))
         task.acceptance = [
             (mark.lower() == "x", text.strip())
             for mark, text in re.findall(r"^\s*- \[([ xX])\]\s*(.+)$", block, re.MULTILINE)

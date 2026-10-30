@@ -260,8 +260,9 @@ def _phase_of(description: Optional[str]) -> Optional[str]:
     return None
 
 
-def _to_agent(af: AgentFile) -> collect._Agent:
-    return collect._Agent(
+def _to_agent(af: AgentFile, span: Optional[Tuple[Optional[int], Optional[int]]] = None,
+              head: Optional[Dict[str, Optional[str]]] = None) -> collect._Agent:
+    return collect._Agent(span=span, head=head,
         agent_id=af.meta.agent_id, label=af.meta.description, phase=_phase_of(af.meta.description),
         model_hint=None, state=None, started_ms=None, duration_ms=None, tokens=None,
         transcript=af.transcript, meta_path=af.meta_path, agent_type=af.meta.agent_type)
@@ -293,11 +294,19 @@ def collect_agent_run(home: Path, run_id: str, *, now: datetime, pricing: Option
                            f"[ck:{run_id}] under {home / 'projects'}")
         return _failed(run_id, "no_agents", f"no agents carry the marker [ck:{run_id}]")
 
-    def _started(af: AgentFile) -> Tuple[int, str]:
+    spans: Dict[str, Tuple[Optional[int], Optional[int]]] = {}
+    heads: Dict[str, Dict[str, Optional[str]]] = {}
+    for f in files:
         try:
-            first_ts = collect._timestamps(af.transcript)[0] if af.transcript.is_file() else None
+            if f.transcript.is_file():
+                spans[f.meta.agent_id], heads[f.meta.agent_id] = collect._timestamps_and_head(f.transcript)
+                continue
         except OSError:
-            first_ts = None
+            pass
+        spans[f.meta.agent_id] = (None, None)
+
+    def _started(af: AgentFile) -> Tuple[int, str]:
+        first_ts = spans[af.meta.agent_id][0]
         return (first_ts if first_ts is not None else 1 << 62, af.meta.agent_id)
 
     files = sorted(files, key=_started)  # rows run in start order, like a workflow run's progress list
@@ -331,8 +340,8 @@ def collect_agent_run(home: Path, run_id: str, *, now: datetime, pricing: Option
         missing.append({"agentId": None, "what": "meta"})
     record = collect._build_record(
         run_id=run_id, workflow_name=ctx.workflow_name, run_data=None, session_dir=session_dir,
-        agent_dir=agent_dir, session_jsonl=session_jsonl, agents=[_to_agent(f) for f in files], missing=missing,
-        start_ms=None, wall_ms=None, status=None, pricing=pricing, fresh=fresh, partial=ctx.partial,
+        agent_dir=agent_dir, session_jsonl=session_jsonl, agents=[_to_agent(f, spans.get(f.meta.agent_id), heads.get(f.meta.agent_id)) for f in files],
+        missing=missing, start_ms=None, wall_ms=None, status=None, pricing=pricing, fresh=fresh, partial=ctx.partial,
         agent_run=ctx)
     return collect.CollectOutcome(run_id, "collected", record=record)
 
@@ -428,12 +437,22 @@ def agent_metrics(ctx: AgentRunContext, rows: List[dict]) -> dict:
 
 
 @dataclass(frozen=True)
+class ExistingBackfill:
+    pairs: List[Tuple[str, FrozenSet[str]]]   # (record id, agent ids) of every backfill record already written
+    malformed: List[str]
+    error: Optional[str]
+
+
+@dataclass(frozen=True)
 class BackfillPlan:
     plan: backfill.GroupPlan
     est_usd: Dict[str, Optional[float]]        # record id -> priced cost of its agents (None: no transcript)
     overlaps: Dict[str, str]                   # record id of a left-out group -> the backfill record it clashes with
     files: Dict[str, AgentFile]                # agent id -> files, for every candidate
     gap_minutes: int = agentrun.DEFAULT_GAP_MINUTES
+    overlap_check: str = "ok"                  # "ok" | "unavailable"
+    store_error: Optional[str] = None
+    malformed_records: Tuple[str, ...] = ()
 
 
 def _backfill_metas(home: Path, workers: int) -> List[AgentFile]:
@@ -460,12 +479,10 @@ def _probe(af: AgentFile, pricing: dict) -> Tuple[Optional[int], Optional[int], 
     return first, last, usd
 
 
-def _existing_backfill(env: Optional[Mapping[str, str]]) -> List[Tuple[str, FrozenSet[str]]]:
-    """(record id, agent ids) of every backfill record already written."""
-    try:
-        records = store.load_records(env)
-    except OSError:
-        return []
+def _existing_backfill(env: Optional[Mapping[str, str]]) -> ExistingBackfill:
+    """The backfill records already written; a read failure is reported, never an empty list."""
+    read = store.load_records_checked(env)
+    records = read.records
     out: List[Tuple[str, FrozenSet[str]]] = []
     for rec in records:
         run = rec.get("agentRun")
@@ -474,7 +491,7 @@ def _existing_backfill(env: Optional[Mapping[str, str]]) -> List[Tuple[str, Froz
         ids = frozenset(a["agentId"] for a in rec.get("agents") or []
                         if isinstance(a, dict) and isinstance(a.get("agentId"), str))
         out.append((str(rec.get("runId")), ids))
-    return out
+    return ExistingBackfill(out, list(read.malformed), read.error)
 
 
 def plan_backfill(home: Path, *, gap_minutes: int = agentrun.DEFAULT_GAP_MINUTES, pricing: Optional[dict] = None,
@@ -509,11 +526,13 @@ def plan_backfill(home: Path, *, gap_minutes: int = agentrun.DEFAULT_GAP_MINUTES
     excluded.extend(grouped.excluded)
 
     existing = _existing_backfill(env)
+    unavailable = bool(existing.error or existing.malformed)
     kept: List[backfill.BackfillGroup] = []
     overlaps: Dict[str, str] = {}
     for g in grouped.groups:
         members = frozenset(g.agent_ids)
-        clash = next((rid for rid, ids in existing if ids & members and ids != members), None)
+        clash = None if unavailable else next(
+            (rid for rid, ids in existing.pairs if ids & members and ids != members), None)
         if clash is None:
             kept.append(g)
         else:
@@ -527,12 +546,23 @@ def plan_backfill(home: Path, *, gap_minutes: int = agentrun.DEFAULT_GAP_MINUTES
 
     plan = backfill.GroupPlan(groups=tuple(kept),
                               excluded=tuple(sorted(excluded, key=lambda e: (e[1], e[0]))))
-    return BackfillPlan(plan=plan, est_usd=est, overlaps=overlaps, files=files, gap_minutes=gap_minutes)
+    return BackfillPlan(plan=plan, est_usd=est, overlaps=overlaps, files=files, gap_minutes=gap_minutes,
+                        overlap_check="unavailable" if unavailable else "ok", store_error=existing.error,
+                        malformed_records=tuple(existing.malformed))
 
 
 def _legacy_matcher(label: object, agent_type: object) -> roles.LabelMatch:
     m = roles.match_legacy(label, agent_type)
     return roles.LabelMatch(role=m.role, matched=m.matched, task=m.task)
+
+
+def _readable(path: Path) -> bool:
+    try:
+        with open(path, "rb") as fh:
+            fh.read(1)
+        return True
+    except OSError:
+        return False
 
 
 def _collect_group(g: backfill.BackfillGroup, plan: BackfillPlan, pricing: dict,
@@ -554,6 +584,8 @@ def _collect_group(g: backfill.BackfillGroup, plan: BackfillPlan, pricing: dict,
         run_id=g.record_id, workflow_name="spec-implement", run_data=None, session_dir=session_dir,
         agent_dir=agent_dir, session_jsonl=session_jsonl, agents=[_to_agent(f) for f in files], missing=missing,
         start_ms=None, wall_ms=None, status=None, pricing=pricing, fresh=False, partial=True, agent_run=ctx)
+    if not _readable(session_jsonl) and not any(m.get("what") == "outcome" for m in record["missing"]):
+        record["missing"].append({"agentId": None, "what": "outcome"})
     _, kind = collect.write_outcome_result(collect.CollectOutcome(g.record_id, "collected", record=record), env)
     return collect.CollectOutcome(g.record_id, kind, record=record)
 
@@ -599,7 +631,12 @@ def _sweep_one(home: Path, path: Path, now: datetime, pricing: Optional[dict],
 def collect_open_manifests(home: Path, *, now: datetime, workers: int = 8, pricing: Optional[dict] = None,
                            env: Optional[Mapping[str, str]] = None) -> Tuple[collect.CollectOutcome, ...]:
     """Stale open manifests become partial records; young ones are unfinished; bad ones failed."""
-    paths = store.iter_open_manifests(env)
+    d = store.open_manifests_dir(env)
+    try:
+        with os.scandir(d) as it:  # an unreadable directory raises: the caller reports the failed sweep
+            paths = sorted(d / e.name for e in it if e.name.endswith(".json"))
+    except FileNotFoundError:
+        paths = []
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         return tuple(pool.map(lambda p: _sweep_one(Path(home), p, now, pricing, env), paths))
 
