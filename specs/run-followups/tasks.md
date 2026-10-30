@@ -133,7 +133,7 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 ---
 
 ### Task 4: Test the Verify-file cycle lint (CLI cases, properties, red-team)
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7, 13.8, 13.9, 13.10
 **Description:** Implement TC-77 through TC-84, TC-99 and TC-100, properties P-20 through P-23 and P-27, and red-team cases for the SHALL NOT clauses 13.4 and 13.5. Reuse `ck`, `block` and `write_spec` from `tests/test_lint.py`.
