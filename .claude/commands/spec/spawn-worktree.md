@@ -110,6 +110,16 @@ If a merge reports **CONFLICT**:
 
 If a task gate is **red**: stop starting new tasks, set that task back to In Progress in tasks.md, report the gate output, and ask me whether to fix it here or re-run the task. Agents already running may finish, but don't merge anything onto a red branch.
 
+### Guard stops: the ladder, parking and my decisions
+
+A task report with `guardStop` (`{file, kind, test, requirement}`) means a guard hook denied the agent a change to a test or to a frozen requirement, or the post-check caught one, and the agent stopped with the test and the requirement quoted. It is not a failure and spends no retry or `escalate` step.
+
+1. **The ladder.** Run `ck agents --guard-ladder <model> --json` with the `model` of the Agent call that stopped (leave `<model>` out when that call inherited the session's). It prints the models above it among sonnet, opus and fable, in order. The ladder is independent of the role's `escalate` list: `escalate` does not change it. Start one attempt per model, once each, with the same agent type and effort as the task: the Agent call's `model` set to that model, the retry prompt (claiming with `--takeover`, so the agent reads the previous agent's handoff note), and the description `[ck:<run_id>] implement task <N> guard <k>` (`k` counts from 1). Stop at the first attempt that ends without a guard stop and carry on as normal (gate retries, review). A later guard stop climbs again from the model then in use, skipping the models already tried. A guard stop in a revision takes the same ladder.
+2. **The decision note.** Every attempt prompt (first attempt, retry, revision, guard attempt) begins with: "Before anything else, read `<worktreeDir>/<spec>-task-<N>.decision.md` if it exists: my decision on this task's guard conflict. Follow it." The note is how my answer reaches the next attempt.
+3. **Unresolved: park it.** If the last model's attempt stops too, or the ladder is empty because the stopped model was fable, and I am not at the session (an unattended run: `ck run` or `claude -p`), park the task: run `ck worktree park <spec> <N> --json` with `{"file", "kind", "test", "requirement", "decision"}` as JSON on stdin, quoting the test and the requirement exactly. It writes the park note and sends one notification, which names the spec and task only. A parked task is neither failed nor merged: add it to the `--exclude` list of `ck plan`, let the independent tasks carry on, and its dependents never start. Parking never triggers stopping at the first failure.
+4. **Interactive: ask me.** When I am at the session, don't park. Ask me with AskUserQuestion, quoting the test and the requirement, and offer: keep the test and let the agent change the code, the test is wrong, the requirement is wrong. Record my answer with `ck worktree resolve <spec> <N> --json` and `{"answer": "<my answer>"}` on stdin. If my answer is that the test or requirement is wrong, tell me to change it from my main session before the task's next attempt (an agent cannot, the guard stops it), and wait for me to confirm the change. Then start the attempt, reading the decision note first.
+5. **The report.** List the needs-input tasks in their own list, apart from merged, failed and blocked (a parked task is in none of those). For each: the test and the requirement, quoted; the models it escalated through; the notification status (sent, failed with its detail, or not configured, in which case say that `ck agents set run.notify_command "<command>"` sets it once per machine); and how to resolve it: `ck worktree resolve <spec> <N>` with my answer, then run `/spec:implement <spec>` again.
+
 ### Phase 5: Final Gate and Report
 
 When nothing is running or ready (or I chose "Just these tasks" and they're all handled), run the full gate once:
@@ -126,7 +136,7 @@ Run complete (42 min):
   [fail]   Task 3 [test]: <error summary>; dependents not started: 5, 6
   Waiting on dependencies: none · Full gate: PASS
 ```
-List failed worktrees and offer to clean them up.
+List failed worktrees and offer to clean them up. Tasks that need my input are listed apart from the failed ones (see Guard stops).
 
 For a spec run on the Agent path, after the report: if `begin` gave a run id, run `ck stats collect --agents <run_id> --auto` outside the sandbox and quote the line it prints (where the record went, or why it was skipped; if it failed, quote the retry command it gives). Never let its result change what you report about the run. If `begin` failed or printed no id, end the report with this line in place of the collect step: `⚠ ck stats begin failed: this run is not recorded in ck stats`
 
