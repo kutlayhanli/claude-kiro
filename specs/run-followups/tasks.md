@@ -299,7 +299,7 @@ Every other `collect`, `--all`, `--agents`, backfill and doctor output stays the
 ---
 
 ### Task 9: Write the progress-file properties (reader and line builder)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.6, 3.8
 **Description:** Write properties P-14 and P-15 over the pure progress seams, so they run as soon as `claude_kiro.progress` exists.
@@ -313,11 +313,11 @@ Settings `derandomize=True, max_examples=200, database=None, deadline=None`. Dec
 **Properties:** P-14, P-15
 **Verifies:** Task 10 (`read_events`, `append`)
 **Acceptance:**
-- [ ] Generators cover every malformed-line form and every extra-key form listed in the test-plan rows
-- [ ] Settings are deterministic, and the tests call `read_events` / `append` directly, not a CLI or server
-- [ ] Before implementation they fail at import of `claude_kiro.progress` (missing behaviour)
-- [ ] No mocks of project code
-- [ ] The file sets `pytestmark` with `no_network`
+- [x] Generators cover every malformed-line form and every extra-key form listed in the test-plan rows
+- [x] Settings are deterministic, and the tests call `read_events` / `append` directly, not a CLI or server
+- [x] Before implementation they fail at import of `claude_kiro.progress` (missing behaviour)
+- [x] No mocks of project code
+- [x] The file sets `pytestmark` with `no_network`
 **Dependencies:** Task 1 (event and malformed-line strategies, kind constants)
 **Complexity:** Medium
 **Risk:** normal
