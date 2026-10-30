@@ -155,7 +155,10 @@ def test_tc32_live_block(chain6):
     assert "task 2 retry 1" in text
     assert "critical:" in text and "running:" in text and "waiting:" in text
     running = next(line for line in text.splitlines() if line.startswith("running:"))
-    assert "10 min" in running and "6 min" in running
+    # Minutes so far run from each task's first claim (design S4: elapsed = now_eff - first_start_eff):
+    # task 2 was first claimed at T0, so 12 at T0+12 (its retry at T0+10 does not reset it); task 3 has 6.
+    assert re.search(r"\b12 min\b", running) and re.search(r"\b6 min\b", running), running
+    assert not re.search(r"\b10 min\b", running), running
     waiting_line = next(line for line in text.splitlines() if line.startswith("waiting:"))
     assert re.search(r"4 on 2", waiting_line) and re.search(r"5 on 3", waiting_line)
     delta = (parse(view["finish"]["p50"]) - parse(s.launch["finish"]["p50"])).total_seconds() / 60
@@ -167,7 +170,7 @@ def test_tc32_live_block(chain6):
     assert (view["merged"], view["running"], view["waiting"]) == (1, 2, 3)
     assert view["cause"] == "task 2 retry 1"
     by_task = {t["task"]: t for t in view["tasks"]}
-    assert round(by_task["2"]["minutes"]) == 10 and round(by_task["3"]["minutes"]) == 6
+    assert round(by_task["2"]["minutes"]) == 12 and round(by_task["3"]["minutes"]) == 6
 
 
 # --------------------------------------------------------------------------- TC-33

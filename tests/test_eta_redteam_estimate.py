@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 import eta_helpers as h
-from test_eta_live import (CHAIN3, SPEC, Scenario, approval_end, approval_start, at, ev, merge, parse, park,
+from test_eta_live import (CHAIN3, SPEC, T0, Scenario, approval_end, approval_start, at, ev, merge, parse, park,
                            start_task, when)
 
 pytestmark = pytest.mark.usefixtures("no_network")
@@ -215,9 +215,14 @@ def _not_slipping_after_wait(s: Scenario, minute: float) -> dict:
 def test_55_a_long_wait_is_not_a_slip(tmp_path):
     s = Scenario(tmp_path, CHAIN3)
     s.begin()
-    wait = 100
+    # The wait is longer than the launch range is wide, so after it the p50 is past the launch p90 by about the
+    # waited minutes alone: the slip check must still subtract the wait (5.5) and so not report slipping.
+    launch_p50 = (parse(s.launch["finish"]["p50"]) - T0).total_seconds() / 60
+    wait = max(100, int(s.launch_p90_minute() - launch_p50) + 30)
     s.add(start_task(0, 1), approval_start(5), approval_end(5 + wait))
-    _not_slipping_after_wait(s, 5 + wait + 2)
+    view = _not_slipping_after_wait(s, 5 + wait + 2)
+    p50_minute = (parse(view["finish"]["p50"]) - T0).total_seconds() / 60
+    assert p50_minute > s.launch_p90_minute(), (p50_minute, s.launch_p90_minute())
 
 
 def test_55_overlapping_approvals_count_their_union_once(tmp_path):

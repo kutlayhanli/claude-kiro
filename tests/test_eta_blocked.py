@@ -37,7 +37,14 @@ def test_tc39_whole_run_park(tmp_path):
     text = s.text(10)
     view = s.view(10)
     assert "blocked: task 1 parked (needs input)" in text
-    assert re.search(r"\b2\b", text) and re.search(r"\b3\b", text)
+    # 5.1: the reason names the parked task and the tasks waiting on it (design Hold.reason: "...; holds 9, 12, 13").
+    blocked_line = next(line for line in text.splitlines() if "blocked:" in line)
+    after_cause = blocked_line.split("task 1 parked (needs input)", 1)[1]
+    assert re.search(r"\b2\b", after_cause) and re.search(r"\b3\b", after_cause), blocked_line
+    reason = view["blocked"]["reason"]
+    assert "task 1 parked (needs input)" in reason, reason
+    held_part = reason.split("task 1 parked (needs input)", 1)[1]
+    assert re.search(r"\b2\b", held_part) and re.search(r"\b3\b", held_part), reason
     assert finish_lines(text) == []
     assert "remaining once unblocked" in text
     assert view["state"] == "blocked" and view["finish"] is None and view["runnableDone"] is None
