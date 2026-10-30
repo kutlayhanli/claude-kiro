@@ -349,7 +349,9 @@ def build_defaults(records: Sequence[Mapping], *, min_runs: int = MIN_DEFAULT_RU
 def model_to_json(m: Model) -> dict ; def model_from_json(d: Mapping) -> Optional[Model]
 
 # eta/simulate.py
-def simulate_implement(graph: Graph, model: Model, state: RunState, *, now_min: float, n: int, seed: int) -> SimResult
+def simulate_implement(graph: Graph, model: Model, state: RunState, *, now_min: float, n: int, seed: int,
+                       exclude: frozenset = frozenset(), roles: Optional[Mapping] = None,
+                       max_concurrent: Optional[int] = None) -> SimResult
 def simulate_create(model: Model, state: RunState, *, now_min: float, n: int, seed: int) -> SimResult
 
 # eta/service.py
