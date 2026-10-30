@@ -27,7 +27,8 @@
   },
   "files": [
     "src",
-    "vendor"
+    "vendor",
+    "scripts/arm.mjs"
   ],
   "engines": {
     "node": ">=20"

@@ -3,12 +3,34 @@
 Status: design only. Phase 4.1 (`bench-output.json` + `ck bench import`) already works; this is the
 controllable launcher/collector for Phase 4.2.
 
-## Why not `opencode run`
+## Why not `opencode run` with a slash command
 
 `opencode run "<text>"` sends the text to the model; it does **not** dispatch a slash command
-(spike 2: `/spec/plan 7` arrived as ordinary user text). Prompting the model to call the `workflow`
-tool by hand would duplicate the skill's setup (spec resolution, `ck plan`, worktree choices) in
-Python and would drift. Use the server API and `session.command`.
+(spike 2: `/spec/plan 7` arrived as ordinary user text).
+
+## Two launch paths
+
+**A. `session.command` on a dedicated server.** The original design: start `opencode serve`, create a
+session in the clone, dispatch `spec/implement` with `session.command`, wait for the record. OpenCode
+requires a password for the serve API; `Service.discover()` gives `{url, basic auth}` for the
+background service, and a dedicated server prints its password. **Open problem:** a server started
+with `opencode serve` did not activate the clone's `.opencode/plugins` (a session created with
+`location.directory` still listed no commands). The TUI/`opencode run` path activates the project, so
+this needs either a location-activation call or a session started by the CLI. Do not rely on it
+until that is proven.
+
+**B. A harness probe tool (recommended, proven).** Copy a small `bench-probe.js` into the clone's
+`.opencode/plugins/` (and add it to `.git/info/exclude`). Its tool reads `.bench-args.json`, calls the
+`workflow` tool with the recorded args, polls `<state>/runs/*/record.json` until it closes, and returns
+the record path. Run `opencode run --standalone --model <arm> "Call bench_run now, exactly once."`.
+The tool keeps the parent turn alive, so `--standalone` cannot exit and kill the workflow. This is the
+same path the Phase 1/2 live tests used. The slash-command surface is tested separately
+(`session.command` with `/spec/plan 7` in spike 2 and the live command list).
+
+Whichever path is used, the launcher still has to assemble the workflow args. That is the skill's
+setup: `ck plan <spec> --json`, `ck agents --json`, the worktree/integration choices, the brief path,
+risk/complexity and the run limits. Assemble them in Python once, write `.bench-args.json`, and pass
+exactly the object the skill would have passed.
 
 ## Shape
 
