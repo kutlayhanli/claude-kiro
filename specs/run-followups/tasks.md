@@ -455,7 +455,7 @@ Seams: `match_pool` (S1); `size_factor` (S2); `fit_size` (S3); `start_model` (S1
 ---
 
 ### Task 15: Write the run-state and notification decision properties
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 1.7, 3.10, 5.1, 5.2, 5.3, 5.4, 8.5, 8.6, 8.7, 8.9, 8.10, 8.11
 **Description:** Write properties over the pure decision seams of `claude_kiro.eta.decide`, with run state from `claude_kiro.progress.fold(events)` and `Graph` from `claude_kiro.eta.history`.
