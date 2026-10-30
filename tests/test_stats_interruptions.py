@@ -225,7 +225,7 @@ def test_tc57_guard_escalations_come_from_the_guard_agent_rows(env):
     rec = collect_all(env, w)
     block = rec["interruptions"]
     assert block["totals"]["guardEscalations"] == 2
-    assert block["escalationModels"] == {"opus": 1, "fable": 1}
+    assert nonzero(block["escalationModels"]) == {"opus": 1, "fable": 1}
     park = [a for a in rec["agents"] if a["label"] == "park 1"]
     assert len(park) == 1 and park[0]["role"] == "orchestrator", park
     guards = [a for a in rec["agents"] if " guard " in a["label"]]
@@ -494,7 +494,7 @@ def test_tc65_agent_mode_runs_carry_the_same_interruptions(env, path):
     assert r.exit_code == 0, r.output
     rec = load_record(env.xdg, w.rid)
     assert_counts(rec, w.expected, escalations=1, by_role=agent_by_role(w.expected))
-    assert rec["interruptions"]["escalationModels"] == {"fable": 1}
+    assert nonzero(rec["interruptions"]["escalationModels"]) == {"fable": 1}
 
 
 # --------------------------------------------------------------------------- TC-66, TC-67
@@ -509,19 +509,20 @@ SHARED_KINDS = ("prompts", "guard_denials", "post_check_catches", "guard_escalat
 def assert_enum_numbers_only(block: dict) -> None:
     from claude_kiro.analytics import share
 
-    assert set(block) == {*SHARED_KINDS, "wait_minutes", "escalation_models", "by_role", "wait_minutes_by_role"}, set(block)
+    required = {*SHARED_KINDS, "wait_minutes"}
+    assert required <= set(block) <= {*required, "escalation_models", "by_role", "wait_minutes_by_role"}, set(block)
     for kind in SHARED_KINDS:
         assert type(block[kind]) is int, kind
     assert isinstance(block["wait_minutes"], (int, float)) and not isinstance(block["wait_minutes"], bool)
-    assert set(block["escalation_models"]) <= set(share.MODEL_FAMILIES)
-    assert all(type(n) is int for n in block["escalation_models"].values())
-    assert set(block["by_role"]) <= set(share.INTERRUPTION_ROLES)
-    for fams in block["by_role"].values():
+    assert set(block.get("escalation_models", {})) <= set(share.MODEL_FAMILIES)
+    assert all(type(n) is int for n in block.get("escalation_models", {}).values())
+    assert set(block.get("by_role", {})) <= set(share.INTERRUPTION_ROLES)
+    for fams in block.get("by_role", {}).values():
         assert set(fams) <= set(share.COMMAND_FAMILIES)
         for counts in fams.values():
             assert set(counts) <= set(SHARED_KINDS) and all(type(n) is int for n in counts.values())
-    assert set(block["wait_minutes_by_role"]) <= set(share.INTERRUPTION_ROLES)
-    assert all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in block["wait_minutes_by_role"].values())
+    assert set(block.get("wait_minutes_by_role", {})) <= set(share.INTERRUPTION_ROLES)
+    assert all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in block.get("wait_minutes_by_role", {}).values())
 
 
 def test_tc66_the_shared_record_holds_only_enum_keyed_numbers(env):

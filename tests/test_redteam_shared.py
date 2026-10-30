@@ -320,7 +320,7 @@ PLANTED_LOG = [
     {"ts_ms": T0 + 90_000, "decision": "ask", "category": "test_weakening", "command": "sed -i s/41250/0/ tests/test_payroll_acme.py",
      "path": "tests/test_payroll_acme.py", "reason": "[ck guard] weakens quarterly payroll"},
 ]
-NOTE_VALUES = ["rm tests/test_payroll_acme.py", "tests/test_payroll_acme.py", "quarterly payroll coverage for acme-ledger-internal"]
+NOTE_VALUES = ["rm tests/test_payroll_acme.py", "tests/test_payroll_acme.py", "[ck guard] Denied: deleting quarterly payroll coverage for acme-ledger-internal"]
 
 
 def with_log(env, sess) -> None:

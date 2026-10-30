@@ -416,15 +416,6 @@ P-28 CLI-backed): P-23, P-25, P-26, P-28, P-30. `tests/test_stats_properties_sha
 **Complexity:** High
 **Risk:** safety (shareable records and submit leave the machine; tests guard against content leaks)
 
-**Implementation notes (test track):**
-- `ck stats export` has no `--dry-run`: TC-66 reads the shareable JSON that `ck stats export --to <checkout> --yes` writes.
-- design S14 names a `ScanResult` without fields, so P-23, P-25, P-26 and P-30 read the counts from the local record that
-  the real `ck stats collect` writes (CLI-backed, `max_examples=40, deadline=None`), not from `scan_lines` directly.
-  The properties are the same; only the seam is the CLI instead of the pure function.
-- Whether an empty or absent guard log counts as a "difference" is not fixed by the contract: TC-62 (a) and P-30 assert
-  differences only when the log holds events for the run.
-- TC-65 sets the manifest back 7 h so `collect --all` closes it; agent-mode windows are open, so events are timed from the manifest.
-
 ---
 
 ### Task 10: Add the pure guard, hand-off and git helper seams
