@@ -362,8 +362,17 @@ async function handleAgent(
         `${outcome.tokens.input}+${outcome.tokens.cache.read} in / ${outcome.tokens.output} out, ` +
         `model=${outcome.resolvedModel.providerID}/${outcome.resolvedModel.id}` +
         `${outcome.resolvedVariant ? `#${outcome.resolvedVariant}` : ""}` +
+        `${outcome.guardEvents.length ? `, guard=${outcome.guardEvents.length}` : ""}` +
         `${outcome.notes.length ? ` (${outcome.notes.join("; ")})` : ""}`,
     );
+    if (outcome.guardEvents.length > 0) {
+      logger.write(
+        `agent ${seq} ${label}: guard stop reported: ${outcome.guardEvents
+          .map((entry) => entry.reason)
+          .join(" | ")
+          .slice(0, 1000)}`,
+      );
+    }
     return { ok: true, value: outcome.value };
   } catch (error) {
     if (error instanceof ChildError) {

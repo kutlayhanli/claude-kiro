@@ -18,6 +18,7 @@ import {
   type ModelRef,
   type Resolution,
 } from "./models.ts";
+import { awaitPendingGuard, clearGuardEvents, guardEventsFor, type GuardEvent } from "./guard.ts";
 import { compile, formatIssues, type SchemaIssue, type Validator } from "./schema.ts";
 import { registerResultTool } from "./result-tool.ts";
 
@@ -58,7 +59,8 @@ export type ChildErrorKind =
   | "start-timeout"
   | "timeout"
   | "failed"
-  | "result";
+  | "result"
+  | "guard";
 
 export class ChildError extends Error {
   readonly kind: ChildErrorKind;
@@ -106,6 +108,7 @@ export interface ChildOutcome {
   submission: "tool" | "text" | "text-empty";
   rejections: number;
   notes: string[];
+  guardEvents: readonly GuardEvent[];
 }
 
 interface AttemptResult {
@@ -117,6 +120,7 @@ interface AttemptResult {
   messages: MessageInfo[];
   startedAt: number;
   endedAt: number;
+  guardEvents: readonly GuardEvent[];
 }
 
 const EMPTY_TOKENS: TokenUsage = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } };
@@ -153,6 +157,7 @@ export async function runChild(options: RunChildOptions): Promise<ChildOutcome> 
         submission: result.submission,
         rejections: result.rejections,
         notes: resolved.notes,
+        guardEvents: result.guardEvents,
       };
     } catch (error) {
       const failure = asChildError(error, "failed");
@@ -195,6 +200,13 @@ export function lastAssistantText(messages: readonly MessageInfo[]): string {
     if (joined) text = joined;
   }
   return text;
+}
+
+/** Whether the child's structured result tells the workflow about a guard stop. */
+export function hasGuardStop(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const guardStop = (value as Record<string, unknown>).guardStop;
+  return guardStop !== undefined && guardStop !== null;
 }
 
 export function failureOf(messages: readonly MessageInfo[], info: SessionView): string | null {
@@ -278,6 +290,16 @@ async function runAttempt(
     }
 
     const info = await observe(options.ctx, sessionID, options.config);
+    // A child can finish right after a weakening command; wait for its background gate before
+    // deciding the result, or the post-check would arrive after the child was already accepted.
+    try {
+      await awaitPendingGuard(
+        sessionID,
+        Math.max(5000, options.config.guard.timeouts.doneVerify * 1000 + 5000),
+      );
+    } catch (error) {
+      throw new ChildError("guard", message(error), { sessionID });
+    }
     const messages = (await options.ctx.session.context({ sessionID })) as unknown as MessageInfo[];
     const failure = failureOf(messages, info);
     if (failure) {
@@ -299,21 +321,50 @@ async function runAttempt(
     }
 
     const endedAt = Date.now();
+    const textValue = lastAssistantText(messages);
+    const accepted = validator ? (resultTool?.accepted() ?? null) : null;
+    const parsed = validator && !accepted ? parseJsonCandidate(textValue) : undefined;
+
+    const value: unknown = !validator
+      ? textValue
+      : accepted
+        ? accepted.value
+        : parsed;
+    const submission: "tool" | "text" | "text-empty" = !validator
+      ? textValue
+        ? "text"
+        : "text-empty"
+      : accepted
+        ? "tool"
+        : "text";
+
+    // A guard denial means the child tried something it was not allowed to do. If it did not report
+    // that as `guardStop`, the step must fail: a green result after a blocked workaround is a
+    // measurement of a different product (D12).
+    const guardEvents = guardEventsFor(sessionID);
+    clearGuardEvents(sessionID);
+    if (guardEvents.length > 0 && !hasGuardStop(value)) {
+      throw new ChildError(
+        "guard",
+        `the child hit the guard and did not report guardStop: ${guardEvents[0]?.reason ?? "guard event"}`,
+        { sessionID, guardEvents },
+      );
+    }
+
     if (!validator) {
-      const textValue = lastAssistantText(messages);
       return {
-        value: textValue,
+        value,
         sessionID,
-        submission: textValue ? "text" : "text-empty",
+        submission,
         rejections: 0,
         info,
         messages,
         startedAt,
         endedAt,
+        guardEvents,
       };
     }
 
-    const accepted = resultTool?.accepted() ?? null;
     if (accepted) {
       return {
         value: accepted.value,
@@ -324,11 +375,10 @@ async function runAttempt(
         messages,
         startedAt,
         endedAt,
+        guardEvents,
       };
     }
 
-    const textValue = lastAssistantText(messages);
-    const parsed = parseJsonCandidate(textValue);
     if (parsed === undefined) {
       throw new ChildError(
         "result",
@@ -352,6 +402,7 @@ async function runAttempt(
       messages,
       startedAt,
       endedAt,
+      guardEvents,
     };
   } finally {
     if (resultTool) await resultTool.registration.dispose().catch(() => {});

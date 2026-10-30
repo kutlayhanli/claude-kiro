@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   failureOf,
+  hasGuardStop,
   lastAssistantText,
   parseJsonCandidate,
   resultInstruction,
@@ -65,6 +66,15 @@ test("failureOf reads the last assistant error, finish, and session outcome", ()
     "the child session failed without recording an error",
   );
   assert.equal(failureOf([], { ...OK, outcome: "interrupted" }), "the child session was interrupted");
+});
+
+test("hasGuardStop only accepts a non-null guardStop field", () => {
+  assert.equal(hasGuardStop({ guardStop: { file: "tests/x.py" } }), true);
+  assert.equal(hasGuardStop({ guardStop: "yes" }), true);
+  assert.equal(hasGuardStop({ guardStop: null }), false);
+  assert.equal(hasGuardStop({ task: "1" }), false);
+  assert.equal(hasGuardStop("guardStop"), false);
+  assert.equal(hasGuardStop(null), false);
 });
 
 test("parseJsonCandidate handles plain, fenced and prose-wrapped objects", () => {

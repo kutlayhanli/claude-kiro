@@ -6,7 +6,10 @@ import test from "node:test";
 import { defaultConfig } from "../src/config.ts";
 import {
   GuardError,
+  awaitPendingGuard,
+  clearGuardEvents,
   createGuard,
+  guardEventsFor,
   parseHookOutput,
   runCkHook,
   translateTool,
@@ -107,6 +110,8 @@ function setup() {
   const previousBin = process.env.CK_BIN;
   const previousHeadless = process.env.CK_RUN_HEADLESS;
   process.env.CK_BIN = ck;
+  clearGuardEvents("main");
+  clearGuardEvents("child");
   return {
     dir,
     cleanup() {
@@ -193,6 +198,7 @@ test("the outer execute event is ignored and the inner deny is thrown verbatim",
       () => before(event({ input: { path: "/p/a", oldString: "a", newString: "DENY" } })),
       (error: unknown) => error instanceof GuardError && /\[ck guard\] fake deny/.test(error.message),
     );
+    assert.equal(guardEventsFor("main")[0]?.kind, "deny");
     await guard.dispose();
   } finally {
     fixture.cleanup();
@@ -302,8 +308,9 @@ test("done-verify blocks the next call through a latch", async () => {
       ...event({ sessionID: "child", input: { path: "/p/a", oldString: "a", newString: "LATCH" } }),
       status: "completed",
     });
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await awaitPendingGuard("child", 5000);
 
+    assert.equal(guardEventsFor("child")[0]?.kind, "post_check");
     await assert.rejects(
       () => before(event({ sessionID: "child", tool: "read", input: { path: "/p/a" } })),
       /\[ck post-check\] fake latch/,

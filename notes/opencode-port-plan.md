@@ -239,11 +239,14 @@ hooks land first.
 
 ### 3.1 Guard shim (D9)
 
-**Status:** implemented in `opencode/src/guard.ts`; 10 unit tests with a fake `ck`.
-Live verified: a child/main edit of `tests/test_demo.py` was denied with the real
+**Status:** implemented in `opencode/src/guard.ts`; unit tests with a fake `ck`.
+Live verified: a real `ck` pre-tool guard denied a test weakening with the verbatim
 `[ck guard] Denied: this edit removes 1 assertion(s)…` text and the file stayed untouched.
-**Open:** a live `sed -i` weakening did not produce the post-check latch yet (the fake-hook latch
-test passes). Investigate `post-bash-check` snapshot matching in the OpenCode event stream.
+Live verified: a sequential child session that ran `sed -i` got the post-check block on its next
+shell call (`before latch fired` in the debug trace). The earlier miss was a parallel-tool-call
+artifact: the model issued `echo NEXT` in the same step as `sed`, before the post-check could latch.
+`runChild` now awaits the background done-verify (`awaitPendingGuard`) and throws a `guard` error if
+the child hit the guard without reporting `guardStop`.
 
 - Register `execute.before` / `execute.after`.
 - **Ignore `tool === "execute"`** (code mode): every call raises an outer event with `{code}` and an
@@ -283,8 +286,11 @@ informational. Runs automatically at the start of `/spec/implement`.
 
 ### 3.4 Acceptance
 
-- [ ] A denied edit leaves the file untouched and the model quotes `[ck guard] …`.
-- [ ] A post-check block surfaces on the next call as `[ck post-check] …` and the run continues.
+- [x] A denied edit leaves the file untouched and the model quotes `[ck guard] …`. Live with the
+      real `ck` hook.
+- [x] A post-check block surfaces on the next call as `[ck post-check] …`. Live: the latch fired on
+      the child's next shell call; `runChild` waits for the background gate and refuses a result that
+      did not report `guardStop`.
 - [ ] `interruptions.guard_denials` > 0 in `ck stats` for a run with a deny.
 - [ ] `ck cost <runId>` prices a free-tier run at $0.00, not "unknown".
 - [ ] A missing agent file, a bad model ref and a dead hook each abort the preflight with a message

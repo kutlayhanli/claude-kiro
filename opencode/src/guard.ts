@@ -9,8 +9,20 @@
  */
 
 import { spawn } from "node:child_process";
+import { appendFileSync } from "node:fs";
 import type { Plugin } from "@opencode/plugin";
 import type { CkConfig } from "./config.ts";
+
+/** Opt-in trace for diagnosing the hook bridge: CK_GUARD_DEBUG=/path/to/log. */
+function debug(text: string): void {
+  const path = process.env.CK_GUARD_DEBUG;
+  if (!path) return;
+  try {
+    appendFileSync(path, `${new Date().toISOString()} ${text}\n`);
+  } catch {
+    // tracing must never affect a run
+  }
+}
 
 export interface GuardToolEvent {
   tool: string;
@@ -44,6 +56,73 @@ export class GuardError extends Error {
     super(message);
     this.name = "GuardError";
   }
+}
+
+export interface GuardEvent {
+  at: number;
+  kind: "deny" | "post_check" | "headless" | "failure";
+  agent?: string;
+  reason: string;
+}
+
+const GUARD_EVENTS = new Map<string, GuardEvent[]>();
+const MAX_GUARD_EVENTS = 50;
+const PENDING_DONE_VERIFY = new Map<string, Set<Promise<void>>>();
+
+function recordGuardEvent(sessionID: string, event: GuardEvent): void {
+  const list = GUARD_EVENTS.get(sessionID) ?? [];
+  list.push(event);
+  if (list.length > MAX_GUARD_EVENTS) list.shift();
+  GUARD_EVENTS.set(sessionID, list);
+}
+
+export function guardEventsFor(sessionID: string): readonly GuardEvent[] {
+  return GUARD_EVENTS.get(sessionID) ?? [];
+}
+
+export function clearGuardEvents(sessionID: string): void {
+  GUARD_EVENTS.delete(sessionID);
+}
+
+/**
+ * Wait for the background done-verify of a session. Without this, a child that ends immediately after
+ * a weakening command could be read before its gate result arrives, and pass with a guard event that
+ * nobody saw. Bounded by the caller; a timeout is a guard failure, never a pass.
+ */
+export async function awaitPendingGuard(sessionID: string, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const pending = PENDING_DONE_VERIFY.get(sessionID);
+    if (!pending || pending.size === 0) return;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      throw new GuardError(`[ck guard] the done-verify hook did not finish within ${timeoutMs}ms`);
+    }
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => resolve("timeout"), remaining);
+    });
+    const settled = await Promise.race([
+      Promise.allSettled([...pending]).then(() => "settled" as const),
+      timeout,
+    ]);
+    if (timer) clearTimeout(timer);
+    if (settled === "timeout") {
+      throw new GuardError(`[ck guard] the done-verify hook did not finish within ${timeoutMs}ms`);
+    }
+  }
+}
+
+function trackDoneVerify(sessionID: string, task: Promise<void>): void {
+  const set = PENDING_DONE_VERIFY.get(sessionID) ?? new Set<Promise<void>>();
+  set.add(task);
+  PENDING_DONE_VERIFY.set(sessionID, set);
+  void task.finally(() => {
+    set.delete(task);
+    if (set.size === 0 && PENDING_DONE_VERIFY.get(sessionID) === set) {
+      PENDING_DONE_VERIFY.delete(sessionID);
+    }
+  });
 }
 
 export interface GuardCleanup {
@@ -242,7 +321,9 @@ export async function createGuard(
     return { input, cwd: meta.directory };
   };
 
-  const latch = (sessionID: string, reason: string): void => {
+  const latch = (sessionID: string, reason: string, kind: GuardEvent["kind"] = "post_check"): void => {
+    debug(`latch session=${sessionID} reason=${reason.slice(0, 300)}`);
+    recordGuardEvent(sessionID, { at: Date.now(), kind, reason });
     latches.set(sessionID, reason);
   };
 
@@ -263,13 +344,28 @@ export async function createGuard(
     // Code mode: the outer wrapper is never a guarded operation; act on the inner event only.
     if (event.tool === "execute") return;
 
+    debug(`before tool=${event.tool} session=${event.sessionID} id=${event.id}`);
     const pending = latches.get(event.sessionID);
     if (pending !== undefined) {
       latches.delete(event.sessionID);
+      debug(`before latch fired session=${event.sessionID}`);
+      recordGuardEvent(event.sessionID, {
+        at: Date.now(),
+        kind: "post_check",
+        agent: event.agent,
+        reason: pending,
+      });
       throw new GuardError(pending);
     }
 
-    const translation = translateTool(event);
+    let translation: Translation | null;
+    try {
+      translation = translateTool(event);
+    } catch (error) {
+      const reason = message(error);
+      recordGuardEvent(event.sessionID, { at: Date.now(), kind: "deny", agent: event.agent, reason });
+      throw error;
+    }
     if (!translation) return;
     if (!config.guard.hooks.preToolGuard) return;
 
@@ -281,14 +377,14 @@ export async function createGuard(
       config.guard.timeouts.preToolGuard * 1000,
     );
     if (result.timedOut) {
-      throw new GuardError(
-        `[ck guard] the pre-tool guard timed out after ${config.guard.timeouts.preToolGuard}s`,
-      );
+      const reason = `[ck guard] the pre-tool guard timed out after ${config.guard.timeouts.preToolGuard}s`;
+      recordGuardEvent(event.sessionID, { at: Date.now(), kind: "failure", agent: event.agent, reason });
+      throw new GuardError(reason);
     }
     if (result.code !== 0) {
-      throw new GuardError(
-        `[ck guard] the pre-tool guard failed (exit ${result.code ?? "unknown"}): ${result.stderr.trim() || result.stdout.trim()}`,
-      );
+      const reason = `[ck guard] the pre-tool guard failed (exit ${result.code ?? "unknown"}): ${result.stderr.trim() || result.stdout.trim()}`;
+      recordGuardEvent(event.sessionID, { at: Date.now(), kind: "failure", agent: event.agent, reason });
+      throw new GuardError(reason);
     }
 
     const output = parseHookOutput(result.stdout, "pre-tool-guard");
@@ -296,9 +392,15 @@ export async function createGuard(
     if (!decision || decision === "allow") return;
 
     const reason = output?.hookSpecificOutput?.permissionDecisionReason || "[ck guard] this call needs approval";
-    if (decision === "deny") throw new GuardError(reason);
+    if (decision === "deny") {
+      recordGuardEvent(event.sessionID, { at: Date.now(), kind: "deny", agent: event.agent, reason });
+      throw new GuardError(reason);
+    }
     if (decision === "ask") {
-      if (headless) throw new GuardError(reason);
+      if (headless) {
+        recordGuardEvent(event.sessionID, { at: Date.now(), kind: "headless", agent: event.agent, reason });
+        throw new GuardError(reason);
+      }
       try {
         await ctx.permission.assert({
           sessionID: event.sessionID,
@@ -306,11 +408,14 @@ export async function createGuard(
           resources: [translation.resource],
         });
       } catch (error) {
+        recordGuardEvent(event.sessionID, { at: Date.now(), kind: "deny", agent: event.agent, reason });
         throw new GuardError(reason || message(error));
       }
       return;
     }
-    throw new GuardError(`[ck guard] the pre-tool guard returned an unknown decision: ${JSON.stringify(decision)}`);
+    const unknown = `[ck guard] the pre-tool guard returned an unknown decision: ${JSON.stringify(decision)}`;
+    recordGuardEvent(event.sessionID, { at: Date.now(), kind: "failure", agent: event.agent, reason: unknown });
+    throw new GuardError(unknown);
   };
 
   const after = async (raw: unknown): Promise<void> => {
@@ -318,11 +423,12 @@ export async function createGuard(
     if (!event || typeof event !== "object" || typeof event.tool !== "string") return;
     if (event.tool === "execute") return;
 
+    debug(`after tool=${event.tool} session=${event.sessionID} id=${event.id}`);
     let translation: Translation | null;
     try {
       translation = translateTool(event);
     } catch (error) {
-      latch(event.sessionID, message(error));
+      latch(event.sessionID, message(error), "failure");
       return;
     }
     if (!translation) return;
@@ -343,6 +449,7 @@ export async function createGuard(
             `[ck guard] the post-file-ops hook failed: ${
               result.timedOut ? `timed out after ${config.guard.timeouts.postFileOps}s` : result.stderr.trim()
             }`,
+            "failure",
           );
         } else {
           const output = parseHookOutput(result.stdout, "post-file-ops");
@@ -351,18 +458,22 @@ export async function createGuard(
           if (output?.systemMessage) await postContext(event.sessionID, output.systemMessage);
         }
       } catch (error) {
-        latch(event.sessionID, message(error));
+        latch(event.sessionID, message(error), "failure");
       }
     }
 
     if (config.guard.hooks.doneVerify) {
       // The gate can take minutes; run it in the background and deliver a block as a latch.
-      void runCkHook("done-verify", input, cwd, config.guard.timeouts.doneVerify * 1000)
+      const task = runCkHook("done-verify", input, cwd, config.guard.timeouts.doneVerify * 1000)
         .then(async (result) => {
+          debug(
+            `done-verify session=${event.sessionID} code=${result.code} timedOut=${result.timedOut} stdout=${result.stdout.trim().slice(0, 300)}`,
+          );
           if (result.timedOut) {
             latch(
               event.sessionID,
               `[ck guard] the done-verify hook timed out after ${config.guard.timeouts.doneVerify}s`,
+              "failure",
             );
             return;
           }
@@ -370,6 +481,7 @@ export async function createGuard(
             latch(
               event.sessionID,
               `[ck guard] the done-verify hook failed (exit ${result.code ?? "unknown"}): ${result.stderr.trim()}`,
+              "failure",
             );
             return;
           }
@@ -381,8 +493,9 @@ export async function createGuard(
           }
         })
         .catch((error: unknown) => {
-          latch(event.sessionID, message(error));
+          latch(event.sessionID, message(error), "failure");
         });
+      trackDoneVerify(event.sessionID, task);
     }
   };
 
