@@ -927,6 +927,9 @@ def run_arm_opencode(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[s
     if exit_code is None:
         result["fail_closed"] = True
         reasons.append("timed out")
+    elif exit_code != 0:
+        result["fail_closed"] = True
+        reasons.append(f"opencode exited {exit_code}")
     if record.get("status") != "done":
         result["fail_closed"] = True
         reasons.append(f"opencode run status {record.get('status')}")
