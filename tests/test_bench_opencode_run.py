@@ -26,6 +26,10 @@ ROOT = Path(__file__).resolve().parents[1]
 FAKE_OPENCODE = """#!/usr/bin/env python3
 import json, os, pathlib, time
 
+cwd = pathlib.Path.cwd()
+agents = cwd / ".opencode" / "agents"
+agents.mkdir(parents=True, exist_ok=True)
+(agents / "ck-worker.md").write_text("---\\nmode: subagent\\n---\\n")
 state = pathlib.Path(os.environ["CK_BENCH_STATE"])
 run = state / "runs" / "wf-fake"
 run.mkdir(parents=True, exist_ok=True)
@@ -116,7 +120,13 @@ def test_run_arm_opencode_imports_the_record_and_bench_output(tmp_path):
 def test_run_arm_opencode_fails_without_a_record(tmp_path, monkeypatch):
     _fake_args_module(monkeypatch)
     fake = tmp_path / "opencode-no-record"
-    fake.write_text("#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n")
+    fake.write_text(
+        "#!/usr/bin/env python3\n"
+        "import pathlib\n"
+        "agents = pathlib.Path.cwd() / '.opencode' / 'agents'\n"
+        "agents.mkdir(parents=True, exist_ok=True)\n"
+        "(agents / 'ck-worker.md').write_text('---\\nmode: subagent\\n---\\n')\n"
+    )
     fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
     config_path, _ = _opencode_config(tmp_path)
     cfg = bench.load_config(config_path)

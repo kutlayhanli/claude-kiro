@@ -838,20 +838,37 @@ def run_arm_opencode(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[s
     logs = results_dir / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     log = logs / f"{arm['id']}.opencode.txt"
+    timeout = float(cfg["timeout_minutes"]) * 60 if cfg.get("timeout_minutes") else None
+    # OpenCode can start the model before an async plugin setup has materialized the agents and
+    # registered tools. Warm the location once, then require the setup marker before the real prompt.
+    warm_argv = [opencode_bin, "run", "--standalone", "--model", arm_model, "--format", "json",
+                 "Reply with exactly READY."]
+    echo(f"▶ {arm['id']}: warming the plugin in {clone}")
+    try:
+        warm = _sh(warm_argv, clone, env, min(120.0, timeout) if timeout else 120.0)
+        warm_out = warm.stdout + warm.stderr
+        warm_code = warm.returncode
+    except FileNotFoundError:
+        raise BenchError(f"opencode binary not found: {opencode_bin}") from None
+    except subprocess.TimeoutExpired as e:
+        warm_out, warm_code = f"warmup timed out\n{e.stdout or ''}{e.stderr or ''}", None
+    worker = clone / ".opencode" / "agents" / "ck-worker.md"
+    if not worker.is_file():
+        log.write_text(warm_out if isinstance(warm_out, str) else str(warm_out))
+        raise BenchError(f"the OpenCode plugin did not materialize its agents during warmup; see {log}\n{warm_out[-2000:]}")
+
     prompt = "Call bench_run now, exactly once. It blocks until the workflow finishes. Then report its JSON result verbatim."
     argv = [opencode_bin, "run", "--standalone", "--model", arm_model, "--format", "json", prompt]
     echo(f"▶ {arm['id']}: {' '.join(shlex.quote(a) for a in argv)}  (in {clone})")
-    timeout = float(cfg["timeout_minutes"]) * 60 if cfg.get("timeout_minutes") else None
     started = time.time()
     try:
         launched = _sh(argv, clone, env, timeout)
         exit_code, launch_out = launched.returncode, launched.stdout + launched.stderr
-    except FileNotFoundError:
-        raise BenchError(f"opencode binary not found: {opencode_bin}") from None
     except subprocess.TimeoutExpired as e:
         exit_code, launch_out = None, f"timed out after {timeout}s\n{e.stdout or ''}{e.stderr or ''}"
     finished = time.time()
-    log.write_text(launch_out if isinstance(launch_out, str) else launch_out.decode(errors="replace"))
+    combined = f"--- warmup (exit {warm_code}) ---\n{warm_out}\n--- run (exit {exit_code}) ---\n{launch_out}"
+    log.write_text(combined if isinstance(combined, str) else combined.decode(errors="replace"))
 
     runs = state / "runs"
     records = [p for p in runs.glob("*/record.json")] if runs.is_dir() else []
