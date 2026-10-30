@@ -153,7 +153,7 @@ test files, so this task makes them while In Progress.
 ---
 
 ### Task 4: Test caller classification, task-agent denials and main-session spec edits
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 4.1, 4.2, 4.3, 5.1, 5.2, 5.3, 5.4
 **Properties:** P-11, P-32
@@ -179,15 +179,15 @@ metamorphic rule) and P-32 (`run_marker` lifecycle with an injected clock, skipp
 **Verify:** `uv run pytest -q -n auto tests/test_guard_callers.py tests/test_caller_properties.py`
 **Verifies:** Task 11 (the rewritten pre-tool guard and the marker; P-11 also covers foundation Task 10's `classify_caller`)
 **Acceptance:**
-- [ ] A recorded Agent-tool subagent input, a headless env and `CK_RUN_HEADLESS=1` each give `deny` under
+- [x] A recorded Agent-tool subagent input, a headless env and `CK_RUN_HEADLESS=1` each give `deny` under
       `guard.tests: ask`; the recorded main-session input gives `ask`/`deny` per config, also inside a task
       worktree.
-- [ ] TC-23 asserts on the recorded fact in `capture-summary.json`, so the gate keeps the answer to 3.4.
-- [ ] Malformed inputs never raise and never break the hook.
-- [ ] Main-session spec edits pass with no ask; the same edits from a task agent are denied with a reason naming
+- [x] TC-23 asserts on the recorded fact in `capture-summary.json`, so the gate keeps the answer to 3.4.
+- [x] Malformed inputs never raise and never break the hook.
+- [x] Main-session spec edits pass with no ask; the same edits from a task agent are denied with a reason naming
       file and kind; a review revise agent's denial says to return the change as a decision.
-- [ ] When built, the marker is cleared on a new prompt and expires 15 minutes after its last refresh.
-- [ ] Tests use recorded real Claude Code input and the real hook; no mocks of project code.
+- [x] When built, the marker is cleared on a new prompt and expires 15 minutes after its last refresh.
+- [x] Tests use recorded real Claude Code input and the real hook; no mocks of project code.
 **Dependencies:** Task 1 (guard_helpers), Task 2 (reads its recorded hook inputs and capture summary)
 **Complexity:** Medium
 **Risk:** safety (oracle for the deny/ask permission decision that gates destructive tool calls)
@@ -425,7 +425,7 @@ P-28 CLI-backed): P-23, P-25, P-26, P-28, P-30. `tests/test_stats_properties_sha
 ---
 
 ### Task 10: Add the pure guard, hand-off and git helper seams
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.9, 2.10, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 4.1, 4.2, 4.3, 5.1, 5.2, 5.3, 5.4, 8.1, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9, 10.2
 **Description:** Create the pure modules and read-only helpers the hooks and CLI call (design Decision Seams S1-S11,
@@ -452,16 +452,16 @@ smoke plus the existing guard and gate suites.
 - `src/claude_kiro/hooks/_shared/test_heuristics.py` - add `is_test_file`
 **Verify:** `uv run python -c "from claude_kiro import handoff; from claude_kiro.hooks._shared import guard_policy, git_utils, test_heuristics; print(guard_policy.command_family('sed -i x f'))"` `uv run pytest -q -n auto tests/test_gate.py`
 **Acceptance:**
-- [ ] `destroy_targets("cd sub && rm tests/test_a.py", "/r")` yields one delete target `/r/sub/tests/test_a.py`;
+- [x] `destroy_targets("cd sub && rm tests/test_a.py", "/r")` yields one delete target `/r/sub/tests/test_a.py`;
       sed/perl -i, heredocs, redirects and `find` yield none.
-- [ ] `may_write` is False for `find tests -name '*.py'` and `git branch`, True for any `find` with `-exec` or
+- [x] `may_write` is False for `find tests -name '*.py'` and `git branch`, True for any `find` with `-exec` or
       `-delete` and for `git branch -D x`.
-- [ ] `classify_caller` ignores paths; a non-empty `agent_id` or headless env gives `task_agent`; the marker counts
+- [x] `classify_caller` ignores paths; a non-empty `agent_id` or headless env gives `task_agent`; the marker counts
       only without `agent_id`.
-- [ ] `decide_bash` blocks only expanded file targets that are existing, unowned tests; `exists_on_base None`
+- [x] `decide_bash` blocks only expanded file targets that are existing, unowned tests; `exists_on_base None`
       passes; `is_test_file` is False for `tests/__pycache__/*.pyc`.
-- [ ] The main-session post-check reason differs by mode (ask me / restore), and neither asks to report a conflict.
-- [ ] `decide_handoff` gives `handoff` only for a whole-spec run in a `.claude/worktrees/` linked worktree, `refuse`
+- [x] The main-session post-check reason differs by mode (ask me / restore), and neither asks to report a conflict.
+- [x] `decide_handoff` gives `handoff` only for a whole-spec run in a `.claude/worktrees/` linked worktree, `refuse`
       without a main root or spec, `none` otherwise; a differing spec gives a `<spec>-run` run branch at the
       worktree's HEAD when the main checkout is clean, else `refuse` with recovery commands.
 **Dependencies:** None
