@@ -1159,6 +1159,11 @@ def seeded_local_record(kind: str) -> dict:
         "byTask": {pick(1): cell(), pick(4): cell()},
         "agents": agents,
         "missing": [{"agentId": pick(21), "what": "transcript"}, {"agentId": pick(22), "what": pick(5)}],
+        # Task 15 added this key to every collected record; a record seeded here has counted nothing (all fixed-set, no free text)
+        "interruptions": {"v": 1, "totals": {"prompts": 0, "waitMs": 0, "guardDenials": 0, "postCheckCatches": 0, "guardEscalations": 0,
+                                             "autoModeDenials": 0, "headlessDenials": 0, "userRejects": 0, "isolationRefusals": 0},
+                          "byRole": {}, "waitMsByRole": {}, "escalationModels": {},
+                          "guardLog": {"state": "ok", "events": 0, "differences": {}}, "skippedLines": 0},
     }
     if kind == "spec-implement":
         reasons = ["merge failed: conflict not resolved", f"permission denied: {pick(4)}"]

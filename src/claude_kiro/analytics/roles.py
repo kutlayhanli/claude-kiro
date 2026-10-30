@@ -48,7 +48,8 @@ def _c(pattern: str) -> "re.Pattern":
 
 _IMPL = [
     ("task", _c(rf"task (?P<n>{_ID})(?P<t> \[test\])?"
-                rf"(?: (?P<kind>retry|revise) (?P<k>{_NUM})(?: \((?P<m>{_MODEL})\))?)?")),
+                rf"(?: (?P<kind>retry|revise|guard) (?P<k>{_NUM})(?: \((?P<m>{_MODEL})\))?)?")),
+    ("park", _c(rf"park (?P<n>{_ID})")),
     ("review", _c(rf"review (?P<n>{_ID})(?: round (?P<r>{_NUM}))?")),
     ("resolve", _c(rf"resolve (?P<n>{_ID})(?: round (?P<r>{_NUM}))?")),
     ("fix_landing", _c(rf"fix (?P<k>{_NUM}) \(Task (?P<n>{_ID}) red on landing\)(?: \[(?P<m>{_MODEL})\])?")),
@@ -105,7 +106,13 @@ def _implement(label: str) -> LabelMatch:
                 kw.update(attempt=int(g["k"]) + 1, escalated_to=g["m"])
             elif g["kind"] == "revise":
                 kw.update(attempt=None, round=int(g["k"]), escalated_to=g["m"])
+            elif g["kind"] == "guard":
+                kw.update(attempt=None, step="guard", escalated_to=g["m"])
             return LabelMatch(**kw)
+        if name == "park":
+            n = g["n"]
+            return LabelMatch(role="orchestrator", matched=True, task=_task(n),
+                              step="path_id" if _is_path(n) else None)
         if name in ("review", "resolve"):
             n = g["n"]
             return LabelMatch(
@@ -232,6 +239,7 @@ _COUNT = r"[1-9][0-9]*"  # <k> is a positive integer (design "Description templa
 _AGENT_FORMS = [
     ("implement", _c(rf"implement task (?P<n>{_TASK_ID})")),
     ("retry", _c(rf"implement task (?P<n>{_TASK_ID}) retry (?P<k>{_COUNT})")),
+    ("guard", _c(rf"implement task (?P<n>{_TASK_ID}) guard (?P<k>{_COUNT})")),
     ("revise", _c(rf"revise task (?P<n>{_TASK_ID}) round (?P<k>{_COUNT})")),
     ("review", _c(rf"review task (?P<n>{_TASK_ID}) round (?P<k>{_COUNT})")),
     ("resolve", _c(rf"resolve task (?P<n>{_TASK_ID})")),
@@ -264,6 +272,8 @@ def _agent_form(name: str, groups: dict, agent_type: object) -> LabelMatch:
         return LabelMatch(role=_work_role(agent_type), matched=True, task=n, attempt=1)
     if name == "retry":
         return LabelMatch(role=_work_role(agent_type), matched=True, task=n, attempt=int(k) + 1)
+    if name == "guard":
+        return LabelMatch(role=_work_role(agent_type), matched=True, task=n, step="guard")
     if name == "revise":
         return LabelMatch(role=_work_role(agent_type), matched=True, task=n, round=int(k))
     if name == "review":

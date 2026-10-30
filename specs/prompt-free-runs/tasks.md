@@ -728,7 +728,7 @@ landed by hand outside the sandbox.
 ---
 
 ### Task 15: Count interruptions in run records, share them and print them in `ck stats show`
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 6.6, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 11.1, 11.2, 11.3, 11.4, 11.5
 **Description:** Create `src/claude_kiro/analytics/interruptions.py` (S13-S16, Local record): `classify_result_text`,
