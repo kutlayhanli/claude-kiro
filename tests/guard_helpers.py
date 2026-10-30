@@ -270,11 +270,14 @@ def sleeping_fake_claude(bin_dir: Path, record: Path) -> Path:
 
 
 def parking_fake_claude(bin_dir: Path, record: Path, spec: str, task: int | str) -> Path:
-    """A fake `claude` that runs the real `ck worktree park <spec> <task> --json` with a fixed note on stdin
+    """A fake `claude` that runs the real `ck worktree park <spec> <task> --json` with a fixed JSON note on stdin
+    (the design's {file, kind, test, requirement, decision} object)
     (inheriting the env `ck run` gave it), writes that output to `record`, sleeps 3 s and exits 0 (TC-88)."""
+    note = json.dumps({"file": "tests/test_x.py", "kind": "test", "test": "tests/test_x.py::test_x",
+                       "requirement": "1.1", "decision": "The test contradicts the requirement."})
     body = (f"#!{sys.executable}\nimport json, subprocess, sys, time\n"
             f"done = subprocess.run({CK!r} + ['worktree', 'park', {spec!r}, {str(task)!r}, '--json'],\n"
-            "                      input='The test contradicts the requirement.\\n', capture_output=True, text=True)\n"
+            f"                      input={note!r}, capture_output=True, text=True)\n"
             f"open({str(record)!r}, 'w').write(json.dumps({{'returncode': done.returncode, 'stdout': done.stdout, 'stderr': done.stderr}}))\n"
             "time.sleep(3)\n")
     return _script(Path(bin_dir) / "claude", body)

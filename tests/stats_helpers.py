@@ -1451,7 +1451,7 @@ def _event_lines(i: int, event: Tuple[Any, ...]) -> List[Any]:
         line["attachment"]["stdout"] = "{}"  # a guard hook that printed no decision
         lines.append(line)
     elif kind == "error_midtext":
-        lines.append(_result_line(tid, "make: *** failed while printing 'Denied by hook: [ck guard]' mid-text, exit 2", ts_ms=ts_ms + 1, is_error=True))
+        lines.append(_result_line(tid, "make: *** failed while printing 'This session is isolated in the worktree /w' mid-text, exit 2", ts_ms=ts_ms + 1, is_error=True))
     elif kind == "gate_block":
         lines.append(gate_block_attachment(tid, ts_ms=ts_ms))
     elif kind == "rtk_allow":
