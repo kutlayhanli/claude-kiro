@@ -4,7 +4,11 @@
 finish quantiles are biased when slots are short: ids "2" and "10" must not swap on a string comparison.
 """
 
+import pytest
+
 from claude_kiro.eta import simulate
+
+pytestmark = pytest.mark.usefixtures("no_network")
 
 
 def test_plan_key_breaks_chain_ties_by_numeric_id():
