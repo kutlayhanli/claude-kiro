@@ -415,9 +415,9 @@ def test_tc97_a_spool_made_unreadable_mid_run_changes_neither_exit_code_nor_outc
     assert (code, outcome) == (base_code, base_outcome), text
 
     key = world.child_json("begin")["run"]
-    evidence = [p for p in [*world.progress_dir.glob("*.errors"), *world.spool_dir.glob("*.errors")] if p.read_text().strip()]
-    evidence += [p for p in world.progress_dir.glob(f"{key}.jsonl") if any("fail" in json.dumps(ln) for ln in progress_lines(p))]
-    assert evidence or "progress" in text.lower(), "no failure was recorded in the progress file, a .errors sidecar or the run log"
+    sidecars = [world.spool_dir / f"{key}.errors", world.progress_dir / f"{key}.errors"]
+    evidence = [p for p in sidecars if p.is_file() and p.read_text().strip()]
+    assert evidence, f"no failure recorded in a non-empty {key}.errors sidecar ({[str(p) for p in sidecars]})"
 
 
 def test_tc97_mirrored_lines_hold_no_confidential_flag_value(world):
