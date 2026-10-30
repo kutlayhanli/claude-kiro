@@ -26,6 +26,14 @@ ARGS_KEYS = {
 }
 
 
+def test_the_published_package_ships_the_probe() -> None:
+    """prepare_probe copies from the package; npm only ships files listed in `files`."""
+    package = json.loads((PACKAGE_ROOT / "package.json").read_text())
+    assert "scripts/bench-probe.mjs" in package["files"]
+    assert "scripts/preflight.mjs" in package["files"]
+    assert "scripts/arm.mjs" in package["files"]
+
+
 def clone_project(tmp_path: Path) -> Path:
     """A clone of a real ck project, on main, with the calc spec and no model."""
     repo = ck_project(tmp_path)

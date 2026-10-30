@@ -29,6 +29,7 @@
     "src",
     "vendor",
     "scripts/arm.mjs",
+    "scripts/bench-probe.mjs",
     "scripts/preflight.mjs"
   ],
   "engines": {
