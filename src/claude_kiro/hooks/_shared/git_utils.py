@@ -9,11 +9,13 @@ from typing import List, Optional, Tuple
 def _git(project_dir: Path, *args: str) -> Optional[str]:
     try:
         result = subprocess.run(
-            ["git", *args], cwd=project_dir, capture_output=True, text=True, timeout=30
+            ["git", *args], cwd=project_dir, capture_output=True, timeout=30
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, ValueError, subprocess.SubprocessError):
         return None
-    return result.stdout if result.returncode == 0 else None
+    if result.returncode != 0:
+        return None
+    return result.stdout.decode("utf-8", errors="replace")
 
 
 def is_repo(project_dir: Path) -> bool:

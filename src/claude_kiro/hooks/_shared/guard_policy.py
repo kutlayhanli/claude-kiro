@@ -87,7 +87,7 @@ _SEP_CHARS = ";&|()\n"
 _ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 
-def _scan(command: str) -> List[_Segment]:
+def _scan(command: str, strict: bool = False) -> List[_Segment]:
     """Split a command into segments of words with write redirects noted. Never raises."""
     segments: List[_Segment] = []
     words: List[str] = []
@@ -134,6 +134,8 @@ def _scan(command: str) -> List[_Segment]:
             continue
         if c == "'":
             j = text.find("'", i + 1)
+            if j < 0 and strict:
+                raise ValueError("unterminated quote")
             j = n if j < 0 else j
             buf.append(text[i + 1 : j])
             have = True
@@ -148,6 +150,8 @@ def _scan(command: str) -> List[_Segment]:
                     continue
                 buf.append(text[j])
                 j += 1
+            if j >= n and strict:
+                raise ValueError("unterminated quote")
             have = True
             i = j + 1
             continue
@@ -275,7 +279,7 @@ def _operands(args: Sequence[str], value_flags: Sequence[str] = ()) -> List[str]
 def destroy_targets(command: str, cwd: str) -> List[DestroyTarget]:
     """S1: paths a command deletes or moves. Redirects, sed/perl -i and find yield none."""
     try:
-        segments = _scan(command)
+        segments = _scan(command, strict=True)
     except Exception:  # defensive: fall back to whitespace split
         segments = [_Segment(s.split(), []) for s in re.split(r"&&|\|\||[;|\n]", command or "")]
     cur = cwd
@@ -315,6 +319,8 @@ def destroy_targets(command: str, cwd: str) -> List[DestroyTarget]:
         else:
             continue
         for p in paths:
+            if not p:
+                continue
             targets.append(DestroyTarget(_abs(base, p), op, name))
     return targets
 

@@ -29,18 +29,17 @@ def is_headless(env: Mapping[str, str]) -> bool:
 
 @dataclass(frozen=True)
 class HandoffFacts:
-    kind: str                                  # implement | create | review
-    spec: Optional[str]                        # the spec named in the args (first non-option token), if any
-    args: Tuple[str, ...] = ()                 # the skill's $ARGUMENTS, tokenized, spec first when named
-    linked: bool = False                       # the session cwd is in a linked git worktree
-    worktree_root: Optional[str] = None        # that worktree's top level
+    kind: str                                  # implement | create | review | other
+    args: Tuple[str, ...] = ()                 # the skill's $ARGUMENTS, split shell-style
+    cwd: str = ""                              # absolute, resolved
+    is_linked_worktree: bool = False           # git-dir != git-common-dir
     main_root: Optional[str] = None            # the main checkout's top level
+    spec_in_main: bool = False                 # specs/<spec> exists at the main HEAD
+    spec_in_worktree: bool = False             # specs/<spec> exists at the worktree HEAD
     worktree_head: Optional[str] = None        # HEAD sha of the worktree
     main_head: Optional[str] = None            # HEAD sha of the main checkout
     main_branch: Optional[str] = None          # branch checked out in the main checkout
     main_clean: Optional[bool] = None          # main checkout has no uncommitted changes
-    spec_in_main: bool = False                 # specs/<spec> exists at the main HEAD
-    spec_in_worktree: bool = False             # specs/<spec> exists at the worktree HEAD
     spec_same: Optional[bool] = None           # same specs/<spec> tree id at both HEADs
     worktree_spec_dirty: Optional[bool] = None  # uncommitted changes under specs/<spec> in the worktree
     run_branch_at: Optional[str] = None        # commit of an existing `<spec>-run` branch, if any
@@ -50,6 +49,7 @@ class HandoffFacts:
 class HandoffDecision:
     action: str                                # "none" | "handoff" | "refuse"
     reason: str = ""
+    main_checkout: Optional[str] = None
     run_args: Tuple[str, ...] = ()             # (spec, "--command", kind)
     rest: Tuple[str, ...] = ()                 # args after the spec, unchanged
     run_branch: Optional[str] = None
@@ -57,12 +57,17 @@ class HandoffDecision:
     recovery: Tuple[str, ...] = field(default_factory=tuple)
 
 
+def _spec_of(facts: HandoffFacts) -> Optional[str]:
+    for token in facts.args:
+        if not token.startswith("-"):
+            return token
+    return None
+
+
 def _is_single_task(facts: HandoffFacts) -> bool:
     if facts.kind != "implement":
         return False
-    for index, token in enumerate(facts.args[:2]):
-        if index == 0 and facts.spec is not None and token == facts.spec:
-            continue
+    for token in facts.args[:2]:
         if token != "all" and _TASK_TOKEN.match(token):
             return True
     return False
@@ -77,71 +82,98 @@ def _under(path: str, root: str) -> bool:
     return PurePosixPath(path) != base
 
 
-def _rest(facts: HandoffFacts) -> Tuple[str, ...]:
+def _rest(facts: HandoffFacts, spec: Optional[str]) -> Tuple[str, ...]:
     args = tuple(facts.args)
-    if args and facts.spec is not None and args[0] == facts.spec:
-        return args[1:]
+    if spec is not None and spec in args:
+        index = args.index(spec)
+        return args[index + 1:]
     return args
 
 
-def _recovery(facts: HandoffFacts, run_args: Tuple[str, ...], rest: Tuple[str, ...]) -> Tuple[str, ...]:
-    spec = facts.spec or "<spec>"
+def _recovery(
+    facts: HandoffFacts,
+    spec: Optional[str],
+    run_args: Tuple[str, ...],
+    rest: Tuple[str, ...],
+    switch: bool,
+) -> Tuple[str, ...]:
     main = facts.main_root or "<main checkout>"
-    run = "ck run " + " ".join(shlex.quote(a) for a in (run_args or (spec, "--command", facts.kind)))
+    run = "ck run " + " ".join(shlex.quote(a) for a in (run_args or ((spec or "<spec>"), "--command", facts.kind)))
     if rest:
         run += " -- " + " ".join(shlex.quote(a) for a in rest)
     steps = []
-    if facts.worktree_head:
-        steps.append(f"git switch -c {spec}-run {facts.worktree_head}")
+    if switch and spec and facts.worktree_head:
+        steps.append(f"git switch -c {shlex.quote(spec + '-run')} {shlex.quote(facts.worktree_head)}")
     steps.append(run)
     return (f"cd {shlex.quote(main)} && " + " && ".join(steps),)
 
 
 def decide_handoff(facts: HandoffFacts) -> HandoffDecision:
     """S11. Never raises for any combination of facts."""
-    if facts.kind not in HANDOFF_KINDS or _is_single_task(facts) or not facts.linked:
-        return HandoffDecision("none", "no hand-off needed")
-    if facts.main_root is None:
+    main = facts.main_root
+    if facts.kind not in HANDOFF_KINDS or _is_single_task(facts) or not facts.is_linked_worktree:
+        return HandoffDecision("none", "no hand-off needed", main_checkout=main)
+    spec = _spec_of(facts)
+    rest = _rest(facts, spec)
+    if main is None:
         return HandoffDecision(
             "refuse",
             "cannot find the main checkout of this worktree",
-            recovery=_recovery(facts, (), _rest(facts)),
+            rest=rest,
+            recovery=_recovery(facts, spec, (), rest, False),
         )
-    if facts.worktree_root is None or not _under(facts.worktree_root, facts.main_root):
-        return HandoffDecision("none", "not a .claude/worktrees/ session")
+    if not facts.cwd or not _under(facts.cwd, main):
+        return HandoffDecision("none", "not a .claude/worktrees/ session", main_checkout=main)
 
-    rest = _rest(facts)
-    if facts.spec is None:
+    if spec is None:
         return HandoffDecision(
-            "refuse", "no spec named in the arguments", rest=rest, recovery=_recovery(facts, (), rest)
+            "refuse",
+            "no spec named in the arguments",
+            main_checkout=main,
+            rest=rest,
+            recovery=_recovery(facts, None, (), rest, False),
         )
-    run_args = (facts.spec, "--command", facts.kind)
-    recovery = _recovery(facts, run_args, rest)
+    run_args = (spec, "--command", facts.kind)
     if not facts.spec_in_main and not facts.spec_in_worktree:
         return HandoffDecision(
-            "refuse", f"specs/{facts.spec} exists at neither HEAD", run_args=run_args, rest=rest, recovery=recovery
+            "refuse",
+            f"specs/{spec} exists at neither HEAD",
+            main_checkout=main,
+            run_args=run_args,
+            rest=rest,
+            recovery=_recovery(facts, spec, run_args, rest, False),
         )
     if facts.spec_same is True:
-        return HandoffDecision("handoff", "same spec at both HEADs", run_args=run_args, rest=rest)
+        return HandoffDecision(
+            "handoff", "same spec at both HEADs", main_checkout=main, run_args=run_args, rest=rest
+        )
 
     problem = None
-    if facts.main_clean is not True:
+    if facts.spec_same is None:
+        problem = f"cannot tell whether specs/{spec} matches between the checkouts; run the commands below"
+    elif facts.main_clean is not True:
         problem = "commit or stash the main checkout's changes, then run the commands below"
     elif facts.worktree_spec_dirty is not False:
-        problem = f"commit the changes under specs/{facts.spec} in this worktree, then run the commands below"
+        problem = f"commit the changes under specs/{spec} in this worktree, then run the commands below"
     elif facts.worktree_head is None:
         problem = "the worktree HEAD is unknown; fix the worktree, then run the commands below"
     elif facts.run_branch_at is not None and facts.run_branch_at != facts.worktree_head:
-        problem = f"delete or rename the existing {facts.spec}-run branch, then run the commands below"
+        problem = f"delete or rename the existing {spec}-run branch, then run the commands below"
     if problem is not None:
         return HandoffDecision(
-            "refuse", problem, run_args=run_args, rest=rest, recovery=recovery
+            "refuse",
+            problem,
+            main_checkout=main,
+            run_args=run_args,
+            rest=rest,
+            recovery=_recovery(facts, spec, run_args, rest, True),
         )
     return HandoffDecision(
         "handoff",
         "spec differs between the worktree and the main checkout",
+        main_checkout=main,
         run_args=run_args,
         rest=rest,
-        run_branch=f"{facts.spec}-run",
+        run_branch=f"{spec}-run",
         start_point=facts.worktree_head,
     )

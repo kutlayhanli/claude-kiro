@@ -120,8 +120,8 @@ def is_test_file(rel_path: str, config: Dict[str, Any]) -> bool:
     if not is_test_path(rel_path, config):
         return False
     path = PurePosixPath(rel_path.replace("\\", "/"))
-    if path.suffix in (".pyc", ".pyo") or _CACHE_PARTS.intersection(path.parts[:-1]):
-        return False
     if any(path.match(pattern) for pattern in config.get("tests", {}).get("files", [])):
         return True
+    if path.suffix in (".pyc", ".pyo") or _CACHE_PARTS.intersection(path.parts[:-1]):
+        return False
     return path.suffix in SOURCE_EXTENSIONS
