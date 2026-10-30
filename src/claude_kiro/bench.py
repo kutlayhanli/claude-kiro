@@ -1032,6 +1032,19 @@ def run_arm_opencode(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[s
             acc["cacheRead"] += int((tokens.get("cache") or {}).get("read") or 0)
             acc["cacheCreation"] += int((tokens.get("cache") or {}).get("write") or 0)
         result["tokens_by_model"] = by_model
+        native_by_label = {agent.get("label"): agent for agent in native_agents if agent.get("label")}
+        for row in result.get("agents") or []:
+            native = native_by_label.get(row.get("label"))
+            if not native:
+                continue
+            row["peak_context"] = native.get("peakContext")
+            if native.get("cost") is not None:
+                row["native_cost_usd"] = native.get("cost")
+            if native.get("tokens") is not None:
+                row["native_tokens"] = native.get("tokens")
+        peaks = [int(agent.get("peakContext") or 0) for agent in native_agents]
+        if peaks:
+            result["peak_context"] = max(peaks)
         if all(agent.get("cost") is not None for agent in native_agents):
             usd = round(sum(float(agent.get("cost") or 0) for agent in native_agents), 6)
             result["cost"] = {**result.get("cost", {}), "usd": usd, "source": "opencode sessions",

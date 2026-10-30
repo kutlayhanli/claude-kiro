@@ -13,6 +13,10 @@ Template for `ck bench run --harness opencode`. Copy next to your bench checkout
   "results_dir": "/absolute/bench/results",
   "ck": ["ck"],
   "timeout_minutes": 120,
+  "env": {
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTEST_ADDOPTS": "-p no:cacheprovider"
+  },
   "opencode": {
     "plugin": "/absolute/path/to/opencode",
     "bin": "opencode"
@@ -82,6 +86,11 @@ ck bench score /absolute/bench/results
 
 The runner sets `CK_RUN_HEADLESS=1`, uses a private `XDG_STATE_HOME` outside the clone, and marks an
 arm fail-closed on a timeout, a non-`done` record, a guard denial/post-check, or a failure label.
+Both configs above set `PYTHONDONTWRITEBYTECODE=1` and disable pytest's cache: a task worktree with
+untracked test artefacts (`__pycache__/`, `.pytest_cache/`) is "busy" and `ck` refuses to merge it,
+which would look like a model failure. If the repo under test has no `.gitignore` for those paths,
+either add one to the base or keep this env; apply the same setting to the Claude baseline so both
+harnesses see the same rule.
 `ck bench import` is still the collection format; the native record is kept under
 `bench/runs/opencode-state/<arm>/claude-kiro/opencode/runs/`.
 
@@ -101,6 +110,10 @@ up when the two `score.md` files are compared.
   "results_dir": "/absolute/bench/results-claude",
   "ck": ["ck"],
   "timeout_minutes": 120,
+  "env": {
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTEST_ADDOPTS": "-p no:cacheprovider"
+  },
   "specs": [
     { "name": "your-spec", "hidden_tests": "/absolute/bench/hidden/your-spec",
       "invariants": "/absolute/bench/invariants", "test_cmd": ["python", "-m", "pytest"] }

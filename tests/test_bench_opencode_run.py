@@ -49,11 +49,25 @@ record = {
     "args": {"spec": "calc"}, "result": report, "throttles": 0, "retries": 0,
     "failureLabel": None, "degraded": [],
     "guard": {"denials": 0, "postCheckCatches": 0, "guardEscalations": 0, "headlessDenials": 0, "prompts": 0},
-    "agents": [],
+    "agents": [{
+        "seq": 1, "label": "task 1", "role": "implementer", "agent": "ck-worker",
+        "parentSessionID": "ses-parent", "sessionID": "ses-1",
+        "requested": {"model": "sonnet", "effort": "medium"},
+        "resolved": {"providerID": "opencode", "id": "fake", "variant": None},
+        "requestedEffort": "medium", "resolvedEffort": "medium", "variant": None,
+        "startedAt": now, "endedAt": now + 1000, "durationMs": 1000, "status": "ok",
+        "submission": "tool", "attempts": 1, "rejections": 0,
+        "tokens": {"input": 100, "output": 10, "reasoning": 0, "cache": {"read": 20, "write": 0}},
+        "cost": 0.0, "peakContext": 456, "error": None,
+    }],
 }
 (run / "record.json").write_text(json.dumps(record))
 (run / "bench-output.json").write_text(json.dumps({
-    "result": report, "status": "done", "durationMs": 60000, "workflowProgress": [],
+    "result": report, "status": "done", "durationMs": 60000,
+    "workflowProgress": [{
+        "type": "workflow_agent", "agentId": "ses-1", "label": "task 1",
+        "model": "opencode/fake", "tokens": 123, "durationMs": 1000, "state": "ok",
+    }],
 }))
 """
 
@@ -113,6 +127,11 @@ def test_run_arm_opencode_imports_the_record_and_bench_output(tmp_path):
     assert result["wall_minutes"] == 1.0
     assert result["fail_closed"] is False
     assert result["guard"]["denials"] == 0
+    assert result["agents"][0]["peak_context"] == 456
+    assert result["agents"][0]["native_cost_usd"] == 0.0
+    assert result["peak_context"] == 456
+    assert result["tokens_by_model"]["opencode/fake"]["input"] == 100
+    assert result["cost"]["usd"] == 0.0
     assert (Path(cfg["results_dir"]) / f"{arm['id']}.json").is_file()
     clone = Path(result["clone"])
     assert (clone / ".bench-args.json").is_file()
