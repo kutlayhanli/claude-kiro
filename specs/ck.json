@@ -1,5 +1,6 @@
 {
   "verify": ["uv run pytest -q -n auto"],
   "guard": {"tests": "ask", "requirements": "ask", "test_plan": "ask"},
-  "base": null
+  "base": null,
+  "contracts_ignore": ["costs"]
 }

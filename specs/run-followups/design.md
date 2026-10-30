@@ -506,9 +506,10 @@ are `unknown`, and `escalations` is a list of model names):
 - `escalations` = `len(list)`; a non-list value → 0. `retries` = `attempts - 1` when `attempts` is an int ≥ 1, else 0.
 It holds no ids, names, paths or timestamps, so it is safe in the spool directory. The task tuples come from
 `tasks[]` of implement records with `ok` true. The model is the family of the task's first implementer/test-writer
-agent row. `usd` is the sum of that task's agent `usd`, or None when any of those rows is unpriced. `size` is
+agent row. `usd` is the sum of that task's agent `usd`, or None when any of those rows is unpriced. A row whose `usd` is
+missing, null, zero or negative zero counts as unpriced (1.9): costless records store `usd` 0. `size` is
 `filesCount + criteriaCount`, or a count from the spec's tasks.md (6.3), or None. Phase samples come from create
-records' `phases` (non-null minutes). `usd` comes from the agents' `usd` grouped by `phase`.
+records' `phases` (positive minutes only: a null or zero-minute phase is not sampled, 2.5). `usd` comes from the agents' `usd` grouped by `phase`.
 
 ### Bundled defaults (`ck-eta-defaults/1`, `src/claude_kiro/resources/eta_defaults.json`)
 
