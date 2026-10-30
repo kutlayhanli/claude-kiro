@@ -66,7 +66,24 @@ def _hex(*parts: object, n: int = 16) -> str:
 
 def _write_jsonl(path: Path, lines: Sequence[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("".join(json.dumps(line) + "\n" for line in lines))
+    path.write_text("".join((line if isinstance(line, str) else json.dumps(line)) + "\n" for line in lines))
+
+
+def _line_ts(line: Any) -> Optional[int]:
+    if isinstance(line, dict) and isinstance(line.get("timestamp"), str):
+        try:
+            return to_ms(line["timestamp"])
+        except ValueError:
+            return None
+    return None
+
+
+def _merge_extra(lines: List[dict], extra: Sequence[Any]) -> List[Any]:
+    """Merge raw `extra` lines into `lines` in timestamp order (stable; a line without a timestamp goes last)."""
+    if not extra:
+        return lines
+    merged = list(lines) + list(extra)
+    return sorted(merged, key=lambda ln: (_line_ts(ln) is None, _line_ts(ln) or 0))
 
 
 # --------------------------------------------------------------------------- fake Claude home
@@ -99,6 +116,7 @@ class AgentSpec:
     omit_started: bool = False  # leave `startedAt` out of the run-file entry
     raw_progress: Optional[dict] = None  # merged over the generated `workflow_agent` entry (may set queuedAt to null, "x", ...)
     extra_meta: Dict[str, Any] = field(default_factory=dict)  # merged last into the agent's meta.json (unknown keys)
+    extra_lines: List[Any] = field(default_factory=list)  # raw transcript lines (dicts, or str for malformed) merged in timestamp order
 
 
 SPEC_TYPES: Tuple[str, ...] = (
@@ -139,6 +157,7 @@ class ToolAgentSpec:
     extra_meta: Dict[str, Any] = field(default_factory=dict)
     meta: bool = True
     agent_id: Optional[str] = None
+    extra_lines: List[Any] = field(default_factory=list)  # raw transcript lines (dicts, or str for malformed) merged in timestamp order
 
 
 @dataclass
@@ -437,7 +456,7 @@ class FakeSession:
         self.transcript_path.parent.mkdir(parents=True, exist_ok=True)
         with self.transcript_path.open("a") as fh:
             for line in lines:
-                fh.write(json.dumps(line) + "\n")
+                fh.write((line if isinstance(line, str) else json.dumps(line)) + "\n")
 
     def _launch_lines(self, run_id: str, name: str, launch: Any, start: str) -> List[dict]:
         if launch is True:
@@ -506,7 +525,7 @@ class FakeSession:
         return run
 
     def _agent_lines(self, prompt: str, model: str, started_ms: int, duration_ms: int, split_blocks: bool,
-                     requests: Sequence[Tuple[str, int, int, int, int]]) -> List[dict]:
+                     requests: Sequence[Tuple[str, int, int, int, int]], extra_lines: Sequence[Any] = ()) -> List[dict]:
         base = self._base
         lines: List[dict] = [base({"type": "user", "timestamp": iso_ms(started_ms), "message": {"role": "user", "content": prompt}})]
         per_request = 2 if split_blocks else 1
@@ -520,11 +539,11 @@ class FakeSession:
                 ts = started_ms + round(duration_ms * k / total)
                 lines.append(base({"type": "assistant", "requestId": rid, "timestamp": iso_ms(ts),
                                    "message": {"id": f"msg_{_hex(rid)}", "role": "assistant", "model": model, "usage": usage, "content": content}}))
-        return lines
+        return _merge_extra(lines, extra_lines)
 
     def _write_agent(self, run_id: str, aid: str, spec: AgentSpec, started_ms: int, requests: Sequence[Tuple[str, int, int, int, int]]) -> None:
         d = self.dir / "subagents" / "workflows" / run_id
-        _write_jsonl(d / f"agent-{aid}.jsonl", self._agent_lines(spec.prompt_preview, spec.model, started_ms, spec.duration_ms, spec.split_blocks, requests))
+        _write_jsonl(d / f"agent-{aid}.jsonl", self._agent_lines(spec.prompt_preview, spec.model, started_ms, spec.duration_ms, spec.split_blocks, requests, spec.extra_lines))
         if spec.meta:
             (d / f"agent-{aid}.meta.json").write_text(
                 json.dumps({"description": spec.label, "workflowPhase": spec.phase, "model": spec.model, **spec.extra_meta}))
@@ -542,7 +561,7 @@ class FakeSession:
             agent_ids.append(aid)
             started = spec.started_at_ms if spec.started_at_ms is not None else start_ms + idx * 1_000
             requests = spec.requests if spec.requests is not None else [(f"req_{aid}_1", 1_000, 500, 2_000, 100)]
-            _write_jsonl(d / f"agent-{aid}.jsonl", self._agent_lines("Implement the task.", spec.model, started, spec.duration_ms, True, requests))
+            _write_jsonl(d / f"agent-{aid}.jsonl", self._agent_lines("Implement the task.", spec.model, started, spec.duration_ms, True, requests, spec.extra_lines))
             tool_id = "toolu_" + _hex(self.session_id, aid, "agent")
             if spec.meta:
                 meta: Dict[str, Any] = {
@@ -1296,3 +1315,239 @@ def backfill_home(env: Dict[str, str], sessions: int, per_session: int) -> FakeC
                                        agent_type=SPEC_TYPES[k % len(SPEC_TYPES)]))
         session.tool_agents(specs, start=iso_ms(base + s_i * 3_600_000))
     return home
+
+
+
+# --------------------------------------------------------------------------- interruption transcript lines (prompt-free-runs)
+
+PLUGIN_ROOT = "/opt/claude/plugins/claude-kiro"
+
+DENIAL_TEXT: Dict[str, str] = {
+    "auto": "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [x]. If this action is needed, ask the user.",
+    "headless": "This action requires approval, and this session has no approval surface.",
+    "reject": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file).",
+    "isolation": "This session is isolated in the worktree /work/demo/.ck/worktrees/demo-task-1, but the path you used is outside it.",
+    "isolation_agent": "This agent is isolated in the worktree /work/demo/.ck/worktrees/demo-task-1, but the path you used is outside it.",
+}
+
+
+def _stamp(ts_ms: int) -> dict:
+    return {"timestamp": iso_ms(ts_ms)}
+
+
+def guard_attachment(tool_use_id: str, decision: str, reason: str, *, ts_ms: int, hook: str = "pre-tool-guard", plugin: bool = False) -> dict:
+    """The real `hook_success` attachment line for a ck PreToolUse guard decision (`[ck guard]` reason)."""
+    if "[ck guard]" not in reason:
+        reason = f"[ck guard] {reason}"
+    command = f'"{PLUGIN_ROOT}/bin/ck" --hook {hook} --plugin-hook' if plugin else f"ck --hook {hook}"
+    stdout = json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": decision, "permissionDecisionReason": reason}})
+    return {"type": "attachment", **_stamp(ts_ms), "attachment": {
+        "type": "hook_success", "hookName": "PreToolUse:Bash", "hookEvent": "PreToolUse", "toolUseID": tool_use_id,
+        "content": "", "stdout": stdout, "stderr": "", "exitCode": 0, "command": command}}
+
+
+def postcheck_attachment(tool_use_id: str, message: str, *, ts_ms: int, gate_text: str = "") -> dict:
+    """A PostToolUse `hook_blocking_error` holding a `[ck post-check]` message (gate report first when given).
+    Shape from test-plan.md "Test Infrastructure -> Add 4"; Task 2's recorded line must match it."""
+    text = f"{gate_text}\n[ck post-check] {message}" if gate_text else f"[ck post-check] {message}"
+    return {"type": "attachment", **_stamp(ts_ms), "attachment": {
+        "type": "hook_blocking_error", "hookName": "PostToolUse:Bash", "hookEvent": "PostToolUse", "toolUseID": tool_use_id,
+        "blockingError": {"blockingError": text}}}
+
+
+def gate_block_attachment(tool_use_id: str, *, ts_ms: int) -> dict:
+    """Near-miss: the same shape holding only a gate failure report, with no `[ck post-check]` text."""
+    return {"type": "attachment", **_stamp(ts_ms), "attachment": {
+        "type": "hook_blocking_error", "hookName": "PostToolUse:Bash", "hookEvent": "PostToolUse", "toolUseID": tool_use_id,
+        "blockingError": {"blockingError": "ck gate failed: 1 test failed\nFAILED tests/test_calc.py::test_add"}}}
+
+
+def rtk_allow_attachment(tool_use_id: str, *, ts_ms: int) -> dict:
+    """Near-miss: another hook's `allow` decision."""
+    stdout = json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
+                                                "permissionDecisionReason": "RTK auto-rewrite", "updatedInput": {"command": "rtk git status"}}})
+    return {"type": "attachment", **_stamp(ts_ms), "attachment": {
+        "type": "hook_success", "hookName": "PreToolUse:Bash", "hookEvent": "PreToolUse", "toolUseID": tool_use_id,
+        "content": "", "stdout": stdout, "stderr": "", "exitCode": 0, "command": "rtk hook claude"}}
+
+
+def _result_line(tool_use_id: str, content: str, *, ts_ms: int, is_error: Optional[bool]) -> dict:
+    block: Dict[str, Any] = {"type": "tool_result", "tool_use_id": tool_use_id, "content": content}
+    if is_error is not None:
+        block["is_error"] = is_error
+    return {"type": "user", **_stamp(ts_ms), "message": {"role": "user", "content": [block]}}
+
+
+def denial_result(tool_use_id: str, kind: str, *, ts_ms: int) -> dict:
+    """An error tool_result with the real phrasing. kind: auto | headless | reject | isolation (the "This session"
+    wording) | isolation_agent (the "This agent" wording)."""
+    return _result_line(tool_use_id, DENIAL_TEXT[kind], ts_ms=ts_ms, is_error=True)
+
+
+def quoted_result(tool_use_id: str, kind: str, *, ts_ms: int) -> dict:
+    """Near-miss: `is_error` absent, with the phrase quoted in the middle of file content (a Read of PLAN.md)."""
+    body = "1\t# Plan\n2\tThe fallback says: " + DENIAL_TEXT[kind] + "\n3\tend of file\n"
+    return _result_line(tool_use_id, body, ts_ms=ts_ms, is_error=None)
+
+
+def ok_result(tool_use_id: str, *, ts_ms: int) -> dict:
+    return _result_line(tool_use_id, "ok", ts_ms=ts_ms, is_error=False)
+
+
+def tool_use(tool_use_id: str, tool: str, command: Optional[str] = None, *, ts_ms: int) -> dict:
+    tool_input: Dict[str, Any] = {"command": command} if tool == "Bash" else {"file_path": command or "specs/demo/requirements.md"}
+    return {"type": "assistant", **_stamp(ts_ms), "requestId": "req_" + _hex(tool_use_id), "message": {
+        "id": "msg_" + _hex(tool_use_id), "role": "assistant", "model": "claude-sonnet-5-5",
+        "content": [{"type": "tool_use", "id": tool_use_id, "name": tool, "input": tool_input}]}}
+
+
+# Interruption kinds an event can have, with the share.INTERRUPTION_KINDS name each one counts under (None = a near-miss).
+EVENT_KINDS: Dict[str, Optional[str]] = {
+    "prompt": "prompts", "guard_denial": "guard_denials", "post_check": "post_check_catches",
+    "auto": "auto_mode_denials", "headless": "headless_denials", "reject": "user_rejects", "isolation": "isolation_refusals",
+    "gate_block": None, "rtk_allow": None, "quoted": None, "malformed": None,
+}
+COUNTED_KINDS = tuple(k for k, v in EVENT_KINDS.items() if v)
+FAMILY_COMMANDS: Dict[str, str] = {
+    "sed": "sed -i 's/a/b/' tests/test_calc.py", "rm": "rm -rf tests/old", "mv": "mv a.py b.py", "git": "git push origin main",
+    "python": "python3 - <<'PY'\nprint(1)\nPY", "redirect": "echo x > notes.txt", "other": "ls -la",
+}
+ROLES: Tuple[str, ...] = ("orchestrator", "implementer", "reviewer")
+MALFORMED_LINES: Tuple[Any, ...] = ("{not json", {}, {"type": "attachment"}, {"type": "mystery", "timestamp": "2026-10-12T09:00:00.000Z"})
+
+
+def event_family(tool: str, command: Optional[str]) -> str:
+    """The expected command family of a generated event (test-side mirror of design S3, for the families generated here)."""
+    if tool != "Bash" or not command:
+        return "other"
+    for family, text in FAMILY_COMMANDS.items():
+        if command == text:
+            return family
+    return "other"
+
+
+def _event_lines(i: int, event: Tuple[Any, ...]) -> List[Any]:
+    kind, _role, tool, command, ts_ms, wait_ms = event
+    tid = "toolu_" + _hex("interruption", i, kind)
+    if kind == "malformed":
+        return [command]  # `command` holds the raw malformed line
+    lines: List[Any] = [tool_use(tid, tool, command, ts_ms=ts_ms - 1)]
+    if kind == "prompt":
+        lines.append(guard_attachment(tid, "ask", "this edit weakens a test", ts_ms=ts_ms))
+        if wait_ms is not None:
+            lines.append(ok_result(tid, ts_ms=ts_ms + wait_ms))
+    elif kind == "guard_denial":
+        lines.append(guard_attachment(tid, "deny", "Denied: destroys a tracked file", ts_ms=ts_ms))
+        lines.append(_result_line(tid, "Denied by hook: [ck guard] Denied: destroys a tracked file", ts_ms=ts_ms + 1, is_error=True))
+    elif kind == "post_check":
+        lines.append(postcheck_attachment(tid, "the command edited a test file", ts_ms=ts_ms, gate_text="ck gate: 1 failed" if i % 2 else ""))
+    elif kind in ("auto", "headless", "reject", "isolation"):
+        lines.append(denial_result(tid, kind if kind != "isolation" else ("isolation" if i % 2 else "isolation_agent"), ts_ms=ts_ms))
+    elif kind == "gate_block":
+        lines.append(gate_block_attachment(tid, ts_ms=ts_ms))
+    elif kind == "rtk_allow":
+        lines.append(rtk_allow_attachment(tid, ts_ms=ts_ms))
+    elif kind == "quoted":
+        lines.append(quoted_result(tid, ("auto", "headless", "reject", "isolation")[i % 4], ts_ms=ts_ms))
+    else:
+        raise ValueError(kind)
+    return lines
+
+
+def _append_any(path: Path, lines: Sequence[Any]) -> None:
+    """Append lines to a transcript, merged with what is there by timestamp (unparseable lines keep their place)."""
+    existing = path.read_text().splitlines() if path.exists() else []
+    parsed: List[Any] = []
+    for raw in existing:
+        try:
+            parsed.append(json.loads(raw))
+        except ValueError:
+            parsed.append(raw)
+    parsed = _merge_extra(parsed, lines)
+    _write_jsonl(path, parsed)
+
+
+def interruptions(target: Any, events: Sequence[Tuple[Any, ...]]) -> None:
+    """Append, per event `(kind, role-target, tool, command, ts_ms, wait_ms)`, the tool_use, attachment and result
+    lines to a transcript, in timestamp order. `target` is a `FakeSession` (orchestrator), `(FakeRun, agent)` (a workflow
+    agent, by index or id) or `(FakeToolAgents, agent)` (an Agent-tool subagent). kinds: see `EVENT_KINDS`."""
+    lines: List[Any] = []
+    for i, event in enumerate(events):
+        lines.extend(_event_lines(i, event))
+    if isinstance(target, FakeSession):
+        _append_any(target.transcript_path, lines)
+        return
+    holder, agent = target
+    _append_any(holder.transcript(agent), lines)
+
+
+def write_guard_log(env: Dict[str, str], events: Sequence[dict]) -> Path:
+    """Write guard-log events in the design's camelCase `GuardEvent` format (`"v": 1`) to the log of `env`'s data dir.
+
+    Each event dict may hold `ts_ms`, `sessionId`, `agentId`, `agentType`, `caller`, `tool`, `decision`, `category`, `reason`, `path`,
+    `command`, `family`, `toolUseId`; missing keys get defaults. The path is `<data_dir>/guard-events.jsonl`,
+    the same as `guardlog.log_path(env)`, computed here from XDG_DATA_HOME/CK_DATA_HOME without importing ck."""
+    data_home = env.get("CK_DATA_HOME") or (env.get("XDG_DATA_HOME") or os.path.join(env.get("HOME", "~"), ".local", "share")) + "/claude-kiro"
+    path = Path(data_home) / "guard-events.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    rows = []
+    for e in events:
+        row = {"v": 1, "ts": iso_ms(e.get("ts_ms", to_ms("2026-10-12T09:01:00Z"))), "sessionId": "session-1", "agentId": None, "agentType": None,
+               "caller": "task_agent", "tool": "Bash", "decision": "deny", "category": "destroy", "reason": "[ck guard] Denied", "path": "",
+               "command": None, "family": "other", "toolUseId": None}
+        row.update({k: v for k, v in e.items() if k != "ts_ms"})
+        rows.append(json.dumps(row))
+    with path.open("a") as fh:
+        fh.write("".join(r + "\n" for r in rows))
+    path.chmod(0o600)
+    return path
+
+
+def _expected_zero() -> dict:
+    return {"kinds": {name: 0 for name in EVENT_KINDS.values() if name}, "byRole": {}, "waitMs": 0, "waitMsByRole": {}}
+
+
+def expected_counts(events: Sequence[Tuple[Any, ...]]) -> dict:
+    """Expected counts for generated events: `kinds` (share.INTERRUPTION_KINDS name -> total), `byRole[role][family][kind]`,
+    `waitMs`, `waitMsByRole`. Near-misses and malformed lines count nothing."""
+    out = _expected_zero()
+    for kind, role, tool, command, _ts, wait in events:
+        name = EVENT_KINDS[kind]
+        if not name:
+            continue
+        family = event_family(tool, command)
+        out["kinds"][name] += 1
+        by = out["byRole"].setdefault(role, {}).setdefault(family, {})
+        by[name] = by.get(name, 0) + 1
+        if kind == "prompt" and wait is not None and wait > 0:
+            out["waitMs"] += wait
+            out["waitMsByRole"][role] = out["waitMsByRole"].get(role, 0) + wait
+    return out
+
+
+def interruption_strategy():
+    """Hypothesis strategy: (events, expected). Events are `(kind, role, tool, command, ts_ms, wait_ms)` over roles x families x
+    categories, mixed with near-misses (gate-only block, RTK allow, quoted phrases) and malformed lines (kind "malformed",
+    whose `command` is the raw line). Timestamps are distinct. `expected` is `expected_counts(events)`."""
+    from hypothesis import strategies as st
+
+    base_ms = to_ms("2026-10-12T09:05:00Z")
+
+    @st.composite
+    def build(draw):
+        n = draw(st.integers(0, 14))
+        events = []
+        for i in range(n):
+            kind = draw(st.sampled_from(sorted(EVENT_KINDS)))
+            role = draw(st.sampled_from(ROLES))
+            if kind == "malformed":
+                events.append((kind, role, "Bash", draw(st.sampled_from(MALFORMED_LINES)), base_ms + i * 400_000, None))
+                continue
+            family = draw(st.sampled_from(sorted(FAMILY_COMMANDS)))
+            tool = draw(st.sampled_from(["Bash", "Bash", "Edit", "Write"]))
+            command = FAMILY_COMMANDS[family] if tool == "Bash" else "specs/demo/requirements.md"
+            wait = draw(st.one_of(st.none(), st.integers(1, 200).map(lambda s: s * 1000))) if kind == "prompt" else None
+            events.append((kind, role, tool, command, base_ms + i * 400_000, wait))
+        return events, expected_counts(events)
+
+    return build()

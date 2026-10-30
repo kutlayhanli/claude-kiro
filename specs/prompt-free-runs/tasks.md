@@ -16,7 +16,7 @@ the protected `.claude/` copies).
 ## Task Breakdown
 
 ### Task 1: Build the shared test harness for guard, park, hand-off and interruption tests
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.2, 9.1, 10.1, 6.1, 7.1
 **Description:** Build the test-owned infrastructure from test-plan.md "Test Infrastructure → Add", except the
@@ -63,11 +63,11 @@ bodies only, so all files collect before the implementation exists.
 **Verify:** `uv run pytest -q -n auto` `uv run pytest -q tests/test_workflow_scripts.py tests/test_landing_scheduler_properties.py` `bash -n tests/fixtures/hook_inputs/capture.sh`
 **Verifies:** None
 **Acceptance:**
-- [ ] The whole existing suite still collects and stays green.
-- [ ] `_not_headless` removes `CK_RUN_HEADLESS` and `CLAUDE_CODE_ENTRYPOINT` for every test; verified by a run with
+- [x] The whole existing suite still collects and stays green.
+- [x] `_not_headless` removes `CK_RUN_HEADLESS` and `CLAUDE_CODE_ENTRYPOINT` for every test; verified by a run with
       both set in the outer environment.
-- [ ] `capture.sh` follows the test-plan procedure step by step and needs no change to run in Task 2.
-- [ ] Helpers exercise real boundaries (real git, real `bash -c`, real `execute_hook`, real `ck worktree`); no
+- [x] `capture.sh` follows the test-plan procedure step by step and needs no change to run in Task 2.
+- [x] Helpers exercise real boundaries (real git, real `bash -c`, real `execute_hook`, real `ck worktree`); no
       project code is mocked.
 **Dependencies:** None
 **Complexity:** High
