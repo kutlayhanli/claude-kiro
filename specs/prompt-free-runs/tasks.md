@@ -102,7 +102,7 @@ recorded answer to 3.4: Task 11 and Task 14 build the fallback marker only when 
 ---
 
 ### Task 3: Test the Bash pre-check and the guard seams, and update the existing guard tests
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 2.2, 4.1, 4.2, 4.3, 5.1, 5.2, 10.2
 **Properties:** P-1, P-2, P-3, P-4, P-5, P-6, P-12, P-13, P-24
@@ -137,15 +137,15 @@ test files, so this task makes them while In Progress.
 **Verify:** `uv run pytest -q -n auto tests/test_guard_bash.py tests/test_guard.py tests/test_guard_properties.py tests/test_guard_properties_hook.py tests/test_plugin_modes.py`
 **Verifies:** Task 11 (the rewritten pre-tool guard; its pure properties also cover foundation Task 10's seams)
 **Acceptance:**
-- [ ] Every delete/move verb in TC-1, including the directory forms, asks (main, `ask`), denies (main, `deny`) and
+- [x] Every delete/move verb in TC-1, including the directory forms, asks (main, `ask`), denies (main, `deny`) and
       denies (task, `ask`); the file is untouched after each call.
-- [ ] Every TC-2 in-place/script/redirect form returns `None` for both callers; TC-3 near-misses (branch-only,
+- [x] Every TC-2 in-place/script/redirect form returns `None` for both callers; TC-3 near-misses (branch-only,
       owned, real `__pycache__`, `.pytest_cache`, `find -delete` of `.pyc`) return `None`.
-- [ ] TC-71's absolute-path deletes in a claimed task worktree are denied for a task agent.
-- [ ] Generators cover every form in the P-rows; settings are deterministic; `PROPERTIES` maps every P-id here.
-- [ ] The edited existing tests now assert the new rules (task agent deny, main session pass) and fail before the
+- [x] TC-71's absolute-path deletes in a claimed task worktree are denied for a task agent.
+- [x] Generators cover every form in the P-rows; settings are deterministic; `PROPERTIES` maps every P-id here.
+- [x] The edited existing tests now assert the new rules (task agent deny, main session pass) and fail before the
       implementation for the right reason; no assertion is weakened beyond what test-plan.md lists.
-- [ ] Tests exercise the real hook and real git; no mocks of project code.
+- [x] Tests exercise the real hook and real git; no mocks of project code.
 **Dependencies:** Task 1 (guard_helpers, `_not_headless`, `claimed_task_worktree`)
 **Complexity:** High
 **Risk:** safety (oracle for blocking irreversible deletion of existing test files)
@@ -247,7 +247,7 @@ TC-53 plants a log just under `guardlog.GUARD_LOG_LIMIT`; TC-55 runs real `ck st
 ---
 
 ### Task 6: Test the hand-off of whole-spec runs to `ck run`
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.2, 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9
 **Properties:** P-19, P-20, P-31
@@ -271,15 +271,15 @@ worktree spec and taken branch refusals (both checkouts unchanged); TC-85 an ide
 **Verify:** `uv run pytest -q -n auto tests/test_handoff.py tests/test_handoff_properties.py tests/test_run.py`
 **Verifies:** Task 12 (`ck run --command`, `ck handoff`; P-19/P-20 also cover foundation Task 10's `decide_handoff`)
 **Acceptance:**
-- [ ] A whole-spec run from `.claude/worktrees/` launches from the main checkout and prints checkout, an existing
+- [x] A whole-spec run from `.claude/worktrees/` launches from the main checkout and prints checkout, an existing
       log path, follow command and report hint; the prompt never holds `--log`.
-- [ ] create/review runs get the same headless, sandboxed, prompt-free argv and refusals as implement.
-- [ ] Every launch failure, including an early child exit, prints the reason and the manual command and runs
+- [x] create/review runs get the same headless, sandboxed, prompt-free argv and refusals as implement.
+- [x] Every launch failure, including an early child exit, prints the reason and the manual command and runs
       nothing in the worktree.
-- [ ] The child's sandbox preflight never depends on this machine's bwrap/socat.
-- [ ] A spec only on the worktree's branch runs on `<spec>-run` at the worktree's HEAD; a dirty main checkout or a
+- [x] The child's sandbox preflight never depends on this machine's bwrap/socat.
+- [x] A spec only on the worktree's branch runs on `<spec>-run` at the worktree's HEAD; a dirty main checkout or a
       taken branch refuses with the recovery commands and changes nothing; an identical spec runs as before.
-- [ ] Generators cover every row form; settings are deterministic; no mocks of project code.
+- [x] Generators cover every row form; settings are deterministic; no mocks of project code.
 **Dependencies:** Task 1 (worktree_of, sleeping_fake_claude, fake_sandbox_tools)
 **Complexity:** Medium
 **Risk:** safety (launches a paid headless claude run)
@@ -287,7 +287,7 @@ worktree spec and taken branch refusals (both checkouts unchanged); TC-85 an ide
 ---
 
 ### Task 7: Test `ck worktree park`, `ck worktree resolve`, notification, report and the ladder CLI
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.1, 6.2, 6.4, 7.1, 7.2, 7.3, 7.4, 7.5, 7.8, 7.9, 7.11, 7.12
 **Properties:** P-17, P-18
@@ -314,15 +314,15 @@ all `derandomize=True, database=None`; `PROPERTIES` map.
 **Verify:** `uv run pytest -q -n auto tests/test_guard_park.py tests/test_redteam_notify.py tests/test_park_properties.py`
 **Verifies:** Task 13 (notifier, ladder CLI, park and resolve)
 **Acceptance:**
-- [ ] Exactly one notification per park, on stdin and in `CK_NOTIFY_MESSAGE`, naming spec, task and "decision",
+- [x] Exactly one notification per park, on stdin and in `CK_NOTIFY_MESSAGE`, naming spec, task and "decision",
       with no quoted text in any channel.
-- [ ] Not configured / failing / slow / missing notify commands never fail the park (exit 0, within 15 s) and are
+- [x] Not configured / failing / slow / missing notify commands never fail the park (exit 0, within 15 s) and are
       named in the output and the report.
-- [ ] Parked tasks appear only in `needsInput`; resolve clears that, keeps the answer for later attempts, and a
+- [x] Parked tasks appear only in `needsInput`; resolve clears that, keeps the answer for later attempts, and a
       re-run treats the task as unfinished with its worktree reused.
-- [ ] The ladder CLI returns the strict-above models whatever `implementer.escalate` says.
-- [ ] Inside `ck run`, the notification comes once per note from `ck run`'s process; the sandbox is not widened.
-- [ ] Tests run the real CLI, real git and a real subprocess notify command; no mocks of project code.
+- [x] The ladder CLI returns the strict-above models whatever `implementer.escalate` says.
+- [x] Inside `ck run`, the notification comes once per note from `ck run`'s process; the sandbox is not widened.
+- [x] Tests run the real CLI, real git and a real subprocess notify command; no mocks of project code.
 **Dependencies:** Task 1 (notify_script, set_notify, parking_fake_claude, fake_sandbox_tools)
 **Complexity:** Medium
 **Risk:** safety (sends the user's push notification through a configured command)
