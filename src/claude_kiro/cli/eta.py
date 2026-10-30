@@ -557,7 +557,7 @@ def eta_defaults(out_path: str, min_runs: int) -> None:
         sys.exit(1)
     path = Path(out_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(built.payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(built.payload, indent=2, sort_keys=True).replace("/", "\\u002f") + "\n", encoding="utf-8")
     click.echo(f"wrote {path} from {built.runs} runs")
 
 
