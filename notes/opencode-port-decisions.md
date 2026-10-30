@@ -200,10 +200,12 @@ Two consequences to keep in view:
   acts only on inner events; the outer one is a no-op. Throwing on the inner event blocks the edit and is
   reported to the model as the code-mode error object (spike 14).
 - Tool translation table, driven by the **inner** names and their real shapes: `edit {path, oldString,
-  newString}`→`Edit {file_path, old_string, new_string}`, `write {path, content}`→`Write`, `patch`→
-  `MultiEdit`, `shell {command, workdir?}`→`Bash` (`workdir` becomes a `cd` prefix only when it differs
-  from the session directory). `read`/`grep`/`glob`/`subagent` pass through untouched. This table gets
-  its own tests built from captured payloads — it is the most bug-prone piece of the port.
+  newString}`→`Edit {file_path, old_string, new_string}`, `write {path, content}`→`Write`,
+  `shell {command, workdir?}`→`Bash` (`workdir` becomes a `cd` prefix only when it differs from the
+  session directory). `read`/`grep`/`glob`/`subagent` pass through untouched. **`patch`/`apply_patch`
+  are refused** with a `[ck guard] use edit or write` reason: their input shape was not captured, and
+  guarding them blindly is worse than forcing a translated tool (D12's unmappable-tool rule). This
+  table gets its own tests built from captured payloads — it is the most bug-prone piece of the port.
 - Attribution: pass the OpenCode session id as `session_id` and the child's role agent as
   `agent_id`/`agent_type`, so guard-log events and role analytics land in the right bucket (shared
   mechanism with D7).
@@ -424,8 +426,9 @@ read or append to them — see finding 12). Each probe is a throwaway plugin aga
     `edit {path, oldString, newString}`, `read {path}`, `shell {command}` (no `workdir` unless set),
     plus `write {path, content}`, `patch`, `glob {pattern}`, `grep`. `MultiEdit` has no equivalent.
     → **Confirms D9a**, with the mapping table corrected: `edit`→`Edit` (field rename), `write`→`Write`,
-    `patch`→`MultiEdit`, `shell`→`Bash` (`workdir` → a `cd` prefix only when it differs from the
-    session directory).
+    `shell`→`Bash` (`workdir` → a `cd` prefix only when it differs from the session directory).
+    `patch`/`apply_patch` are refused rather than mapped; their shape was not captured, and a guarded
+    refusal is safer than an unguarded write.
 16. **`session.wait` can return before the run starts.** After `session.command`, `wait` resolved in
     3 ms with the child still idle, and the execution began afterwards. With `session.prompt` it behaved
     correctly, but that is timing, not a guarantee.
