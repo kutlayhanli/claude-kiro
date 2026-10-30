@@ -11,6 +11,7 @@ class HookRegistry:
         "post-file-ops": "claude_kiro.hooks.post_file_ops_spec_context:hook",
         "pre-tool-guard": "claude_kiro.hooks.pre_tool_guard:hook",
         "done-verify": "claude_kiro.hooks.done_verify:hook",
+        "post-bash-check": "claude_kiro.hooks.post_bash_check:hook",
         "stop-verify": "claude_kiro.hooks.stop_verify:hook",
     }
 
@@ -18,6 +19,7 @@ class HookRegistry:
         "post-file-ops": "Injects spec task context after file edits; records tasks.md edits",
         "pre-tool-guard": "Asks before tests are weakened/deleted or requirements/test plan edited mid-implementation",
         "done-verify": "Runs the task's verification gate when it is marked Done; reports a failure to Claude",
+        "post-bash-check": "Reports a Bash command that weakened or deleted an existing test (also run by done-verify)",
         "stop-verify": "Warns at the end of a turn about Done tasks that never passed the gate (runs no tests)",
     }
 

@@ -493,7 +493,7 @@ smoke plus the existing guard and gate suites.
 ---
 
 ### Task 11: Rewrite the pre-tool guard, add the post-check and the private guard log
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 2.10, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 4.1, 4.2, 4.3, 5.1, 5.2, 5.3, 5.4, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6
 **Description:** The real hook boundary (design "Existing Components to Modify", "New Components", "Pre-command
@@ -541,20 +541,30 @@ snapshot", "Guard event").
 **Verified by:** Task 4, Task 5
 Run note (2026-10-30): P-24 (`test_p24_family_names_are_the_documented_set`) reads `share.COMMAND_FAMILIES`, which Task 15 adds and Task 15 depends on this task, so it runs under Task 15's Verify, not here. Task 3 is linked to Task 15 for P-24; its other tests still run in this task's Verify above.
 **Acceptance:**
-- [ ] As a task agent, each NFR replay case gives no output; `rm` / `rm -rf tests` of existing unowned tests is
+- [x] As a task agent, each NFR replay case gives no output; `rm` / `rm -rf tests` of existing unowned tests is
       denied for a task agent and uses the configured mode for the main session, also through `cd` and by absolute
       path into a task worktree.
-- [ ] My main session inside a task worktree keeps the configured mode.
-- [ ] A weakening `sed`, script, `find -exec`, `find -delete` or `... && git commit` is caught after the command,
+- [x] My main session inside a task worktree keeps the configured mode.
+- [x] A weakening `sed`, script, `find -exec`, `find -delete` or `... && git commit` is caught after the command,
       in the project and in a task worktree, through `done-verify`; concurrent agents never lose a snapshot or
       see another agent's file; a merge bringing in the target's test change reports nothing.
-- [ ] A main-session edit removing text from requirements.md of a started spec passes; a task agent's is denied.
-- [ ] Every ask, deny and catch writes one event; a pass writes none; an unwritable log changes nothing; log terms
+- [x] A main-session edit removing text from requirements.md of a started spec passes; a task agent's is denied.
+- [x] Every ask, deny and catch writes one event; a pass writes none; an unwritable log changes nothing; log terms
       refuse a leaking export or submit.
-- [ ] Hook input with missing or unknown fields never fails the hook; every post-check failure is silent within 5 s.
+- [x] Hook input with missing or unknown fields never fails the hook; every post-check failure is silent within 5 s.
 **Dependencies:** Task 10 (calls the guard policy seams and git helpers), Task 2 (reads its capture summary to decide the marker), Task 3 (its tests are the oracle), Task 4 (its tests are the oracle), Task 5 (its tests are the oracle)
 **Complexity:** High
 **Risk:** safety (blocks deletion of existing tests, gates frozen spec edits and keeps confidential command text local)
+
+**Implementation notes (agent, 2026-10-30):**
+- Built: `analytics/guardlog.py`, `hooks/post_bash_check.py`, the rewritten `hooks/pre_tool_guard.py` (calls the Task 10 seams), `done_verify` merge, `post-bash-check` registration, leak terms at the three leak call sites. The fallback marker (`run_marker`, `ck guard`, `marker-clear`) is not built: Task 2's `capture-summary.json` has `workflowAgentHasAgentId: true`.
+- Deviation: the guard **mode** (`guard.tests|requirements|test_plan`) comes from the session's own checkout (the one `cwd` is in); test patterns, base ref and owned files come from the target's checkout. `tests/test_guard_properties_hook.py::test_p1_git_dash_c_forms` sets the mode in the main checkout and targets a task worktree whose committed config says `ask`, and expects the main checkout's mode.
+- Deviation: an unresolvable base (configured ref missing, no default branch) is "unknown" (`git_utils.base_ref(..., fallback_head=False)`), not HEAD, so TC-7 never asks. A `Write` over an unreadable test file compares against the committed content (P-10).
+- Deviation: `guard_policy.block_reason` task-agent frozen-spec text names the noun ("existing requirements|test cases cannot be changed"), because TC-26 / requirement 4.3 need "test case" in the reason; design S10 updated.
+- Review round 1: the frozen-spec check now judges `checkout / rel` (resolved: `..` and symlinks gone), not the lexical path. The Bash destroy-target check has no cap: every target is checked.
+- Outside the file list: `hooks/_shared/git_utils.py` (`set_deadline`, `find_toplevel`, `base_ref(fallback_head=)`, process-group-bounded git under a deadline), `hooks/_shared/guard_policy.py` (reason text), `cli/main.py` (an unparseable hook stdin reads as `{}` instead of exiting 1, TC-24).
+- Snapshot dedupe (`guarddedup-*`) skips a report only when the same content was reported and the file was dirty or HEAD moved before the command; a file that was clean before the command was restored since (P-21 repeats the same `sed` after a reset).
+- Open, not caused by this task (see the final report): `test_tc21_ck_run_dry_run_child_env_is_denied` and `test_tc86_handed_off_ck_run_revise_agent_is_denied_with_decision_reason` need `ck run` to set `CK_RUN_HEADLESS=1` (Task 12; `tests/test_run.py::test_dry_run_denies_destructive_git_and_credential_files` pins the env to exactly one key and must change with it). `test_tc6_guard_off_means_both_hooks_stay_silent` runs `git checkout -- .` first, which reverts the committed `specs/ck.json` and with it the `off` it just wrote. `test_tc19_ck_init_vendor_installs_the_same_set` reads `.claude/settings.json` but `ck init` writes hooks to `.claude/settings.local.json`. `test_p7_...` appends ` && git commit` after a heredoc terminator (`EOF_X && git ...`), so the heredoc never ends and the command fails. `tests_fingerprint` in `test_postcheck_properties.py` is collected as a test and errors for a missing `root` fixture.
 
 ---
 

@@ -123,6 +123,22 @@ def test_tc10_python_c_dropping_a_test_names_test_case(project, session, via):
     assert text and CALC_PATH in text and "test case" in text
 
 
+@pytest.mark.parametrize("via", VIAS)
+@pytest.mark.parametrize("spelled", ["relative", "absolute"])
+def test_tc10_script_file_naming_no_test_path_is_caught(project, session, via, spelled):
+    # design.md "Pre-command snapshot": a command naming no test path makes every test file a candidate.
+    (project / "rewrite.py").write_text(
+        "p = 'tests/test_calc.py'\n"
+        "s = open(p).read()\n"
+        "open(p, 'w').write(s.replace('    assert add(1, 2) == 3\\n', ''))\n")
+    script = "rewrite.py" if spelled == "relative" else str(project / "rewrite.py")
+    out = run_bash(project, session, f"{sys.executable} {script}", agent_id=AGENT, via=via)
+    assert out.ran and out.returncode == 0
+    assert "assert add(1, 2) == 3" not in (project / CALC_PATH).read_text()
+    text = post_message(out.post)
+    assert text and CALC_PATH in text and "[ck post-check]" in text
+
+
 # --------------------------------------------------------------------------- TC-11
 
 

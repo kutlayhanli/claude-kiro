@@ -290,6 +290,29 @@ def test_tc25_tc26_task_agent_requirement_reword_is_denied(project, session):
     assert "requirement" in reason_of(result)
 
 
+def test_tc25_tc26_redteam_dotdot_and_symlink_paths_to_frozen_spec_are_denied(project, session):
+    started(project)
+    reword = dict(old_string=REQ_OLD, new_string=REQ_OLD.replace("subtract", "subtract or return 0"))
+    dotdot = project / "specs" / "calc" / ".." / "calc" / "requirements.md"
+    result = fire(recorded("agent-tool-subagent", project, session, "Edit", file_path=str(dotdot), **reword))
+    assert decision(result) == "deny"
+    (project / "specs_link").symlink_to(project / "specs")
+    linked = project / "specs_link" / "calc" / "requirements.md"
+    result = fire(recorded("agent-tool-subagent", project, session, "Edit", file_path=str(linked), **reword))
+    assert decision(result) == "deny"
+
+
+def test_tc25_tc26_redteam_symlink_into_another_checkout_is_denied(project, session, tmp_path):
+    started(project)
+    other = tmp_path / "other-checkout"
+    git(project, "worktree", "add", "-q", "-b", "other-side", str(other))
+    (other / "r.md").symlink_to(project / "specs" / "calc" / "requirements.md")
+    reword = dict(old_string=REQ_OLD, new_string=REQ_OLD.replace("subtract", "subtract or return 0"))
+    result = fire(recorded("agent-tool-subagent", other, session, "Edit", file_path=str(other / "r.md"), **reword))
+    assert decision(result) == "deny"
+    assert "requirements.md" in reason_of(result)
+
+
 def test_tc25_tc26_task_agent_test_plan_row_deletion_is_denied(project, session):
     started(project)
     path = project / "specs/calc/test-plan.md"

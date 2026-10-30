@@ -106,7 +106,9 @@ def build_batch(plan: ExportPlan, *, machine_label: Optional[str] = None,
 
 def leak_gate(files: Sequence[PendingFile], records: Sequence[Mapping], identity: Any,
               non_ck_names: Sequence[str]) -> "leak.Gate":
-    terms = leak.build_terms(records, identity, non_ck_names)
+    from claude_kiro.analytics import guardlog
+
+    terms = leak.build_terms(records, identity, non_ck_names, guardlog.leak_terms())
     hits = leak.scan({f.rel_path: f.text for f in files}, terms)
     return leak.decide(hits)
 

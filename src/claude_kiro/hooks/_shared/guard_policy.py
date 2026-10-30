@@ -600,7 +600,8 @@ def block_reason(caller: Caller, target_kind: str, rel: str, kinds: Sequence[str
         if caller == "task_agent":
             return (
                 f"[ck guard] Denied: {rel} is the contract of a spec whose implementation has started; "
-                "existing text cannot be changed or removed by an agent (adding is allowed). Do not apply "
+                f"existing {'requirements' if target_kind == 'requirements' else 'test cases'} cannot be changed "
+                "or removed by an agent (adding is allowed). Do not apply "
                 "this change. If you are revising the spec in /spec:review, return it under \"escalated\" "
                 "as a decision for me, with the proposed text; otherwise report the conflict."
             )

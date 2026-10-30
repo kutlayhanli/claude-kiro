@@ -1,35 +1,79 @@
 """Small read-only git helpers for the gate and guard."""
 
 import hashlib
+import os
+import signal
 import subprocess
+import time
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 
+# A hook may give git a time budget: every call after the deadline fails at once, and a running one is cut short.
+_deadline: Optional[float] = None
+
+
+def set_deadline(seconds: Optional[float]) -> None:
+    """Allow git `seconds` more in this process (None lifts the limit)."""
+    global _deadline
+    _deadline = None if seconds is None else time.monotonic() + seconds
+
+
 def _git(project_dir: Path, *args: str) -> Optional[str]:
+    timeout = 30.0
+    if _deadline is not None:
+        timeout = min(timeout, _deadline - time.monotonic())
+        if timeout <= 0:
+            return None
     try:
-        result = subprocess.run(
-            ["git", *args], cwd=project_dir, capture_output=True, timeout=30
-        )
+        if _deadline is None:
+            result = subprocess.run(["git", *args], cwd=project_dir, capture_output=True, timeout=timeout)
+            code, out = result.returncode, result.stdout
+        else:
+            code, out = _run_bounded(["git", *args], project_dir, timeout)
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
-    if result.returncode != 0:
+    if code != 0:
         return None
-    return result.stdout.decode("utf-8", errors="replace")
+    return out.decode("utf-8", errors="replace")
+
+
+def _run_bounded(cmd: List[str], cwd: Path, timeout: float) -> Tuple[int, bytes]:
+    """Run `cmd`, killing its whole process group at `timeout` (a child holding the pipe cannot stall us)."""
+    proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            stdin=subprocess.DEVNULL, start_new_session=True)
+    try:
+        out, _err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            proc.kill()
+        try:
+            proc.communicate(timeout=0.5)
+        except subprocess.SubprocessError:
+            pass
+        raise
+    return proc.returncode, out
 
 
 def is_repo(project_dir: Path) -> bool:
     return _git(project_dir, "rev-parse", "--is-inside-work-tree") is not None
 
 
-def base_ref(project_dir: Path, configured: Optional[str] = None) -> Optional[str]:
-    """Commit to diff against: merge-base of HEAD with the configured or default branch."""
+def base_ref(project_dir: Path, configured: Optional[str] = None, fallback_head: bool = True) -> Optional[str]:
+    """Commit to diff against: merge-base of HEAD with the configured or default branch.
+
+    With `fallback_head` False, None when no such branch resolves (the base is unknown).
+    """
     candidates = [configured] if configured else ["origin/HEAD", "origin/main", "origin/master", "main", "master"]
     for ref in candidates:
         if ref and _git(project_dir, "rev-parse", "--verify", "--quiet", ref):
             merge_base = _git(project_dir, "merge-base", "HEAD", ref)
             if merge_base:
                 return merge_base.strip()
+    if not fallback_head:
+        return None
     head = _git(project_dir, "rev-parse", "HEAD")
     return head.strip() if head else None
 
@@ -150,3 +194,21 @@ def tree_files(project_dir: Path, ref: str, rel: str) -> Optional[List[str]]:
     """Files under `rel` on `ref` (`git ls-tree -r --name-only`); None on error."""
     out = _git(project_dir, "ls-tree", "-r", "--name-only", ref, "--", rel)
     return None if out is None else out.splitlines()
+
+
+def find_toplevel(path) -> Optional[Path]:
+    """Checkout holding `path`: the nearest ancestor directory with a `.git` entry. Starts no process."""
+    try:
+        current = Path(os.path.abspath(str(path)))
+        while not current.is_dir():
+            if current.parent == current:
+                return None
+            current = current.parent
+        while True:
+            if (current / ".git").exists():
+                return current
+            if current.parent == current:
+                return None
+            current = current.parent
+    except (OSError, ValueError):
+        return None
