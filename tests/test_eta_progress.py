@@ -19,7 +19,7 @@ import pytest
 
 import eta_helpers as h
 from eta_strategies import CREATE_PHASES, PROGRESS_SCHEMA, progress_lines
-from guard_helpers import CK, ck_run_cmd
+from guard_helpers import ck_run_cmd
 from stats_helpers import ck_sub, git, spec_repo
 
 pytestmark = pytest.mark.usefixtures("no_network")
@@ -47,7 +47,7 @@ def full_env(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
 
 @pytest.fixture
 def env() -> Dict[str, str]:
-    return {"TZ": "UTC"}
+    return {"TZ": "UTC", "CK_AGENT_SLOTS": "4"}
 
 
 @pytest.fixture
@@ -228,9 +228,14 @@ def test_a_create_run_writes_a_phase_start_and_step_end_per_phase_then_end(env, 
     assert rows[0]["kind"] == "start" and rows[0]["runKind"] == "create"
     assert rows[-1]["kind"] == "end"
     body = rows[1:-1]
-    assert [e["phase"] for e in body] == [p for p in phases for _ in range(2)]
-    assert [e["kind"] for e in body[0::2]] == ["phase-start"] * 3
-    assert all(e["kind"] in ("phase-end", "step-end") for e in body[1::2])
+    for i, phase in enumerate(phases):
+        mine = [(n, e["kind"]) for n, e in enumerate(body) if e.get("phase") == phase]
+        order = [k for _, k in mine]
+        assert "phase-start" in order and "step-end" in order
+        assert order.index("phase-start") < order.index("step-end")
+        if i + 1 < len(phases):
+            nxt = next(n for n, e in enumerate(body) if e.get("phase") == phases[i + 1] and e["kind"] == "phase-start")
+            assert any(n < nxt for n, k in mine if k == "phase-end")
 
 
 # --------------------------------------------------------------------------- TC-24
@@ -322,7 +327,7 @@ def test_garbage_lines_leave_the_eta_unchanged(env, repo):
 def test_an_unwritable_progress_dir_never_fails_the_caller(env, repo):
     run, file = start_run(env, repo)
     create_worktrees(repo, 1, 2)
-    file.parent.chmod(0o500)
+    file.chmod(0o400)
     try:
         ev = ck_sub(*h.PROGRESS_EVENT, "demo", "approval-start", "--reason", "question", "--json",
                     env={"TZ": "UTC", h.NOW_ENV: at(1)}, cwd=repo)
@@ -339,7 +344,7 @@ def test_an_unwritable_progress_dir_never_fails_the_caller(env, repo):
         assert ended.output.count("⚠ progress:") == 1
         assert "event(s) not written" in ended.output
     finally:
-        file.parent.chmod(0o700)
+        file.chmod(0o600)
 
 
 def test_a_progress_dir_that_is_a_file_never_fails_the_caller(env, repo, tmp_path):

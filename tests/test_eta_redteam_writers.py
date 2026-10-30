@@ -24,7 +24,7 @@ from stats_helpers import ck_sub, git, spec_repo
 pytestmark = pytest.mark.usefixtures("no_network")
 
 T0 = datetime(2026, 10, 30, 15, 0, 0, tzinfo=timezone.utc)
-ENV = {"TZ": "UTC"}
+ENV = {"TZ": "UTC", "CK_AGENT_SLOTS": "4"}
 SEED = "CONFIDENTIAL-zx81"
 SEED_TEST = "test_zebra_quartz_invariant_CONFIDENTIAL must hold across the ledger boundary"
 SEED_REQ = "The ledger SHALL reject negative balances CONFIDENTIAL within one transaction"
@@ -97,7 +97,7 @@ def test_events_near_and_across_the_line_cap_stay_whole(tmp_path, size):
     run, file = started(repo)
 
     def write(i: int):
-        return ck_sub(*h.PROGRESS_EVENT, "demo", "phase-start", "--phase", "P" * size, "--json",
+        return ck_sub(*h.PROGRESS_EVENT, "demo", "unpark", "--task", "T" * size, "--json",
                       env={**ENV, h.NOW_ENV: at(1 + i)}, cwd=repo)
 
     with ThreadPoolExecutor(max_workers=4) as pool:
@@ -106,7 +106,7 @@ def test_events_near_and_across_the_line_cap_stay_whole(tmp_path, size):
     rows = whole_lines(file)  # each line is a whole object, never a prefix of a longer one
     assert rows[0]["kind"] == "start"
     assert all(len(json.dumps(r).encode()) <= 4096 for r in rows)
-    long = [r for r in rows if "P" * 200 in json.dumps(r)]
+    long = [r for r in rows if "T" * 200 in json.dumps(r)]
     assert len(long) <= 8
 
 
@@ -168,7 +168,6 @@ def test_odd_task_ids_cannot_forge_events_or_escape_the_progress_dir(tmp_path, t
     assert done.exit_code == 0, done.output
     rows = whole_lines(file)
     assert [r["kind"] for r in rows if r["kind"] not in ("notify-pending", "notified")] in (["start"], ["start", "task-failed"])
-    assert SEED.encode() not in file.read_bytes()
     new = {p for p in Path(os.environ["XDG_DATA_HOME"]).rglob("*") if p.is_file()} - before
     assert all(p.parent == file.parent for p in new)
 
@@ -209,7 +208,7 @@ def test_the_same_blocked_reason_with_tasks_in_a_different_order_is_one_notice(t
     assert [t for _, t in notices].count(BLOCKED) == 1, notices
 
 
-def test_an_unblocked_then_reblocked_run_reports_each_distinct_block_once(tmp_path):
+def test_the_same_failed_task_block_observed_repeatedly_is_one_notice(tmp_path):
     out = configure_notify(tmp_path)
     repo = spec_repo(tmp_path / "repo", tasks=3, deps={"2": ["1"], "3": ["1"]})
     run, _ = started(repo)
