@@ -524,7 +524,7 @@ Settings `derandomize=True, max_examples=200, database=None, deadline=None`. Eac
 - [x] The file sets `pytestmark` with `no_network`
 **Dependencies:** Task 2 (pools, spec builder, `append_events`), Task 1 (strategies)
 **Complexity:** Medium
-**Implementation notes:** `NotifyInput` has no fixed shape yet (Task 16/18), so the test passes a duck-typed namespace carrying the likely field names (`p50_finish_min`, `waited_min`, `launch_p90_min`, `state`, `spec`); Task 18 may need to adapt `_slip_notices`, keeping every assertion. Launch p90 comes from a third `estimate` over the start event alone.
+**Implementation notes:** `NotifyInput`, `SentNotice` and `Notice` are now defined in design.md's Estimator types (the shape Task 15's tests proposed); `_slip_notices` builds exactly `decide.NotifyInput` and reads `Notice.kind`, with the hold read back from the view's `blocked`/`waitingOnYou`/`runnableDone`. The start event's `launch` is the design's `LaunchSummary` mapped from the launch view's `remainingMinutes` and `cost`. The start event carries `maxConcurrent: None` and no `model`/`modelDigest` (no snapshot is written, so the service fits from the store). About half the drawn cases are clean (acyclic, no park or failure), and the test asserts at least 5 of the 50 examples compared a non-null finish. Launch p90 comes from a third `estimate` over the start event alone.
 **Risk:** safety (asserts no spurious slip notification reaches the user's notify command)
 
 ---

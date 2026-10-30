@@ -568,6 +568,35 @@ class Hold:
     held: Tuple[str, ...]                  # parked tasks and their dependents (or the tasks a failure/cycle holds)
     waiting_on_you: Tuple[str, ...]        # parked tasks and dependents
     whole_run: bool                        # True when no open task outside `held` can still run (5.2: no runnableDone); never sends a notice (8.9, D15)
+
+@dataclass(frozen=True)
+class NotifyInput:                         # S7 input; built by the service from the fold, the hold and the view
+    spec: str
+    state: str                             # a `decide_state` (S6) value
+    p50_finish_min: Optional[float]        # minutes from launch to the finish p50; None when there is no finish
+    waited_min: float                      # closed approval-wait minutes (S12)
+    launch_p90_min: Optional[float]        # minutes from launch to the launch estimate's finish p90; None when unknown
+    hold: Hold                             # S5 result
+    cause: Optional[str]                   # latest change cause (enum-built text, S8 slip cause)
+    outcome: Optional[str]                 # the end outcome; None until the run ends
+    merged: Optional[int]; total: Optional[int]
+    wall_min: Optional[float]              # wall minutes since launch
+    usd: Optional[float]
+    now_hhmm: str                          # local HH:MM of `now`, for S8 text
+
+@dataclass(frozen=True)
+class SentNotice:                          # from `notified` / `notify-pending` events
+    kind: Literal["slip", "blocked", "done"]
+    key: str
+    level: Optional[int]                   # the slip level, else None
+
+@dataclass(frozen=True)
+class Notice:                              # S7 output, rendered by S8
+    kind: Literal["slip", "blocked", "done"]
+    level: Optional[int]                   # the slip level, else None
+    key: str                               # dedupe key: "slip", the hold's reason_key, or "done"
+    type: str                              # NOTICE_TYPES[kind]
+    source: NotifyInput                    # the input S8 renders the text from
 ```
 
 Simulation (pure). One run of `simulate_implement` uses `random.Random(seed)`. The default seed is

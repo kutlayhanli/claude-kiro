@@ -17,7 +17,6 @@ import shutil
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
 import pytest
@@ -30,7 +29,9 @@ from eta_strategies import (
     EV_END,
     EV_HAND_LANDING,
     EV_MERGE,
+    EV_PARK,
     EV_START,
+    EV_TASK_FAILED,
     events,
     graphs,
 )
@@ -147,78 +148,110 @@ def _closed_wait_minutes(evs: List[Dict[str, Any]], launch: datetime) -> float:
     return total
 
 
-def _no_hold() -> Any:
+def _view_hold(view: Dict[str, Any]) -> Any:
+    """The S5 `Hold` the service applied, read back from the view's `blocked`, `waitingOnYou` and `runnableDone`.
+
+    Only the slip rule is checked here, and S7's slip rule does not read the hold (a blocked view has no finish, so
+    no slip); the hold is passed so the input is a complete `NotifyInput`, matching the view rather than assuming none.
+    """
     from claude_kiro.eta import decide
 
-    hold_cls = getattr(decide, "Hold", None)
-    if hold_cls is not None:
-        try:
-            return hold_cls(kind="none", reason=None, reason_key=None, held=(), waiting_on_you=(), whole_run=False)
-        except TypeError:
-            pass
-    return SimpleNamespace(kind="none", reason=None, reason_key=None, held=(), waiting_on_you=(), whole_run=False)
-
-
-def _is_slip(notice: Any) -> bool:
-    """True when the notice is a slip notice, by its key or by its NOTICE_TYPES type, whatever the field is named."""
-    from claude_kiro.eta import decide
-
-    slip_type = getattr(decide, "NOTICE_TYPES", {}).get("slip")
-    for name in ("kind", "notice", "type", "notice_type", "notification_type"):
-        value = notice.get(name) if isinstance(notice, dict) else getattr(notice, name, None)
-        if value is not None and (value == "slip" or (slip_type is not None and value == slip_type)):
-            return True
-    return False
+    blocked = view.get("blocked")
+    if not blocked:
+        return decide.Hold(kind="none", reason=None, reason_key=None, held=(), waiting_on_you=(), whole_run=False)
+    return decide.Hold(kind="blocked", reason=blocked["reason"], reason_key=blocked["reason"],
+                       held=tuple(blocked["held"]), waiting_on_you=tuple(view.get("waitingOnYou") or ()),
+                       whole_run=view.get("runnableDone") is None)
 
 
 def _slip_notices(view: Dict[str, Any], evs: List[Dict[str, Any]], launch_p90_min: Optional[float],
                   spec: str = SPEC) -> List[Any]:
-    """The slip notices `decide.notify_decision` would send for this view with nothing sent before."""
+    """The slip notices `decide.notify_decision` would send for this view with nothing sent before.
+
+    Builds the design's `NotifyInput` (Estimator types) and reads the design's `Notice.kind`.
+    """
     from claude_kiro.eta import decide
 
     fin = _finish(view)
     launch = _parse(evs[0]["at"])
-    p50_min = None if fin is None else (fin["p50"] - launch).total_seconds() / 60
-    waited = _closed_wait_minutes(evs, launch)
-    ni = SimpleNamespace(
-        spec=spec, state=view["state"], p50_finish_min=p50_min, p50=p50_min, waited_min=waited, waited=waited,
-        launch_p90_min=launch_p90_min, launch_p90=launch_p90_min, hold=_no_hold(), ended=view.get("ended"),
-        view=view, kind=view.get("runKind"),
+    now = datetime.fromisoformat(view["now"]) if view.get("now") else launch
+    ended = view.get("ended")
+    cost = view.get("cost") or {}
+    ni = decide.NotifyInput(
+        spec=spec, state=view["state"],
+        p50_finish_min=None if fin is None else (fin["p50"] - launch).total_seconds() / 60,
+        waited_min=_closed_wait_minutes(evs, launch), launch_p90_min=launch_p90_min, hold=_view_hold(view),
+        cause=view.get("cause"), outcome=None if not ended else ended["outcome"],
+        merged=view.get("merged"), total=view.get("open", 0) + view.get("merged", 0) if "open" in view else None,
+        wall_min=(now - launch).total_seconds() / 60, usd=cost.get("p50"), now_hhmm=now.strftime("%H:%M"),
     )
-    return [n for n in decide.notify_decision(ni, (), THRESHOLD_MIN) if _is_slip(n)]
+    return [n for n in decide.notify_decision(ni, (), THRESHOLD_MIN) if n.kind == "slip"]
 
 
 def test_slip_helper_can_see_a_slip():
     """Guard: the helper must report a slip when one is plain, so an unexpected notice shape fails loudly here."""
     start = "2026-01-01T00:00:00Z"
-    view = {"state": "slipping", "ended": False, "runKind": "implement",
+    view = {"state": "slipping", "ended": None, "runKind": "implement", "now": "2026-01-01T03:00:00+00:00",
+            "blocked": None, "cause": "task 1 running", "open": 2, "merged": 1,
+            "cost": {"p10": None, "p50": None, "p90": None},
             "finish": {q: (_parse(start) + timedelta(minutes=m)).strftime(ISO_FMT)
                        for q, m in (("p10", 300), ("p50", 400), ("p90", 500))}}
     evs = [{"at": start, "kind": EV_START}]
     slips = _slip_notices(view, evs, launch_p90_min=100.0)
-    assert slips, "notify_decision returned no slip notice for p50 400 vs launch p90 100: notice shape unrecognised"
+    assert slips, "notify_decision returned no slip notice for p50 400 vs launch p90 100"
 
 
 def _launch_summary(view: Dict[str, Any]) -> Dict[str, Any]:
+    """The design's `LaunchSummary`, mapped from the launch `EtaView`'s own fields."""
+    rm = view.get("remainingMinutes")
+    cost = view.get("cost")
+    usd = None
+    if cost and cost.get("p10") is not None and cost.get("p90") is not None:
+        usd = [cost["p10"], cost["p90"]]
     return {"finish": [view["finish"][q] for q in ("p10", "p50", "p90")] if view.get("finish") else None,
-            "remainingMin": view.get("remainingMin"), "usd": view.get("usd"),
+            "remainingMin": None if rm is None else [rm[q] for q in ("p10", "p50", "p90")], "usd": usd,
             "confidence": view.get("confidence", "low")}
+
+
+def _acyclic(graph: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """`graph` with only deps on lower, known ids: no cycle, no self-loop, no unknown dependency."""
+    return {tid: dict(g, deps=[d for d in g["deps"] if d in graph and int(d) < int(tid)]) for tid, g in graph.items()}
 
 
 @st.composite
 def shifted_runs(draw):
+    """About half the cases are clean (acyclic, no park, no failure), so many examples compare a real finish."""
+    clean = draw(st.booleans())
     graph = draw(graphs(max_tasks=8))
-    evs = [e for e in draw(events(graph, max_events=25)) if e["kind"] != EV_END]
+    if clean:
+        graph = _acyclic(graph)
+    evs = [e for e in draw(events(graph, max_events=25)) if e["kind"] != EV_END
+           and not (clean and e["kind"] in (EV_PARK, EV_TASK_FAILED))]
     wait = draw(st.integers(1, 240))
     insert_at = draw(st.integers(1, len(evs)))           # the wait opens at the time of evs[insert_at - 1]
     since_last = draw(st.integers(0, STALE_LIMIT_MIN))   # `now` within 120 minutes of the last event (no stale run)
     return graph, evs, wait, insert_at, since_last
 
 
-@settings(derandomize=True, max_examples=50, database=None, deadline=None,
-          suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large, HealthCheck.filter_too_much])
-@given(shifted_runs())
-def test_p8_approval_wait_shifts_the_estimate(case):
+MIN_COMPARED = 5   # of the 50 examples, at least this many must compare a non-null finish
+
+
+def test_p8_approval_wait_shifts_the_estimate():
+    compared: List[int] = []
+
+    @settings(derandomize=True, max_examples=50, database=None, deadline=None,
+              suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large, HealthCheck.filter_too_much])
+    @given(shifted_runs())
+    def check(case):
+        if _p8_case(case):
+            compared.append(1)
+
+    check()
+    assert len(compared) >= MIN_COMPARED, f"only {len(compared)} examples had a finish to shift"
+
+
+def _p8_case(case) -> bool:
+    """One P-8 example. True when both views had a finish, so the shift itself was compared."""
     graph, evs, wait, insert_at, since_last = case
     root = Path(tempfile.mkdtemp(prefix="repo-", dir=_scratch()))
     try:
@@ -227,8 +260,10 @@ def test_p8_approval_wait_shifts_the_estimate(case):
                  for tid, g in graph.items()]
         repo = h.eta_spec(root / "project", tasks, spec=SPEC)
         key = "demo--20260101T000000Z-" + evs[0]["run"]
+        # `model` / `modelDigest` are left out on purpose: no `<key>.model.json` snapshot is written, so the service
+        # must fit from the record store (design: the snapshot is used only when it exists), the same for both runs.
         start0 = dict(evs[0], run=key, root=str(repo), mode="workflow", slots=int(SLOTS), slotsSource="runtime",
-                      spool=True)
+                      maxConcurrent=None, spool=True)
         launch_view = _write_view(repo, key, [start0], _parse(start0["at"]))
         launch_fin = _finish(launch_view)
         launch_p90 = None if launch_fin is None else (launch_fin["p90"] - _parse(start0["at"])).total_seconds() / 60
@@ -258,5 +293,6 @@ def test_p8_approval_wait_shifts_the_estimate(case):
         slips_a = _slip_notices(view_a, base, launch_p90)
         slips_b = _slip_notices(view_b, with_wait, launch_p90)
         assert len(slips_b) <= len(slips_a), (len(slips_a), len(slips_b))
+        return fin_a is not None
     finally:
         shutil.rmtree(root, ignore_errors=True)
