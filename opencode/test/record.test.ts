@@ -162,6 +162,23 @@ test("the writer starts partial, records agents and guard counts, and closes onc
   }
 });
 
+test("a provider throttle in a failed row increments the run throttle count", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ck-record-"));
+  try {
+    const record = writer(dir);
+    record.addAgent(
+      agentRowFromError(
+        { kind: "failed", message: "provider 429 rate limit: retryAfterMs 1000" },
+        { seq: 1, label: "task 1", phase: null, agent: "ck-worker", parentSessionID: "p" },
+      ),
+    );
+    const data = JSON.parse(readFileSync(join(dir, "record.json"), "utf8"));
+    assert.equal(data.throttles, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("headless denials are counted separately", () => {
   const dir = mkdtempSync(join(tmpdir(), "ck-record-"));
   try {

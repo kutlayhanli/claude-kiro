@@ -77,6 +77,7 @@ export interface FinishOptions {
 }
 
 const EMPTY_TOKENS: TokenUsage = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } };
+const THROTTLE_PATTERN = /\b429\b|rate.?limit|retry.?after|quota|free.?limit/i;
 
 export function packageVersion(packageRoot: string): string {
   try {
@@ -236,6 +237,9 @@ export class RunRecordWriter {
     (this.data.agents as AgentRow[]).push(row);
     if (row.attempts > 1) {
       this.data.retries = (this.data.retries as number) + (row.attempts - 1);
+    }
+    if (row.error && THROTTLE_PATTERN.test(row.error)) {
+      this.data.throttles = (this.data.throttles as number) + 1;
     }
     this.applyGuard(guardEvents);
     this.write();
