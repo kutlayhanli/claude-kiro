@@ -223,7 +223,7 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 ---
 
 ### Task 7: Test agent-mode analytics hardening (backfill guard, outcome entry, collect errors, sweep failure, red-team)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 9.1, 9.2, 9.3, 9.4, 10.1, 10.2, 10.3, 11.1, 11.2, 11.3, 11.4
 **Description:** Implement TC-62 through TC-72 and red-team cases for 9.1, 9.3 and 10.1, with the existing `stats_helpers` and the helpers of `test_stats_agents_backfill.py` / `test_stats_agents_collect.py`: `backfill_home`, `unreadable`, `needs_user`, `begin`, `backdate_manifest`.
@@ -246,13 +246,15 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 **Verify:** `uv run pytest -q -n auto tests/test_stats_followups.py tests/test_stats_followups_redteam.py` `uv run pytest -q -n auto tests/test_stats_*.py tests/test_stats_doctor.py tests/test_doctor_xdist.py`
 **Verifies:** Task 8 (analytics hardening)
 **Acceptance:**
-- [ ] Tests exercise the real `ck stats collect` subprocess, real permissions, a real store and real collect.log bytes
-- [ ] Before the fix, TC-62, TC-63, TC-64, TC-65, TC-66, TC-67 (log line), TC-69 and TC-71 fail for the missing behaviour. TC-70 and TC-72 pass before and after, as regression guards
-- [ ] No mocks or monkeypatching of project code. The audit hook only observes
-- [ ] Each red-team clause has at least three cases. Permission cases skip as root
+- [x] Tests exercise the real `ck stats collect` subprocess, real permissions, a real store and real collect.log bytes
+- [x] Before the fix, TC-62, TC-63, TC-64, TC-65, TC-66, TC-67 (log line), TC-69 and TC-71 fail for the missing behaviour. TC-70 and TC-72 pass before and after, as regression guards
+- [x] No mocks or monkeypatching of project code. The audit hook only observes
+- [x] Each red-team clause has at least three cases. Permission cases skip as root
 **Dependencies:** None
 **Complexity:** Medium
 **Risk:** normal
+
+**Implementation notes:** TC-68 asserts a non-zero exit (1 or 2) for a malformed id without `--auto`: requirement 10.3 says exit 1 "as today", but today the exit is 2 and `test_stats_agents_collect.py::test_tc23` pins 2 for the text form. TC-67 for the unknown id `ag_0a1b2c3d` already passes today (a log line exists); the bogus-id and 200-character cases fail first. The FIFO red-team case fails today by hanging (30 s timeout).
 
 ---
 
@@ -297,7 +299,7 @@ Every other `collect`, `--all`, `--agents`, backfill and doctor output stays the
 ---
 
 ### Task 9: Write the progress-file properties (reader and line builder)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.6, 3.8
 **Description:** Write properties P-14 and P-15 over the pure progress seams, so they run as soon as `claude_kiro.progress` exists.
@@ -311,11 +313,11 @@ Settings `derandomize=True, max_examples=200, database=None, deadline=None`. Dec
 **Properties:** P-14, P-15
 **Verifies:** Task 10 (`read_events`, `append`)
 **Acceptance:**
-- [ ] Generators cover every malformed-line form and every extra-key form listed in the test-plan rows
-- [ ] Settings are deterministic, and the tests call `read_events` / `append` directly, not a CLI or server
-- [ ] Before implementation they fail at import of `claude_kiro.progress` (missing behaviour)
-- [ ] No mocks of project code
-- [ ] The file sets `pytestmark` with `no_network`
+- [x] Generators cover every malformed-line form and every extra-key form listed in the test-plan rows
+- [x] Settings are deterministic, and the tests call `read_events` / `append` directly, not a CLI or server
+- [x] Before implementation they fail at import of `claude_kiro.progress` (missing behaviour)
+- [x] No mocks of project code
+- [x] The file sets `pytestmark` with `no_network`
 **Dependencies:** Task 1 (event and malformed-line strategies, kind constants)
 **Complexity:** Medium
 **Risk:** normal
@@ -406,7 +408,7 @@ Seams: `match_pool` (S1); `size_factor` (S2); `fit_size` (S3); `start_model` (S1
 ---
 
 ### Task 13: Write the simulator properties over collected history
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.5, 1.9, 2.1, 2.2, 2.4, 2.5, 4.3, 4.5
 **Description:** Write properties P-1, P-2, P-3, P-4, P-10, P-12 and P-13 in `tests/test_eta_estimate_properties.py`, calling `claude_kiro.eta.simulate.simulate_implement(graph, model, state, now_min=, n=, seed=)` / `simulate_create(...)` and `simulate.conditional_sample`, with the model from `claude_kiro.eta.history.fit_model(records, defaults)`, the state from `claude_kiro.progress.fold(events)` and `Graph` built from its documented fields.
@@ -419,12 +421,12 @@ Seams: `match_pool` (S1); `size_factor` (S2); `fit_size` (S3); `start_model` (S1
 **Properties:** P-1, P-2, P-3, P-4, P-10, P-12, P-13
 **Verifies:** Task 14 (`simulate_implement`, `simulate_create`, `conditional_sample`)
 **Acceptance:**
-- [ ] Properties call the pure seams directly with history the real collector wrote, not a server or CLI
-- [ ] Generators cover the P-rows' surface forms: duplicated deps, e far above p90, presence 0 and 1, nested and permuted subsets
-- [ ] Settings are deterministic, and every simulator call has a fixed seed
-- [ ] Before implementation they fail at import of `claude_kiro.eta.simulate` (missing behaviour)
-- [ ] No mocks of project code
-- [ ] The file sets `pytestmark` with `no_network`
+- [x] Properties call the pure seams directly with history the real collector wrote, not a server or CLI
+- [x] Generators cover the P-rows' surface forms: duplicated deps, e far above p90, presence 0 and 1, nested and permuted subsets
+- [x] Settings are deterministic, and every simulator call has a fixed seed
+- [x] Before implementation they fail at import of `claude_kiro.eta.simulate` (missing behaviour)
+- [x] No mocks of project code
+- [x] The file sets `pytestmark` with `no_network`
 **Dependencies:** Task 2 (history pools), Task 1 (strategies)
 **Complexity:** High
 **Risk:** normal
