@@ -24,7 +24,7 @@ translates OpenCode tool events into the same `ck` guard hooks. It needs Node.js
 
 ```jsonc
 // opencode.json
-{ "plugins": ["opencode-claude-kiro@0.10.3"] }
+{ "plugins": ["opencode-claude-kiro@0.11.0"] }
 ```
 
 See [`opencode/README.md`](opencode/README.md) for configuration, the native `ck-opencode-run/1`
