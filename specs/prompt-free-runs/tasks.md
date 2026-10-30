@@ -493,7 +493,7 @@ smoke plus the existing guard and gate suites.
 ---
 
 ### Task 11: Rewrite the pre-tool guard, add the post-check and the private guard log
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 2.10, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 4.1, 4.2, 4.3, 5.1, 5.2, 5.3, 5.4, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6
 **Description:** The real hook boundary (design "Existing Components to Modify", "New Components", "Pre-command

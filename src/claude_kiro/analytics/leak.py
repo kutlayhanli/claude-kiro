@@ -171,7 +171,7 @@ def _candidates(value: str) -> List[str]:
 
 
 def build_terms(records: Sequence[Mapping], identity: Optional[GitIdentity] = None,
-                non_ck_names: Sequence[str] = ()) -> TermSet:
+                non_ck_names: Sequence[str] = (), extra_terms: Sequence[str] = ()) -> TermSet:
     """S17: the confidential term set from every local record, the git identity and the non-ck workflow names."""
     found: Set[str] = set()
     ids: Set[str] = set()
@@ -202,6 +202,8 @@ def build_terms(records: Sequence[Mapping], identity: Optional[GitIdentity] = No
                 add(agent.get("agentId"), True)
     for name in non_ck_names:
         add(name)
+    for term in extra_terms:
+        add(term)
 
     # ids are kept whole, even when hex-only: they identify a run and are too long to collide by chance
     found.update(i for i in ids if len(i) >= 2 and any(ch.isalnum() for ch in i))
@@ -224,8 +226,10 @@ def _hex_terms(records: Sequence[Mapping]) -> List[str]:
 
 
 def confidential_terms(local_records: Iterable[Mapping], non_ck_names: Iterable[str] = ()) -> Set[str]:
-    """Harness Contract seam: every confidential term (lower-cased) for these records."""
-    ts = build_terms(list(local_records), GitIdentity(None, None), list(non_ck_names))
+    """Harness Contract seam: every confidential term (lower-cased) for these records and the guard log."""
+    from claude_kiro.analytics import guardlog
+
+    ts = build_terms(list(local_records), GitIdentity(None, None), list(non_ck_names), guardlog.leak_terms())
     return set(ts.strong) | set(ts.weak)
 
 

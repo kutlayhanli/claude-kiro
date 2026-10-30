@@ -57,6 +57,23 @@ def _rewritten_by_bash(cwd: Path, seen: dict, session_start: float) -> List[Path
 
 
 def hook(input_data: dict) -> Optional[dict]:
+    """The gate result for a task just marked Done, and, for Bash, the post-check finding (gate report first)."""
+    result = _gate_hook(input_data)
+    if input_data.get("tool_name") != "Bash":
+        return result
+    from claude_kiro.hooks import post_bash_check
+
+    message = post_bash_check.check(input_data)
+    if not message:
+        return result
+    if result and result.get("decision") == "block":
+        return {**result, "reason": f"{result['reason']}\n\n{message}"}
+    if result and result.get("systemMessage"):
+        return {"decision": "block", "reason": message, "systemMessage": result["systemMessage"]}
+    return {"decision": "block", "reason": message}
+
+
+def _gate_hook(input_data: dict) -> Optional[dict]:
     tool = input_data.get("tool_name", "")
     if tool not in FILE_TOOLS and tool != "Bash":
         return None
