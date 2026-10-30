@@ -6,6 +6,13 @@ allowed-tools: Read, Edit, Write, Grep, Glob, AskUserQuestion, Workflow, Agent, 
 
 Create the specification for: $ARGUMENTS
 
+## Step 0: Hand-off check
+
+Before anything else, and before choosing between the Workflow tool and agent mode, run `ck handoff create $ARGUMENTS --json` (from where you are now). It decides whether this run belongs in the main checkout instead of this isolated session, and answers with one JSON object:
+- `handoff: false`: nothing to hand off. Continue with the steps below. Its `interactive` field says whether I am at the session (true) or this is an unattended run (false).
+- `handoff: true` and `launched: true`: the run now continues in the main checkout under `ck run`. Print `command`, `mainCheckout`, `runBranch`, `follow` (how to watch the log) and `report` to me, then stop. Do nothing else.
+- `handoff: true` and `launched: false`, or the command exits non-zero or fails to run: print its `error` and the `manualCommand` it gives, then stop. Never start the run from this session after a failed hand-off.
+
 ## First: Model Check
 
 The spec written here is what every later agent builds and tests against, and the spec-create workflow's agents run on this session's model, so this should run on a strong model.

@@ -653,7 +653,7 @@ log; the sandbox settings do not change.
 ---
 
 ### Task 14: Add the ladder, parking, resolve and hand-off to the Workflow, skills and agent-mode instructions, with their vendored copies (lands by hand)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.5, 2.2, 3.4, 5.4, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.9, 7.10, 7.11, 8.1, 8.2, 8.4, 8.5, 8.6
 **Description:** Edit the packaged sources, then regenerate their vendored `.claude/` copies with `ck vendor` in the
@@ -709,18 +709,18 @@ landed by hand outside the sandbox.
 **Verify:** `node tests/js/guard_ladder.test.mjs` `node tests/js/spec_review_frozen.test.mjs` `uv run pytest -q -n auto tests/test_guard_agent_mode_docs.py tests/test_guard_ladder_properties.py tests/test_workflow_scripts.py tests/test_landing_scheduler_properties.py tests/test_stats_agents_docs.py tests/test_implement_skill_args.py tests/test_plugin.py tests/test_plugin_modes.py`
 **Verified by:** Task 8
 **Acceptance:**
-- [ ] A guard stop climbs each higher model once, spending no retry or escalate step; a gate-red or review failure
+- [x] A guard stop climbs each higher model once, spending no retry or escalate step; a gate-red or review failure
       escalates only per `implementer.escalate`.
-- [ ] Unresolved after Fable in an unattended run: parked via `ck worktree park`, independents finish, dependents do
+- [x] Unresolved after Fable in an unattended run: parked via `ck worktree park`, independents finish, dependents do
       not start, listed under `needsInput` apart from merged, failed and blocked.
-- [ ] With `interactive: true` the skill asks, records the answer with `ck worktree resolve`, waits for me to
+- [x] With `interactive: true` the skill asks, records the answer with `ck worktree resolve`, waits for me to
       confirm the change when my answer is that the test or requirement is wrong (7.11), and re-runs; every
       attempt reads the decision note first.
-- [ ] Each of the three skills runs `ck handoff` before the Workflow/agent-mode choice and stops on `handoff: true`
+- [x] Each of the three skills runs `ck handoff` before the Workflow/agent-mode choice and stops on `handoff: true`
       or an error.
-- [ ] In review mode on a started spec, a fix to existing requirements.md / test-plan.md text lands in
+- [x] In review mode on a started spec, a fix to existing requirements.md / test-plan.md text lands in
       `openQuestions`, never in the files.
-- [ ] `test_dogfood_copies_in_this_repo_match_the_plugin_source` passes and `ck vendor --dry-run` reports nothing.
+- [x] `test_dogfood_copies_in_this_repo_match_the_plugin_source` passes and `ck vendor --dry-run` reports nothing.
 **Dependencies:** Task 8 (its tests are the oracle), Task 12 (the skills call `ck handoff`), Task 13 (the instructions call `ck agents --guard-ladder`, `ck worktree park` and `ck worktree resolve`), Task 11 (the skills call `ck guard workflow-begin|end` when the marker is built), Task 2 (reads its capture summary to decide the marker steps)
 **Complexity:** High
 **Risk:** safety (triggers push notifications and paid model escalations up to Fable)

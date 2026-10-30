@@ -34,6 +34,8 @@ export const meta = {
 //                                          //   orchestrator: plan, merge, gate and re-check steps; resolver: merge conflicts
 //                                          //   ("inherit" = the session's). Absent: every agent inherits, no review.
 //   model: null, effort: null,             // one-run override for every code-writing agent (task, retry, fix)
+//   interactive: false,                    // true when I am at the session (ck handoff "interactive"): a task still guard-stopped after
+//                                          //   the top of the guard ladder is listed in needsInput with action 'ask' and not parked
 //   brief: '/abs/plugin/resources/spec-implement-brief.md',  // the task agents' brief (the plugin passes
 //                                          //   ${CLAUDE_PLUGIN_ROOT}/resources/...); relative paths resolve against root;
 //                                          //   absent: <root>/.claude/workflows/spec-implement-brief.md (vendored projects)
@@ -63,6 +65,7 @@ const CONTINUE = A.onFailure !== 'halt'
 const MAX_CONCURRENT = A.maxConcurrent && A.maxConcurrent > 0 ? A.maxConcurrent : Infinity
 const FULL_EVERY = Number.isInteger(A.fullGateEvery) ? A.fullGateEvery : 10
 const MERGE_BATCH = Number.isInteger(A.mergeBatch) && A.mergeBatch > 0 ? A.mergeBatch : 4
+const INTERACTIVE = A.interactive === true
 const BRIEF = !A.brief
   ? `${ROOT}/.claude/workflows/spec-implement-brief.md`
   : String(A.brief).startsWith('/') ? String(A.brief) : `${ROOT}/${String(A.brief).replace(/^\.\//, '')}`
@@ -221,6 +224,12 @@ const RESULT = {
       properties: { state: { type: 'string' }, detail: { type: 'string' } },
     },
     blocker: { type: 'string' },
+    guardStop: {
+      type: 'object',
+      description: 'only when a guard denial or post-check message stopped you: the file, its kind, the test and the requirement, quoted',
+      properties: { file: { type: 'string' }, kind: { type: 'string' }, test: { type: 'string' }, requirement: { type: 'string' } },
+      required: ['file'],
+    },
     deviations: { type: 'string' },
     wrongTests: { type: 'string' },
     outsideFiles: { type: 'string' },
@@ -228,6 +237,16 @@ const RESULT = {
     finishedAt: { type: 'string', description: `output of "${NOW}" when you finished` },
   },
   required: ['task', 'status', 'gatePassed', 'summary', 'commits'],
+}
+const PARKED = {
+  type: 'object',
+  properties: {
+    parked: { type: 'boolean' },
+    notification: { type: 'string', description: 'sent, not_configured, failed, deferred or skipped, as printed' },
+    detail: { type: 'string' },
+    error: { type: 'string', description: 'only if the command failed or printed no JSON: what happened' },
+  },
+  required: ['parked'],
 }
 const LAND = {
   type: 'object',
@@ -334,7 +353,14 @@ const HANDOFF = n => `${WT(n)}.handoff.md`
 const WRITE_HANDOFF = n => `If you finish without a passing gate, or with a reviewer's blocking finding unresolved, first write a handoff note to ${HANDOFF(n)} for the next agent (possibly a bigger model): what the task needs, what you tried and why it failed (exact error text), the state of the branch, and what you would do next. Overwrite any older note.`
 const READ_HANDOFF = n => `Before anything else, read ${HANDOFF(n)} if it exists: the previous agent's handoff note.`
 
-const taskPrompt = n => `${MANDATE}Your task: Task ${n} of spec ${SPEC}${TITLES[n] ? ` ("${TITLES[n]}")` : ''}.
+// A guard stop: a hook denied a change to a test, or the post-check caught one. The ladder (guardLadder) retries
+// the task on each higher model once; unresolved after the top, the task is parked (or asked about, if interactive).
+const GUARD_NOTE = 'If a hook denies a command or edit with a "[ck guard]" message, or a "[ck post-check]" message says a test was changed, weakened or deleted: keep the test as it is, or restore it from the base branch if it was already changed, and never work around the denial (another tool, another path, a different command). Never run "ck guard". Stop, leave the task In Progress, and return status blocked with guardStop {file, kind, test, requirement}: the file, its kind (test, requirements, test_plan or other), the test quoted exactly as the denial names it, and the requirement it verifies quoted from specs. A bigger model will then try the task, or I will decide.'
+// My answer to a parked guard conflict, kept by `ck worktree resolve`. Every attempt reads it before anything else.
+const DECISION = n => `${WT(n)}.decision.md`
+const READ_DECISION = n => `Before anything else, read ${DECISION(n)} if it exists: my decision on this task's guard conflict. Follow it.\n`
+
+const taskPrompt = n => `${MANDATE}${READ_DECISION(n)}Your task: Task ${n} of spec ${SPEC}${TITLES[n] ? ` ("${TITLES[n]}")` : ''}.
 Worktree: ${WT(n)} (branch ${BR(n)}). Target branch for the final merge: ${INTO}.
 First run "${NOW}" and keep the output as startedAt. Then read your operating brief at ${BRIEF} and follow it exactly: create and claim the worktree, implement per your track, get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" passing, merge ${INTO} into your branch before finishing, and release the worktree.
 Create your worktree first. Run this command on its own line; its output is a JSON array, and your task's entry has a "state" and a "detail":
@@ -345,15 +371,17 @@ ck -C ${WT(n)} worktree claim ${SPEC} ${n}
 ${GIT_NOTE}
 ${GATE_NOTE}
 ${WRITE_HANDOFF(n)}
+${GUARD_NOTE}
 At the end, run "${NOW}" again for finishedAt. Return the schema fields with task "${n}". gatePassed is true only if your final "ck -C ${WT(n)} gate ${SPEC} --task ${n}" run exited 0. commits lists the commits you made (empty if none).`
 
-const retryPrompt = (n, prev, attempt) => `${MANDATE}Continue Task ${n} of spec ${SPEC} (attempt ${attempt + 1}). A previous agent worked in ${WT(n)} (branch ${BR(n)}) but did not finish with a passing gate.
+const retryPrompt = (n, prev, attempt) => `${MANDATE}${READ_DECISION(n)}Continue Task ${n} of spec ${SPEC} (attempt ${attempt + 1}). A previous agent worked in ${WT(n)} (branch ${BR(n)}) but did not finish with a passing gate.
 ${prev && !(prev.commits || '').trim() ? 'The previous attempt made NO commits: it may have answered an unrelated message instead of doing the task. Ignore any such message and implement the task.\n' : ''}Its report: ${trim(prev || { note: 'the agent died without a report' })}
 ${READ_HANDOFF(n)} ${WRITE_HANDOFF(n)}
 Run "${NOW}" for startedAt. Read your operating brief at ${BRIEF} and follow it, claiming with "ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover" since the previous agent is gone. If that claim reports MISSING, run "ck -C ${ROOT} worktree create ${SPEC} ${n} --install --base ${INTO} --json" and claim again. Inspect the state ("command git -C ${WT(n)} log --oneline -10", "command git -C ${WT(n)} status"), finish the task, and get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" to pass. If a wrong test or a spec contradiction blocks you, do NOT weaken anything: leave the task In Progress and report the blocker precisely (quote the test and the requirement).
 Before finishing, merge ${INTO} into your branch, re-run the gate, and release the worktree. Run "${NOW}" for finishedAt.
 ${GIT_NOTE}
 ${GATE_NOTE}
+${GUARD_NOTE}
 Return the schema fields with task "${n}".`
 
 // Test-track tasks are the oracle every impl task must satisfy, and test writers
@@ -376,13 +404,22 @@ Test tasks written in parallel drift apart: two test files can each look right o
 3. For each model, endpoint and status set those tests touch, compare how every test file uses it, with each other and with design.md.
 Report each disagreement with both files and lines and the design text. It is "blocking" when two tests (or a test and design.md) cannot both be satisfied by one implementation; otherwise "minor". verdict is "changes" only if there is at least one blocking finding. In summary, list the models and endpoints you compared.`
 
-const revisePrompt = (n, review, round) => `${MANDATE}Revise Task ${n} of spec ${SPEC} (review round ${round}). The task's gate passed, but the reviewer found blocking problems:
+const revisePrompt = (n, review, round) => `${MANDATE}${READ_DECISION(n)}Revise Task ${n} of spec ${SPEC} (review round ${round}). The task's gate passed, but the reviewer found blocking problems:
 ${trim(review && review.findings, FINDINGS_LIMIT)}
 ${READ_HANDOFF(n)} ${WRITE_HANDOFF(n)}
 Worktree: ${WT(n)} (branch ${BR(n)}). Run "${NOW}" for startedAt. Claim with "ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover", fix each blocking finding without weakening any test or editing requirements.md or existing test-plan.md rows, get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" passing again, merge ${INTO} into your branch, re-run the gate, and release the worktree. If a finding is wrong (it contradicts the spec), do not change the code for it: say why in deviations. Run "${NOW}" for finishedAt.
 ${GIT_NOTE}
 ${GATE_NOTE}
+${GUARD_NOTE}
 Return the schema fields with task "${n}".`
+
+// Parking: one `ck worktree park` call. The note carries the quotes; the notification never does.
+const parkPrompt = (n, stop, decision) => `Parking step for Task ${n} of spec ${SPEC}: run ONE command and copy its JSON output. Nothing else: no other commands, no edits. ${GIT_NOTE}
+Command: "ck worktree park ${SPEC} ${n} --json", run in ${ROOT} and with the note on standard input (a here-document, never a pipe), so write it as:
+ck -C ${ROOT} worktree park ${SPEC} ${n} --json <<'CK_PARK'
+${JSON.stringify({ file: stop.file, kind: stop.kind || 'test', test: stop.test || '', requirement: stop.requirement || '', decision })}
+CK_PARK
+Copy "parked", "notification" and "detail" exactly as printed. A non-zero exit is a failure: put what it printed in error.`
 
 // Landing is one ck command: it prechecks with git merge-tree, merges the batch,
 // gates it in-process, and bisects a red batch by itself. The agent only runs it.
@@ -573,6 +610,32 @@ function worktreeOutcome(result) {
   return proceed
 }
 
+// The guard ladder (S17): the models of sonnet, opus, fable ranked above the attempted model, in order. An
+// inherited or unknown model gives all three, fable gives none. A mirror of agents.guard_ladder; it ignores
+// implementer.escalate.
+function guardLadder(attemptedModel) {
+  const ladder = ['sonnet', 'opus', 'fable']
+  const families = ['haiku', 'sonnet', 'opus', 'fable']
+  const text = typeof attemptedModel === 'string' ? attemptedModel.toLowerCase() : ''
+  const family = families.find(f => text.includes(f))
+  if (!family) return ladder
+  return ladder.filter(m => families.indexOf(m) > families.indexOf(family))
+}
+
+// S18: the guard stop in a task agent's result, or null. A passing result is never a guard stop.
+function guardStopOf(result) {
+  if (!result || typeof result !== 'object') return null
+  if (result.status === 'done' && result.gatePassed === true) return null
+  const stop = result.guardStop
+  if (!stop || typeof stop !== 'object' || Array.isArray(stop)) return null
+  return typeof stop.file === 'string' && stop.file.trim() ? stop : null
+}
+
+// S19: what happens to a task still guard-stopped after the top of the ladder.
+function parkAction({ interactive } = {}) {
+  return interactive ? 'ask' : 'park'
+}
+
 // --- end decisions ---
 
 // --- scheduler ---------------------------------------------------------------
@@ -583,6 +646,7 @@ const running = new Map()    // task -> promise of its record
 const working = new Set()
 const records = {}           // task -> record
 const failed = new Map()     // task -> reason
+const parked = new Map()     // task -> needsInput entry: guard-stopped through the ladder; not failed, never retried, dependents wait
 const mergedInRun = new Set()  // tasks this run landed: they stay Done whatever a plan snapshot says (1.6)
 let stopLaunching = false
 let stopReason = null
@@ -694,7 +758,7 @@ let queuedTrigger = null    // a trigger that arrived while one was in flight: o
 let idleArmed = true
 let recordSeq = 0           // task records seen so far: a landing plan disarms the idle plan only if none arrived while it ran
 let deferring = false
-const excluded = () => new Set([...running.keys(), ...failed.keys(), ...mergedInRun])
+const excluded = () => new Set([...running.keys(), ...failed.keys(), ...parked.keys(), ...mergedInRun])
 function planContext() {
   const exclude = excluded()
   const ready = SCRIPT_READINESS ? readyTasks({ order: view.order, deps: view.deps, done: view.done, exclude, blocked: blockedOf(view) }) : []
@@ -787,7 +851,10 @@ function finishTask(n, rec) {
   recordSeq++
   maybeCrossTest(n)
   if (!rec.ok) idleArmed = true  // a merged task was already followed by its landing plan; a failed one may change what is ready
-  if (!rec.ok) {
+  if (!rec.ok && rec.needsInput) {
+    parked.set(n, rec.needsInput)  // listed apart from failed; never triggers onFailure: halt
+    log(`Task ${n}: needs input (${rec.needsInput.action}); independent tasks continue, its dependents wait`)
+  } else if (!rec.ok) {
     failed.set(n, rec.reason)
     log(`Task ${n}: not merged (${rec.reason})`)
     if (!CONTINUE && !rec.busy) { stopLaunching = true; stopReason = stopReason || `Task ${n} failed` }
@@ -981,6 +1048,59 @@ async function runTask(n) {
   }
   try {
     let r = await call('task', taskPrompt(n), { label: label(n), phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
+    let lastModel = codeOpts(n).model
+    let stop = guardStopOf(r)   // set after every call; a guard stop leaves the retry, escalate and revise loops at once
+    let guardK = 0
+    const triedGuard = new Set()
+    // Climb the guard ladder (S17) from the model that stopped: each higher model once, at the role's effort, no
+    // retry or escalate step spent. Returns the last result; `stop` stays set if the top of the ladder stopped too.
+    const climbGuard = async attempted => {
+      for (const model of guardLadder(attempted)) {
+        if (triedGuard.has(model)) continue
+        triedGuard.add(model)
+        guardK++
+        log(`Task ${n}: guard stop, trying ${model} (guard ${guardK})`)
+        r = await call('task', retryPrompt(n, r, rec.attempts), { label: `${label(n)} guard ${guardK} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
+        rec.attempts++
+        rec.escalations.push({ stage: 'guard', model })
+        rec.startedAt = rec.startedAt || (r && r.startedAt)
+        lastModel = model
+        stop = guardStopOf(r)
+        if (!stop) break
+      }
+      return r
+    }
+    // Still guard-stopped through the top of the ladder: park it (unattended) or list it for me to decide (interactive).
+    const needInput = async () => {
+      const action = parkAction({ interactive: INTERACTIVE })
+      const entry = {
+        task: n,
+        file: stop.file,
+        kind: stop.kind || 'test',
+        test: stop.test || '',
+        requirement: stop.requirement || '',
+        decision: `Is ${stop.test || stop.file} wrong${stop.requirement ? ` (requirement ${stop.requirement})` : ''}, or must the implementation change? Change the test or requirement yourself from the main session, or tell the agent to keep it as is.`,
+        action,
+        notification: null,
+        escalatedTo: rec.escalations.filter(e => e.stage === 'guard').map(e => e.model),
+      }
+      rec.result = r
+      rec.finishedAt = r && r.finishedAt
+      releaseSlot(n)
+      if (action === 'park') {
+        let p = null
+        try { p = await call('park', parkPrompt(n, stop, entry.decision), { label: `park ${n}`, phase: phaseOf(n), schema: PARKED, ...LOW }) } catch (e) { p = { parked: false, error: e && e.message } }
+        entry.notification = p && p.notification ? p.notification : 'failed'
+        entry.notificationDetail = (p && (p.detail || p.error)) || ''
+        if (!p || p.parked === false) {
+          entry.notification = 'failed'
+          entry.notificationDetail = (p && (p.error || p.detail)) || 'the park step returned nothing'
+        } else rec.parked = true
+      }
+      rec.needsInput = entry
+      rec.reason = `needs input: ${stop.test || stop.file}`
+      return rec
+    }
     rec.attempts = 1
     rec.startedAt = r && r.startedAt
     // The task agent creates its own worktree first: a busy or failed creation ends the task here (2.3, 2.4).
@@ -993,19 +1113,31 @@ async function runTask(n) {
       releaseSlot(n)
       return rec
     }
-    while (!ok(r) && rec.attempts <= MAX_RETRIES && !busy(r)) {
-      log(`Task ${n}: ${r && !(r.commits || '').trim() ? 'no commits' : 'gate not passed'}, retry ${rec.attempts}/${MAX_RETRIES}`)
-      r = await call('task', retryPrompt(n, r, rec.attempts), { label: `${label(n)} retry ${rec.attempts}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
-      rec.attempts++
-      rec.startedAt = rec.startedAt || (r && r.startedAt)
-    }
-    for (const model of ladderOf(n)) {
+    let escIdx = 0
+    const rungs = ladderOf(n)
+    for (;;) {
+      while (!ok(r) && !stop && rec.attempts <= MAX_RETRIES && !busy(r)) {
+        log(`Task ${n}: ${r && !(r.commits || '').trim() ? 'no commits' : 'gate not passed'}, retry ${rec.attempts}/${MAX_RETRIES}`)
+        r = await call('task', retryPrompt(n, r, rec.attempts), { label: `${label(n)} retry ${rec.attempts}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
+        rec.attempts++
+        lastModel = codeOpts(n).model
+        stop = guardStopOf(r)
+        rec.startedAt = rec.startedAt || (r && r.startedAt)
+      }
+      while (escIdx < rungs.length && !ok(r) && !stop && !busy(r)) {
+        const model = rungs[escIdx++]
+        log(`Task ${n}: still failing after ${rec.attempts} attempt(s), escalating to ${model}`)
+        r = await call('task', retryPrompt(n, r, rec.attempts), { label: `${label(n)} retry ${rec.attempts} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
+        rec.attempts++
+        rec.escalations.push({ stage: 'retry', model })
+        lastModel = model
+        stop = guardStopOf(r)
+        rec.startedAt = rec.startedAt || (r && r.startedAt)
+      }
+      if (!stop) break
+      await climbGuard(lastModel)
+      if (stop) return await needInput()
       if (ok(r) || busy(r)) break
-      log(`Task ${n}: still failing after ${rec.attempts} attempt(s), escalating to ${model}`)
-      r = await call('task', retryPrompt(n, r, rec.attempts), { label: `${label(n)} retry ${rec.attempts} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
-      rec.attempts++
-      rec.escalations.push({ stage: 'retry', model })
-      rec.startedAt = rec.startedAt || (r && r.startedAt)
     }
     if (!ok(r) && busy(r)) {
       const bo = worktreeOutcome(r)
@@ -1016,21 +1148,28 @@ async function runTask(n) {
     if (ok(r) && REVIEW_ON) {
       let review = await call('review', reviewPrompt(n, r), { label: `review ${n}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
       let round = 0
+      // A revision that guard-stops climbs the ladder before the review goes on.
+      const revised = async (prompt, lbl, opts, model) => {
+        working.add(n)  // a revision takes a slot but never waits for one: the task is nearly done
+        r = await call('revise', prompt, { label: lbl, phase: phaseOf(n), schema: RESULT, ...opts })
+        lastModel = model
+        stop = guardStopOf(r)
+        if (stop) await climbGuard(lastModel)
+        releaseSlot(n)
+      }
       while (review && review.verdict === 'changes' && round < REVIEW_ROUNDS && ok(r)) {
         round++
         log(`Task ${n}: reviewer asked for changes, revision ${round}/${REVIEW_ROUNDS}`)
-        working.add(n)  // a revision takes a slot but never waits for one: the task is nearly done
-        r = await call('revise', revisePrompt(n, review, round), { label: `${label(n)} revise ${round}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
-        releaseSlot(n)
+        await revised(revisePrompt(n, review, round), `${label(n)} revise ${round}`, codeOpts(n), codeOpts(n).model)
+        if (stop) return await needInput()
         if (ok(r)) review = await call('review', reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
       }
       for (const model of ladderOf(n)) {
         if (!(review && review.verdict === 'changes' && ok(r))) break
         round++
         log(`Task ${n}: blocking findings remain, escalating the revision to ${model}`)
-        working.add(n)
-        r = await call('revise', revisePrompt(n, review, round), { label: `${label(n)} revise ${round} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
-        releaseSlot(n)
+        await revised(revisePrompt(n, review, round), `${label(n)} revise ${round} (${model})`, escalated(codeOpts(n), model), model)
+        if (stop) return await needInput()
         rec.escalations.push({ stage: 'revise', model })
         if (ok(r)) review = await call('review', reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
       }
@@ -1137,6 +1276,7 @@ const taskReport = Object.values(records).map(r => ({
   fixedAfterMerge: !!r.fixes,
   review: r.review,
   escalations: r.escalations || [],
+  parked: !!r.parked,
   riskTag: r.riskTag || (isSafety(r.task) ? 'safety' : 'normal'),
   startModel: r.startModel || null,
   reviewModel: r.reviewModel || null,
@@ -1167,6 +1307,7 @@ const REPORT = {
     done: { type: 'array', items: { type: 'object', properties: { task: { type: 'string' } }, required: ['task'] } },
     failed: { type: 'array', items: { type: 'object', properties: { task: { type: 'string' }, branch: { type: 'string' }, ahead: { type: 'number' }, claim: { type: 'string' } }, required: ['task'] } },
     blocked: { type: 'array', items: { type: 'object', properties: { task: { type: 'string' }, on: { type: 'array', items: { type: 'string' } } }, required: ['task', 'on'] } },
+    needsInput: { type: 'array', items: { type: 'object', properties: { task: { type: 'string' } }, required: ['task'] } },
     unstarted: { type: 'array', items: { type: 'object', properties: { task: { type: 'string' } }, required: ['task'] } },
     error: { type: 'string', description: 'only if the command printed no JSON (or was refused): what happened' },
   },
@@ -1174,7 +1315,7 @@ const REPORT = {
 }
 const reportPrompt = () => `Report step for spec ${SPEC}: run ONE command and copy its JSON output. Nothing else: no other commands, no edits. ${GIT_NOTE}
 Command:  ck -C ${ROOT} worktree report ${SPEC} --into ${INTO} --json
-Copy "head", "merged" (task, commit, mergedAt), "done", "failed" (task, branch, ahead, claim), "blocked" (task, on) and "unstarted" exactly as printed, every entry. Put a message in error only if the command printed no JSON (say what it printed, or that it was refused).`
+Copy "head", "merged" (task, commit, mergedAt), "done", "failed" (task, branch, ahead, claim), "blocked" (task, on), "needsInput" (task; leave it empty if the output has none) and "unstarted" exactly as printed, every entry. Put a message in error only if the command printed no JSON (say what it printed, or that it was refused).`
 phase('Report')
 let gitReport = null
 try { gitReport = await call('report', reportPrompt(), { label: 'report', phase: 'Report', schema: REPORT, ...LOW }) } catch (e) { gitReport = { error: e && e.message } }
@@ -1183,6 +1324,12 @@ const fromGit = !!gitReport && !gitReport.error && GIT_LISTS.every(k => Array.is
 const ids = list => (list || []).map(e => taskId(e && typeof e === 'object' ? e.task : e))
 const byNum = (a, b) => (Number(a) - Number(b)) || String(a).localeCompare(String(b))
 const startDone = new Set((initialPlan.done || []).map(taskId))
+// Tasks that need my input (guard-stopped through the ladder, parked or asked about) are listed apart from
+// merged, failed and blocked, whatever else the git report says about them (7.5).
+const needsInputIds = new Set([...parked.keys(), ...(fromGit ? ids(gitReport.needsInput) : [])].map(taskId))
+const needsInput = [...parked.values()].map(e => ({ ...e, task: taskId(e.task) }))
+for (const t of needsInputIds) if (!needsInput.some(e => e.task === t)) needsInput.push({ task: t, file: '', kind: '', test: '', requirement: '', decision: 'see the park note (ck worktree report)', action: 'park', notification: null })
+needsInput.sort((a, b) => byNum(a.task, b.task))
 const agentFailed = new Map([...failed.entries()].map(([t, r]) => [taskId(t), r]))
 let merged, failedList, notStarted, blocked = [], readyLeft = null
 if (fromGit) {
@@ -1194,7 +1341,7 @@ if (fromGit) {
     agentFailed.delete(t)
   }
   const gitFailed = new Map((gitReport.failed || []).map(e => [taskId(e.task), e]))
-  const failedTasks = [...new Set([...agentFailed.keys(), ...gitFailed.keys()])].filter(n => !landed.has(n))
+  const failedTasks = [...new Set([...agentFailed.keys(), ...gitFailed.keys()])].filter(n => !landed.has(n) && !needsInputIds.has(n))
   failedList = failedTasks.map(task => {
     const g = gitFailed.get(task)
     const reason = agentFailed.get(task) || `${g.ahead || 'some'} commit(s) on ${g.branch || BR(task)} never landed${g.claim ? `; claimed: ${g.claim}` : ''}`
@@ -1202,13 +1349,13 @@ if (fromGit) {
   })
   const failedSet = new Set(failedTasks)
   blocked = (gitReport.blocked || []).map(e => ({ task: taskId(e.task), on: ids(e.on) })).filter(b => !failedSet.has(b.task))
-  readyLeft = ids(gitReport.unstarted).filter(n => !failedSet.has(n))
+  readyLeft = ids(gitReport.unstarted).filter(n => !failedSet.has(n) && !needsInputIds.has(n))
   notStarted = [...readyLeft, ...blocked.map(b => b.task)].sort(byNum)
 } else {
   log(`Report: no usable git report (${(gitReport && gitReport.error && String(gitReport.error).slice(0, 300)) || 'no result'}); using the agents' results`)
   merged = taskReport.filter(t => t.ok).map(t => t.task)
   const mergedSet = new Set(merged)
-  failedList = [...agentFailed.entries()].filter(([t]) => !mergedSet.has(t)).map(([task, reason]) => ({ task, reason }))
+  failedList = [...agentFailed.entries()].filter(([t]) => !mergedSet.has(t) && !needsInputIds.has(t)).map(([task, reason]) => ({ task, reason }))
   const failedSet = new Set(failedList.map(f => f.task))
   notStarted = (current.remaining || []).map(taskId).filter(n => !records[n] && !running.has(n) && !mergedSet.has(n) && !failedSet.has(n))
 }
@@ -1220,8 +1367,17 @@ for (const b of blocked) for (const r of new Set(rootsOf(b.task))) roots.set(r, 
 const failedReason = new Map(failedList.map(f => [f.task, f.reason]))
 const why = t => failedReason.get(t) || (readyLeft && readyLeft.includes(t) ? 'ready but not started' : 'not Done on the target')
 const blockedOn = fromGit
-  ? [...roots.entries()].sort((a, b) => byNum(a[0], b[0])).map(([task, blocks]) => ({ task, reason: why(task), blocks: blocks.sort(byNum) }))
+  ? [...roots.entries()].filter(([task]) => !needsInputIds.has(task)).sort((a, b) => byNum(a[0], b[0])).map(([task, blocks]) => ({ task, reason: why(task), blocks: blocks.sort(byNum) }))
   : failedList.map(f => ({ task: f.task, reason: f.reason, blocks: [] }))
+// Notification status of the parks (7.3, 7.4): a missing or failed notification never stops the run.
+const NOTIFY_HINT = 'no notification command is set: set one once per machine with: ck agents set run.notify_command "<command>"'
+const notifications = { sent: 0, failed: [], notConfigured: false, hint: null }
+for (const e of needsInput) {
+  if (e.action !== 'park') continue
+  if (e.notification === 'sent') notifications.sent++
+  else if (e.notification === 'not_configured') { notifications.notConfigured = true; notifications.hint = NOTIFY_HINT }
+  else if (e.notification === 'failed') notifications.failed.push({ task: e.task, detail: e.notificationDetail || '' })
+}
 // Outcome: "complete" (nothing left), "blocked" (nothing left that can start: a clean stop with
 // what it waits on), or "halted" (a red target, a halt on failure, or a failed plan step that
 // left a ready task unstarted). A failed plan step with nothing ready left is not a halt.
@@ -1231,13 +1387,14 @@ const planFailed = stopReason === PLAN_FAILED
 if (redTarget) outcome = 'halted'
 else if (stopReason && !planFailed && notStarted.length) outcome = 'halted'
 else if (planFailed && (!fromGit || readyLeft.length)) outcome = 'halted'
-else if (notStarted.length || failedList.length) {
+else if (notStarted.length || failedList.length || needsInput.length) {
   outcome = 'blocked'
   if (planFailed) log('A planning step failed, but every remaining task was blocked anyway: nothing was left to start')
   const top = blockedOn.length ? blockedOn : failedList
+  const waiting = needsInput.length ? `needs input: ${needsInput.map(e => `Task ${e.task}`).join(', ')}` : ''
   reason = top.length
-    ? `blocked on: ${top.map(b => `Task ${b.task} (${String(b.reason).slice(0, 300)})`).join('; ')}`
-    : `not started: ${notStarted.map(n => `Task ${n}`).join(', ')}`
+    ? `blocked on: ${top.map(b => `Task ${b.task} (${String(b.reason).slice(0, 300)})`).join('; ')}${waiting ? `; ${waiting}` : ''}`
+    : waiting || `not started: ${notStarted.map(n => `Task ${n}`).join(', ')}`
 } else if (planFailed) reason = null
 if (outcome === 'blocked') log(reason)
 
@@ -1256,6 +1413,8 @@ return {
   notStarted,
   blocked,
   blockedOn,
+  needsInput,
+  notifications,
   escalated: taskReport.filter(t => t.escalations.length).map(t => ({ task: t.task, models: t.escalations.map(e => e.model), ok: t.ok })),
   fixerEscalations,
   timing: {

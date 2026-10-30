@@ -1,7 +1,7 @@
 ---
 description: Implement a spec task, or a whole spec as a workflow (each task starts when its dependencies merge)
 argument-hint: [spec-name | task-number] [--model M] [--effort E] [--test-model M] [--review-model M] [--no-review] [--escalate M,M] [--no-workflow]
-allowed-tools: Read, Write, Edit, Grep, Glob, Bash, TodoWrite, Workflow, Agent, SendMessage, TaskCreate, TaskUpdate
+allowed-tools: Read, Write, Edit, Grep, Glob, Bash, TodoWrite, Workflow, Agent, SendMessage, AskUserQuestion, TaskCreate, TaskUpdate
 ---
 
 Implement: $ARGUMENTS
@@ -10,6 +10,13 @@ Implement: $ARGUMENTS
 
 - **A task number** (for example `/spec:implement 3` or `/spec:implement auth 3`): implement that one task yourself, following the Implementation Guidelines below.
 - **A spec with no task number** (for example `/spec:implement auth`, `/spec:implement auth all`, `/spec:implement auth in parallel`): run the whole spec as the `spec-implement` workflow. Tasks start as soon as their dependencies merge. That's the default for a spec. Running this command for a whole spec is my opt-in to the multi-agent workflow; don't ask me before each task.
+
+## Step 0: Hand-off check (whole spec)
+
+Before anything else, and before choosing between the Workflow tool and agent mode, run `ck handoff implement $ARGUMENTS --json` (from where you are now). Only a whole-spec run hands off: the single-task path has no hand-off, so for `/spec:implement 3` or `/spec:implement auth 3` the answer is `handoff: false`. It decides whether this run belongs in the main checkout instead of this isolated session, and answers with one JSON object:
+- `handoff: false`: nothing to hand off. Continue with the steps below. Its `interactive` field says whether I am at the session (true) or this is an unattended run (false).
+- `handoff: true` and `launched: true`: the run now continues in the main checkout under `ck run`. Print `command`, `mainCheckout`, `runBranch`, `follow` (how to watch the log) and `report` to me, then stop. Do nothing else.
+- `handoff: true` and `launched: false`, or the command exits non-zero or fails to run: print its `error` and the `manualCommand` it gives, then stop. Never start the run from this session after a failed hand-off.
 
 **Without the Workflow tool.** If the Workflow tool isn't among your tools, or calling it is refused or blocked (some organizations disable it), or I pass `--no-workflow`: run the same steps yourself with the Agent tool and a task list, as `.claude/workflows/without-workflow-tool.md` describes. Everything else here still applies (agents and their models, lint, plan, merge target, report); only the launch differs. Tell me once that you're running without workflows. Don't ask whether to.
 
@@ -60,6 +67,7 @@ How each mode applies them:
      "remaining": "<remaining from ck plan --json>",
      "agentSlots": "<runtime.agentSlots from ck agents --json>",
      "finishFirst": "<run.finish_first from ck agents --json>",
+     "interactive": "<interactive from ck handoff --json (step 0)>",
      "maxRetries": 1,
      "onFailure": "continue",
      "maxConcurrent": "<run.max_concurrent from ck agents --json>",
@@ -73,6 +81,7 @@ How each mode applies them:
    - **risk / complexity:** copy them from `ck plan` as they are. Tell me how many tasks are safety (and which), since they run on the strong model and the risky reviewer. If `ck lint` warned about a task touching a risk path without `**Risk:** safety`, mention it: it is routed as safety anyway, but the tag belongs in tasks.md.
    - **deps / remaining:** copy them from `ck plan <spec> --json` as they are. With `deps` the script decides which tasks are ready itself, instead of asking a planning agent after every task.
    - **agentSlots / finishFirst:** `runtime.agentSlots` and `run.finish_first` from `ck agents --json`. While a review, revision or landing waits for a runtime slot, no new task starts (`finishFirst`); `agentSlots` is how many agents the runtime runs at once.
+   - **interactive:** the `interactive` field of the step 0 `ck handoff` answer: true when I am at the session, false for an unattended run. It decides whether a task still guard-stopped after fable is parked (false) or put to me (true).
    - **onFailure:** by default a failed task doesn't stop the run. Tasks that don't depend on it keep starting, its dependents never start and are reported, and a red target branch always halts. Use `"onFailure": "halt"` if I asked to stop at the first failure.
    - **mergeBatch:** the most finished tasks landed together in one step (default 4). Pass 1 if I asked for one merge at a time, or if the target's gate is often red (each red batch costs extra gates to find the culprit).
    - **maxConcurrent:** how many tasks may have an implementing agent at work at once; review and the merge queue don't hold a slot. Pass `run.max_concurrent` from `ck agents --json` (null means no cap). If I said the test suite is memory-heavy or asked to go easy on usage, pass a lower number (for example 4) for this run, and mention `ck agents set run.max_concurrent N` to make it stick.
@@ -87,12 +96,19 @@ How each mode applies them:
    - tasks merged, failed (with reasons and blockers), and not started (and why). Take these lists from the result as they are: with `reportSource: "git"` they come from `ck worktree report` (merge commits on the target plus tasks.md there), not from agent claims, so a task is never both merged and failed. With `reportSource: "agents"` the git report was unavailable; say so, and suggest `ck worktree report <spec> --into <branch>` to check;
    - the `outcome`: `complete`, `blocked` (nothing left could start; `reason` and `blockedOn` say which tasks everything waits on and why, which is a clean stop, not a failure), or `halted`;
    - tests agents believe are wrong, and files touched outside their task;
+   - the needs-input tasks and the notification status (see below);
    - any `crossTests` findings (test files that disagree with each other or with design.md), blocking ones first: they need a test fix before the impl tasks they verify can pass;
    - the timing: total wall-clock, minutes per wave group (dependency levels, a display label only), and the slowest tasks;
    - the landings: how many, their batch sizes and minutes, and which were bisected (and the culprits);
    - if it halted or refused, the reason;
    - the spend: run `ck cost --run <the run's wf_ id>` and quote it. Never estimate spend from the workflow's token counts: they report each agent's final context size and run 7-14x low. If the command is refused or can't read the transcripts (a sandboxed shell can't see ~/.claude), say so; under `ck run`, the run's log ends with the spend once the session exits.
    - run `ck stats collect --run <wf_id> --auto` outside the sandbox and quote the line it prints (where the record went, or why it was skipped; if it failed, quote the retry command it gives). Never let its result change what you report about the run. In agent mode (no `wf_id`, the run was started with `ck stats begin`), run `ck stats collect --agents <run_id> --auto` instead, outside the sandbox, and quote its line the same way.
+
+   **Guard stops and parked tasks.** A task whose agent was denied a change to a test or requirement climbs sonnet, opus and fable once each (independent of `implementer.escalate`). If it is still stopped after the top, an unattended run parks it with `ck worktree park`; because I pass `interactive`, a run with me at the session lists it in `needsInput` with `action: 'ask'` instead and parks nothing. A parked or asked task is neither failed nor merged, its dependents do not start, and the independent tasks carry on.
+   - Report `needsInput` in its own list, apart from merged, failed and blocked: for each entry the test and the requirement, quoted, the models it escalated through (the entries of `escalated`), and how to resolve it.
+   - Report the notification status from `notifications`: how many were sent, each failure with its detail, and when `notConfigured` is true the `hint` (set it once per machine with `ck agents set run.notify_command "<command>"`).
+   - For each `needsInput` entry with `action: 'ask'`, ask me with AskUserQuestion, quoting the test and the requirement from the entry, with the options: keep the test and let the agent change the code, the test is wrong, the requirement is wrong. Record each answer with `ck worktree resolve <spec> <N> --json` and `{"answer": "<my answer>"}` on stdin. If my answer is that the test or requirement is wrong, tell me to change the test or requirement myself from my main session (an agent cannot, the guard stops it), and wait for me to confirm the change before going on. Once every entry is answered, re-run the workflow once (a fresh run: Done tasks are skipped, and every attempt reads the decision note first). Do not re-run more than once; anything still unresolved goes in the report.
+   - For `action: 'park'` entries (the run was unattended), tell me how to resolve them: `ck worktree resolve <spec> <N>` with my answer, then `/spec:implement <spec>` again.
    
    Then give me the next step: fix the blockers (or answer the wrong-test questions), then run `/spec:implement <spec>` again. That is a fresh run: Done tasks are skipped and worktrees and the integration branch are reused. Don't use `resumeFromRunId`, because its cached planning steps would be stale.
 10. **Landing the integration branch:** once I'm happy (ideally once every task is Done and `ck gate <spec>` passes in the integration worktree), tell me the command to land it: `git merge --ff-only integrate/<spec>` from the main checkout. If main moved in the meantime, use `git merge integrate/<spec>` instead. Afterwards: `git worktree remove <worktree dir>/<spec>-integration && git branch -d integrate/<spec>`. Don't run these yourself unless I ask.
