@@ -99,7 +99,7 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 ---
 
 ### Task 3: Extend the Node test harness: execCk agents, a create op and a virtual clock
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.4, 8.1, 8.2, 12.1, 12.3
 **Description:** Build the test-only JS harness the Workflow tests and the deterministic P-10 need (test-plan Test Infrastructure item 2, Harness Contract H-15). The virtual clock is test infrastructure: nothing in `plugin/` or `.claude/` changes (12.3).
@@ -120,12 +120,12 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 **Verify:** `uv run pytest -q tests/test_bridge_harness.py` `node tests/js/spec_create.test.mjs` `node tests/js/spec_implement.test.mjs` `node tests/js/landing_speed.test.mjs` `node tests/js/finish_first.test.mjs`
 **Verifies:** None
 **Acceptance:**
-- [ ] The existing JS suites and `tests/test_landing_scheduler_properties.py` pass unchanged
-- [ ] No file under `plugin/workflows/` or `.claude/workflows/` is touched
-- [ ] `execCk` runs the real CLI as a subprocess, and the landing sets it records come from the fake project's own result. Agents are the only fakes
-- [ ] `sleep(ms)` resolves exactly at `now() + ms` virtual time, in (due, creation) order, and virtual time advances only after pending microtasks drain
-- [ ] Without a `clock`, the bridge and the JS suites run on real timers exactly as today
-- [ ] Harness self-tests pass against today's workflow scripts
+- [x] The existing JS suites and `tests/test_landing_scheduler_properties.py` pass unchanged
+- [x] No file under `plugin/workflows/` or `.claude/workflows/` is touched
+- [x] `execCk` runs the real CLI as a subprocess, and the landing sets it records come from the fake project's own result. Agents are the only fakes
+- [x] `sleep(ms)` resolves exactly at `now() + ms` virtual time, in (due, creation) order, and virtual time advances only after pending microtasks drain
+- [x] Without a `clock`, the bridge and the JS suites run on real timers exactly as today
+- [x] Harness self-tests pass against today's workflow scripts
 **Dependencies:** None
 **Complexity:** Medium
 **Risk:** normal
@@ -325,7 +325,7 @@ Settings `derandomize=True, max_examples=200, database=None, deadline=None`. Dec
 ---
 
 ### Task 10: Add the run progress file module
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 3.5, 3.6, 3.7, 3.8, 3.9, 3.10, 5.4
 **Description:** Create `src/claude_kiro/progress.py`, the single owner of the `ck-progress/1` file (design Data Models). This task owns Harness Contract H-1's clock override and H-10's `read_events` / `append` seams. Functions: `progress_dir(env)` (`CK_PROGRESS_DIR` when set, else `store.data_dir()/"progress"`, created with `store._mkdir_private`, mode 0700); `clock_now(env)`, which returns `CK_NOW` parsed as ISO-8601 UTC when set, else the current UTC time, and is the one place every ETA command, the worktree progress hooks and the status line read "now"; `new_run_key(spec, now, token=None)` -> `"<spec>--20261030T150205Z-3f9a1c"`; `run_file(key, env)` -> `<progress_dir>/<key>.jsonl`; `append(key, event, env)`. `append` keeps only the typed fields of the event's kind, adds `schema` and `at` when missing, serialises one line of at most 4 KiB, opens with `O_APPEND|O_CREAT` and mode 0o600 (then `chmod`), takes `fcntl.flock(LOCK_EX)` and writes with one `os.write`. It never raises: on `OSError`/`ValueError` it returns the error text and best-effort appends `<iso> <kind> <error class>: <message <= 200>` to `<key>.errors`. Also add: `read_events(path) -> (events, skipped)`; the frozen dataclasses `TaskProgress` and `RunState` exactly as in the design (including `waits` and `last_event_min`); pure `fold(events) -> RunState`, which tracks task status (pending/running/merged/failed/parked/hand), the last claim step, model and attempt, first/last start minutes, phases done/running, approval waits (an `approval-start`/`approval-end` pair, or a `hand-landing` that opens wait `hand-<task>` closed by that task's `merge` or by `end`, 5.4), `waited_min` with overlapping waits merged, `last_event`, `cause`, `ended`, `sent` notices (from both `notified` and `notify-pending` events, so a queued notice is never queued twice) and `skipped`; the `start` event's typed fields include `spool: bool` (D14); pure `effective_min(waits, t)` (wall minute minus wait minutes before it, for S12 and the simulator); pure `is_stale(last_event_at, now)` (no end and last event more than `STALE_MIN = 120` minutes ago, 3.10); `active_run(spec, root, env, *, now)`, the newest run of the spec with no `end` event; `runs_for_project(root, env, *, now)`, start event `root` equal to root, no end, not stale; `mergeable(line, seen_hashes)` (S20); `notice_lock(key, env)`, a context manager holding `flock(LOCK_EX)` on `<progress_dir>/<key>.lock` (0600) for the fold-decide-send-append sequence (D14); and `mirror(spool, target, *, send)`. `mirror` appends spool lines not yet mirrored (keyed by line hash) to the real progress file (0600), copies `<key>.model.json` and the latest `<key>.eta.json` sidecars when their bytes changed, sends each `notify-pending` exactly once through `send(message, notification_type)` with the type mapped from its `notice` (`slip` -> `ck_eta_slip`, `blocked` -> `ck_eta_blocked`, `done` -> `ck_run_done`, 8.11) and appends a `notified` event with the outcome, and returns the count. A new key per run means a second run of a spec gets a new file and the old one stays; nothing deletes progress files outside the spool. Stdlib only, and no click import, so the status line can use it.
@@ -334,16 +334,16 @@ Settings `derandomize=True, max_examples=200, database=None, deadline=None`. Dec
 **Verify:** `uv run pytest -q -n auto tests/test_eta_progress_properties.py` `uv run python -c "from claude_kiro import progress; s = progress.fold([]); assert s.tasks == {} and s.skipped == 0 and progress.effective_min((), 5.0) == 5.0"`
 **Verified by:** Task 9 (P-14, P-15)
 **Acceptance:**
-- [ ] Concurrent appends from several processes leave every line whole and none lost
-- [ ] `read_events` skips malformed and unknown lines, counts them, and returns the rest
-- [ ] `append` returns an error string (and never raises) when the directory is unwritable, and records the failure in `<key>.errors`
-- [ ] `append` writes only the typed fields of the event's kind
-- [ ] The progress directory is 0700 and files are 0600 when ck creates them; the default location is under ck's data dir, outside the repository
-- [ ] `fold` gives the task, phase, approval-wait (questions and hand landings) and ended state for a sequence of the design's event kinds; overlapping waits are counted once in `waited_min`
-- [ ] `is_stale` is true only after 120 minutes with no event and no end; `runs_for_project` leaves stale and ended runs out
-- [ ] `mirror` copies each spool line once, copies the model and cache sidecars, and sends each pending notice exactly once, with its notification type
-- [ ] `fold` counts `notify-pending` as well as `notified` events in `sent`
-- [ ] `clock_now` returns `CK_NOW` when set
+- [x] Concurrent appends from several processes leave every line whole and none lost
+- [x] `read_events` skips malformed and unknown lines, counts them, and returns the rest
+- [x] `append` returns an error string (and never raises) when the directory is unwritable, and records the failure in `<key>.errors`
+- [x] `append` writes only the typed fields of the event's kind
+- [x] The progress directory is 0700 and files are 0600 when ck creates them; the default location is under ck's data dir, outside the repository
+- [x] `fold` gives the task, phase, approval-wait (questions and hand landings) and ended state for a sequence of the design's event kinds; overlapping waits are counted once in `waited_min`
+- [x] `is_stale` is true only after 120 minutes with no event and no end; `runs_for_project` leaves stale and ended runs out
+- [x] `mirror` copies each spool line once, copies the model and cache sidecars, and sends each pending notice exactly once, with its notification type
+- [x] `fold` counts `notify-pending` as well as `notified` events in `sent`
+- [x] `clock_now` returns `CK_NOW` when set
 **Dependencies:** Task 9 (its tests are the oracle)
 **Complexity:** Medium
 **Risk:** safety (`mirror` sends deferred notifications through the user's notify command exactly once)
@@ -351,7 +351,7 @@ Settings `derandomize=True, max_examples=200, database=None, deadline=None`. Dec
 ---
 
 ### Task 11: Write the history and bundled-defaults properties
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.3, 6.5, 6.6, 7.2, 7.3, 7.5
 **Description:** Write properties P-9, P-11 and P-19 over the pure seams of `claude_kiro.eta.history`, so they run as soon as the history module exists.
@@ -367,14 +367,15 @@ History inputs are `st.sets` of indices into records the real collector wrote, n
 **Properties:** P-9, P-11, P-19
 **Verifies:** Task 12 (`fit_model`, `fit_size`, `size_factor`, `match_pool`, `build_defaults`, `defaults_shape_ok`)
 **Acceptance:**
-- [ ] Properties call the pure history seams directly with history the real collector wrote, not a CLI or server
-- [ ] P-19's generators cover ids, names, paths, timestamps and titles from `CONFIDENTIAL`
-- [ ] Settings are deterministic (`derandomize=True`, `database=None`)
-- [ ] Before implementation they fail at import of `claude_kiro.eta.history` (missing behaviour)
-- [ ] No mocks of project code
-- [ ] Both files set `pytestmark` with `no_network`
+- [x] Properties call the pure history seams directly with history the real collector wrote, not a CLI or server
+- [x] P-19's generators cover ids, names, paths, timestamps and titles from `CONFIDENTIAL`
+- [x] Settings are deterministic (`derandomize=True`, `database=None`)
+- [x] Before implementation they fail at import of `claude_kiro.eta.history` (missing behaviour)
+- [x] No mocks of project code
+- [x] Both files set `pytestmark` with `no_network`
 **Dependencies:** Task 2 (history pools, `history_records`)
 **Complexity:** Medium
+**Implementation notes:** Sizes come from a pure `tasks_md_reader` built from the harness `impl_plan` (pool records carry no file/criteria counts). `build_defaults` returns `DefaultsResult(payload, runs)` and raises `ValueError` below `min_runs` (design.md; every record counts as one run). Model size is rebuilt as `SizeFit` from `model_to_json(m)["size"]`, bundled parts via `model_to_json(m)["bundledParts"]`.
 **Risk:** safety (guards the bundled defaults shipped in the published package against record-level data)
 
 ---
@@ -457,7 +458,7 @@ Seams: `match_pool` (S1); `size_factor` (S2); `fit_size` (S3); `start_model` (S1
 ---
 
 ### Task 15: Write the run-state and notification decision properties
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.7, 3.10, 5.1, 5.2, 5.3, 5.4, 8.5, 8.6, 8.7, 8.9, 8.10, 8.11
 **Description:** Write properties over the pure decision seams of `claude_kiro.eta.decide`, with run state from `claude_kiro.progress.fold(events)` and `Graph` from `claude_kiro.eta.history`.
@@ -472,12 +473,13 @@ Settings `derandomize=True, max_examples=200, database=None, deadline=None`. Eac
 **Properties:** P-5, P-6, P-7, P-16, P-17, P-18
 **Verifies:** Task 16 (`classify_hold`, `effective_now`, `notify_decision`, `notice_text`)
 **Acceptance:**
-- [ ] Properties call the pure decision seams directly, not a server or CLI
-- [ ] P-16..P-18 generators cover p50 moves in [-60, +120], waits 0..120, thresholds 1..60, every hold kind (whole-run and branch parks), stale and waiting views (questions and hand landings), completed and superseded ends, pending and sent notices, repeated states, and the seeded path/test/requirement strings
-- [ ] Settings are deterministic (`derandomize=True`, `database=None`)
-- [ ] Before implementation they fail at import of `claude_kiro.eta.decide` (missing behaviour)
-- [ ] No mocks of project code
-- [ ] Both files set `pytestmark` with `no_network`
+- [x] Properties call the pure decision seams directly, not a server or CLI
+- [x] P-16..P-18 generators cover p50 moves in [-60, +120], waits 0..120, thresholds 1..60, every hold kind (whole-run and branch parks), stale and waiting views (questions and hand landings), completed and superseded ends, pending and sent notices, repeated states, and the seeded path/test/requirement strings
+- [x] Settings are deterministic (`derandomize=True`, `database=None`)
+- [x] Before implementation they fail at import of `claude_kiro.eta.decide` (missing behaviour)
+- [x] No mocks of project code
+- [x] Both files set `pytestmark` with `no_network`
+**Implementation notes (task 15):** the tests propose these input shapes for Task 16: `NotifyInput(spec, state, p50_finish_min, waited_min, launch_p90_min, hold, cause, outcome, merged, total, wall_min, usd, now_hhmm)`, `SentNotice(kind, key, level)`, `Notice` with `kind`, `level`, `key`, `type`; a park hold is told apart by non-empty `Hold.waiting_on_you`; `Graph` is built with the design fields. Documented at the top of `tests/test_eta_notify_properties.py`.
 **Dependencies:** Task 1 (graph and event strategies)
 **Complexity:** Medium
 **Risk:** safety (guards which slip, blocked and done notifications go to the user's notify command and what they contain)
@@ -498,7 +500,7 @@ Settings `derandomize=True, max_examples=200, database=None, deadline=None`. Eac
 - [ ] A failed task with unfinished dependents holding the rest gives `blocked`, and any dependency cycle or unknown dependency gives `blocked` even when other tasks could still run, each naming the cause; a hand landing never does
 - [ ] An open wait gives `waiting`; a run with no event for over 120 minutes gives `stale`, also while a wait, hand landing or park is open; waited minutes never count toward `slipping`
 - [ ] Slip notices fire once per new threshold level; blocked once per reason, never for a park; done once, including a `superseded` end; nothing while waiting (hand landings included) or stale; each notice carries its `NOTICE_TYPES` type
-- [ ] Notice text contains no `/`, no test or requirement text and no prompt text
+- [ ] Notice text contains no file paths (a `/` inside `<merged>/<total> merged` is required by design S8), no test or requirement text and no prompt text
 - [ ] Status and log lines match the formats in the design; the cache check reuses only on identical digests; `effective_now` is constant while a wait is open
 **Dependencies:** Task 10 (reads `RunState`, `effective_min`), Task 12 (uses `Graph`), Task 15 (its tests are the oracle)
 **Complexity:** Medium
