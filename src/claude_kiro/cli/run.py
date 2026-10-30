@@ -673,7 +673,8 @@ class NotifyWatcher:
 
             target = progress.progress_dir(self._data_env())
             progress.mirror(self.spool, target, send=self._send_typed)
-            for errors in self.spool.glob("*.jsonl"):  # failures the child recorded while writing
+            own = self._own_runs()
+            for errors in own:  # failures the child recorded while writing
                 err = errors.with_suffix(".errors")
                 if not self._regular(err):
                     continue  # a symlink or other planted entry is not copied out of the sandbox's spool
@@ -683,15 +684,25 @@ class NotifyWatcher:
                     continue
                 if data:
                     self._append_unique(target / err.name, data)
-            for src in self.spool.glob("*.jsonl"):  # a spool file that cannot be read is recorded, not retried loudly
+            for src in own:  # a spool file that cannot be read is recorded, not retried loudly
                 try:
-                    src.read_bytes()
+                    with open(src, "rb"):  # opening is enough to tell; mirror has already read the content
+                        pass
                 except OSError as exc:
                     if src.stem not in self._unreadable:
                         self._unreadable.add(src.stem)
                         progress._record_error(src.stem, "mirror", exc, {"CK_PROGRESS_DIR": str(target)})
         except Exception as e:  # noqa: BLE001
             self._write(f"ck run: progress mirror error: {e}")
+
+    def _own_runs(self) -> List[Path]:
+        """This spec's spool run files. The spool is shared by every spec's `ck run`; another run's files are not ours."""
+        import re
+
+        if self.spool is None:
+            return []
+        own = re.compile(re.escape(self.spec) + r"--\d{8}T\d{6}Z-[^/]+")
+        return sorted(p for p in self.spool.glob("*.jsonl") if own.fullmatch(p.stem))
 
     @staticmethod
     def _regular(path: Path) -> bool:
@@ -736,7 +747,7 @@ class NotifyWatcher:
 
             env = {**self._data_env(), "CK_PROGRESS_DIR": str(self.spool)}
             now = progress.clock_now(env)
-            for src in sorted(self.spool.glob("*.jsonl")):
+            for src in self._own_runs():
                 events, _ = progress.read_events(src)
                 if not any(e.get("kind") == "start" for e in events) or any(e.get("kind") == "end" for e in events):
                     continue
@@ -752,7 +763,7 @@ class NotifyWatcher:
             from .. import progress
 
             target = progress.progress_dir(self._data_env())
-            for src in self.spool.glob("*.jsonl"):
+            for src in self._own_runs():  # only this run's spec: another spec's live run shares the spool
                 dst = target / src.name
                 if not dst.exists():
                     continue  # never mirrored: keep it
@@ -764,10 +775,9 @@ class NotifyWatcher:
                 if not want <= have:
                     self._write(f"ck run: progress spool {src.name} kept: {len(want - have)} line(s) not in the data dir")
                     continue
-                for path in self.spool.glob(f"{src.stem}*"):
-                    path.unlink(missing_ok=True)
-            for path in self.spool.glob("*.prepared-model.json"):
-                path.unlink(missing_ok=True)
+                for suffix in (".jsonl", ".model.json", ".eta.json", ".lock", ".errors"):
+                    (self.spool / f"{src.stem}{suffix}").unlink(missing_ok=True)
+            (self.spool / f"{self.spec}.prepared-model.json").unlink(missing_ok=True)
         except Exception as e:  # noqa: BLE001
             self._write(f"ck run: progress spool clean-up error: {e}")
 

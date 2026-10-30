@@ -432,7 +432,7 @@ Common fields:
 | `landing` | `tasks: List[str]`, `merged: List[str]`, `red: List[str]`, `conflict: List[str]`, `protected: List[str]`, `green: bool \| None` |
 | `task-failed` | `task: str`, `reason: "gate" \| "review" \| "landing" \| "conflict" \| "worktree" \| "other"` |
 | `hand-landing` | `task: str` (opens an approval wait with id `hand-<task>`, closed by that task's `merge` or by `end`; 5.4) |
-| `park` | `task: str`, `parkKind: str` (the park note's `kind` enum), `parkedAt: str` |
+| `park` | `task: str`, `parkKind: str` (the constant `"needs-input"`: the park note's free-text `kind` is not a closed enum, so it is not copied into the progress file), `parkedAt: str` (the event time) |
 | `unpark` | `task: str` |
 | `approval-start` | `id: str` (8 hex), `reason: "question"` |
 | `approval-end` | `id: str` |
