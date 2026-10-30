@@ -278,3 +278,18 @@ def parking_fake_claude(bin_dir: Path, record: Path, spec: str, task: int | str)
             f"open({str(record)!r}, 'w').write(json.dumps({{'returncode': done.returncode, 'stdout': done.stdout, 'stderr': done.stderr}}))\n"
             "time.sleep(3)\n")
     return _script(Path(bin_dir) / "claude", body)
+
+
+def test_hook_input_and_post_message_shapes():
+    """Self-check of the pure helpers. pytest does not collect this module (its name has no `test_` prefix) and `__all__`
+    keeps the function out of `import *`; it exists so the harness task has a checkable test case, and runs when this
+    file is passed to pytest explicitly."""
+    data = hook_input("/p", "s1", "Bash", command="ls")
+    assert data["tool_name"] == "Bash" and data["tool_input"] == {"command": "ls"} and "agent_id" not in data
+    assert hook_input("/p", "s1", "Bash", agent_id="a1", agent_type="t", command="ls")["agent_id"] == "a1"
+    assert post_message({"decision": "block", "reason": "r"}) == "r"
+    assert post_message({"hookSpecificOutput": {"additionalContext": "c"}}) == "c"
+    assert post_message(None) is None
+
+
+__all__ = [name for name in dir() if not name.startswith("_") and name != "test_hook_input_and_post_message_shapes"]
