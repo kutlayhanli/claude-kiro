@@ -370,12 +370,24 @@ export async function createGuard(
     if (!config.guard.hooks.preToolGuard) return;
 
     const { input, cwd } = await hookInput(event, translation);
-    const result = await runCkHook(
-      "pre-tool-guard",
-      input,
-      cwd,
-      config.guard.timeouts.preToolGuard * 1000,
-    );
+    let result: HookRun;
+    try {
+      result = await runCkHook(
+        "pre-tool-guard",
+        input,
+        cwd,
+        config.guard.timeouts.preToolGuard * 1000,
+      );
+    } catch (error) {
+      // A missing/broken ck mid-run is a guard failure, not an allowed call.
+      recordGuardEvent(event.sessionID, {
+        at: Date.now(),
+        kind: "failure",
+        agent: event.agent,
+        reason: message(error),
+      });
+      throw error;
+    }
     if (result.timedOut) {
       const reason = `[ck guard] the pre-tool guard timed out after ${config.guard.timeouts.preToolGuard}s`;
       recordGuardEvent(event.sessionID, { at: Date.now(), kind: "failure", agent: event.agent, reason });

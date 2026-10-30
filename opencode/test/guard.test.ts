@@ -288,6 +288,23 @@ test("ask degrades to deny on a headless run, and prompts interactively", async 
   }
 });
 
+test("a missing ck binary is a recorded guard failure", async () => {
+  const fixture = setup();
+  process.env.CK_BIN = join(fixture.dir, "missing-ck");
+  process.env.CK_RUN_HEADLESS = "1";
+  const fake = fakeContext(fixture.dir);
+  try {
+    const guard = await createGuard(fake.ctx as never, defaultConfig(), fixture.dir);
+    const before = fake.hooks.get("execute.before");
+    assert.ok(before);
+    await assert.rejects(() => before(event()), /could not run/);
+    assert.equal(guardEventsFor("main")[0]?.kind, "failure");
+    await guard.dispose();
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test("a failed pre-tool guard halts instead of allowing the call", async () => {
   const fixture = setup();
   process.env.CK_RUN_HEADLESS = "1";
