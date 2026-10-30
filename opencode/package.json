@@ -28,7 +28,8 @@
   "files": [
     "src",
     "vendor",
-    "scripts/arm.mjs"
+    "scripts/arm.mjs",
+    "scripts/preflight.mjs"
   ],
   "engines": {
     "node": ">=20"

@@ -698,15 +698,23 @@ def _setup_diff(loader) -> None:
 
 @cli.command()
 @click.option("--unattended", is_flag=True, help="Check this machine for unattended `ck run`s: sandbox tools, credentials, risky allow rules")
-def doctor(unattended: bool):
+@click.option("--harness", type=click.Choice(["claude", "opencode"]), default="claude", show_default=True, help="Check the Claude Code or OpenCode setup")
+def doctor(unattended: bool, harness: str):
     """Check Claude Kiro setup health.
 
     Reports how the project gets the spec commands (the plugin, or vendored
     copies), whether the plugin is installed on this machine, and checks
     files, hooks, the version stamp and verify commands.
+    With --harness opencode: the OpenCode plugin's node/ck/vendor/model/agent/
+    hook/git preflight, without starting a server.
     With --unattended: what an unattended `ck run` is exposed to here, with
     recommendations (always exits 0).
     """
+    if harness == "opencode":
+        from .doctor_opencode import doctor_opencode
+
+        raise SystemExit(doctor_opencode())
+
     import shutil
     from .. import manifest
 

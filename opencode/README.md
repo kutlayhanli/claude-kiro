@@ -24,6 +24,12 @@ The plugin runs a preflight at startup. A missing `node`, old `ck`, incomplete `
 agent file, unresolvable model, or dead guard hook fails the plugin load with a fix. A dirty git
 tree is a warning: interactive work may proceed, a benchmark run should not.
 
+The same checks are available without starting a server:
+
+```sh
+CK_OPENCODE_PLUGIN=/path/to/opencode ck doctor --harness opencode
+```
+
 ## Install
 
 ```jsonc
