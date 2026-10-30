@@ -186,7 +186,7 @@ def test_parked_task_is_ready_again_with_its_worktree_reused(repo):
     assert made.returncode == 0, made.stdout + made.stderr
     assert json.loads(made.stdout)[0]["state"] == "CREATED"
     assert park(repo, "2").returncode == 0
-    plan = ck_run_cmd(repo, "worktree", "plan", "demo", "--json", env=clean_env())
+    plan = ck_run_cmd(repo, "plan", "demo", "--json", env=clean_env())
     assert plan.returncode == 0, plan.stdout + plan.stderr
     assert "2" in [str(n) for n in json.loads(plan.stdout)["ready"]]
     again = ck_run_cmd(repo, "worktree", "create", "demo", "2", "--base", "integrate/demo", "--json", env=clean_env())
@@ -200,6 +200,8 @@ def test_fresh_claim_clears_the_park_note(repo):
     claimed_task_worktree(repo, "demo", 2, base="integrate/demo")
     note = Path(json.loads(park(repo, "2").stdout)["note"])
     assert note.exists()
+    released = ck_run_cmd(repo, "worktree", "release", "demo", "2", env=clean_env())
+    assert released.returncode == 0, released.stdout + released.stderr
     assert ck_run_cmd(repo, "worktree", "claim", "demo", "2", env=clean_env()).returncode == 0
     assert not note.exists()
     assert report(repo)["needsInput"] == []
@@ -209,13 +211,13 @@ def test_fresh_claim_clears_the_park_note(repo):
 
 
 LADDER = [("haiku", ["sonnet", "opus", "fable"]), ("sonnet", ["opus", "fable"]), ("claude-sonnet-5-5", ["opus", "fable"]),
-          ("opus", ["fable"]), ("fable", [])]
+          ("opus", ["fable"]), ("fable", []), ("some-unknown-model", ["sonnet", "opus", "fable"])]
 
 
 @pytest.mark.parametrize("escalate", [None, ["opus"], ["sonnet", "opus"], ["fable"], ["haiku"]])
 def test_guard_ladder_cli_ignores_escalate(tmp_path, escalate):
     if escalate is not None:
-        done = ck_run_cmd(tmp_path, "agents", "set", "implementer.escalate", ",".join(escalate) if escalate else "", env=clean_env())
+        done = ck_run_cmd(tmp_path, "agents", "set", "implementer.escalate", ",".join(escalate), env=clean_env())
         if done.returncode != 0:
             done = ck_run_cmd(tmp_path, "agents", "set", "implementer.escalate", json.dumps(escalate), env=clean_env())
         assert done.returncode == 0, done.stdout + done.stderr
@@ -230,7 +232,7 @@ def test_guard_ladder_cli_ignores_escalate(tmp_path, escalate):
 
 def test_resolve_records_the_answer_and_keeps_it(repo):
     first = json.loads(park(repo, "2").stdout)
-    assert json.loads((Path(first["note"])).read_text()).get("priorDecision") in (False, None)
+    assert json.loads((Path(first["note"])).read_text())["priorDecision"] is False
     done = resolve(repo, "2", "the code must satisfy the test")
     assert done.returncode == 0, done.stdout + done.stderr
     result = json.loads(done.stdout)
@@ -282,7 +284,8 @@ def test_park_inside_ck_run_is_deferred_and_notified_once_by_ck_run(repo, tmp_pa
     assert len(calls) == 1
     message = json.loads(calls[0]["stdin"])["message"]
     assert "demo" in message and "2" in message and "decision" in message
-    assert QUOTED_TEST not in calls[0]["stdin"]
+    assert "tests/test_x.py::test_x" not in calls[0]["stdin"]
+    assert "The test contradicts the requirement." not in calls[0]["stdin"]
     assert log1.read_text().count("ck run: notification sent") == 1
 
     record3 = tmp_path / "park3.json"
