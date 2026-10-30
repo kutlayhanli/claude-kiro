@@ -30,8 +30,7 @@ export type AgentStatus =
   | "agent_error"
   | "result_error"
   | "model_error"
-  | "session_error"
-  | "guard_error";
+  | "session_error";
 
 export interface AgentRow {
   seq: number;
@@ -327,9 +326,8 @@ function statusForError(kind: string): AgentStatus {
       return "timeout";
     case "result":
       return "result_error";
-    case "guard":
-      return "guard_error";
     default:
+      // A guard stop is a failed step; the error text and the guard events carry the detail.
       return "failed";
   }
 }

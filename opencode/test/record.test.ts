@@ -110,7 +110,7 @@ test("an error becomes a failed row with the mapped status", () => {
     ["agent", "agent_error"],
     ["session", "session_error"],
     ["result", "result_error"],
-    ["guard", "guard_error"],
+    ["guard", "failed"],
   ] as const) {
     assert.equal(agentRowFromError({ kind, message: "x" }, base).status, status);
   }
