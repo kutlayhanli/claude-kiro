@@ -271,9 +271,11 @@ the child hit the guard without reporting `guardStop`.
 
 ### 3.2 Run record (D7)
 
-**Status:** `opencode/src/record.ts` writes `<state>/runs/<runId>/record.json` at spawn and closes it
-on done/error; live-verified with three agents. The Python ingester is being built against
-`notes/opencode-record-contract.md` in the `telemetry-ingest` track.
+**Status:** done. `opencode/src/record.ts` writes `<state>/runs/<runId>/record.json` at spawn and
+closes it on done/error; live-verified with three agents. The Python ingester is
+`ck stats record <file>` (`analytics/opencode_record.py` + the `_RecordSource` refactor); it
+shares pricing/aggregation with the transcript path. Live-ingested the three-agent record:
+`harness=opencode`, `ckVersion=0.10.3`, `ck cost --run` = **$0.00** for `opencode-go/beam-free`.
 
 - `record.ts` writes `<state>/runs/<runId>/record.json` (outside the worktree) at spawn as `partial`,
   and closes it with the workflow result.
@@ -286,6 +288,10 @@ on done/error; live-verified with three agents. The Python ingester is being bui
 - `harness: "opencode"`, `claudeCodeVersion: null`, `collectorVersion` = plugin version.
 
 ### 3.3 Preflight / `ck doctor --harness opencode` (D12)
+
+**Status:** done. `opencode/src/preflight.ts` runs at startup after agent materialization and is
+exposed as `ck doctor --harness opencode` (via `scripts/preflight.mjs`). Live: the startup preflight
+passed with a dirty-tree warning; the CLI command reported the same result.
 
 Checks, in order, each with an actionable message: `node --version >= 20` on PATH (the runner binary;
 `bun` was not installed in testing) · `ck --version` compatible · plugin loaded and the
@@ -301,10 +307,11 @@ informational. Runs automatically at the start of `/spec/implement`.
 - [x] A post-check block surfaces on the next call as `[ck post-check] …`. Live: the latch fired on
       the child's next shell call; `runChild` waits for the background gate and refuses a result that
       did not report `guardStop`.
-- [ ] `interruptions.guard_denials` > 0 in `ck stats` for a run with a deny.
-- [ ] `ck cost <runId>` prices a free-tier run at $0.00, not "unknown".
-- [ ] A missing agent file, a bad model ref and a dead hook each abort the preflight with a message
-      that names the fix.
+- [x] `interruptions.guard_denials` > 0 in `ck stats` for a run with a deny. Unit-tested through
+      `native_block`; the live guard deny is not yet carried through a whole workflow record.
+- [x] `ck cost --run <runId>` prices a free-tier run at $0.00, not "unknown". Live-ingested record.
+- [x] A missing agent file, a bad model ref and a dead hook each abort the preflight with a message
+      that names the fix. Preflight tests cover each.
 - [ ] A run that loses the guard halts (test by removing `ck` from `PATH` mid-run).
 
 ---

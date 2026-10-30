@@ -41,19 +41,30 @@ SCHEMA = "ck-bench-result/1"
 PRICING_DATE = "2026-10"
 # OpenCode refs are exact `provider/model` keys (not families): "opencode" is also a provider
 # prefix of paid refs, so substring matching would price every paid model as free.
+_FREE_OPENCODE = (
+    "opencode/deepseek-v4.1-flash-free",
+    "opencode-go/beam-free",
+    "opencode/beam-free",
+    "opencode/flint-40b-free",
+    "opencode/glm-5.3-flash-free",
+    "opencode/mimo-v2.6-flash-free",
+    "opencode/nemotron-3.5-lightning-free",
+    "opencode/nemotron-3.5-super-vl-free",
+    "opencode-go/iceman-contributor-free",
+    # Kept for older records; the catalog later renamed/removed this id.
+    "opencode/muse-spark-1.3-contributor-free",
+)
+_FREE_RATES = {"input": 0.0, "output": 0.0, "cacheRead": 0.0, "cacheCreation": 0.0, "free": True}
 OPENCODE_PRICING: Dict[str, Dict[str, Any]] = {
     # Free tiers: explicit zero rates, so a free run is $0.00 rather than "cost unknown".
-    "opencode/deepseek-v4.1-flash-free": {"input": 0.0, "output": 0.0, "cacheRead": 0.0,
-                                          "cacheCreation": 0.0, "free": True},
-    "opencode/muse-spark-1.3-contributor-free": {"input": 0.0, "output": 0.0, "cacheRead": 0.0,
-                                                 "cacheCreation": 0.0, "free": True},
-    "opencode/mimo-v2.6-flash-free": {"input": 0.0, "output": 0.0, "cacheRead": 0.0,
-                                     "cacheCreation": 0.0, "free": True},
+    ref: dict(_FREE_RATES) for ref in _FREE_OPENCODE
+}
+OPENCODE_PRICING.update({
     # Known paid refs (models.dev, 2026-10). Anything else stays unknown (None), never $0.
     "opencode/deepseek-v4.1-flash": {"input": 0.30, "output": 1.20},
     "opencode-go/deepseek-v4.1-flash": {"input": 0.15, "output": 0.60},
     "opencode-go/muse-spark-1.3-contributor": {"input": 0.10, "output": 0.20},
-}
+})
 PRICING: Dict[str, Dict[str, Any]] = {
     "haiku": {"input": 0.10, "output": 0.50, "cacheRead": 0.01},
     "sonnet": {"input": 2.0, "output": 10.0, "cacheRead": 0.20},

@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-from claude_kiro import bench
+from claude_kiro import bench, manifest
 from claude_kiro.analytics import collect, interruptions, roles
 
 SCHEMA = "ck-opencode-run/1"
@@ -195,7 +195,8 @@ def record_from_data(data: Any) -> collect.CollectOutcome:
     if workflow not in WORKFLOWS:
         _fail("record.workflow", "must be one of " + ", ".join(WORKFLOWS))
     collector_version = _string(root.get("collectorVersion"), "record.collectorVersion", required=True)
-    ck_version = _string(root.get("ckVersion"), "record.ckVersion", required=True)
+    # The plugin writes its resolved version; older/local records may say null, and the ingester fills it.
+    ck_version = _string(root.get("ckVersion"), "record.ckVersion") or manifest.ck_version()
     status = _string(root.get("status"), "record.status", required=True) or ""
     if status not in STATUSES:
         _fail("record.status", "must be one of " + ", ".join(STATUSES))

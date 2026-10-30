@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from claude_kiro import bench
+from claude_kiro import bench, manifest
 from claude_kiro.analytics import store
 from claude_kiro.analytics.share import build_shareable, validate_shareable
 from claude_kiro.cli.main import cli
@@ -138,6 +138,18 @@ def test_a_contract_record_becomes_a_local_record(tmp_path):
     shown = ck("stats", "show", RUN_ID)
     assert shown.exit_code == 0, shown.output
     assert RUN_ID in shown.output
+
+
+def test_a_null_ck_version_is_filled_from_the_installed_cli(tmp_path):
+    result = ingest(tmp_path, record(tmp_path, ckVersion=None))
+    assert result.exit_code == 0
+    assert load()["ckVersion"] == manifest.ck_version()
+
+
+def test_the_beam_free_arm_is_priced_at_zero():
+    assert bench.price_usage(
+        "opencode-go/beam-free", {"input": 1000, "output": 100, "cacheRead": 500, "cacheCreation": 0}
+    ) == 0.0
 
 
 def test_a_free_run_reports_zero_dollars_not_unknown(tmp_path):

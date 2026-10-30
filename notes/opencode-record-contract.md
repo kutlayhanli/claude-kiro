@@ -24,7 +24,7 @@ and `ck stats` keep working.
   "harness": "opencode",
   "workflow": "spec-create" | "spec-implement" | "other",
   "collectorVersion": "0.10.3",          // the npm package version
-  "ckVersion": "0.10.3" | null,          // `ck --version`; the ingester fills it when null
+  "ckVersion": "0.10.3" | null,          // `ck --version`; the ingester fills it from the installed ck when null
   "claudeCodeVersion": null,             // always null on this harness
   "status": "running" | "done" | "failed" | "partial",
   "startedAt": 1793388200665,            // epoch ms
@@ -124,8 +124,8 @@ crash never truncates the last completed row.
 
 ## `ck` ingestion
 
-Add a CLI entry point (working name `ck analytics record <file>`, fold it into the existing `stats`
-group if that fits the CLI better) that:
+Add the CLI entry point `ck stats record <file>` (the existing `stats` group; there is no `analytics`
+group) that:
 
 1. Reads and validates `ck-opencode-run/1`; a malformed file fails with a message, never silently
    produces an empty record.
@@ -141,7 +141,8 @@ group if that fits the CLI better) that:
    `retries`, `degraded`, `failureLabel`. No schema version bump; follow the 0.10.3 `interruptions`
    precedent.
 6. Writes the same local record as the transcript path (`store.record_path`), so `ck cost`,
-   `ck stats` and `ck stats share` work unchanged. `ck cost <runId>` must price a free run at $0.00.
+   `ck stats` and `ck stats share` work unchanged. `ck cost --run <runId>` must price a free run at
+   $0.00; `ck stats show <runId>` reads the same record.
 
 ## Phase 4: `bench-output.json`
 

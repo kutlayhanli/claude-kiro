@@ -6,6 +6,7 @@
  * did instead of disappearing.
  */
 
+import { spawnSync } from "node:child_process";
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { GuardEvent } from "./guard.ts";
@@ -77,6 +78,18 @@ export interface FinishOptions {
 
 const EMPTY_TOKENS: TokenUsage = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } };
 const THROTTLE_PATTERN = /\b429\b|rate.?limit|retry.?after|quota|free.?limit/i;
+
+/** `ck --version` as `X.Y.Z`, or null when the CLI is missing or unreadable. */
+export function detectCkVersion(command = process.env.CK_BIN || "ck"): string | null {
+  try {
+    const result = spawnSync(command, ["--version"], { encoding: "utf8", timeout: 5000 });
+    const text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+    const match = /ck, version\s+([0-9]+\.[0-9]+\.[0-9]+)/.exec(text);
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
 
 export function packageVersion(packageRoot: string): string {
   try {

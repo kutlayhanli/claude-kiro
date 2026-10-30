@@ -7,6 +7,7 @@ import { createGuard } from "./guard.ts";
 import { writeInstructions } from "./instructions.ts";
 import { catalogFromModels } from "./models.ts";
 import { formatPreflight, runPreflight } from "./preflight.ts";
+import { detectCkVersion } from "./record.ts";
 import { materializeResources } from "./resources.ts";
 import { registerWorkflowTool } from "./workflow-tool.ts";
 
@@ -43,6 +44,7 @@ export default Plugin.define({
       catalog,
       packageRoot,
       projectDir,
+      ckVersion: detectCkVersion(),
     });
     const guard = await createGuard(ctx, loaded.config, projectDir);
     const commands = await registerCommands(ctx, { packageRoot, projectDir });

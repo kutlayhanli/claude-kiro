@@ -7,6 +7,7 @@ import {
   RunRecordWriter,
   agentRowFromError,
   agentRowFromOutcome,
+  detectCkVersion,
   packageVersion,
   workflowNameOf,
 } from "../src/record.ts";
@@ -61,6 +62,12 @@ test("workflowNameOf maps the shipped workflows and leaves inline as other", () 
 test("packageVersion reads the package manifest", () => {
   assert.equal(packageVersion(PACKAGE_ROOT), "0.10.3");
   assert.equal(packageVersion("/does/not/exist"), "0.0.0");
+});
+
+test("detectCkVersion reads the CLI version and tolerates a missing binary", () => {
+  const version = detectCkVersion();
+  assert.match(version ?? "", /^\d+\.\d+\.\d+$/);
+  assert.equal(detectCkVersion("/does/not/exist"), null);
 });
 
 test("an outcome becomes a complete ok row", () => {
