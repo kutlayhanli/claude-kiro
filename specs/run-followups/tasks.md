@@ -711,7 +711,7 @@ Skip the permission cases as root (`needs_user`).
 ---
 
 ### Task 24: Test the end-to-end paths and progress spooling under `ck run`
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 2.1, 3.1, 3.5, 3.7, 3.8, 3.9, 4.2, 5.1, 5.4, 7.1, 8.3, 8.5, 8.6, 8.7, 8.8, 8.9, 8.11
 **Description:** Implement TC-92, TC-93 and TC-95 through TC-97.
