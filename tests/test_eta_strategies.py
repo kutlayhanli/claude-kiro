@@ -77,8 +77,8 @@ def test_malformed_lines_are_not_valid_events(line):
         obj = json.loads(line)
     except ValueError:
         return
-    ok = (isinstance(obj, dict) and obj.get("schema") == es.PROGRESS_SCHEMA and isinstance(obj.get("kind"), str)
-          and "at" in obj and len(line) <= 4096)
+    ok = (isinstance(obj, dict) and obj.get("schema") == es.PROGRESS_SCHEMA and obj.get("kind") in es.ALL_EVENTS
+          and "at" in obj)
     assert not ok
 
 
@@ -86,3 +86,31 @@ def test_busy_starts_and_kills_children():
     with es.busy(2) as procs:
         assert all(p.poll() is None for p in procs)
     assert all(p.poll() is not None for p in procs)
+
+
+@FAST
+@given(es.malformed_raw())
+def test_malformed_raw_is_never_a_valid_event(raw):
+    assert raw.endswith(b"\n")
+    body = raw[:-1].rstrip(b"\r")
+    try:
+        obj = json.loads(body.decode("utf-8"))
+    except ValueError:
+        return
+    ok = (isinstance(obj, dict) and obj.get("schema") == es.PROGRESS_SCHEMA and obj.get("kind") in es.ALL_EVENTS
+          and "at" in obj)
+    assert not ok
+
+
+def test_malformed_raw_covers_nul_invalid_utf8_crlf_unknown_kind():
+    from hypothesis import find
+    assert find(es.malformed_raw(), lambda r: b"\x00" in r)
+    assert find(es.malformed_raw(), lambda r: r.endswith(b"\r\n"))
+    def bad_utf8(r):
+        try:
+            r.decode("utf-8")
+        except UnicodeDecodeError:
+            return True
+        return False
+    assert find(es.malformed_raw(), bad_utf8)
+    assert find(es.malformed_lines(), lambda l: '"kind": "' + es.EV_UNKNOWN in l)
