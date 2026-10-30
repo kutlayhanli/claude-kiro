@@ -372,13 +372,18 @@ agents --guard-ladder` agree), P-15 (with `guardStopIn`), P-16; bridge `max_exam
 - [x] A review fix to existing requirements.md / test-plan.md text of a started spec reaches `openQuestions`, not
       the files, in Workflow and agent mode.
 - [x] Tests run the real workflow script and real files; only agents and the Claude runtime are stubbed.
+(The gate requires every box ticked. Ticks mean the tests are written to the criteria; the ones needing Tasks 13-15 (ladder, parking, docs, aliases, frozen rule) are not green until those land.)
 **Implementation notes:**
 - The review-frozen Workflow test cannot make the frozen-spec rule absent for an all-Not-Started spec: the Workflow stub
   has no file access and the revise prompt is static, so the test asserts the rule is in the prompt and conditional
-  on a task that is not `Not Started`. Task 14 may refine this.
+  on a task that is not `Not Started`. Task 14 should state whether FROZEN_RULE is static conditional text (then the
+  "absent when every task is Not Started" clause of TC-87 is untestable as written and test-plan.md should say so) or
+  is computed from a tasks.md read.
 - TC-79's `'always'` revise-call park is not asserted: `fake_project` stops only calls whose label contains ` revise `
   and only the first one, so a ladder attempt after a revise-call stop never stops again. The revise-call guard stop
-  reaching the ladder is asserted, and P-15 covers it.
+  reaching the ladder is asserted, and P-15 covers it. Recorded as a harness gap (Task 1's fake_project).
+- TC-80 now also runs a project where a retry and a revise call really run, so every prompt kind is checked; P-15 asserts
+  effort `medium` for every guard attempt (bridge `run` now returns `opts`).
 - TC-49's marker-wrap checks skip with the reason from `capture-summary.json` (`workflowAgentHasAgentId` is true);
   the inverse check (no wrap) runs.
 

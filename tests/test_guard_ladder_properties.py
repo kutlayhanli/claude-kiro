@@ -148,6 +148,9 @@ def test_p15_attempts_follow_the_ladder_rules(bridge, sc):  # noqa: F811
                     break
             assert models == want, f"task {t}: {models} != {want} (start {start}, stop {ceiling})"
         assert all(RANK[m] > RANK[start] for m in models)
+        for l in mine:
+            if TASK_LABEL.match(l).group(2):
+                assert out["opts"][l]["effort"] == "medium", f"task {t}: {l} not at the role effort: {out['opts'][l]}"
 
 
 # --------------------------------------------------------------------------- P-16
