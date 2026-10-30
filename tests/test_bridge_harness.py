@@ -101,9 +101,12 @@ def test_execck_runs_a_backticked_real_ck_command():
 
 
 def test_execck_surfaces_a_failing_command():
-    out = real_run("Run `ck progress event demo bogus-kind --json` now")
+    # `ck plan` fails for a spec with no tasks.md whatever its options; `ck progress event` always exits 0 (design),
+    # so it cannot show a failure.
+    out = real_run("Run `ck plan no-such-spec --failed 1` now")
+    assert out["log"] == [["plan", "no-such-spec", "--failed", "1"]]
     (res,) = out["results"]
-    assert res["code"] != 0 and res["error"], res
+    assert res["code"] != 0 and res["error"] and res["stderr"].strip(), res
 
 
 def test_execck_runs_commands_written_in_land_prompts_and_ignores_a_closing_backtick():
@@ -136,7 +139,7 @@ def test_create_op_runs_spec_create_to_completion(bridge):  # noqa: F811
     assert out["result"]["review"]["fixed"] == ["R1"]
     assert len(out["result"]["files"]) == 5
     assert "write requirements.md" in [e["label"] for e in out["trace"] if e["ev"] == "start"]
-    assert out["execLog"] == []
+    assert out["execLog"] == [] and out["execResults"] == []
 
 
 def test_virtual_clock_orders_timers_by_due_time_then_creation(bridge):  # noqa: F811

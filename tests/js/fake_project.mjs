@@ -43,6 +43,23 @@ export function writtenCommands(prompt) {
   return out
 }
 
+// Run one `ck` command through execCk {cmd, env, cwd, dry} (in dry mode, or with no execCk, only record it in
+// log). The outcome {argv, code, error, stdout, stderr} is pushed to results, never swallowed: tests assert the
+// CLI really ran. Returns the parsed --json output, else the trimmed stdout (null in dry mode).
+export async function execCkRun(execCk, argv, { log, results, external = p => p }) {
+  log.push(argv)
+  if (!execCk || execCk.dry) return null
+  const env = { ...process.env, ...(execCk.env || {}), CK_PROGRESS_TEST_KINDS: '1' }
+  const [bin, ...pre] = execCk.cmd
+  const res = await external(new Promise(resolve => {
+    execFile(bin, [...pre, ...argv], { env, cwd: execCk.cwd || process.cwd(), encoding: 'utf8' }, (err, out, errOut) => {
+      resolve({ argv, code: err ? (typeof err.code === 'number' ? err.code : -1) : 0, error: err ? String(err.message) : null, stdout: out || '', stderr: errOut || '' })
+    })
+  }))
+  results.push(res)
+  try { return JSON.parse(res.stdout) } catch { return res.stdout.trim() }
+}
+
 // Same as cli/worktree.py::_chain_lengths: for each open task, the open tasks on its longest chain of dependents.
 function chainLengths(deps, done) {
   const dependents = {}
@@ -93,19 +110,7 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
     return within ? { file: 'tests/test_guarded.py', kind: 'test', test: 'tests/test_guarded.py::test_x', requirement: '1.1' } : null
   }
   // Run one `ck` command through execCk (or, in dry mode, only record it). Returns the parsed --json output, if any.
-  const runCk = async argv => {
-    state.execLog.push(argv)
-    if (!execCk || execCk.dry) return null
-    const env = { ...process.env, ...(execCk.env || {}), CK_PROGRESS_TEST_KINDS: '1' }
-    const [bin, ...pre] = execCk.cmd
-    const res = await external(new Promise(resolve => {
-      execFile(bin, [...pre, ...argv], { env, cwd: execCk.cwd || process.cwd(), encoding: 'utf8' }, (err, out, errOut) => {
-        resolve({ argv, code: err ? (typeof err.code === 'number' ? err.code : -1) : 0, error: err ? String(err.message) : null, stdout: out || '', stderr: errOut || '' })
-      })
-    }))
-    state.execResults.push(res)  // the outcome is kept, never swallowed: tests assert the CLI really ran
-    try { return JSON.parse(res.stdout) } catch { return res.stdout.trim() }
-  }
+  const runCk = argv => execCkRun(execCk, argv, { log: state.execLog, results: state.execResults, external })
   const recordClaim = async prompt => {
     const c = findClaim(prompt)
     if (!c || !c.flags['progress-run'] || !c.flags['progress-event']) return
