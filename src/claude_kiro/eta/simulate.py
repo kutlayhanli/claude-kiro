@@ -28,7 +28,7 @@ class SimResult:
     usd: Optional[Tuple[float, float]]   # p10, p90; None when any open task's pool is unpriced (1.9)
     task_median_min: Dict[str, float]    # per open task, median sampled duration
     critical_median_min: Optional[float]
-    widest_step: str
+    widest_step: Optional[str]           # None when there is nothing to match (no open task, no phase)
     phase_median_min: Dict[str, float]   # create: per phase, median over the passes that included it
 
 
@@ -66,6 +66,14 @@ def _pct(values: Sequence[float], p: float) -> float:
 
 def _triple(values: Sequence[float]) -> Triple:
     return (_pct(values, 0.1), _pct(values, 0.5), _pct(values, 0.9))
+
+
+def plan_key(chain: Mapping[str, int], task: str) -> Tuple[int, int, str]:
+    """`ck plan` order: longest chain first, then the numeric id (non-numeric ids count as 0), then the id string.
+
+    Shared with `cli.worktree._plan`'s ready sort so the simulator starts tasks in the order `/spec:implement` does.
+    """
+    return (-chain.get(task, 0), int(task) if task.isdigit() else 0, task)
 
 
 def conditional_sample(values: Sequence[float], elapsed: float, u: float) -> float:
@@ -164,18 +172,20 @@ def _draw(plan: _Plan, model: Model, up: float, ur: float, ul: float, uc: float)
 
 def _schedule(active: Sequence[str], running: Mapping[str, float], hand: frozenset, dependents: Mapping[str, List[str]],
               indeg0: Mapping[str, int], chain: Mapping[str, int], slot_of: Mapping[str, float],
-              rev_of: Mapping[str, float], land_of: Mapping[str, float], cap: int) -> Dict[str, float]:
+              rev_of: Mapping[str, float], land_of: Mapping[str, float], cap: int, busy: int = 0) -> Dict[str, float]:
     """One pass of the slot scheduler in effective minutes from now. Returns each finished task's finish time.
 
-    Running tasks already hold a slot; hand-landing tasks hold none. Pending tasks start in `ck plan` order (chain
-    desc, then id) while fewer than `cap` slots are busy. Review and landing waits follow the slot and hold none.
+    Running tasks already hold a slot; hand-landing tasks hold none. `busy` counts excluded running tasks, which hold
+    a slot for the whole pass. Pending tasks start in `ck plan` order (`plan_key`) while fewer than `cap` slots are
+    busy. Review and landing waits follow the slot and hold none. A task on a dependency cycle is never released, so
+    it is missing from the result.
     """
-    free = cap - len(running)
+    free = cap - len(running) - busy
     indeg = dict(indeg0)
     finish: Dict[str, float] = {}
     events: List[Tuple[float, int, int, str]] = []  # (time, seq, kind 0 slot-free | 1 finished, task)
     seq = itertools.count()
-    ready: List[Tuple[int, str]] = []
+    ready: List[Tuple[Tuple[int, int, str], str]] = []
     for t in running:
         heapq.heappush(events, (slot_of[t], next(seq), 0, t))
         heapq.heappush(events, (slot_of[t] + rev_of[t] + land_of[t], next(seq), 1, t))
@@ -183,7 +193,7 @@ def _schedule(active: Sequence[str], running: Mapping[str, float], hand: frozens
         heapq.heappush(events, (land_of[t], next(seq), 1, t))
     for t in active:
         if t not in running and t not in hand and indeg[t] == 0:
-            heapq.heappush(ready, (-chain.get(t, 0), t))
+            heapq.heappush(ready, (plan_key(chain, t), t))
     now = 0.0
     while True:
         while free > 0 and ready:
@@ -202,7 +212,7 @@ def _schedule(active: Sequence[str], running: Mapping[str, float], hand: frozens
         for d in dependents[t]:
             indeg[d] -= 1
             if indeg[d] == 0 and d not in running and d not in hand:
-                heapq.heappush(ready, (-chain.get(d, 0), d))
+                heapq.heappush(ready, (plan_key(chain, d), d))
     return finish
 
 
@@ -219,7 +229,7 @@ def simulate_implement(graph: Graph, model: Model, state: RunState, *, now_min: 
     roles = roles if isinstance(roles, Mapping) else {}
     active = [t for t in graph.order if t not in graph.done and t not in exclude]
     if not active:
-        return SimResult((now, now, now), (0.0, 0.0, 0.0), None, {}, None, STEPS[0], {})
+        return SimResult((now, now, now), (0.0, 0.0, 0.0), None, {}, None, None, {})
     plans = {t: _plan(graph, model, t, roles) for t in active}
     widest = STEPS[max(p.step_index for p in plans.values())]
     if any(p.unknown for p in plans.values()):
@@ -247,7 +257,10 @@ def simulate_implement(graph: Graph, model: Model, state: RunState, *, now_min: 
             if d in aset:
                 indeg[t] += 1
                 dependents[d].append(t)
-    plan_order = sorted(active, key=lambda t: (-graph.chain.get(t, 0), t))
+    plan_order = sorted(active, key=lambda t: plan_key(graph.chain, t))
+    # Excluded running tasks (held) still occupy their slot; they are not simulated, so they hold it for the whole pass.
+    busy = sum(1 for t in exclude if t not in graph.done and state.tasks.get(t) is not None
+               and state.tasks[t].status == "running")
 
     spans: List[float] = []
     crits: List[float] = []
@@ -265,19 +278,27 @@ def simulate_implement(graph: Graph, model: Model, state: RunState, *, now_min: 
             up, ur, ul, uc = draws[t]
             plan = plans[t]
             slot, rev, land, base = _draw(plan, model, up, ur, ul, uc)
+            frac = 1.0  # share of the tuple's cost still to be spent
             if t in running:
                 elapsed = max(0.0, now - running[t])
                 values = plan.slots if plan.samples else plan.bundled_slots
+                full = slot
                 slot = conditional_sample(values, elapsed, up) - elapsed
+                frac = min(1.0, slot / full) if full > 0 else 0.0
             elif t in hand_set:
                 slot, rev = 0.0, 0.0
+                frac = 0.0  # the agent work is already spent
             slot_of[t], rev_of[t], land_of[t] = slot, rev, land
             dur[t] = slot + rev + land
             if base is None:
                 unpriced = True
             else:
-                cost += base
-        finish = _schedule(active, running, hand_set, dependents, indeg, graph.chain, slot_of, rev_of, land_of, cap)
+                cost += base * frac
+        finish = _schedule(active, running, hand_set, dependents, indeg, graph.chain, slot_of, rev_of, land_of, cap,
+                           busy)
+        if len(finish) < len(active):
+            # Some open task never became ready: it sits on a dependency cycle or behind one. Its time is unknown.
+            return SimResult(None, None, None, {}, None, widest, {})
         spans.append(max(finish.values()) if finish else 0.0)
         best: Dict[str, float] = {}
         for t in plan_order:
@@ -313,16 +334,23 @@ def simulate_create(model: Model, state: RunState, *, now_min: float, n: int, se
     rng = random.Random(seed)
     now = float(now_min)
     phases = model.phases
+    unknown = SimResult(None, None, None, {}, None, None, {})
     if not phases:
-        return SimResult(None, None, None, {}, None, STEPS[-1], {})
+        return unknown
 
     run_name = state.phase_running if state.phase_running in phases else None
+    if run_name is not None and not phases[run_name]["minutes"]:
+        return unknown  # a running phase with no samples has no estimate; it must not read as 0 minutes left
     elapsed = 0.0
     if run_name is not None and state.phase_started_min is not None:
         elapsed = max(0.0, now - effective_min(state.waits, state.phase_started_min))
-    pending = [t for t in CREATE_PHASES
-               if t in phases and t not in state.phases_done and t != state.phase_running
-               and phases[t]["minutes"] and float(phases[t]["presence"]) > 0]
+    pending = []
+    for t in CREATE_PHASES:
+        if t not in phases or t in state.phases_done or t == state.phase_running or float(phases[t]["presence"]) <= 0:
+            continue
+        if not phases[t]["minutes"]:
+            return unknown  # a phase that may run but has no samples cannot be dropped silently
+        pending.append(t)
     minutes = {t: tuple(float(x) for x in phases[t]["minutes"]) for t in ([run_name] if run_name else []) + pending}
     presence = {t: float(phases[t]["presence"]) for t in pending}
     candidates = ([run_name] if run_name else []) + pending
@@ -366,6 +394,6 @@ def simulate_create(model: Model, state: RunState, *, now_min: float, n: int, se
         usd=usd,
         task_median_min={},
         critical_median_min=None,
-        widest_step=STEPS[-1],
+        widest_step=None,  # create has no match ladder; None says so instead of a placeholder step
         phase_median_min={t: statistics.median(v) for t, v in per_phase.items()},
     )
