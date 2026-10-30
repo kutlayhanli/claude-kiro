@@ -755,16 +755,17 @@ omitted when absent; `guardLog` and differences never leave). Regenerate `analyt
 **Verify:** `uv run pytest -q -n auto tests/test_stats_interruptions.py tests/test_stats_properties_interruptions.py tests/test_stats_properties_shared.py tests/test_redteam_shared.py tests/test_stats_roles.py tests/test_stats_agents_collect.py tests/test_stats_collect.py tests/test_stats_show.py tests/test_stats_export.py tests/test_stats_properties_share.py` `uv run pytest -q tests/test_guard_properties.py::test_p24_family_names_are_the_documented_set`
 **Verified by:** Task 9, Task 8, Task 3
 **Acceptance:**
-- [ ] A workflow run and an agent-mode run with seeded interruptions get the matching totals by role and family
+- [x] A workflow run and an agent-mode run with seeded interruptions get the matching totals by role and family
       (`other` for non-shell); a gate-only block counts nothing.
-- [ ] Wait minutes equal the sum of ask-to-result gaps; guard-ladder rows in both grammars count as escalations
+- [x] Wait minutes equal the sum of ask-to-result gaps; guard-ladder rows in both grammars count as escalations
       with the model family; the `park` row is matched as orchestrator.
-- [ ] A guard log that disagrees within the run window keeps transcript counts and records the difference
+- [x] A guard log that disagrees within the run window keeps transcript counts and records the difference
       locally; another run in the same session never adds a difference.
-- [ ] A shareable record carries counts, roles, families, wait minutes and escalation model names only, under
+- [x] A shareable record carries counts, roles, families, wait minutes and escalation model names only, under
       `ck-run-analytics/1`; SCHEMA.md documents every new path.
-- [ ] `ck stats show` prints the exact interruptions line; a record without counts prints `interruptions: not
+- [x] `ck stats show` prints the exact interruptions line; a record without counts prints `interruptions: not
       recorded`; older records still load.
+**Implementation notes:** Agent-mode orchestrator window is open at the end; unmatched agent descriptions take their interruption role from the agent type. `tests/stats_helpers.py::seeded_local_record` gained an all-zero `interruptions` key (needed by `test_stats_collect.py::test_seeded_local_record_has_the_key_set_of_a_collected_record`; not pre-approved). `tests/test_stats_helpers.py::test_seeded_local_record_has_the_contract_keys_and_plants_strings` pins the old key set and now fails: it contradicts the collect key-set test.
 **Dependencies:** Task 10 (calls `command_family`), Task 11 (calls `guardlog.read_events`), Task 9 (its tests are the oracle), Task 8 (its tests are the oracle)
 **Complexity:** High
 **Risk:** safety (builds the record that leaves the machine on export and submit)
