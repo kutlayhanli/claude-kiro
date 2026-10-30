@@ -195,7 +195,7 @@ metamorphic rule) and P-32 (`run_marker` lifecycle with an injected clock, skipp
 ---
 
 ### Task 5: Test the shell post-check and the private guard event log
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.6, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 2.10, 3.4, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6
 **Properties:** P-7, P-8, P-9, P-10, P-21
@@ -228,21 +228,34 @@ TC-53 plants a log just under `guardlog.GUARD_LOG_LIMIT`; TC-55 runs real `ck st
 **Verify:** `uv run pytest -q -n auto tests/test_guard_postcheck.py tests/test_redteam_postcheck.py tests/test_postcheck_properties.py tests/test_guard_log.py`
 **Verifies:** Task 11 (the guard hooks, the post-check and the guard log)
 **Acceptance:**
-- [ ] A real `sed -i` deleting an assertion, a python heredoc adding a skip, a `python -c` dropping a test, the same
+- [x] A real `sed -i` deleting an assertion, a python heredoc adding a skip, a `python -c` dropping a test, the same
       in a task worktree by absolute path, and the same followed by `git commit` are each reported with file and
       kind; non-weakening, new-on-branch and owned changes are not.
-- [ ] `find -exec sed` weakening and `find -delete` of an existing test are caught after the command; `find ...
+- [x] `find -exec sed` weakening and `find -delete` of an existing test are caught after the command; `find ...
       '*.pyc' -delete` is not.
-- [ ] Concurrent pairs on one session each catch their own weakening exactly once; a script-built path into
+- [x] Concurrent pairs on one session each catch their own weakening exactly once; a script-built path into
       another worktree is left to the gate, which fails.
-- [ ] A merge that brings in the target's test change reports nothing; a weakening after it is reported.
-- [ ] Every forced failure and red-team case leaves no blocking output, exit 0, within 5 s through `done-verify`.
-- [ ] One event per ask/deny/catch with every 9.1 field; none for passing calls; the log is 0600 in 0700, rotates,
+- [x] A merge that brings in the target's test change reports nothing; a weakening after it is reported.
+- [x] Every forced failure and red-team case leaves no blocking output, exit 0, within 5 s through `done-verify`.
+- [x] One event per ask/deny/catch with every 9.1 field; none for passing calls; the log is 0600 in 0700, rotates,
       never changes a decision when unwritable, and feeds the leak check.
-- [ ] Tests exercise both real hooks, real shell commands and real git; no mocks of project code.
+- [x] Tests exercise both real hooks, real shell commands and real git; no mocks of project code.
 **Dependencies:** Task 1 (run_bash, fake_git, big_repo, claimed_task_worktree, guard_events), Task 2 (TC-19 reads its capture summary)
 **Complexity:** High
 **Risk:** safety (oracle for catching shell-made test weakening and for keeping confidential command text local)
+
+**Implementation notes (task 5):**
+- Shared CLI helpers (`cli_hook`, `cli_cycle`, `py_heredoc`) live in `tests/test_guard_postcheck.py` and are imported by the red-team and guard-log files.
+- TC-75(b) deviation: the plan checks out `main`'s version of the test after `feature` added an assertion. That version equals the base ref's content, which D19 exempts, so the case as written contradicts TC-82/D19. The test first moves `main` on with a weaker version (no longer the merge-base's content), so the checkout brings in content that is neither the base ref's nor an incoming merge ref's, and still exercises "HEAD moves, file clean afterwards".
+- TC-55: the machine label (slug-only) is the free-text slot a record carries, so the refusal-on-export-and-submit half plants a slug-shaped value; command, path and reason texts are covered through the note flow.
+- Red team: non-JSON stdin is left to the hook runner (TC-24 covers it); the red-team cases send well-formed JSON with hostile contents, plus invalid UTF-8 inside the JSON string. That case pins `LC_ALL=C.UTF-8` and `PYTHONUTF8=0`; Task 11 should read `sys.stdin.buffer` and decode with `errors='replace'` so the hook is quiet under any locale.
+- P-7 draws its starting body and path from four templates (pytest, jest/vitest, go, rspec), committed on the base, with per-language skip/only markers.
+- P-10: for the `data_dir` and `read_only` failures the post-check must equal the baseline post-check (not `None` as the test-plan row reads), since a logging failure must not change a catch. Spec question: correct the P-10 row in test-plan.md to say so. Likewise the TC-75(b) row still says the unadapted case is caught, which contradicts D19/TC-82; the row should be corrected to match D19.
+- TC-77 asserts a snapshot appears under `TMPDIR` after a pre hook alone (`<TMPDIR>/.../guardsnap-*`), so the "none left behind" check is not vacuous; design.md should name the snapshot directory explicitly.
+- Spec question (snapshot location): TC-77 and the red-team `private_tmp` fixture treat `<cache dir>` in `<cache dir>/guardsnap-<session_id>-<key>.json` as a directory under `tempfile.gettempdir()` (the existing CacheManager default, `tempfile.gettempdir()/claude-kiro-hooks`). Task 11 should treat that location as the contract until design.md names it.
+- Spec question (P-10, Write on an unreadable file): P-10 follows its test-plan row and includes `Write` under the `unreadable` failure (old file chmod 0 before the pre hook), requiring the forced decision to equal the baseline. Today's Write path returns no decision when the old file cannot be read, and design.md names no fallback; Error Handling 1.7 says uncertainty never causes an ask. Task 11 needs a fallback that reaches the same decision, for example reading the old content from git (`content_at(HEAD)`) when the working file is unreadable. Either design.md should name that fallback or the P-10 row should drop Write+unreadable; until then the test stands as the row reads.
+- TC-14 counts the `<rel>:` part of the S10 text (one catch per command), not bare path occurrences, because the S10 task-agent text names `<rel>` again in its restore hint.
+- P-7 applies `drop_assert` through sed, `perl -ni` and `find -exec sed -i`; the other template mutations go through the python heredoc, so the shell forms cover a subset of the mutations.
 
 ---
 
