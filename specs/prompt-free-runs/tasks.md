@@ -247,7 +247,7 @@ TC-53 plants a log just under `guardlog.GUARD_LOG_LIMIT`; TC-55 runs real `ck st
 ---
 
 ### Task 6: Test the hand-off of whole-spec runs to `ck run`
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.2, 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9
 **Properties:** P-19, P-20, P-31
@@ -271,15 +271,15 @@ worktree spec and taken branch refusals (both checkouts unchanged); TC-85 an ide
 **Verify:** `uv run pytest -q -n auto tests/test_handoff.py tests/test_handoff_properties.py tests/test_run.py`
 **Verifies:** Task 12 (`ck run --command`, `ck handoff`; P-19/P-20 also cover foundation Task 10's `decide_handoff`)
 **Acceptance:**
-- [ ] A whole-spec run from `.claude/worktrees/` launches from the main checkout and prints checkout, an existing
+- [x] A whole-spec run from `.claude/worktrees/` launches from the main checkout and prints checkout, an existing
       log path, follow command and report hint; the prompt never holds `--log`.
-- [ ] create/review runs get the same headless, sandboxed, prompt-free argv and refusals as implement.
-- [ ] Every launch failure, including an early child exit, prints the reason and the manual command and runs
+- [x] create/review runs get the same headless, sandboxed, prompt-free argv and refusals as implement.
+- [x] Every launch failure, including an early child exit, prints the reason and the manual command and runs
       nothing in the worktree.
-- [ ] The child's sandbox preflight never depends on this machine's bwrap/socat.
-- [ ] A spec only on the worktree's branch runs on `<spec>-run` at the worktree's HEAD; a dirty main checkout or a
+- [x] The child's sandbox preflight never depends on this machine's bwrap/socat.
+- [x] A spec only on the worktree's branch runs on `<spec>-run` at the worktree's HEAD; a dirty main checkout or a
       taken branch refuses with the recovery commands and changes nothing; an identical spec runs as before.
-- [ ] Generators cover every row form; settings are deterministic; no mocks of project code.
+- [x] Generators cover every row form; settings are deterministic; no mocks of project code.
 **Dependencies:** Task 1 (worktree_of, sleeping_fake_claude, fake_sandbox_tools)
 **Complexity:** Medium
 **Risk:** safety (launches a paid headless claude run)
