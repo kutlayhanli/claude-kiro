@@ -507,7 +507,11 @@ def mergeable(line: str, seen_hashes: Set[str]) -> bool:
 @contextlib.contextmanager
 def notice_lock(key: str, env: Optional[Mapping[str, str]] = None) -> Iterator[None]:
     path = progress_dir(env) / f"{_check_key(key)}.lock"
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT, 0o600)
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT, 0o600)
+    except OSError:
+        yield  # an unwritable progress directory: no lock to take, the notice still goes out
+        return
     try:
         try:
             os.chmod(path, 0o600)

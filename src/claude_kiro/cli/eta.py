@@ -516,12 +516,13 @@ def progress_end(spec: str, run_key: Optional[str], outcome: str, record: Option
                 first = (lines[0].split(" ", 2)[2] if lines and len(lines[0].split(" ", 2)) == 3 else err)
                 n = len(lines) if lines else 1
                 warnings.append(f"⚠ progress: {n} event(s) not written ({first})")
-            if ok:
-                svc.notify_done(key, now=now, env=env, root=None if env.get("CK_PROGRESS_DIR") else root)
-                events, _ = prog.read_events(prog.run_file(key, env))
-                bad = [e for e in events if e.get("kind") == "notified" and e.get("outcome") == "failed"]
-                if bad:
-                    warnings.append(f"⚠ notification failed: {bad[0].get('detail') or 'unknown error'}")
+            end_event = {"kind": "end", "at": _utc_iso(now), "outcome": outcome, "merged": merged,
+                         "total": total, "usd": usd}
+            sent = svc.notify_done(key, now=now, env=env, root=None if env.get("CK_PROGRESS_DIR") else root,
+                                   end_event=None if ok else end_event)
+            bad = [detail for status, detail in sent if status == "failed"]
+            if bad:
+                warnings.append(f"⚠ notification failed: {bad[0] or 'unknown error'}")
             try:
                 view = svc.estimate(root, spec, state.run_kind or None, now=now, env=env)
                 block = svc.render(view)

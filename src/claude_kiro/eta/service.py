@@ -792,9 +792,13 @@ def _queues_for_parent(env: Mapping[str, str]) -> bool:
 
 
 def _dispatch(key: str, notices: Sequence[decide.Notice], cwd: Path, command: Optional[str],
-              env: Mapping[str, str], direct: bool) -> None:
-    """Send (or queue for `ck run`) each due notice and record it. Called under `notice_lock`; never raises."""
+              env: Mapping[str, str], direct: bool) -> List[Tuple[str, Optional[str]]]:
+    """Send (or queue for `ck run`) each due notice and record it. Called under `notice_lock`; never raises.
+
+    Returns the (status, detail) of each notice sent, so a caller whose progress file is unwritable still knows the
+    outcome. With no notify command nothing is sent and nothing is recorded (8.8)."""
     parent = env.get("CK_RUN_NOTIFY") == "parent" and not direct
+    outcomes: List[Tuple[str, Optional[str]]] = []
     for n in notices:
         text = decide.notice_text(n)
         try:
@@ -805,8 +809,12 @@ def _dispatch(key: str, notices: Sequence[decide.Notice], cwd: Path, command: Op
             status, detail = outcome.status, (outcome.detail or None)
         except Exception as exc:  # noqa: BLE001 - failures are recorded, not raised
             status, detail = "failed", ("%s: %s" % (type(exc).__name__, exc))[:200]
+        if status == "not_configured":
+            continue
+        outcomes.append((status, detail))
         progress.append(key, {"kind": "notified", "notice": n.kind, "key": n.key, "level": n.level,
                               "outcome": status, "detail": detail}, env)
+    return outcomes
 
 
 def after_event(key: str, *, now: datetime, budget_s: Optional[float] = None,
@@ -876,7 +884,8 @@ def after_event(key: str, *, now: datetime, budget_s: Optional[float] = None,
 
 
 def _send_done(key: str, *, now: datetime, env: Mapping[str, str], direct: bool,
-               root: Optional[Path] = None) -> None:
+               root: Optional[Path] = None,
+               end_event: Optional[Mapping[str, Any]] = None) -> List[Tuple[str, Optional[str]]]:
     """Dispatch the done notice of an ended run (once: S7 skips a run that already has one).
 
     `root` is the caller's trusted project root. Without it, a run whose `start` may come from a sandboxed child
@@ -885,16 +894,18 @@ def _send_done(key: str, *, now: datetime, env: Mapping[str, str], direct: bool,
     now = _aware(now)
     with progress.notice_lock(key, env):
         events, _skipped = progress.read_events(progress.run_file(key, env))
+        if end_event is not None and not any(ev.get("kind") == "end" for ev in events):
+            events = list(events) + [dict(end_event)]  # `end` could not be written: the notice still goes out
         start = _start_of(events)
         state = progress.fold(events)
         if start is None or state.ended is None:
-            return
+            return []
         spec = str(start.get("spec"))
         if root is not None:
             project_dir = Path(root)
         elif _start_untrusted(start, env):
             if direct or not _queues_for_parent(env):
-                return
+                return []
             project_dir = Path(str(start.get("root")))
         else:
             project_dir = Path(str(start.get("root")))
@@ -909,18 +920,20 @@ def _send_done(key: str, *, now: datetime, env: Mapping[str, str], direct: bool,
         ni = _notify_input(view, aux, spec, env, end_event=state.ended)
         ni = decide.NotifyInput(**{**ni.__dict__, "now_hhmm": _local(now, env).strftime("%H:%M")})
         notices = decide.notify_decision(ni, state.sent, settings["threshold"])
-        _dispatch(key, notices, project_dir, settings["notify_command"], env, direct=direct)
+        return _dispatch(key, notices, project_dir, settings["notify_command"], env, direct=direct)
 
 
 def notify_done(key: str, *, now: datetime, env: Optional[Mapping[str, str]] = None,
-                root: Optional[Path] = None) -> None:
+                root: Optional[Path] = None,
+                end_event: Optional[Mapping[str, Any]] = None) -> List[Tuple[str, Optional[str]]]:
     """After `end` is appended: send the run's done notice (or queue it under `CK_RUN_NOTIFY=parent`). Never raises.
 
-    Pass `root` (the caller's own project root) when the run may have been spooled: see `_send_done`."""
+    Returns the (status, detail) of each notice sent. Pass `root` (the caller's own project root) when the run may
+    have been spooled: see `_send_done`. Pass `end_event` when `end` could not be written to the progress file."""
     try:
-        _send_done(key, now=now, env=_environ(env), direct=False, root=root)
+        return _send_done(key, now=now, env=_environ(env), direct=False, root=root, end_event=end_event)
     except Exception:  # noqa: BLE001
-        pass
+        return []
 
 
 def send_done_for_superseded(key: str, *, now: datetime, env: Optional[Mapping[str, str]] = None,
