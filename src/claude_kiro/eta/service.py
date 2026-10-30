@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import statistics
 import time
 from datetime import datetime, timedelta, timezone, tzinfo
@@ -392,6 +393,14 @@ def _launch_p90_min(state: progress.RunState, launch: datetime) -> Optional[floa
     return None
 
 
+_SPEC_NAME = re.compile(r"[0-9A-Za-z_][0-9A-Za-z_.\-]*")
+_UNSET: Any = object()
+
+
+def _valid_spec(spec: str) -> bool:
+    return bool(_SPEC_NAME.fullmatch(spec)) and ".." not in spec
+
+
 def _check_deadline(deadline: Optional[float]) -> None:
     if deadline is not None and time.monotonic() > deadline:
         raise _Timeout()
@@ -407,7 +416,9 @@ def _run_sim(fn: Any, deadline: Optional[float], n_full: int, **kwargs: Any) -> 
     _check_deadline(deadline)
     if n_full > BATCH and time.monotonic() + took * (n_full / BATCH - 1) > deadline:
         raise _Timeout()
-    return fn(n=n_full, **kwargs)
+    result = fn(n=n_full, **kwargs)
+    _check_deadline(deadline)
+    return result
 
 
 def _core(project_dir: Path, spec: str, kind: str, *, key: Optional[str], events: Sequence[Mapping[str, Any]],
@@ -619,7 +630,8 @@ def _ended_block(project_dir: Path, spec: str, kind: str, state: progress.RunSta
                              "vsLaunch": place, "next": None, "nothingLeft": False}
     if kind == "implement":
         try:
-            fresh = _build_graph(project_dir, spec, [], settings["slots"], settings["source"])
+            fresh = _build_graph(project_dir, spec, [t for t, p in state.tasks.items() if p.status == "merged"],
+                                 settings["slots"], settings["source"])
         except NoEstimate:
             fresh = None
         remaining = [t for t in fresh.order if t not in fresh.done] if fresh is not None else []
@@ -627,8 +639,9 @@ def _ended_block(project_dir: Path, spec: str, kind: str, state: progress.RunSta
             block["nothingLeft"] = True
         else:
             try:
-                nxt, _ = _core(project_dir, spec, kind, key=None, events=[], skipped=0, progress_file=None, now=now,
-                               seed=None, env=env, model=model, settings=settings)
+                carried = [ev for ev in events if ev.get("kind") == "merge"]
+                nxt, _ = _core(project_dir, spec, kind, key=None, events=carried, skipped=0, progress_file=None,
+                               now=now, seed=None, env=env, model=model, settings=settings)
                 block["next"] = nxt
             except (EtaError, _Timeout):
                 block["next"] = None
@@ -678,7 +691,7 @@ def estimate(project_dir: Path, spec: str, kind: Optional[str] = None, *, now: d
     now_iso = _iso_local(now, e)
     if key and seed is None:
         cache = _read_cache(key, e)
-        if cache is not None and cache.get("now") == now_iso and decide.cache_fresh(cache, digest, model.digest):
+        if cache is not None and decide.cache_fresh(cache, digest, model.digest):
             return _from_cache(cache, path, now_iso)  # type: ignore[arg-type]
     view, _ = _core(project_dir, spec, kind, key=key, events=events, skipped=skipped, progress_file=path, now=now,
                     seed=seed, env=e, model=model, settings=settings, extra_notes=extra)
@@ -754,8 +767,13 @@ def _dispatch(key: str, notices: Sequence[decide.Notice], cwd: Path, command: Op
 
 
 def after_event(key: str, *, now: datetime, budget_s: Optional[float] = None,
-                env: Optional[Mapping[str, str]] = None) -> Optional[str]:
-    """Recompute after an event (or on time alone), cache, notify, and return the log line; None past the budget or on error."""
+                env: Optional[Mapping[str, str]] = None, root: Optional[Path] = None,
+                notify_command: Any = _UNSET) -> Optional[str]:
+    """Recompute after an event (or on time alone), cache, notify, and return the log line; None past the budget or on error.
+
+    The progress file may be written by a sandboxed child (the spool), so its `start` event's root is not trusted for
+    the notify command or the working directory: a caller outside the sandbox passes its own `root` and
+    `notify_command`. Under `CK_PROGRESS_DIR` without them nothing is sent directly (outcomes are recorded)."""
     e = _environ(env)
     try:
         override = e.get("CK_ETA_LINE_TIMEOUT_S")
@@ -777,8 +795,17 @@ def after_event(key: str, *, now: datetime, budget_s: Optional[float] = None,
             if state.ended is not None or progress.is_stale(last_at, now):
                 return None
             project_dir, spec = Path(str(start.get("root"))), str(start.get("spec"))
+            if not _valid_spec(spec):
+                return None
+            untrusted = root is None and bool(e.get("CK_PROGRESS_DIR"))
+            if root is not None:
+                project_dir = Path(root)
             kind = str(start.get("runKind") or "implement")
             settings = _settings(project_dir, e)
+            if notify_command is not _UNSET:
+                settings["notify_command"] = notify_command
+            elif untrusted:
+                settings["notify_command"] = None
             model = _load_model(key, spec, e)
             digest = _events_digest(path)
             now_iso = _iso_local(now, e)
@@ -788,6 +815,7 @@ def after_event(key: str, *, now: datetime, budget_s: Optional[float] = None,
             _check_deadline(deadline)
             view, aux = _core(project_dir, spec, kind, key=key, events=events, skipped=skipped, progress_file=path,
                               now=now, seed=None, env=e, model=model, settings=settings, deadline=deadline)
+            _check_deadline(deadline)
             _write_cache(key, view, digest, model.digest, e)
             view["_timeOnly"] = bool(fresh_events and cache.get("now") != now_iso)  # type: ignore[union-attr]
             ni = _notify_input(view, aux, spec, e)
@@ -870,9 +898,15 @@ def prepare_spool(main_root: Path, spec: str, env: Optional[Mapping[str, str]] =
         return None
     spool = Path(wdir) / ".ck-progress"
     try:
+        if spool.is_symlink():
+            return None
         spool.mkdir(parents=True, exist_ok=True)
+        if spool.is_symlink() or not spool.is_dir():
+            return None
         os.chmod(spool, 0o700)
         ignore = spool / ".gitignore"
+        if ignore.is_symlink():
+            return None
         if not ignore.exists() or ignore.read_text(encoding="utf-8") != "*\n":
             ignore.write_text("*\n", encoding="utf-8")
         model = _fit(data_env)
