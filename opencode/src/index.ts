@@ -6,6 +6,7 @@ import { loadConfig } from "./config.ts";
 import { createGuard } from "./guard.ts";
 import { writeInstructions } from "./instructions.ts";
 import { catalogFromModels } from "./models.ts";
+import { formatPreflight, runPreflight } from "./preflight.ts";
 import { materializeResources } from "./resources.ts";
 import { registerWorkflowTool } from "./workflow-tool.ts";
 
@@ -49,6 +50,20 @@ export default Plugin.define({
     const resources = materializeResources(projectDir, packageRoot);
     const instructions = writeInstructions(projectDir, packageRoot);
 
+    // Run after materialization: on first install the agent files do not exist until setup writes them.
+    const preflight = await runPreflight({
+      projectDir,
+      packageRoot,
+      config: loaded.config,
+      catalog,
+    });
+    if (!preflight.ok || preflight.checks.some((check) => !check.ok)) {
+      console.error(`[claude-kiro] ${formatPreflight(preflight)}`);
+    }
+    if (!preflight.ok) {
+      throw new Error("claude-kiro preflight failed; fix the errors above before running /spec/*");
+    }
+
     if (agents.conflicts.length > 0) {
       console.error(
         `[claude-kiro] kept your edited agent file(s): ${agents.conflicts.join(", ")} ` +
@@ -60,6 +75,7 @@ export default Plugin.define({
         `${agents.written.length + agents.unchanged.length + agents.conflicts.length} agents, ` +
         `${resources.length} resources` +
         `${instructions.changed ? `, AGENTS.md ${instructions.appended ? "updated" : "refreshed"}` : ""}` +
+        `, preflight=${preflight.ok ? "ok" : "failed"}` +
         ` (sonnet=${loaded.config.models.sonnet}, project=${projectDir})`,
     );
 

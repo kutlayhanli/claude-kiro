@@ -123,6 +123,13 @@ return { structured, plain }
     assert.equal(record.agents[1].label, "review 1");
     assert.ok(record.agents[0].tokens.input > 0);
     assert.ok(record.agents[0].peakContext >= 0);
+    const bench = JSON.parse(readFileSync(join(runDir, "bench-output.json"), "utf8"));
+    assert.equal(bench.workflowProgress.length, 2);
+    assert.equal(bench.workflowProgress[0].type, "workflow_agent");
+    assert.equal(bench.workflowProgress[0].label, "task 1");
+    assert.equal(bench.workflowProgress[0].state, "ok");
+    assert.match(bench.workflowProgress[0].model, /fake\/model/);
+    assert.ok(bench.durationMs >= 0);
 
     await dispose();
   } finally {

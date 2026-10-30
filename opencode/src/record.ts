@@ -228,6 +228,10 @@ export class RunRecordWriter {
     this.write();
   }
 
+  agents(): readonly AgentRow[] {
+    return this.data.agents as AgentRow[];
+  }
+
   addAgent(row: AgentRow, guardEvents: readonly GuardEvent[] = []): void {
     (this.data.agents as AgentRow[]).push(row);
     if (row.attempts > 1) {
@@ -280,6 +284,29 @@ export class RunRecordWriter {
     writeFileSync(temporary, `${JSON.stringify(this.data, null, 2)}\n`);
     renameSync(temporary, this.path);
   }
+}
+
+/** The shape `ck bench import` accepts (`{result, workflowProgress, durationMs}`). */
+export function benchOutput(
+  result: unknown,
+  rows: readonly AgentRow[],
+  durationMs: number,
+  status: "done" | "failed" = "done",
+): Record<string, unknown> {
+  return {
+    result,
+    status,
+    durationMs,
+    workflowProgress: rows.map((row) => ({
+      type: "workflow_agent",
+      agentId: row.sessionID,
+      label: row.label,
+      model: row.resolved ? `${row.resolved.providerID}/${row.resolved.id}` : row.requested.model,
+      tokens: row.peakContext,
+      durationMs: row.durationMs,
+      state: row.status,
+    })),
+  };
 }
 
 function statusForError(kind: string): AgentStatus {

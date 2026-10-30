@@ -265,8 +265,12 @@ the child hit the guard without reporting `guardStop`.
 
 ### 3.2 Run record (D7)
 
-- `record.ts` writes `<state>/runs/<runId>.json` (outside the worktree) at spawn as `partial`, and
-  closes it with the workflow result.
+**Status:** `opencode/src/record.ts` writes `<state>/runs/<runId>/record.json` at spawn and closes it
+on done/error; live-verified with three agents. The Python ingester is being built against
+`notes/opencode-record-contract.md` in the `telemetry-ingest` track.
+
+- `record.ts` writes `<state>/runs/<runId>/record.json` (outside the worktree) at spawn as `partial`,
+  and closes it with the workflow result.
 - Fields: label, phase, role, agent, `model`, `requestedEffort`, `resolvedEffort`, `variant`,
   `startedAt`/`endedAt`, tokens `{input, output, reasoning, cache{read, write}}`, cost, status,
   guard events, retries, throttles, peak context (max `input + cache.read` per step).
@@ -303,8 +307,10 @@ informational. Runs automatically at the start of `/spec/implement`.
 
 ### 4.1 Step 1 (import path)
 
-- `workflow-tool.ts` writes `bench-output.json`: `{result, workflowProgress:[{label, phase, model,
-  state, startedAt, durationMs, tokens}]}` — the shape `ck bench import` accepts.
+- `workflow-tool.ts` writes `bench-output.json`: `{result, status, durationMs, workflowProgress:[{
+  type:"workflow_agent", agentId, label, model, state, durationMs, tokens}]}` — the shape
+  `ck bench import` accepts. **Live-verified:** the generated file imported into
+  `smoke--beam-free--r1.json` with all three agents, wall time and context-token estimates.
 - Small script `opencode/scripts/arm.sh` (spec, model, rep) that starts one run in a fresh worktree
   with `CK_RUN_HEADLESS=1`, waits for the record, and prints the bench output path.
 - `ck bench import` + `ck bench score` unchanged.

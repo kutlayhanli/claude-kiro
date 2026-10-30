@@ -24,7 +24,7 @@ and `ck stats` keep working.
   "harness": "opencode",
   "workflow": "spec-create" | "spec-implement" | "other",
   "collectorVersion": "0.10.3",          // the npm package version
-  "ckVersion": "0.10.3",                 // `ck --version`, resolved by the plugin or by the ingester
+  "ckVersion": "0.10.3" | null,          // `ck --version`; the ingester fills it when null
   "claudeCodeVersion": null,             // always null on this harness
   "status": "running" | "done" | "failed" | "partial",
   "startedAt": 1793388200665,            // epoch ms

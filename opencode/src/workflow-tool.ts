@@ -21,6 +21,7 @@ import {
   RunRecordWriter,
   agentRowFromError,
   agentRowFromOutcome,
+  benchOutput,
   packageVersion,
   workflowNameOf,
 } from "./record.ts";
@@ -218,6 +219,7 @@ async function startWorkflow(
   const logger = createRunLogger(join(runDir, "run.log"));
   logger.write(`run ${runId} ${target.name} project=${runtime.projectDir}`);
 
+  const runStartedAt = Date.now();
   const record = new RunRecordWriter(join(runDir, "record.json"), {
     runId,
     workflow: workflowNameOf(target.name),
@@ -314,8 +316,12 @@ async function startWorkflow(
       record.finish({ status: "done", result, endedAt: Date.now() });
       try {
         writeFileSync(join(runDir, "result.json"), `${JSON.stringify({ runId, workflow: target.name, result }, null, 2)}\n`);
+        writeFileSync(
+          join(runDir, "bench-output.json"),
+          `${JSON.stringify(benchOutput(result, record.agents(), Date.now() - runStartedAt), null, 2)}\n`,
+        );
       } catch (error) {
-        logger.write(`could not write result.json: ${messageOf(error)}`);
+        logger.write(`could not write result.json/bench-output.json: ${messageOf(error)}`);
       }
       logger.write("workflow finished");
       void post(runtime, sessionID, runId, logger, finalMessage(runId, target.name, result, runDir), true);
