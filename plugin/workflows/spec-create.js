@@ -602,6 +602,8 @@ const GOVERNING_RULE = `**Fixes that change behaviour.** A fix changes behaviour
    c. If the fix needs behaviour that differs from any of them (it would refuse what a criterion accepts or re-evaluates, add a state, change a number or an actor), do NOT apply it, and do not edit the criterion to make room for it. Choosing between the two is a product decision. Return it under "escalated": the finding id, the question (state both behaviours plainly), 2-3 options (one of them "follow criterion N.M as written" and what that means for the finding), and conflictsWith (the criterion ids and P-ids, with a short quote).
    A finding you escalate goes in "escalated" only, not in "fixed" or "notFixed".`
 
+const FROZEN_RULE = `**Frozen spec.** First read the Status line of every task in ${DIR}/tasks.md. If any task is not Not Started, implementation has started and requirements.md and test-plan.md are the contract it is checked against. Then a fix that changes or removes existing text in requirements.md or test-plan.md (rewording, renumbering, narrowing, weakening or deleting an existing requirement, criterion, test case or property) is one you do NOT apply, whatever the finding says. Return it under "escalated" instead: the finding id, the question (for example "Change <id> although implementation has started?"), and 2-3 options: one with the proposed text verbatim, and one "leave the spec as is". It goes in "escalated" only, not in "fixed" or "notFixed". Fixes that only add (a new requirement or criterion, a new test case or property, a new task, design or tasks.md edits) are add-only and are applied as usual. When every task is Not Started, this rule does not apply.`
+
 const revision = await agent(`
 You are revising a spec after adversarial review.
 
@@ -613,6 +615,8 @@ Spec files: ${SPEC_FILES}.
 ${JSON.stringify(toFix, null, 2)}
 
    ${GOVERNING_RULE}
+
+   ${FROZEN_RULE}
 
 2. Do NOT resolve these; they need the user's decision. Leave the spec as is for them:
 ${JSON.stringify(forUser.map(f => ({ id: f.id, question: f.question || f.problem })), null, 2)}

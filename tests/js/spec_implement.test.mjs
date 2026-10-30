@@ -824,7 +824,8 @@ await test('planning: a plan step that keeps failing halts only if it left a rea
 })
 
 // Recursive key paths of a result: objects by key, arrays by their elements merged under "[]".
-// Pinned from the script before tasks[].resolves existed, plus that one key.
+// Pinned from the script before tasks[].resolves existed, plus that key and the prompt-free-runs additions
+// (needsInput, notifications, tasks[].parked: design "Workflow script interface").
 const SNAPSHOT_KEYS = [
   "agents",
   "agents.fixer",
@@ -859,7 +860,13 @@ const SNAPSHOT_KEYS = [
   "landings[].tasks",
   "landings[].window",
   "merged",
+  "needsInput",
   "notStarted",
+  "notifications",
+  "notifications.failed",
+  "notifications.hint",
+  "notifications.notConfigured",
+  "notifications.sent",
   "outcome",
   "reason",
   "reportSource",
@@ -887,6 +894,7 @@ const SNAPSHOT_KEYS = [
   "tasks[].mergedAt",
   "tasks[].ok",
   "tasks[].outsideFiles",
+  "tasks[].parked",
   "tasks[].reason",
   "tasks[].resolves",
   "tasks[].review",

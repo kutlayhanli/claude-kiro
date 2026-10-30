@@ -53,6 +53,8 @@ An unattended run (`ck run`) may put your shell commands in Claude Code's sandbo
 - Never set `dangerouslyDisableSandbox`, and never edit `.claude/settings*.json` to widen permissions.
 - Some commands are denied outright: `git push`, `git reset --hard`, `git clean`, `git worktree remove --force`, `git -c ...`, `curl`, `wget`, `ssh`, `scp`, `rsync`, `nc`, and WebFetch. You don't need them; don't look for substitutes. These rules match the command text, so a commit whose message contains such a phrase (for example "clean up" or "push") can be refused: reword the message.
 
+**Guard denials and post-check messages.** A hook may deny a command or an edit with a `[ck guard]` message, or a Bash result may end with a `[ck post-check]` message saying a test was changed, weakened or deleted. Both mean the test stays as it is: keep it, or restore it from the base branch if the command already changed it (`command git -C <worktree> checkout <base> -- <path>`). Never work around the denial (another tool, another path, a different command, a script that writes the file), and never run `ck guard` or edit the guard's files. Stop, leave the task In Progress, and report `guardStop` with `file`, `kind`, the `test` and the `requirement` it verifies, both quoted exactly. A bigger model, or I, will decide.
+
 ## Steps
 
 1. Note the time (`date -u +%Y-%m-%dT%H:%M:%SZ`) for your report's startedAt. Claim the worktree (see above). Set your task to `**Status:** In Progress` and commit `task [N]: mark in progress`.
@@ -81,6 +83,7 @@ Return the structured fields your prompt asks for:
 - commits (hashes)
 - gateTail (the last ~15 lines of the gate output)
 - blocker (if any)
+- guardStop (only if a guard denial or post-check message stopped you): `file`, `kind`, the quoted `test` and `requirement`
 - deviations from the spec
 - wrongTests (tests you believe are wrong, with your reasoning; for a property, its ID, the shrunk counterexample, and whether you think the code, the spec, or the property should change)
 - outsideFiles (files you touched that your task doesn't list)

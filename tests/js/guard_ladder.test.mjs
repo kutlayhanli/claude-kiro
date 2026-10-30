@@ -180,3 +180,12 @@ await test('TC-80: task, retry, revise and guard prompts read the decision note 
     assert.ok(gate < 0 || at < gate, `${l} reads it before the work starts`)
   }
 })
+
+await test('guard attempts do not use the gate-retry budget: guard stop, red ladder attempt, then maxRetries retries on the start model', async () => {
+  const p = project({ deps: { 1: [] }, guardStops: { 1: 'haiku' }, failUntil: { 1: 3 } })
+  await run(p, { maxRetries: 1, agents: roles('haiku', []) })
+  // The stub stops every call at or below the ceiling, so the retry on the start model guard-stops again: only the prefix is the point.
+  assert.deepEqual(attemptsOf(p.state).slice(0, 3), ['task 1', 'task 1 guard 1 (sonnet)', 'task 1 retry 1'], p.state.events.join(', '))
+  assert.deepEqual(modelsOf(p.state).slice(0, 3), ['haiku', 'sonnet', 'haiku'])
+
+})
