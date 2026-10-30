@@ -150,6 +150,7 @@ def _status_world(tmp_path: Path):
     return repo
 
 
+@pytest.mark.serial  # a timing budget: runs in the serial verify step, not under -n auto load
 def test_tc86_status_line_costs_under_100_ms_over_a_bare_import_and_uses_no_network(tmp_path):
     repo = _status_world(tmp_path)
     stdin = {"workspace": {"current_dir": str(repo)}}

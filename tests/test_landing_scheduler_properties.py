@@ -13,6 +13,8 @@ also passes `args.agentSlots = slots`, so the script's presumed queue matches th
 
 import copy
 import re
+
+import pytest
 from collections import Counter
 from typing import Any, Dict, List, Optional, Set
 
@@ -187,6 +189,15 @@ def outstanding_walk(trace: List[Dict[str, Any]]):
 
 @SETTINGS
 @given(scenarios())
+# Found when another module's constants entered Hypothesis's pool: task 3 waits on task 1 at the start and is
+# relinked free at plan 2, so the idle plan at t=3 is legitimate and the graph is not all-independent.
+@example(
+    sc={"project": {"deps": {"1": [], "2": [], "3": ["1"]}, "durations": {"1": 1, "2": 1, "3": 1},
+                    "reviewDurations": {}, "mergeDurations": {}, "reviews": {}, "checkRed": [], "failUntil": {},
+                    "relink": {"atPlan": 2, "deps": {"3": []}}},
+        "args": {"mergeBatch": 1, "fullGateEvery": 1, "wave": {"1": 1, "2": 1, "3": 1}, "maxConcurrent": 1},
+        "slots": 2},
+)
 def test_p6_plan_agents_only_at_start_after_landings_and_when_idle(bridge, sc):  # noqa: F811
     """1.4, 1.5, NFR-1: a non-retry plan request is the start plan, the first plan after a `land … end`, or idle;
     idle plans after the first need a landing end or a task end since the previous idle plan; an all-independent
@@ -223,9 +234,11 @@ def test_p6_plan_agents_only_at_start_after_landings_and_when_idle(bridge, sc): 
             rearmed = False
         land_ended = False
 
-    final_deps = dict(sc["project"]["deps"])
+    start_deps = dict(sc["project"]["deps"])
+    final_deps = dict(start_deps)
     final_deps.update((sc["project"].get("relink") or {}).get("deps", {}))
-    if all(not ds for ds in final_deps.values()):
+    # All-independent means independent from the start: a dependency relinked away later can make an idle plan legitimate.
+    if all(not ds for ds in start_deps.values()) and all(not ds for ds in final_deps.values()):
         lands = sum(1 for e in trace if e["ev"] == "request" and kind(e["label"]) == "land")
         assert plans <= 1 + lands, f"{plans} plan agents for {lands} landing attempt(s) in an all-independent graph: {requests}"
 

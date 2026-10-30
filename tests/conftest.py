@@ -222,3 +222,7 @@ def write_tasks(root: Path, t1="Not Started", t2="Not Started", a1=" ", a2=" ") 
 @pytest.fixture
 def session() -> str:
     return f"test-{uuid.uuid4().hex}"
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "serial: timing-sensitive; specs/ck.json runs these in a separate, non-parallel verify step")
