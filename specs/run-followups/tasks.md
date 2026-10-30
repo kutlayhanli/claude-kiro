@@ -699,11 +699,11 @@ Skip the permission cases as root (`needs_user`).
 **Verify:** `uv run pytest -q -n auto tests/test_eta_progress.py tests/test_eta_writers.py tests/test_eta_redteam_writers.py`
 **Verifies:** Task 25 (progress events from `ck worktree claim`, `land`, `plan`, `park`, `resolve`)
 **Acceptance:**
-- [ ] Tests exercise real `ck progress`, `ck worktree claim/land/park/resolve/report` and `ck plan` subprocesses, real concurrent processes, a real notify script, real file modes and real file bytes
-- [ ] Before implementation they fail because `ck progress`, the `--progress-run` flags and `claude_kiro.progress` are missing
-- [ ] No mocks of project code. Message counts are exact
-- [ ] TC-27 runs real parallel subprocesses and checks for lost or interleaved lines
-- [ ] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
+- [x] Tests exercise real `ck progress`, `ck worktree claim/land/park/resolve/report` and `ck plan` subprocesses, real concurrent processes, a real notify script, real file modes and real file bytes
+- [x] Before implementation they fail because `ck progress`, the `--progress-run` flags and `claude_kiro.progress` are missing
+- [x] No mocks of project code. Message counts are exact
+- [x] TC-27 runs real parallel subprocesses and checks for lost or interleaved lines
+- [x] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
 **Dependencies:** Task 2 (helpers, spec builder, notify wrappers)
 **Complexity:** High
 **Risk:** safety (verifies a safety task whose land and park events trigger notifications)
