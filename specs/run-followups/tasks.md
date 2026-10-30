@@ -559,7 +559,7 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 ---
 
 ### Task 19: Test the launch estimates (implement, size signal, create, cold start) through `ck eta`
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 4.1, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 7.1, 7.2, 7.3, 7.4, 7.5
 **Description:** Implement TC-1 through TC-20 and TC-46 through TC-50 as CLI integration tests, plus red-team cases for 6.2 and 7.2. Each test runs the real `ck eta` subprocess against an `eta_spec` repo and a copied pool, with `CK_NOW=2026-10-30T15:00:00Z`, `TZ=UTC` and `CK_AGENT_SLOTS` set.
