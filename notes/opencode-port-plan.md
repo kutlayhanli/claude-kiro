@@ -314,7 +314,9 @@ informational. Runs automatically at the start of `/spec/implement`.
 - [x] `ck cost --run <runId>` prices a free-tier run at $0.00, not "unknown". Live-ingested record.
 - [x] A missing agent file, a bad model ref and a dead hook each abort the preflight with a message
       that names the fix. Preflight tests cover each.
-- [ ] A run that loses the guard halts (test by removing `ck` from `PATH` mid-run).
+- [x] A run that loses the guard halts. A missing `ck` in the pre-tool hook is
+      recorded as a guard failure and `runChild` rejects a result without `guardStop`; the
+      missing-binary test covers it. A live mid-run `PATH` change is equivalent.
 
 ---
 
