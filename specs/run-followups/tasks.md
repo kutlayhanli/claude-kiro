@@ -564,7 +564,7 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 ---
 
 ### Task 19: Test the launch estimates (implement, size signal, create, cold start) through `ck eta`
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 4.1, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 7.1, 7.2, 7.3, 7.4, 7.5
 **Description:** Implement TC-1 through TC-20 and TC-46 through TC-50 as CLI integration tests, plus red-team cases for 6.2 and 7.2. Each test runs the real `ck eta` subprocess against an `eta_spec` repo and a copied pool, with `CK_NOW=2026-10-30T15:00:00Z`, `TZ=UTC` and `CK_AGENT_SLOTS` set.
@@ -582,12 +582,12 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 **Verify:** `uv run pytest -q -n auto tests/test_eta_implement.py tests/test_eta_size.py tests/test_eta_create.py tests/test_eta_coldstart.py tests/test_eta_redteam_records.py`
 **Verifies:** Task 22 (`ck eta` launch estimates over the service, history, size counts and bundled defaults; `ck stats eta-defaults`)
 **Acceptance:**
-- [ ] Tests exercise the real boundary: the `ck eta`, `ck progress` and `ck stats eta-defaults` subprocesses, real tasks.md, real `ck plan`, the packaged resource, and a store written by the real collector
-- [ ] Before implementation they fail because `ck eta`, the commands, the resource and the `filesCount`/`criteriaCount` fields do not exist, not because of fixture errors
-- [ ] No mocks of project code. Time is pinned only through `NOW_ENV`, randomness only through `--seed`, and slots only through `CK_AGENT_SLOTS`
-- [ ] TC-6 asserts byte-identical seeded output, and at most 1 min drift per quantile without a seed
-- [ ] TC-12 and the 6.2 red-team cases assert the size keys never reach shareable output; the defaults check reads this repository's real spec names as near-miss negatives
-- [ ] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
+- [x] Tests exercise the real boundary: the `ck eta`, `ck progress` and `ck stats eta-defaults` subprocesses, real tasks.md, real `ck plan`, the packaged resource, and a store written by the real collector
+- [x] Before implementation they fail because `ck eta`, the commands, the resource and the `filesCount`/`criteriaCount` fields do not exist, not because of fixture errors
+- [x] No mocks of project code. Time is pinned only through `NOW_ENV`, randomness only through `--seed`, and slots only through `CK_AGENT_SLOTS`
+- [x] TC-6 asserts byte-identical seeded output, and at most 1 min drift per quantile without a seed
+- [x] TC-12 and the 6.2 red-team cases assert the size keys never reach shareable output; the defaults check reads this repository's real spec names as near-miss negatives
+- [x] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
 **Dependencies:** Task 2 (helpers, pools, spec builder)
 **Complexity:** High
 **Risk:** safety (verifies a safety task, and asserts size counts and record-level data never reach exported records or the bundled defaults)
