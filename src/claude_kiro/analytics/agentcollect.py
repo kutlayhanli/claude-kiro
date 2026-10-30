@@ -1,7 +1,8 @@
 """The I/O side of agent-mode analytics: begin, marked-agent discovery, record building, open-manifest sweep.
 
-This module never prices or aggregates on its own: it builds `collect._Agent` lists and calls
-`collect._build_record(..., agent_run=ctx)`. The pure rules live in `agentrun` and `roles`.
+This module never prices or aggregates on its own: it builds `collect._Agent` lists, turns them into a
+`collect._RecordSource` with `agent_run=ctx`, and calls `collect._build_record`. The pure rules live in
+`agentrun` and `roles`.
 """
 
 import json
@@ -329,11 +330,13 @@ def collect_agent_run(home: Path, run_id: str, *, now: datetime, pricing: Option
         missing.append({"agentId": None, "what": "manifest"})
     if bad:
         missing.append({"agentId": None, "what": "meta"})
-    record = collect._build_record(
-        run_id=run_id, workflow_name=ctx.workflow_name, run_data=None, session_dir=session_dir,
-        agent_dir=agent_dir, session_jsonl=session_jsonl, agents=[_to_agent(f) for f in files], missing=missing,
+    source = collect._transcript_source(
+        run_id=run_id, workflow_name=ctx.workflow_name, run_data=None, session_id=session_dir.name,
+        session_jsonl=session_jsonl, agents=[_to_agent(f) for f in files], missing=missing,
         start_ms=None, wall_ms=None, status=None, pricing=pricing, fresh=fresh, partial=ctx.partial,
         agent_run=ctx)
+    record = collect._build_record(
+        run_id=run_id, workflow_name=ctx.workflow_name, run_data=None, source=source, pricing=pricing)
     return collect.CollectOutcome(run_id, "collected", record=record)
 
 
@@ -550,10 +553,12 @@ def _collect_group(g: backfill.BackfillGroup, plan: BackfillPlan, pricing: dict,
         manifest="missing", partial=True, backfill=True, gap_minutes=plan.gap_minutes,
         spec_agent_ids=frozenset(g.spec_agent_ids))
     missing: List[dict] = [{"agentId": None, "what": "manifest"}]
-    record = collect._build_record(
-        run_id=g.record_id, workflow_name="spec-implement", run_data=None, session_dir=session_dir,
-        agent_dir=agent_dir, session_jsonl=session_jsonl, agents=[_to_agent(f) for f in files], missing=missing,
+    source = collect._transcript_source(
+        run_id=g.record_id, workflow_name="spec-implement", run_data=None, session_id=session_dir.name,
+        session_jsonl=session_jsonl, agents=[_to_agent(f) for f in files], missing=missing,
         start_ms=None, wall_ms=None, status=None, pricing=pricing, fresh=False, partial=True, agent_run=ctx)
+    record = collect._build_record(
+        run_id=g.record_id, workflow_name="spec-implement", run_data=None, source=source, pricing=pricing)
     _, kind = collect.write_outcome_result(collect.CollectOutcome(g.record_id, "collected", record=record), env)
     return collect.CollectOutcome(g.record_id, kind, record=record)
 

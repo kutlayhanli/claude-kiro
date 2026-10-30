@@ -271,6 +271,39 @@ def collect_cmd(run_id: Optional[str], collect_everything: bool, agents_id: Opti
         _collect_all(home, as_json)
 
 
+@stats.command("record")
+@click.argument("record_file", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--json", "as_json", is_flag=True)
+def record_cmd(record_file: Path, as_json: bool):
+    """Ingest an OpenCode `ck-opencode-run/1` record.json into a local run record.
+
+    \b
+    The bridge writes <state>/runs/<runId>/record.json; this reads it, validates it and writes
+    the same `ck-run-local/1` record `ck stats collect` writes. No Claude transcript is read.
+    Malformed input never writes an empty record.
+    """
+    from ..analytics import opencode_record
+
+    try:
+        outcome = opencode_record.ingest_file(record_file)
+    except opencode_record.RecordError as e:
+        click.echo(json.dumps({"result": "failed", "error": str(e)}) if as_json else f"❌ {e}")
+        sys.exit(1)
+    try:
+        path, kind = col.write_outcome_result(outcome)
+    except OSError as e:
+        click.echo(json.dumps({"run_id": outcome.run_id, "result": "failed", "error": str(e)}) if as_json
+                   else f"❌ {outcome.run_id}: could not write the record: {e}")
+        sys.exit(1)
+    partial = bool((outcome.record or {}).get("partial"))
+    if as_json:
+        click.echo(json.dumps({"run_id": outcome.run_id, "result": kind, "path": str(path), "partial": partial}))
+    elif kind == "unchanged":
+        click.echo(f"✓ {outcome.run_id}: unchanged {path}")
+    else:
+        click.echo(f"✓ {outcome.run_id}: wrote {path}" + (" (partial)" if partial else ""))
+
+
 def _collect_agents_one(home: Path, run_id: str, as_json: bool) -> None:
     try:
         outcome = agentcollect.collect_agent_run(home, run_id, now=_now())

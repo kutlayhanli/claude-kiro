@@ -138,7 +138,7 @@ def import_cmd(output: str, spec: str, config_name: str, rep: int, out: str, tra
 @click.option("--run", "run_id", default=None, help="Workflow run id (wf_...): count only that run's agents")
 @click.option("--json", "as_json", is_flag=True, help="Print the numbers as JSON")
 def cost(session_id: str, run_id: str, as_json: bool):
-    """Real spend of a session or workflow run, from its transcripts.
+    """Real spend of a session, a workflow run, or a native run record.
 
     \b
     Reports Claude Code's own running total (when the session had a budget,
@@ -147,10 +147,18 @@ def cost(session_id: str, run_id: str, as_json: bool):
     agent's final context size and run 7-14x low on a whole-spec run.
     Transcripts live under $CLAUDE_CONFIG_DIR (default ~/.claude), which a
     sandboxed shell command cannot read; run this outside the sandbox.
+    An OpenCode run has no Claude transcript: `--run <runId>` falls back to
+    the local `ck-run-local/1` record written by `ck stats record`.
     """
     home = b.claude_home()
     if run_id and not session_id:
         session_id = b.find_run_session(home, run_id)
+    if not session_id and run_id:
+        record = _local_record(run_id)
+        if record is not None:
+            s = b.spend_from_record(record)
+            click.echo(json.dumps(s, indent=2) if as_json else "\n".join(b.spend_lines(s)))
+            return
     if not session_id:
         session_id = b.latest_session(home, Path.cwd())
     if not session_id:
@@ -161,3 +169,14 @@ def cost(session_id: str, run_id: str, as_json: bool):
         click.echo(f"❌ No transcripts found for session {session_id}{' run ' + run_id if run_id else ''} under {home}")
         sys.exit(1)
     click.echo(json.dumps(s, indent=2) if as_json else "\n".join(b.spend_lines(s)))
+
+
+def _local_record(run_id: str) -> dict:
+    """The local run record of RUN_ID, or None when it is absent or unreadable."""
+    from ..analytics import store
+
+    try:
+        data = json.loads(store.record_path(run_id).read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None

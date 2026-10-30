@@ -6,6 +6,11 @@ Nothing outside this list is ever exported. Pattern syntax: `*` = a segment whos
 
 ## Fields
 
+- `agents[].model`: enum: `fable`, `haiku`, `inherit`, `opus`, `other`, `sonnet`
+- `agents[].requested_effort`: enum: `high`, `inherit`, `low`, `max`, `medium`, `other`, `xhigh`
+- `agents[].resolved_effort`: enum: `high`, `inherit`, `low`, `max`, `medium`, `other`, `xhigh`
+- `agents[].role`: enum: `cross-test`, `fixer`, `gate`, `implementer`, `land`, `other`, `plan`, `report`, `resolver`, `reviewer`, `test-writer`
+- `agents[].variant`: enum: `default`, `high`, `low`, `max`, `medium`, `none`, `other`, `xhigh`
 - `agents_by_role.*`: non-negative integer
 - `ck_version`: format: version or other
 - `claude_code_version`: format: version or other
@@ -47,12 +52,15 @@ Nothing outside this list is ever exported. Pattern syntax: `*` = a segment whos
 - `counts.tasks_merged`: non-negative integer
 - `counts.tasks_not_started`: non-negative integer
 - `counts.waves`: non-negative integer
+- `degraded[]`: enum: `compaction`, `other`
 - `durations.by_role.*`: non-negative number
 - `durations.phases[].minutes`: non-negative number
 - `durations.phases[].phase`: enum: `adversarial_review`, `consistency_check`, `design_test_plan`, `final_gate`, `link`, `other`, `plan`, `report`, `requirements`, `revise`, `task_tracks`, `tasks`, `wave`
 - `durations.phases[].wave`: non-negative integer
 - `durations.task_span_minutes`: non-negative number
 - `durations.wall_minutes`: non-negative number
+- `failure_label`: enum: `env`, `model`, `other`, `port`, `spec`, `throttle`
+- `harness`: enum: `claude`, `opencode`, `other`
 - `id`: format: 16 lowercase hex characters
 - `interruptions.auto_mode_denials`: non-negative integer
 - `interruptions.by_role.*.*.auto_mode_denials`: non-negative integer
@@ -78,6 +86,7 @@ Nothing outside this list is ever exported. Pattern syntax: `*` = a segment whos
 - `missing[]`: enum: `agent_entries`, `ck_version`, `meta`, `result`, `runfile`, `timing`, `transcripts`
 - `month`: format: yyyy-mm
 - `outcome`: enum: `blocked`, `complete`, `failed`, `halted`, `needs_work`, `other`, `ready`, `ready_after_decisions`, `refused`
+- `retries`: non-negative integer
 - `schema`: enum: `ck-run-analytics/1`
 - `source`: enum: `agents`, `workflow`
 - `stack`: enum: `dotnet`, `go`, `java`, `node`, `other`, `python`, `ruby`, `rust`
@@ -94,6 +103,7 @@ Nothing outside this list is ever exported. Pattern syntax: `*` = a segment whos
 - `tasks[].to_merged_minutes`: non-negative number
 - `tasks[].track`: enum: `impl`, `other`, `test`, `unknown`
 - `tasks[].verdict`: enum: `approve`, `changes`, `other`, `unreviewed`
+- `throttles`: non-negative integer
 - `tokens.by_model.*.cacheCreation`: non-negative integer
 - `tokens.by_model.*.cacheRead`: non-negative integer
 - `tokens.by_model.*.input`: non-negative integer
@@ -164,6 +174,10 @@ identity and the names of non-ck workflows. Any hit blocks the submission.
 - outcomes: `complete`, `blocked`, `halted`, `refused`, `ready`, `ready_after_decisions`, `needs_work`, `failed`, `other`
 - verdicts: `approve`, `changes`, `unreviewed`, `other`
 - efforts: `low`, `medium`, `high`, `xhigh`, `max`, `inherit`
+- effort variants: `default`, `high`, `low`, `max`, `medium`, `none`, `other`, `xhigh`
+- harnesses: `claude`, `opencode`, `other`
+- failure labels: `model`, `port`, `throttle`, `spec`, `env`, `other`
+- degraded kinds: `compaction`, `other`
 - workflows: `spec-implement`, `spec-create`, `spec-plan`, `other`
 - variants: `default`, `iso`, `other`
 - config roles: `implementer`, `test_writer`, `reviewer`, `reviewer_risky`, `fixer`, `orchestrator`, `resolver`
