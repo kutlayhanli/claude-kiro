@@ -37,8 +37,10 @@ def _agents(plan: Sequence[h.PlanTask], waits: Sequence[float]) -> List[AgentSpe
     for p, w in zip(plan, waits):
         n = p.defn.id
         total_ms = (p.finished - p.started).total_seconds() * 1000
+        # The collector reads a test-track task from the " [test]" label suffix (the test-writer role), as in eta_helpers.
+        suffix = " [test]" if p.defn.track == "test" else ""
         for k in range(p.attempts):
-            agents.append(AgentSpec(f"task {n}" if k == 0 else f"task {n} retry {k}", model=f"claude-{p.start_model}-5-5",
+            agents.append(AgentSpec(f"task {n}{suffix}" if k == 0 else f"task {n} retry {k}", model=f"claude-{p.start_model}-5-5",
                                     phase="Wave 1", duration_ms=int(total_ms / p.attempts), attempt=k + 1,
                                     started_at_ms=to_ms(iso(p.started)) + int(k * total_ms / p.attempts)))
         fin = to_ms(iso(p.finished))
@@ -57,8 +59,10 @@ def custom_history(root: Path, make_run: Callable[[int], Sequence[T]], runs: int
     root.mkdir(parents=True, exist_ok=True)
     env = h._pool_env(root)
     home = FakeClaudeHome(Path(env["CLAUDE_CONFIG_DIR"]))
+    wanted = {}
     for i in range(runs):
         specs = list(make_run(i))
+        wanted[f"cust-{i:02d}"] = {str(j + 1): t.track for j, t in enumerate(specs)}
         start = h._RUN0 + timedelta(days=i)
         plan: List[h.PlanTask] = []
         cursor = start
@@ -74,11 +78,16 @@ def custom_history(root: Path, make_run: Callable[[int], Sequence[T]], runs: int
         session = home.session(f"-work-{spec}", cwd=proj, git_branch=f"integrate/{spec}")
         session.implement_run(
             f"wf_cust-{i:02d}", start=iso(start - timedelta(minutes=1)),
-            duration_ms=int((cursor - start).total_seconds() * 1000) + 120_000, args={"spec": spec, "root": str(proj)},
+            duration_ms=int((cursor - start).total_seconds() * 1000) + 120_000, args={"spec": spec, "root": str(proj), "tracks": wanted[spec]},
             result=implement_result([h._task_spec(p) for p in plan], into=f"integrate/{spec}", base=iso(start)),
             agents=_agents(plan, [t.wait for t in specs]))
     h._collect(root, env)
-    return root / "xdg-data"
+    store = root / "xdg-data"
+    # Sanity: the collected records carry the track each task was written with (the ladder keys on tasks[].track).
+    got = {(r.get("project") or {}).get("spec"): {str(t.get("task")): t.get("track") for t in r.get("tasks") or []} for r in records(store)}
+    for spec, tracks in wanted.items():
+        assert got.get(spec) == tracks, (spec, got.get(spec), tracks)
+    return store
 
 
 def install(store: Path, xdg: Path) -> Path:

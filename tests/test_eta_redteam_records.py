@@ -162,6 +162,14 @@ def assert_clean(out, target: Path, forbidden: List[str]) -> None:
 
 
 def test_72_epoch_timestamps_in_numeric_fields_do_not_become_numbers(tmp_path):
+    """Requirement 7.2: no timestamp or record-level value reaches the bundled defaults.
+
+    Half the implement tasks carry an epoch (about 1.77e12 ms or 1.77e9 s) in a duration field. q100 is the max, so a
+    build that takes quantiles over raw values copies the timestamp into the file. `assert_clean` takes 1e6 as the bound
+    for any number in the defaults (no aggregate of minutes, ms waits, USD per minute or sizes comes near it); the build
+    must drop such implausible values first, or refuse.
+    """
+
     def mutate(rec):
         if rec["workflow"] != "spec-implement":
             return

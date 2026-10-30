@@ -130,7 +130,9 @@ def test_tc3_only_open_tasks_count(tmp_path):
     assert "4 open" in out.stdout
     view = estimate(env, repo, "--seed", "1")
     assert view["open"] == 4
-    assert {t["task"] for t in view["tasks"]} == {"3", "4", "5", "6"}
+    # Done tasks may be listed as merged (design does not say); every task still to run is one of the open ones.
+    assert {t["task"] for t in view["tasks"] if t.get("state") != "merged"} == {"3", "4", "5", "6"}
+    assert all(t["task"] in {"1", "2"} for t in view["tasks"] if t.get("state") == "merged")
     assert not {"1", "2"} & set(view["criticalPath"]["tasks"])
 
 
@@ -285,7 +287,9 @@ def test_tc8_unknown_dependency_is_blocked(tmp_path):
 # --------------------------------------------------------------------------- TC-9
 
 
-@pytest.mark.parametrize("bad", ['{"agents": "x"}', '{"run": {"max_concurrent": "zero"}}'], ids=["agents-not-a-table", "cap-not-a-number"])
+# Config files nest roles under "agents"; both layers below make `agents.resolve` raise AgentConfigError (design 1.8).
+@pytest.mark.parametrize("bad", ['{"agents": {"run": "x"}}', '{"agents": {"run": {"max_concurrent": "zero"}}}'],
+                         ids=["run-not-a-table", "cap-not-a-number"])
 def test_tc9_unreadable_slot_cap_uses_the_default(tmp_path, bad):
     env = store_env(tmp_path, slots=3)
     repo = h.eta_spec(tmp_path / "ledger", spec_tasks_one())

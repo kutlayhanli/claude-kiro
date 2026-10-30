@@ -164,7 +164,7 @@ def test_tc49_no_history_and_no_defaults_still_shows_the_graph(tmp_path, content
     view = view_of(env, repo)
     assert view["confidence"] == "none" and view["basis"]["source"] == "none"
     assert view["finish"] is None and view["remainingMinutes"] is None
-    assert view["cost"] is None or all(v is None for v in view["cost"].values())
+    assert view["cost"] == {"p10": None, "p50": None, "p90": None}
     assert view["criticalPath"]["tasks"] == crit and view["open"] == 4
 
 

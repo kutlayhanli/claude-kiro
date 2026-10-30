@@ -108,6 +108,8 @@ def test_tc18_a_running_create_run_simulates_only_what_is_left(tmp_path):
         assert h.event(env, repo, "orbit", "phase-start", now=at(cursor), phase=phase).exit_code == 0
         cursor += 10
         assert h.event(env, repo, "orbit", "step-end", now=at(cursor), phase=phase).exit_code == 0
+        # design 3.2: phase-end is the event that closes a phase.
+        assert h.event(env, repo, "orbit", "phase-end", now=at(cursor), phase=phase).exit_code == 0
     assert h.event(env, repo, "orbit", "phase-start", now=at(30), phase=CREATE_PHASES[3]).exit_code == 0
     now = at(40)
     view = view_of(env, repo, now=now)
@@ -162,3 +164,4 @@ def test_tc20_kind_follows_the_spec_directory(tmp_path):
     (repo / "specs" / "orbit" / "tasks.md").unlink()
     out = h.eta(env, repo, "orbit", "--kind", "implement", now=NOW)
     assert out.exit_code == 1 and "tasks.md" in out.output and "Traceback" not in out.output
+    assert "no implement estimate for orbit" in out.output, out.output
