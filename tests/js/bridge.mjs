@@ -1,7 +1,7 @@
 // Long-lived JSON-lines bridge: one request object per stdin line, one response object per stdout line.
 //   {op:'ready', order, deps, done, exclude, blocked} -> {ok:true, ready}
 //   {op:'ladder', model}                              -> {ok:true, ladder}
-//   {op:'run', project, args, slots}                  -> {ok:true, result, logs, trace, prompts, events}
+//   {op:'run', project, args, slots}                  -> {ok:true, result, logs, trace, prompts, opts, events}
 // Any throw -> {ok:false, error}. Durations in the project options are milliseconds (1-40).
 import readline from 'node:readline'
 import { runWorkflow } from './load_workflow.mjs'
@@ -25,7 +25,7 @@ async function handle(req) {
     const slots = req.slots ?? undefined
     const args = { ...baseArgs, ...req.args, ...(slots ? { agentSlots: slots } : {}) }
     const { result, logs, trace } = await runWorkflow(SCRIPT, { agent: p.agent, args, slots })
-    return { result, logs, trace, prompts: p.state.prompts, events: p.state.events }
+    return { result, logs, trace, prompts: p.state.prompts, opts: p.state.opts, events: p.state.events }
   }
   throw new Error(`unknown op: ${req.op}`)
 }
