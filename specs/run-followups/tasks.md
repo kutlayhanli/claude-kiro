@@ -788,12 +788,13 @@ Skip permission cases as root.
 **Properties:** P-24
 **Verifies:** Task 27 (workflow scripts, skills and agent-mode documents)
 **Acceptance:**
-- [ ] Tests exercise the real `plugin/workflows/spec-implement.js` and `spec-create.js` under the stub runtime, real `ck` subprocesses and real progress files. Agents are the only fakes, and landing results come from the fake project, not from running `land --gate`
-- [ ] Before implementation they fail because the scripts embed no `--progress-run` flags, log no ETA lines, and the skills hold no progress commands
-- [ ] No mocks of project code
-- [ ] P-24 uses the existing `SETTINGS` (deterministic), covers finish-first on and off and slots 1..6, and inspects the prompts the script builds
-- [ ] The agent-mode and skill checks read both packaged and vendored copies; the agent-mode set is cross-checked against the Workflow prompts
-- [ ] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
+- [x] Tests exercise the real `plugin/workflows/spec-implement.js` and `spec-create.js` under the stub runtime, real `ck` subprocesses and real progress files. Agents are the only fakes, and landing results come from the fake project, not from running `land --gate`
+- [x] Before implementation they fail because the scripts embed no `--progress-run` flags, log no ETA lines, and the skills hold no progress commands
+- [x] No mocks of project code
+- [x] P-24 uses the existing `SETTINGS` (deterministic), covers finish-first on and off and slots 1..6, and inspects the prompts the script builds
+- [x] The agent-mode and skill checks read both packaged and vendored copies; the agent-mode set is cross-checked against the Workflow prompts
+- [x] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
+**Implementation notes:** `tests/js/fake_project.mjs` `writtenCommands` (Task 3's helper) cut a command at its first double quote, so `progress event ... --phase "Design + Test Plan" --run K --json` lost its phase title and flags. It now tokenizes double-quoted values as one argument (a fix needed by the create-op tests; no assertion changed; `tests/test_bridge_harness.py` still passes). Until Tasks 22, 25 and 27 land the tests fail because `ck progress` does not exist and the scripts/documents carry no progress flags.
 **Dependencies:** Task 2 (helpers), Task 3 (bridge `execCk`, `create` op, virtual clock)
 **Complexity:** High
 **Risk:** safety (exercises a failing notification command during a run)
