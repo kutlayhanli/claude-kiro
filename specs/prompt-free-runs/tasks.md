@@ -153,7 +153,7 @@ test files, so this task makes them while In Progress.
 ---
 
 ### Task 4: Test caller classification, task-agent denials and main-session spec edits
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 4.1, 4.2, 4.3, 5.1, 5.2, 5.3, 5.4
 **Properties:** P-11, P-32
@@ -179,15 +179,15 @@ metamorphic rule) and P-32 (`run_marker` lifecycle with an injected clock, skipp
 **Verify:** `uv run pytest -q -n auto tests/test_guard_callers.py tests/test_caller_properties.py`
 **Verifies:** Task 11 (the rewritten pre-tool guard and the marker; P-11 also covers foundation Task 10's `classify_caller`)
 **Acceptance:**
-- [ ] A recorded Agent-tool subagent input, a headless env and `CK_RUN_HEADLESS=1` each give `deny` under
+- [x] A recorded Agent-tool subagent input, a headless env and `CK_RUN_HEADLESS=1` each give `deny` under
       `guard.tests: ask`; the recorded main-session input gives `ask`/`deny` per config, also inside a task
       worktree.
-- [ ] TC-23 asserts on the recorded fact in `capture-summary.json`, so the gate keeps the answer to 3.4.
-- [ ] Malformed inputs never raise and never break the hook.
-- [ ] Main-session spec edits pass with no ask; the same edits from a task agent are denied with a reason naming
+- [x] TC-23 asserts on the recorded fact in `capture-summary.json`, so the gate keeps the answer to 3.4.
+- [x] Malformed inputs never raise and never break the hook.
+- [x] Main-session spec edits pass with no ask; the same edits from a task agent are denied with a reason naming
       file and kind; a review revise agent's denial says to return the change as a decision.
-- [ ] When built, the marker is cleared on a new prompt and expires 15 minutes after its last refresh.
-- [ ] Tests use recorded real Claude Code input and the real hook; no mocks of project code.
+- [x] When built, the marker is cleared on a new prompt and expires 15 minutes after its last refresh.
+- [x] Tests use recorded real Claude Code input and the real hook; no mocks of project code.
 **Dependencies:** Task 1 (guard_helpers), Task 2 (reads its recorded hook inputs and capture summary)
 **Complexity:** Medium
 **Risk:** safety (oracle for the deny/ask permission decision that gates destructive tool calls)
