@@ -3,6 +3,7 @@
 import json
 import os
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -319,8 +320,12 @@ def test_doctor_reports_vendored_and_legacy_modes(project, legacy):
 # --- plugin hooks only act in ck projects ---------------------------------------------
 
 def test_plugin_hooks_stay_silent_outside_ck_projects(tmp_path):
+    # A real git repo with the test committed on the base branch, so the guarded half has a base to judge against.
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True, capture_output=True)
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests/test_x.py").write_text("def test_x():\n    assert True\n")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "-qm", "base"], check=True, capture_output=True)
     payload = json.dumps({"cwd": str(tmp_path), "tool_name": "Bash", "tool_input": {"command": "rm tests/test_x.py"}, "session_id": "s"})
     quiet = CliRunner().invoke(cli, ["--hook", "pre-tool-guard", "--plugin-hook"], input=payload)
     assert quiet.exit_code == 0 and quiet.output.strip() == ""
