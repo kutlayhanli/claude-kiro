@@ -753,6 +753,195 @@ def run_arm(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[str], None
     return result
 
 
+def run_arm_opencode(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[str], None] = print) -> Dict[str, Any]:
+    """Clone, configure and run one OpenCode arm through the workflow bridge.
+
+    The harness writes a probe plugin into the clone; `opencode run --standalone` calls it, and the
+    probe calls the `workflow` tool with the same args `/spec/implement` would assemble. The probe
+    blocks until the run record closes, so the process exit is a completion signal. Results come from
+    the native `ck-opencode-run/1` record and its `bench-output.json` (`ck bench import` shape).
+    """
+    from .bench_opencode import prepare_probe, workflow_args
+
+    spec = next(s for s in cfg["specs"] if s["name"] == arm["spec"])
+    conf = next(c for c in cfg["configs"] if c["name"] == arm["config"])
+    results_dir, bench_dir = Path(cfg["results_dir"]), Path(cfg["bench_dir"])
+    clone = bench_dir / arm["id"]
+    env = {**os.environ, **cfg["env"]}
+    ck = cfg["ck"]
+    opencode_cfg = cfg.get("opencode") or {}
+    package_root = Path(os.path.expanduser(str(opencode_cfg.get("plugin") or os.environ.get("CK_OPENCODE_PLUGIN") or "")))
+    if not package_root.is_dir() or not (package_root / "src" / "index.ts").is_file():
+        raise BenchError(
+            "opencode.plugin (or CK_OPENCODE_PLUGIN) must point at the opencode-claude-kiro package directory"
+        )
+    package_root = package_root.resolve()
+    opencode_bin = str(opencode_cfg.get("bin") or "opencode")
+    arm_model = conf.get("model") or opencode_cfg.get("model")
+    if not isinstance(arm_model, str) or "/" not in arm_model:
+        raise BenchError(f"{arm['config']}: opencode arms need a full `model` like provider/model[#variant]")
+
+    if clone.exists():
+        shutil.rmtree(clone)  # a half-finished earlier attempt
+    bench_dir.mkdir(parents=True, exist_ok=True)
+    p = subprocess.run(["git", "clone", "-q", "--no-hardlinks", cfg["repo"], str(clone)], capture_output=True, text=True)
+    if p.returncode != 0:
+        raise BenchError(f"git clone failed: {p.stderr.strip()}")
+    base_sha = _git(clone, "rev-parse", "--verify", "-q", f"{cfg['base']}^{{commit}}", check=False) or \
+        _git(clone, "rev-parse", "--verify", f"origin/{cfg['base']}^{{commit}}")
+    branch = f"bench/{arm['config']}-{arm['rep']}"
+    _git(clone, "checkout", "-q", "-b", branch, base_sha)
+
+    version = _sh([*ck, "--version"], clone, env)
+    ck_version = (version.stdout or version.stderr).strip().splitlines()[-1] if (version.stdout or version.stderr).strip() else None
+    for key, value in conf["agents"].items():
+        s = _sh([*ck, "agents", "set", key, str(value), "--project"], clone, env)
+        if s.returncode != 0:
+            raise BenchError(f"ck agents set {key} {value} failed:\n{s.stdout}{s.stderr}")
+
+    # The ck aliases are what the workflow passes; the plugin maps them to the arm's OpenCode ref.
+    config_path = clone / "specs" / "ck.json"
+    data = json.loads(config_path.read_text()) if config_path.is_file() else {}
+    if not isinstance(data, dict):
+        data = {}
+    aliases = {name: arm_model for name in ("haiku", "sonnet", "opus", "fable")}
+    aliases.update({str(k): str(v) for k, v in (opencode_cfg.get("models") or {}).items()})
+    data["opencode"] = {"models": aliases}
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps(data, indent=2) + "\n")
+
+    if _git(clone, "status", "--porcelain"):
+        _git(clone, "add", "-A")
+        _git(clone, "-c", "user.name=ck-bench", "-c", "user.email=ck-bench@localhost", "commit", "-qm",
+             f"bench: set up {arm['config']}")
+    setup_sha = _git(clone, "rev-parse", "HEAD")
+
+    # Each arm gets a private OpenCode state directory, outside the clone.
+    state_root = bench_dir / "opencode-state" / arm["id"]
+    shutil.rmtree(state_root, ignore_errors=True)
+    state = state_root / "claude-kiro" / "opencode"
+    state.mkdir(parents=True, exist_ok=True)
+    env["XDG_STATE_HOME"] = str(state_root)
+    env["CK_RUN_HEADLESS"] = "1"
+    env["CK_BENCH_STATE"] = str(state)
+    if len(ck) == 1:
+        env.setdefault("CK_BIN", ck[0])
+
+    args = workflow_args(clone, arm["spec"], ck, env, interactive=False)
+    prepare_probe(clone, package_root, args, state)
+    exclude = clone / ".git" / "info" / "exclude"
+    if exclude.is_file():
+        text = exclude.read_text()
+        if ".ck/" not in text:
+            exclude.write_text(text + ("\n" if text and not text.endswith("\n") else "") + ".ck/\n")
+
+    logs = results_dir / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    log = logs / f"{arm['id']}.opencode.txt"
+    prompt = "Call bench_run now, exactly once. It blocks until the workflow finishes. Then report its JSON result verbatim."
+    argv = [opencode_bin, "run", "--standalone", "--model", arm_model, "--format", "json", prompt]
+    echo(f"▶ {arm['id']}: {' '.join(shlex.quote(a) for a in argv)}  (in {clone})")
+    timeout = float(cfg["timeout_minutes"]) * 60 if cfg.get("timeout_minutes") else None
+    started = time.time()
+    try:
+        launched = _sh(argv, clone, env, timeout)
+        exit_code, launch_out = launched.returncode, launched.stdout + launched.stderr
+    except FileNotFoundError:
+        raise BenchError(f"opencode binary not found: {opencode_bin}") from None
+    except subprocess.TimeoutExpired as e:
+        exit_code, launch_out = None, f"timed out after {timeout}s\n{e.stdout or ''}{e.stderr or ''}"
+    finished = time.time()
+    log.write_text(launch_out if isinstance(launch_out, str) else launch_out.decode(errors="replace"))
+
+    runs = state / "runs"
+    records = [p for p in runs.glob("*/record.json")] if runs.is_dir() else []
+    if not records:
+        raise BenchError(f"no OpenCode run record under {runs}; see {log}")
+    record_path = max(records, key=lambda p: p.stat().st_mtime)
+    record = json.loads(record_path.read_text())
+    bench_path = record_path.parent / "bench-output.json"
+    into = record.get("into") or f"integrate/{arm['spec']}"
+
+    if bench_path.is_file():
+        imported = import_output(bench_path, arm["spec"], arm["config"], arm["rep"], cfg.get("pricing") or {},
+                                 None, clone, into)
+    else:
+        imported = {
+            "id": arm_id(arm["spec"], arm["config"], arm["rep"]),
+            "spec": arm["spec"], "config": arm["config"], "rep": arm["rep"],
+            "report": summarize_report(None), "agents": [], "tokens_by_model": {},
+            "cost": _cost_summary([], None), "fail_closed": True,
+            "fail_closed_reasons": ["the workflow left no bench-output.json"],
+            "wall_minutes": round((finished - started) / 60, 3), "workflow_status": record.get("status"),
+        }
+
+    final_sha = _git(clone, "rev-parse", "--verify", "-q", f"{into}^{{commit}}", check=False) or None
+    started_at = record.get("startedAt")
+    ended_at = record.get("endedAt")
+    wall_minutes = round((ended_at - started_at) / 60000, 3) if isinstance(started_at, int) and isinstance(ended_at, int) else round((finished - started) / 60, 3)
+    guard = record.get("guard") or {}
+    result = {
+        **imported,
+        "schema": SCHEMA,
+        "source": "opencode",
+        "harness": "opencode",
+        **arm,
+        "config_order": [c["name"] for c in cfg["configs"]],
+        "spec_settings": {k: spec.get(k) for k in ("hidden_tests", "invariants", "hidden_dest", "invariants_dest", "test_cmd", "task_map")},
+        "agents_settings": conf["agents"],
+        "run_args": [],
+        "ck_version": record.get("ckVersion") or ck_version,
+        "repo": cfg["repo"], "base": cfg["base"], "base_sha": base_sha, "setup_sha": setup_sha,
+        "clone": str(clone), "branch": branch, "into": into, "final_sha": final_sha,
+        "argv": argv, "session_id": record.get("runId"), "log": str(log),
+        "exit_code": exit_code,
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started)),
+        "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(finished)),
+        "wall_minutes": wall_minutes,
+        "record": str(record_path), "run_id": record.get("runId"),
+        "throttles": record.get("throttles", 0), "retries": record.get("retries", 0),
+        "degraded": record.get("degraded", []), "failure_label": record.get("failureLabel"),
+        "guard": {k: guard.get(k, 0) for k in ("denials", "postCheckCatches", "guardEscalations", "headlessDenials", "prompts")},
+    }
+
+    # Native token totals and costs are exact; the imported context-token estimate is the fallback.
+    native_agents = record.get("agents") or []
+    if native_agents:
+        by_model: Dict[str, Dict[str, int]] = {}
+        for agent in native_agents:
+            resolved = agent.get("resolved") or {}
+            model = f"{resolved.get('providerID')}/{resolved.get('id')}" if resolved.get("providerID") and resolved.get("id") else (agent.get("requested") or {}).get("model", "?")
+            tokens = agent.get("tokens") or {}
+            acc = by_model.setdefault(model, dict.fromkeys(USAGE_KEYS, 0))
+            acc["input"] += int(tokens.get("input") or 0)
+            acc["output"] += int(tokens.get("output") or 0)
+            acc["cacheRead"] += int((tokens.get("cache") or {}).get("read") or 0)
+            acc["cacheCreation"] += int((tokens.get("cache") or {}).get("write") or 0)
+        result["tokens_by_model"] = by_model
+        if all(agent.get("cost") is not None for agent in native_agents):
+            usd = round(sum(float(agent.get("cost") or 0) for agent in native_agents), 6)
+            result["cost"] = {**result.get("cost", {}), "usd": usd, "source": "opencode sessions",
+                              "basis": "session.get().cost", "estimated": False}
+
+    reasons = result.setdefault("fail_closed_reasons", [])
+    if exit_code is None:
+        result["fail_closed"] = True
+        reasons.append("timed out")
+    if record.get("status") != "done":
+        result["fail_closed"] = True
+        reasons.append(f"opencode run status {record.get('status')}")
+    if guard.get("denials") or guard.get("postCheckCatches"):
+        result["fail_closed"] = True
+        reasons.append(f"{guard.get('denials', 0)} guard denial(s), {guard.get('postCheckCatches', 0)} post-check(s)")
+    if record.get("failureLabel"):
+        result["fail_closed"] = True
+        reasons.append(f"failure label: {record.get('failureLabel')}")
+
+    results_dir.mkdir(parents=True, exist_ok=True)
+    (results_dir / f"{arm['id']}.json").write_text(json.dumps(result, indent=2))
+    return result
+
+
 # ---------------------------------------------------------------- import
 
 
