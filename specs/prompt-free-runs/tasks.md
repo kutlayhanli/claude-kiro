@@ -379,7 +379,7 @@ agents --guard-ladder` agree), P-15 (with `guardStopIn`), P-16; bridge `max_exam
 ---
 
 ### Task 9: Test interruption counts in run records, shared records and `ck stats show`
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.6, 9.6, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 11.1, 11.2, 11.3, 11.4, 11.5
 **Properties:** P-22, P-23, P-25, P-26, P-27, P-28, P-29, P-30
@@ -404,14 +404,14 @@ P-28 CLI-backed): P-23, P-25, P-26, P-28, P-30. `tests/test_stats_properties_sha
 **Verify:** `uv run pytest -q -n auto tests/test_stats_interruptions.py tests/test_redteam_shared.py tests/test_stats_properties_interruptions.py tests/test_stats_properties_shared.py` `uv run pytest -q -n auto tests/test_stats_*.py`
 **Verifies:** Task 15 (interruption records, shared object and show line)
 **Acceptance:**
-- [ ] Every interruption kind is counted from real transcript shapes, by role and family, in Workflow and agent
+- [x] Every interruption kind is counted from real transcript shapes, by role and family, in Workflow and agent
       mode alike; a gate-only `hook_blocking_error` counts nothing.
-- [ ] Wait time, log join and differences (within the run window), malformed lines and pre-feature records behave
+- [x] Wait time, log join and differences (within the run window), malformed lines and pre-feature records behave
       as specified; a never-created log is `ok` with zero events and not missing, an unreadable or rotated-away log
       is listed as missing (TC-62).
-- [ ] Shared records carry only enum-keyed numbers under `ck-run-analytics/1`; no planted value leaks; show prints
+- [x] Shared records carry only enum-keyed numbers under `ck-run-analytics/1`; no planted value leaks; show prints
       one interruptions line.
-- [ ] Existing collect, show, export and submit tests stay green; no mocks of project code.
+- [x] Existing collect, show, export and submit tests stay green; no mocks of project code.
 **Dependencies:** Task 1 (stats_helpers line builders, write_guard_log, interruption_strategy)
 **Complexity:** High
 **Risk:** safety (shareable records and submit leave the machine; tests guard against content leaks)
