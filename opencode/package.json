@@ -1,6 +1,6 @@
 {
   "name": "opencode-claude-kiro",
-  "version": "0.10.3",
+  "version": "0.11.0",
   "description": "claude-kiro spec-driven development for OpenCode: /spec commands, role agents, spec workflows and guard hooks. Needs the `ck` CLI.",
   "type": "module",
   "license": "MIT",

@@ -35,7 +35,7 @@ CK_OPENCODE_PLUGIN=/path/to/opencode ck doctor --harness opencode
 ```jsonc
 // opencode.json
 {
-  "plugins": ["opencode-claude-kiro@0.10.3"]
+  "plugins": ["opencode-claude-kiro@0.11.0"]
 }
 ```
 

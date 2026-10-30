@@ -60,7 +60,7 @@ test("workflowNameOf maps the shipped workflows and leaves inline as other", () 
 });
 
 test("packageVersion reads the package manifest", () => {
-  assert.equal(packageVersion(PACKAGE_ROOT), "0.10.3");
+  assert.equal(packageVersion(PACKAGE_ROOT), "0.11.0");
   assert.equal(packageVersion("/does/not/exist"), "0.0.0");
 });
 
