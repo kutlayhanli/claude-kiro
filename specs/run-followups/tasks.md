@@ -548,15 +548,15 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 **Acceptance:**
 - [x] `estimate` for an implement spec returns the finish range, cost range (null when unknown), critical path with median, slowest two, safety count, rates and basis; for create it lists phases with medians and done/running marks
 - [x] Equal inputs and seed give an identical view
-- [ ] A cycle or unknown dependency gives `state: "blocked"` with a reason and no finish time; any needs-input park gives `blocked`, `finish: null`, remaining work over every open task, and `runnableDone` only as a separate field
+- [x] A cycle or unknown dependency gives `state: "blocked"` with a reason and no finish time; any needs-input park gives `blocked`, `finish: null`, remaining work over every open task, and `runnableDone` only as a separate field (implemented; CLI-level proof pending Tasks 19-22)
 - [x] No progress file gives `not-started`; an ended run gives `done` with the remaining launch estimate or `nothingLeft`; a run silent for over 120 minutes gives `stale` and is not simulated
 - [x] An unreadable slot cap uses the default and says so; an unreadable progress file falls back to the launch estimate with a note
 - [x] No history uses bundled defaults with `confidence: "low"` and `basis.source: "bundled"`; partial history names the bundled parts; no defaults and no history gives the graph with no estimate
 - [x] While a wait is open the remaining work stays frozen; after a wait of W minutes ends, the finish range is W minutes later (same seed) and the state is not `slipping`
 - [x] `after_event` returns None past its budget (or `CK_ETA_LINE_TIMEOUT_S`) or on any error, and reuses the cache when nothing changed
-- [ ] Slip, blocked and done notices are sent once each through `run.notify_command`, with `CK_NOTIFY_TYPE` `ck_eta_slip` / `ck_eta_blocked` / `ck_run_done`; nothing is sent when it is unset; failures are recorded, not raised; two concurrent `after_event` calls on one run send a due notice once
+- [x] Slip, blocked and done notices are sent once each through `run.notify_command`, with `CK_NOTIFY_TYPE` `ck_eta_slip` / `ck_eta_blocked` / `ck_run_done`; nothing is sent when it is unset; failures are recorded, not raised; two concurrent `after_event` calls on one run send a due notice once (implemented; CLI-level proof pending Tasks 19-22)
 - [x] `notify.send` without the keyword behaves exactly as before (`ck_needs_input`), and prompt-free-runs' tests (`tests/test_guard_park.py`, `tests/test_redteam_notify.py`) pass unchanged
-- [ ] `after_event` with no new event sends a slip that comes from time alone during a running task
+- [x] `after_event` with no new event sends a slip that comes from time alone during a running task (implemented; CLI-level proof pending Tasks 19-22)
 - [x] `prepare_spool` closes an unfinished data-dir run of the spec as `superseded` and sends its done notice once, writes a git-ignored 0700 spool holding the prepared snapshot, and `estimate` under `CK_PROGRESS_DIR` uses it without reading the record store
 **Dependencies:** Task 10 (calls `fold`, `append`, `read_events`), Task 12 (calls `fit_model`, `load_defaults`), Task 14 (calls `simulate_*`), Task 16 (calls the decision seams), Task 17 (its tests are the oracle)
 **Complexity:** High
