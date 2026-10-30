@@ -533,7 +533,7 @@ Settings `derandomize=True, max_examples=200, database=None, deadline=None`. Eac
 ---
 
 ### Task 18: Build the ETA service (estimate, after-event recompute, cache, notifications, spool preparation)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.1, 1.4, 1.6, 1.7, 1.8, 2.3, 2.6, 3.8, 3.9, 3.10, 4.1, 4.2, 4.5, 4.6, 4.7, 4.8, 5.1, 5.2, 5.4, 5.5, 5.6, 7.1, 7.3, 7.4, 8.2, 8.5, 8.6, 8.7, 8.8, 8.9, 8.11
 **Description:** Create `src/claude_kiro/eta/service.py`, the I/O layer that wires history, simulate and decide. It never re-implements a rule. This task owns Harness Contract H-3 (the `EtaView` object), H-7 (slip threshold), H-13 (notification dispatch), H-10's `estimate` seam and the `CK_ETA_LINE_TIMEOUT_S` line budget. `estimate(project_dir, spec, kind=None, *, now, seed=None, env=None) -> EtaView` (`ck-eta/1`, design Data Models). It resolves the kind (`specs/<spec>/` with tasks.md -> implement, without -> create; an explicit kind wins; neither the directory nor a progress run -> unknown spec). It picks the form: no progress file -> launch estimate + `not-started` (4.1), or `blocked` when the graph has a cycle or an unknown dependency (1.7, TC-8); latest run ended -> `done` with `ended` (and `ended.next`, the launch estimate of the remaining open tasks, or `nothingLeft`) (4.8); last event older than `STALE_MIN` -> `stale` with `staleSince` and no simulation (3.10); else live. It builds `Graph` from `cli.worktree._plan` plus `parse_tasks` sizes. It takes slots from `agents.runtime_info()["agentSlots"]` and `run.max_concurrent`; on `AgentConfigError` it uses `runtime_agent_slots(...)` with `slotsSource: "default"` and the note `slot cap unreadable: using the default <n>`. It loads the model snapshot: `<key>.model.json` for a run; else, when `CK_PROGRESS_DIR` is set and `<spec>.prepared-model.json` exists there with a valid digest, that file (no record store read); else it fits from `store.load_records()` + `load_defaults(env)`. It folds the run's progress file, applies `classify_hold`, `effective_now` and `decide_state`, simulates at `now_eff` with the default seed `int(sha256(spec, model digest, events digest)[:8], 16)` (or the given seed), and converts back to wall time (effective finish + waited minutes, design Simulation). When blocked it reports `finish: null`, `remainingMinutes` over every open task, and `runnableDone` from an `exclude=held` pass when `whole_run` is False. It fills every `EtaView` field, including `cached`, `progressFile`, `cost.p50`, per-task `medianMinutes`, slowest two, safety count, rates, basis, `bundledParts`, size signal, per-task/per-phase states, `deltaVsLaunchMinutes` and notes. Raise typed errors the CLI maps to exit codes: unknown spec (exit 2), no tasks.md / no tasks (exit 1). Return a `nothing left to run` view when every task is Done. With no history and no defaults, return `confidence: "none"` with the graph only.
@@ -546,21 +546,23 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 **Verify:** `uv run pytest -q -n auto tests/test_eta_service_properties.py tests/test_agents.py tests/test_guard_park.py tests/test_redteam_notify.py`
 **Verified by:** Task 17 (P-8)
 **Acceptance:**
-- [ ] `estimate` for an implement spec returns the finish range, cost range (null when unknown), critical path with median, slowest two, safety count, rates and basis; for create it lists phases with medians and done/running marks
-- [ ] Equal inputs and seed give an identical view
-- [ ] A cycle or unknown dependency gives `state: "blocked"` with a reason and no finish time; any needs-input park gives `blocked`, `finish: null`, remaining work over every open task, and `runnableDone` only as a separate field
-- [ ] No progress file gives `not-started`; an ended run gives `done` with the remaining launch estimate or `nothingLeft`; a run silent for over 120 minutes gives `stale` and is not simulated
-- [ ] An unreadable slot cap uses the default and says so; an unreadable progress file falls back to the launch estimate with a note
-- [ ] No history uses bundled defaults with `confidence: "low"` and `basis.source: "bundled"`; partial history names the bundled parts; no defaults and no history gives the graph with no estimate
-- [ ] While a wait is open the remaining work stays frozen; after a wait of W minutes ends, the finish range is W minutes later (same seed) and the state is not `slipping`
-- [ ] `after_event` returns None past its budget (or `CK_ETA_LINE_TIMEOUT_S`) or on any error, and reuses the cache when nothing changed
-- [ ] Slip, blocked and done notices are sent once each through `run.notify_command`, with `CK_NOTIFY_TYPE` `ck_eta_slip` / `ck_eta_blocked` / `ck_run_done`; nothing is sent when it is unset; failures are recorded, not raised; two concurrent `after_event` calls on one run send a due notice once
-- [ ] `notify.send` without the keyword behaves exactly as before (`ck_needs_input`), and prompt-free-runs' tests (`tests/test_guard_park.py`, `tests/test_redteam_notify.py`) pass unchanged
-- [ ] `after_event` with no new event sends a slip that comes from time alone during a running task
-- [ ] `prepare_spool` closes an unfinished data-dir run of the spec as `superseded` and sends its done notice once, writes a git-ignored 0700 spool holding the prepared snapshot, and `estimate` under `CK_PROGRESS_DIR` uses it without reading the record store
+- [x] `estimate` for an implement spec returns the finish range, cost range (null when unknown), critical path with median, slowest two, safety count, rates and basis; for create it lists phases with medians and done/running marks
+- [x] Equal inputs and seed give an identical view
+- [x] A cycle or unknown dependency gives `state: "blocked"` with a reason and no finish time; any needs-input park gives `blocked`, `finish: null`, remaining work over every open task, and `runnableDone` only as a separate field
+- [x] No progress file gives `not-started`; an ended run gives `done` with the remaining launch estimate or `nothingLeft`; a run silent for over 120 minutes gives `stale` and is not simulated
+- [x] An unreadable slot cap uses the default and says so; an unreadable progress file falls back to the launch estimate with a note
+- [x] No history uses bundled defaults with `confidence: "low"` and `basis.source: "bundled"`; partial history names the bundled parts; no defaults and no history gives the graph with no estimate
+- [x] While a wait is open the remaining work stays frozen; after a wait of W minutes ends, the finish range is W minutes later (same seed) and the state is not `slipping`
+- [x] `after_event` returns None past its budget (or `CK_ETA_LINE_TIMEOUT_S`) or on any error, and reuses the cache when nothing changed
+- [x] Slip, blocked and done notices are sent once each through `run.notify_command`, with `CK_NOTIFY_TYPE` `ck_eta_slip` / `ck_eta_blocked` / `ck_run_done`; nothing is sent when it is unset; failures are recorded, not raised; two concurrent `after_event` calls on one run send a due notice once
+- [x] `notify.send` without the keyword behaves exactly as before (`ck_needs_input`), and prompt-free-runs' tests (`tests/test_guard_park.py`, `tests/test_redteam_notify.py`) pass unchanged
+- [x] `after_event` with no new event sends a slip that comes from time alone during a running task
+- [x] `prepare_spool` closes an unfinished data-dir run of the spec as `superseded` and sends its done notice once, writes a git-ignored 0700 spool holding the prepared snapshot, and `estimate` under `CK_PROGRESS_DIR` uses it without reading the record store
 **Dependencies:** Task 10 (calls `fold`, `append`, `read_events`), Task 12 (calls `fit_model`, `load_defaults`), Task 14 (calls `simulate_*`), Task 16 (calls the decision seams), Task 17 (its tests are the oracle)
 **Complexity:** High
 **Risk:** safety (sends slip, blocked and done notifications through the user's notify command)
+
+**Implementation notes:** `estimate` returns the `EtaView` as a plain dict. Deviations: `SimResult` gained an optional `usd_p50` field (`eta/simulate.py`) so `cost.p50` is the simulated median; the events digest used for the cache and the default seed leaves out `notified`/`notify-pending` lines so a sent notice does not change the seed; a cached view is reused only when the events digest, the model digest and `now` all match, so the time-only slip check re-simulates as time passes. Extra public helper `notify_done(key, now=, env=)` sends a run's done notice after `end` (used by `send_done_for_superseded`).
 
 ---
 

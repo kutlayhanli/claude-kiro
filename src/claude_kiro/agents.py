@@ -92,7 +92,10 @@ DEFAULTS: Dict[str, Dict[str, Any]] = {
             "analytics": True, "machine_label": None,
             # notify_command: a shell command `ck` runs (in the main checkout) when a task parks as needs-input;
             # it gets a Notification-hook JSON on stdin and CK_NOTIFY_MESSAGE. null = no notification.
-            "notify_command": None},
+            "notify_command": None,
+            # eta_slip_minutes: a slip notice is sent when the finish estimate moves later than the launch
+            # estimate's p90 by more than this many minutes (and again at each further multiple).
+            "eta_slip_minutes": 15},
 }
 
 ROLE_KEYS = {
@@ -103,7 +106,8 @@ ROLE_KEYS = {
     "fixer": {"model", "effort", "escalate"},
     "orchestrator": {"model", "effort"},
     "resolver": {"model", "effort"},
-    "run": {"max_concurrent", "allowed_domains", "budget_usd", "budget_per_task_usd", "finish_first", "analytics", "machine_label", "notify_command"},
+    "run": {"max_concurrent", "allowed_domains", "budget_usd", "budget_per_task_usd", "finish_first", "analytics", "machine_label", "notify_command",
+            "eta_slip_minutes"},
 }
 UNLIMITED = "unlimited"
 
@@ -231,6 +235,16 @@ def _coerce(role: str, key: str, value: Any) -> Any:
             number = 0
         if number < 1:
             raise AgentConfigError(f"{role}.max_concurrent must be a whole number of 1 or more, or {UNLIMITED}")
+        return number
+    if key == "eta_slip_minutes":
+        if value is None:
+            return None
+        try:
+            number = int(str(value))
+        except ValueError:
+            number = 0
+        if isinstance(value, bool) or number < 1 or str(value).strip() != str(number):
+            raise AgentConfigError(f"{role}.eta_slip_minutes must be a whole number of 1 or more")
         return number
     if key in ("budget_usd", "budget_per_task_usd"):
         if value is None:

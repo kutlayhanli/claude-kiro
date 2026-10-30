@@ -33,14 +33,21 @@ def _tail(text: str) -> str:
     return text[-_DETAIL_LIMIT:]
 
 
-def send(command: Optional[str], message: str, cwd: Path, timeout: float = 10.0) -> NotifyOutcome:
-    """Run `command` (shell=True, in `cwd`) with the message; kill it after `timeout` seconds."""
+def send(command: Optional[str], message: str, cwd: Path, timeout: float = 10.0, *,
+         notification_type: str = "ck_needs_input") -> NotifyOutcome:
+    """Run `command` (shell=True, in `cwd`) with the message; kill it after `timeout` seconds.
+
+    `notification_type` goes into the stdin JSON and into CK_NOTIFY_TYPE. ck sends every type (`ck_needs_input`,
+    `ck_eta_slip`, `ck_eta_blocked`, `ck_run_done`) the same way; a quieter route for done or slip notices needs the
+    user's notify command to branch on CK_NOTIFY_TYPE.
+    """
     if not command or not str(command).strip():
         return NotifyOutcome("not_configured", NOTIFY_HINT)
-    payload = json.dumps({"hook_event_name": "Notification", "notification_type": "ck_needs_input",
+    payload = json.dumps({"hook_event_name": "Notification", "notification_type": notification_type,
                           "title": "ck", "message": message})
     env = dict(os.environ)
     env["CK_NOTIFY_MESSAGE"] = message
+    env["CK_NOTIFY_TYPE"] = notification_type
     env.pop("CK_RUN_NOTIFY", None)
     try:
         proc = subprocess.Popen(command, shell=True, cwd=str(cwd), env=env, stdin=subprocess.PIPE,

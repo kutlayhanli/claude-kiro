@@ -30,6 +30,7 @@ class SimResult:
     critical_median_min: Optional[float]
     widest_step: Optional[str]           # None when there is nothing to match (no open task, no phase)
     phase_median_min: Dict[str, float]   # create: per phase, median over the passes that included it
+    usd_p50: Optional[float] = None      # median cost; set whenever `usd` is
 
 
 # --------------------------------------------------------------------------- numeric helpers
@@ -319,6 +320,7 @@ def simulate_implement(graph: Graph, model: Model, state: RunState, *, now_min: 
         critical_median_min=statistics.median(crits),
         widest_step=widest,
         phase_median_min={},
+        usd_p50=None if usd is None else _pct(costs, 0.5),
     )
 
 
@@ -396,4 +398,5 @@ def simulate_create(model: Model, state: RunState, *, now_min: float, n: int, se
         critical_median_min=None,
         widest_step=None,  # create has no match ladder; None says so instead of a placeholder step
         phase_median_min={t: statistics.median(v) for t, v in per_phase.items()},
+        usd_p50=_pct(costs, 0.5) if cost_ok else None,
     )
