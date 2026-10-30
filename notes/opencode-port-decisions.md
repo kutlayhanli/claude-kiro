@@ -235,6 +235,11 @@ Two consequences to keep in view:
   guard.
 - Repeatability for the benchmark: a fresh worktree needs only the package entry (+ `ck`), which is the
   cleanest possible baseline for "same install, N runs".
+- **Local testing:** OpenCode resolves a bare `plugins` name from the npm registry, so an unpublished
+  package must be passed as a directory path (`"/abs/path/opencode"`). Verified from a packed tarball:
+  setup registered five commands, six agents, two resources and the `AGENTS.md` block, and preflight
+  passed. Setup can run twice because writing those files triggers the config watcher's reload; the
+  digest guards make it idempotent.
 
 ### D11 — Scope: full interactive surface, no headless mode
 
