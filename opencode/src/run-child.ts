@@ -346,7 +346,7 @@ async function runAttempt(
     const messages = (await options.ctx.session.context({ sessionID })) as unknown as MessageInfo[];
     const peakContext = peakContextOf(messages);
     const endedAt = Date.now();
-    const details = { sessionID, tokens: info.tokens, startedAt, endedAt, peakContext };
+    const details = { sessionID, tokens: info.tokens, cost: info.cost, startedAt, endedAt, peakContext };
     const failure = failureOf(messages, info);
     if (failure) {
       throw new ChildError("failed", `child ${options.label} failed: ${failure}`, details);

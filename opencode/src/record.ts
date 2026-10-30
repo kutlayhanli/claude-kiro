@@ -129,6 +129,7 @@ export function agentRowFromOutcome(outcome: ChildOutcome, meta: AgentMeta): Age
 interface ErrorDetails {
   sessionID?: string;
   tokens?: TokenUsage;
+  cost?: number;
   startedAt?: number;
   endedAt?: number;
   attempts?: number;
@@ -180,7 +181,7 @@ export function agentRowFromError(
     attempts: details.attempts ?? 1,
     rejections: details.rejections ?? 0,
     tokens: details.tokens ?? EMPTY_TOKENS,
-    cost: 0,
+    cost: details.cost ?? 0,
     peakContext: details.peakContext ?? 0,
     error: error.message,
   };
