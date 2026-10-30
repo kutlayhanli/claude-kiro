@@ -839,6 +839,7 @@ Skip permission cases as root.
 **Dependencies:** Task 22 (prompts run `ck progress begin|event|end`), Task 25 (prompts pass the new claim/land/plan flags), Task 26 (its tests are the oracle)
 **Complexity:** High
 **Risk:** safety (its prompts and skills run the progress commands that send notifications through the user's notify command)
+**Implementation notes (Task 27):** Beyond the listed files, the Task 26 tests (TC-25, TC-51, TC-87) needed three small fixes in code from Task 22: (1) `eta/service.py::_dispatch` no longer records a `notified` event with outcome `not_configured` (8.8: nothing is sent), so `end` stays the last line of a run without a notify command; `_dispatch`/`_send_done`/`notify_done` now return the (status, detail) of each notice sent, and `notify_done` takes `end_event` so `ck progress end` still sends the done notice, and names a failure once, when `end` could not be written; `cli/eta.py::progress_end` uses those outcomes. (2) `progress.py::notice_lock` yields without a lock when the lock file cannot be opened (unwritable progress directory). (3) `eta/decide.py::eta_log_line` prints the current time as the ETA when no task is open (`landed 2 · ETA 16:50`, not `ETA ?`). `tests/test_eta_workflow.py::test_tc54b...` can flake: two task agents that start together record their `task-start` through concurrent real subprocesses, so which gets the fake project's first timestamp is a race in the harness.
 
 ---
 
