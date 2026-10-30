@@ -395,10 +395,14 @@ before the cheap arms.
 **Strong-model calibration on an available ref (2026-10-30):** `opencode-go/deepseek-v4-pro` works
 and the live demo arm merged 1/1 with a green final gate in 5.09 min, peak context 31,121, 63,454
 input / 7,713 output / 1,116,160 cache-read tokens, and a **$0.08 list-price estimate** (the provider
-reported $0.00; the harness prices native tokens at models.dev 2026-10 rates). This proves the port
-under a strong model, but it is **not** the Sonnet E0 baseline; a cross-model number cannot be
-compared with Claude Code Sonnet. `opencode-go/claude-haiku-5-5` also responds but is not an E0
-candidate; `opencode-go/muse-spark-1.3-contributor` is blocked by the workspace's
+reported $0.00; the harness prices native tokens at models.dev 2026-10 rates). A hidden subtract
+suite plus an `add` invariant kept outside the repo scored **100% hidden, 1/1 task passing, 100%
+invariants, $0.08 per passing task** — the full `ck bench score` path works on an OpenCode arm. The
+same suite scored the beam-free arm at **100% hidden, $0.00, 1.12 min**, so two OpenCode arms are
+comparable in one score table. Both specs are trivial; these are harness proofs, not conclusions. This
+proves the port under a strong model, but it is **not** the Sonnet E0 baseline; a cross-model number
+cannot be compared with Claude Code Sonnet. `opencode-go/claude-haiku-5-5` also responds but is not
+an E0 candidate; `opencode-go/muse-spark-1.3-contributor` is blocked by the workspace's
 train-on-request-data privacy setting.
 
 **Full suite (post-merge, 0.11.0):** `uv run pytest -q -n auto` → **2938 passed, 16 skipped** in 4:03.
