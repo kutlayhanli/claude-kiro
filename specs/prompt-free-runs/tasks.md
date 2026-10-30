@@ -102,7 +102,7 @@ recorded answer to 3.4: Task 11 and Task 14 build the fallback marker only when 
 ---
 
 ### Task 3: Test the Bash pre-check and the guard seams, and update the existing guard tests
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 2.2, 4.1, 4.2, 4.3, 5.1, 5.2, 10.2
 **Properties:** P-1, P-2, P-3, P-4, P-5, P-6, P-12, P-13, P-24
@@ -137,15 +137,15 @@ test files, so this task makes them while In Progress.
 **Verify:** `uv run pytest -q -n auto tests/test_guard_bash.py tests/test_guard.py tests/test_guard_properties.py tests/test_guard_properties_hook.py tests/test_plugin_modes.py`
 **Verifies:** Task 11 (the rewritten pre-tool guard; its pure properties also cover foundation Task 10's seams)
 **Acceptance:**
-- [ ] Every delete/move verb in TC-1, including the directory forms, asks (main, `ask`), denies (main, `deny`) and
+- [x] Every delete/move verb in TC-1, including the directory forms, asks (main, `ask`), denies (main, `deny`) and
       denies (task, `ask`); the file is untouched after each call.
-- [ ] Every TC-2 in-place/script/redirect form returns `None` for both callers; TC-3 near-misses (branch-only,
+- [x] Every TC-2 in-place/script/redirect form returns `None` for both callers; TC-3 near-misses (branch-only,
       owned, real `__pycache__`, `.pytest_cache`, `find -delete` of `.pyc`) return `None`.
-- [ ] TC-71's absolute-path deletes in a claimed task worktree are denied for a task agent.
-- [ ] Generators cover every form in the P-rows; settings are deterministic; `PROPERTIES` maps every P-id here.
-- [ ] The edited existing tests now assert the new rules (task agent deny, main session pass) and fail before the
+- [x] TC-71's absolute-path deletes in a claimed task worktree are denied for a task agent.
+- [x] Generators cover every form in the P-rows; settings are deterministic; `PROPERTIES` maps every P-id here.
+- [x] The edited existing tests now assert the new rules (task agent deny, main session pass) and fail before the
       implementation for the right reason; no assertion is weakened beyond what test-plan.md lists.
-- [ ] Tests exercise the real hook and real git; no mocks of project code.
+- [x] Tests exercise the real hook and real git; no mocks of project code.
 **Dependencies:** Task 1 (guard_helpers, `_not_headless`, `claimed_task_worktree`)
 **Complexity:** High
 **Risk:** safety (oracle for blocking irreversible deletion of existing test files)
