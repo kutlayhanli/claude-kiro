@@ -193,7 +193,7 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 ---
 
 ### Task 6: Make P-10 deterministic on the virtual clock
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 12.1, 12.2, 12.3, 12.4
 **Description:** Story 12 is a test-only change: the fix is this rewrite, on the virtual clock Task 3 adds to the harness. Implement TC-73 through TC-76, properties P-25 and P-26, and red-team cases for 12.3.
@@ -211,11 +211,11 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 **Properties:** P-25, P-26
 **Verifies:** None
 **Acceptance:**
-- [ ] Tests exercise the real `plugin/workflows/spec-implement.js` through the bridge. Only the clock and agents are test doubles, and both are test-owned
-- [ ] The rewritten P-10 is at least as strong as today's (exact equality of events and result) and has no re-run loop
-- [ ] The P-25/P-26 generators are the existing `scenarios()` with `SETTINGS` (deterministic)
-- [ ] TC-75 passes on today's scripts and fails if a clock code token leaks into them
-- [ ] TC-76's default part runs in seconds. The 50-run stress is opt-in
+- [x] Tests exercise the real `plugin/workflows/spec-implement.js` through the bridge. Only the clock and agents are test doubles, and both are test-owned
+- [x] The rewritten P-10 is at least as strong as today's (exact equality of events and result) and has no re-run loop
+- [x] The P-25/P-26 generators are the existing `scenarios()` with `SETTINGS` (deterministic)
+- [x] TC-75 passes on today's scripts and fails if a clock code token leaks into them
+- [x] TC-76's default part runs in seconds. The 50-run stress is opt-in
 **Dependencies:** Task 1 (`busy`), Task 3 (the virtual clock in the bridge)
 **Complexity:** Medium
 **Risk:** normal

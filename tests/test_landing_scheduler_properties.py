@@ -31,6 +31,7 @@ PROPERTIES = {
     "P-21": "test_p21_busy_worktrees_are_recorded_and_left_alone",
     "P-22": "test_p22_each_start_is_the_head_of_ready_tasks",
     "P-23": "test_p23_a_new_task_start_never_queues",
+    "P-26": "test_p10_finish_first_changes_nothing_when_nothing_queues",
 }
 
 SETTINGS = settings(derandomize=True, max_examples=60, database=None, deadline=None)
@@ -149,7 +150,7 @@ def prepare(sc: Dict[str, Any], slots: Any = _KEEP, drop_relink: bool = False, *
 
 
 def run(bridge, sc: Dict[str, Any]) -> Dict[str, Any]:  # noqa: F811
-    return bridge.run(sc["project"], sc["args"], slots=sc["slots"])
+    return bridge.run(sc["project"], sc["args"], slots=sc["slots"], clock="virtual")
 
 
 def events(out: Dict[str, Any]) -> List[tuple]:
@@ -335,27 +336,26 @@ def test_p9_finish_type_agents_are_requested_at_their_trigger(bridge, sc, slots)
 @SETTINGS
 @given(scenarios(), st.sampled_from([1000, None]))
 def test_p10_finish_first_changes_nothing_when_nothing_queues(bridge, sc, agent_slots):  # noqa: F811
-    """3.3, 3.5, NFR-6: without `slots` (nothing ever queues) and with `agentSlots` above any in-flight count or
-    omitted, the request/start/end sequence (by label, in order) and the result are identical with finish-first on
-    and off.
-
-    Each run uses real timers, so two runs of one configuration can differ when two timers fall due in the same
-    millisecond (about 1 example in 13 here, more on a loaded machine). So a mismatch is re-run: the relation holds
-    when some on-run is identical to some off-run (up to six of each). A difference the setting causes shows in
-    every on-run, so no pair can match."""
+    """3.3, 3.5, NFR-6 (TC-74, P-26): without `slots` (nothing ever queues) and with `agentSlots` above any
+    in-flight count or omitted, the request/start/end sequence (by label, in order) and the result are identical
+    with finish-first on and off. One run each on the virtual clock: timers fire in simulated-time order, so no
+    re-run is needed and load cannot reorder anything."""
     base = prepare(sc, slots=None)
     if agent_slots is not None:
         base["args"]["agentSlots"] = agent_slots
-    ons: List[Dict[str, Any]] = []
-    offs: List[Dict[str, Any]] = []
-    key = lambda out: (events(out), out["result"])  # noqa: E731
-    for _ in range(6):
-        ons.append(run(bridge, with_finish_first(base, True)))
-        offs.append(run(bridge, with_finish_first(base, False)))
-        if any(key(a) == key(b) for a in ons for b in offs):
-            return
-    assert events(ons[0]) == events(offs[0])
-    assert ons[0]["result"] == offs[0]["result"]
+    on = run(bridge, with_finish_first(base, True))
+    off = run(bridge, with_finish_first(base, False))
+    assert events(on) == events(off)
+    assert on["result"] == off["result"]
+
+
+def test_p10_source_has_two_runs_and_no_loop():
+    import inspect
+
+    src = inspect.getsource(test_p10_finish_first_changes_nothing_when_nothing_queues)
+    body = src.split('"""', 2)[2]
+    assert len(re.findall(r"\brun\(", body)) == 2, body
+    assert not re.search(r"^\s*(for|while)\b", body, re.M), body
 
 
 # --- P-11 ------------------------------------------------------------------------------------------------------
