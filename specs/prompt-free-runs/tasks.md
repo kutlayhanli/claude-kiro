@@ -287,7 +287,7 @@ worktree spec and taken branch refusals (both checkouts unchanged); TC-85 an ide
 ---
 
 ### Task 7: Test `ck worktree park`, `ck worktree resolve`, notification, report and the ladder CLI
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.1, 6.2, 6.4, 7.1, 7.2, 7.3, 7.4, 7.5, 7.8, 7.9, 7.11, 7.12
 **Properties:** P-17, P-18
@@ -314,15 +314,15 @@ all `derandomize=True, database=None`; `PROPERTIES` map.
 **Verify:** `uv run pytest -q -n auto tests/test_guard_park.py tests/test_redteam_notify.py tests/test_park_properties.py`
 **Verifies:** Task 13 (notifier, ladder CLI, park and resolve)
 **Acceptance:**
-- [ ] Exactly one notification per park, on stdin and in `CK_NOTIFY_MESSAGE`, naming spec, task and "decision",
+- [x] Exactly one notification per park, on stdin and in `CK_NOTIFY_MESSAGE`, naming spec, task and "decision",
       with no quoted text in any channel.
-- [ ] Not configured / failing / slow / missing notify commands never fail the park (exit 0, within 15 s) and are
+- [x] Not configured / failing / slow / missing notify commands never fail the park (exit 0, within 15 s) and are
       named in the output and the report.
-- [ ] Parked tasks appear only in `needsInput`; resolve clears that, keeps the answer for later attempts, and a
+- [x] Parked tasks appear only in `needsInput`; resolve clears that, keeps the answer for later attempts, and a
       re-run treats the task as unfinished with its worktree reused.
-- [ ] The ladder CLI returns the strict-above models whatever `implementer.escalate` says.
-- [ ] Inside `ck run`, the notification comes once per note from `ck run`'s process; the sandbox is not widened.
-- [ ] Tests run the real CLI, real git and a real subprocess notify command; no mocks of project code.
+- [x] The ladder CLI returns the strict-above models whatever `implementer.escalate` says.
+- [x] Inside `ck run`, the notification comes once per note from `ck run`'s process; the sandbox is not widened.
+- [x] Tests run the real CLI, real git and a real subprocess notify command; no mocks of project code.
 **Dependencies:** Task 1 (notify_script, set_notify, parking_fake_claude, fake_sandbox_tools)
 **Complexity:** Medium
 **Risk:** safety (sends the user's push notification through a configured command)
