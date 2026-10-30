@@ -393,7 +393,7 @@ def _find_spec_dir(cwd: Path, spec: str, command: str) -> Optional[Path]:
         if (c / "tasks.md").exists():
             return c
     if command == "create":
-        for c in candidates:
+        for c in [*(root / spec for root in spec_roots(cwd)), *([candidate] if Path(spec).is_absolute() else [])]:
             if c.is_dir():
                 return c
     return None

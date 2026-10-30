@@ -31,27 +31,46 @@ def _git(cwd: Path, *args: str) -> Optional[str]:
     return done.stdout.strip() if done.returncode == 0 else None
 
 
+def _checkout_of(common: Path) -> Optional[Path]:
+    """The checkout that owns git-common-dir `common` (a submodule's lives under .git/modules)."""
+    if common.name == ".git":
+        return common.parent
+    top = _git(common, "rev-parse", "--show-toplevel") if common.is_dir() else None
+    if top:
+        return Path(top).resolve()
+    return common if (common / "HEAD").exists() and not (common / "objects").is_dir() else None
+
+
 def _linked_main_root(cwd: Path) -> Tuple[bool, Optional[Path]]:
-    """(is a linked worktree, its main checkout), read from the `.git` file so a damaged worktree still resolves."""
+    """(is a linked worktree, its main checkout): git-dir != git-common-dir, as design.md says.
+
+    The `.git` file is only a fallback for a damaged worktree, and only when its gitdir sits under `worktrees/`.
+    """
+    git_dir = _git(cwd, "rev-parse", "--absolute-git-dir")
+    common = _git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if git_dir and common:
+        if Path(git_dir).resolve() == Path(common).resolve():
+            return False, None
+        root = _checkout_of(Path(common).resolve())
+        return True, root if root is not None and root.is_dir() else None
     for directory in (cwd, *cwd.parents):
         entry = directory / ".git"
         if entry.is_dir():
-            return False, directory
+            return False, None
         if entry.is_file():
             try:
                 text = entry.read_text().strip()
             except OSError:
-                return True, None
+                return False, None
             if not text.startswith("gitdir:"):
-                return True, None
+                return False, None
             gitdir = Path(text[len("gitdir:"):].strip())
             if not gitdir.is_absolute():
-                gitdir = (directory / gitdir)
-            if gitdir.parent.name != "worktrees" or not gitdir.is_dir():
-                return True, None
-            common = gitdir.parent.parent
-            root = common.parent if common.name == ".git" else common
-            return True, root.resolve() if root.is_dir() else None
+                gitdir = directory / gitdir
+            if gitdir.parent.name != "worktrees":
+                return False, None
+            root = _checkout_of(gitdir.parent.parent.resolve())
+            return True, root if root is not None and root.is_dir() else None
     return False, None
 
 
@@ -133,7 +152,10 @@ def handoff(kind: str, args: tuple, as_json: bool):
     main = Path(decision.main_checkout or "")
     run_args, rest = decision.run_args, decision.rest
     spec = run_args[0]
-    switch_cmd = f"git switch -c {shlex.quote(spec + '-run')} {shlex.quote(facts.worktree_head or '')}"
+    if facts.run_branch_at is not None:
+        switch_cmd = f"git switch {shlex.quote(spec + '-run')}"
+    else:
+        switch_cmd = f"git switch -c {shlex.quote(spec + '-run')} {shlex.quote(facts.worktree_head or '')}"
     manual_switch = _manual(str(main), spec, run_args, rest, switch_cmd)
     run_branch: Optional[str] = None
     if decision.run_branch:
@@ -147,6 +169,7 @@ def handoff(kind: str, args: tuple, as_json: bool):
                   f"{(switched.stderr or switched.stdout).strip()}", manual_switch, as_json)
         run_branch = decision.run_branch
     manual = _manual(str(main), spec, run_args, rest)
+    note = f" (the main checkout is now on branch {run_branch})" if run_branch else ""
 
     try:
         plan = preflight(main, spec, kind, False)
@@ -161,7 +184,7 @@ def handoff(kind: str, args: tuple, as_json: bool):
             proc = subprocess.Popen(argv, cwd=str(main), start_new_session=True, stdin=subprocess.DEVNULL,
                                     stdout=out, stderr=subprocess.STDOUT)
     except OSError as e:
-        _fail(f"could not start ck run: {e}", manual, as_json)
+        _fail(f"could not start ck run: {e}" + note, manual, as_json)
     try:
         code = proc.wait(timeout=EARLY_EXIT_SECONDS)
     except subprocess.TimeoutExpired:
@@ -171,7 +194,7 @@ def handoff(kind: str, args: tuple, as_json: bool):
             tail = " ".join(launch_log.read_text().split())[-300:]
         except OSError:
             tail = ""
-        _fail(f"ck run exited with code {code} within {EARLY_EXIT_SECONDS:g} s" + (f": {tail}" if tail else ""), manual, as_json)
+        _fail(f"ck run exited with code {code} within {EARLY_EXIT_SECONDS:g} s" + (f": {tail}" if tail else "") + note, manual, as_json)
     command = "ck run " + " ".join(shlex.quote(a) for a in (spec, "--command", kind)) + (
         " -- " + " ".join(shlex.quote(a) for a in rest) if rest else "")
     _emit({

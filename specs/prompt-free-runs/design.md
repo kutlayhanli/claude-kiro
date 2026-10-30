@@ -304,7 +304,7 @@ A move gives `moves the test file`.
   - It launches `ck run` with every option before `--` (`run <spec> --command <kind> --log <log> -- <rest>`), so the
     log path it prints is the one `ck run` writes, and the prompt never holds `--log`.
   - Without `--json` it prints the same fields as lines.
-- `ck run SPEC [--command implement|create|review] [existing options] [-- EXTRA]`. Unchanged for implement.
+- `ck run SPEC [--command implement|create|review] [existing options] [-- EXTRA]`. Unchanged for implement, except that each EXTRA argument is shell-quoted in the prompt so an argument with spaces or quotes survives intact (requirement 8.6, TC-48).
   `--command create` runs `/spec:create SPEC EXTRA`. `--command review` runs `/spec:review SPEC EXTRA`. It refuses
   with exit 2 in the same cases as today (linked worktree, missing bwrap/socat without `--unsandboxed`, unknown
   spec).
@@ -644,8 +644,9 @@ class NotifyOutcome:
 
 @dataclass(frozen=True)
 class RunPlan:
-    cwd: Path; name: str; command: str; prompt: str; argv: List[str]; env: Dict[str, str]
-    log: Path; settings: Optional[dict]; warnings: List[str]
+    # Pre-launch facts only; run() builds prompt, argv, env, log and settings from them.
+    name: str; command: str; cwd: Path; spec_dir: Path; sandboxed: bool
+    wt_dir: Optional[Path]; run_role: Dict[str, Any]; warnings: List[str]
 ```
 
 ## Data Flow
