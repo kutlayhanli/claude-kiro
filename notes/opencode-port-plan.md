@@ -152,14 +152,20 @@ future workflow schema change fails loudly).
 - [x] A trivial 2-phase workflow with three `agent()` calls runs end to end and returns its result.
       Live on 2026-10-30 with `opencode-go/beam-free`: `ALPHA`, `BETA`, `{ok:true}`, in 4.5 s.
 - [x] `spec-implement.js` and `spec-create.js` are vendored **unmodified** (`sync-vendor --check`
-      compares source and copy digests). Executing both real workflows is still pending E0.
+      compares source and copy digests). The real `spec-implement` has now executed live through the
+      bench bridge; `spec-create` is covered by the same `workflow` tool path but has not been run on
+      a real model.
 - [x] A step with a schema gets a validated object; a deliberately wrong submission gets field errors
       and then succeeds; a never-submitting child fails the step with a clear error. (Live structured
       step plus the fake-session rejection/retry test.)
 - [x] A child whose model is missing/invalid fails at resolution, not 20 minutes in.
-- [ ] Guard-denied child halts the step; `[ck guard]` text is in the error. (Phase 3.)
-- [ ] `deepseek-v4.1-flash-free` completes a 1-task workflow (smoke). Blocked: `provider.free-limit`
-      429 until ~01:00Z; `claude-sonnet-5-5` returns `provider.quota` 402 (account unfunded).
+- [x] Guard-denied child halts the step; `[ck guard]` text is in the error. Live guard denial and
+      `guardStop` → record verified in Phase 3; the missing-binary test covers the fatal path and
+      `runChild` rejects a result without `guardStop`.
+- [x] A 1-task workflow completes on a free model: the live bench E2E ran the real
+      `spec-implement` end to end on `opencode-go/beam-free`. `deepseek-v4.1-flash-free` itself is
+      still unavailable (`provider.free-limit` 429, `retryAfterMs` ~19.7 M) and
+      `claude-sonnet-5-5` returns `provider.quota` 402 (account unfunded).
 - [x] Tokens, cost and wall clock per child appear in the run log.
 
 ### 1.5 Calibration gate
