@@ -343,6 +343,9 @@ def send(command, message, cwd, timeout=10, *, notification_type: str = "ck_need
 def fit_model(records: Sequence[Mapping], defaults: Optional[Mapping], *, tasks_md_reader: Callable[[str, str], Optional[Dict[str, Tuple[int, int]]]] = ...) -> Model
 def load_defaults() -> Optional[dict]
 def build_defaults(records: Sequence[Mapping], *, min_runs: int = MIN_DEFAULT_RUNS) -> DefaultsResult
+#   DefaultsResult = dataclass(payload: dict, runs: int). `runs` = len(records): every record, implement or create, is one run.
+#   With len(records) < min_runs it raises ValueError(f"{n} runs in history, need {min}") (the CLI prints it after "refusing to write defaults: ", 7.5).
+#   `payload` is the ck-eta-defaults/1 tree; it always passes defaults_shape_ok.
 def model_to_json(m: Model) -> dict ; def model_from_json(d: Mapping) -> Optional[Model]
 
 # eta/simulate.py
