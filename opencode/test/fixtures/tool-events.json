@@ -1,0 +1,175 @@
+{
+  "meta": {
+    "capturedAt": "2026-10-30T18:20:00Z",
+    "opencode": "2.2.3",
+    "probes": [
+      "/tmp/opencode/spike/.opencode/plugins/probe2.js",
+      "/tmp/opencode/spike/.opencode/plugins/probe3.js",
+      "/tmp/opencode/spike/.opencode/plugins/probe4.js"
+    ],
+    "logs": [
+      "/tmp/opencode/spike-logs/findings2.log",
+      "/tmp/opencode/spike/findings4.log"
+    ],
+    "note": "Captured on disk so the guard translation table is tested against real payloads, not remembered ones. Outer 'execute' and inner real-tool events share one call id; the shim must act on the inner event only."
+  },
+  "before": {
+    "outerExecute": {
+      "tool": "execute",
+      "agent": "build",
+      "sessionID": "ses_e7200c3cdffe7FbcL5tuXXyGAh",
+      "messageID": "msg_18dff481d001lXpYF3ELxcO0Mi",
+      "id": "call_00_6d4j2goq8p2t5p21oahj64kq",
+      "input": {
+        "code": "return await tools.spike_echo({ value: \"second\" })"
+      }
+    },
+    "read": {
+      "tool": "read",
+      "agent": "build",
+      "sessionID": "ses_e7200c3cdffe7FbcL5tuXXyGAh",
+      "messageID": "msg_18dff3cb60013kOH0ucgawPiMc",
+      "id": "call_00_kb6tpghws50wxgn1v1ivbu4r",
+      "input": {
+        "path": "/tmp/opencode/spike/hello.txt"
+      }
+    },
+    "edit": {
+      "tool": "edit",
+      "agent": "build",
+      "sessionID": "ses_e7200c3cdffe7FbcL5tuXXyGAh",
+      "messageID": "msg_18dff4ddb001kR2wcZAdS7am9e",
+      "id": "call_00_ix8stwvy7n84dja1a77obtn8",
+      "input": {
+        "path": "/tmp/opencode/spike/guarded.txt",
+        "oldString": "original line",
+        "newString": "original line\nAPPENDED"
+      }
+    },
+    "shell": {
+      "tool": "shell",
+      "agent": "build",
+      "sessionID": "ses_e7200c3cdffe7FbcL5tuXXyGAh",
+      "messageID": "msg_18dff5502001AgG7TiJa2T5Nvl",
+      "id": "call_00_0jk3qg51vwzaw5ndpwji2z4e",
+      "input": {
+        "command": "echo SHELL_OK"
+      }
+    },
+    "spikeEcho": {
+      "tool": "spike_echo",
+      "agent": "build",
+      "sessionID": "ses_e7200c3cdffe7FbcL5tuXXyGAh",
+      "messageID": "msg_18dff4ddb001kR2wcZAdS7am9e",
+      "id": "call_00_eo48c2u0u504heqvbzn2a8fq",
+      "input": {
+        "value": "DENYME"
+      }
+    },
+    "spikeChild": {
+      "tool": "spike_child",
+      "agent": "build",
+      "sessionID": "ses_e7200c3cdffe7FbcL5tuXXyGAh",
+      "messageID": "msg_18dff3cb60013kOH0ucgawPiMc",
+      "id": "call_00_vf55cr8fbw2r1p5t8lisxbht",
+      "input": {
+        "prompt": "Reply with exactly CHILD_OK"
+      }
+    }
+  },
+  "after": {
+    "outerExecute": {
+      "tool": "execute",
+      "agent": "build",
+      "sessionID": "ses_e7200c3cdffe7FbcL5tuXXyGAh",
+      "messageID": "msg_18dff3cb60013kOH0ucgawPiMc",
+      "id": "call_00_vf55cr8fbw2r1p5t8lisxbht",
+      "input": {
+        "code": "return await tools.spike_child({ prompt: \"Reply with exactly CHILD_OK\" });"
+      },
+      "status": "completed"
+    },
+    "read": {
+      "tool": "read",
+      "agent": "build",
+      "sessionID": "ses_e7200c3cdffe7FbcL5tuXXyGAh",
+      "messageID": "msg_18dff3cb60013kOH0ucgawPiMc",
+      "id": "call_00_kb6tpghws50wxgn1v1ivbu4r",
+      "input": {
+        "path": "/tmp/opencode/spike/hello.txt"
+      },
+      "status": "completed",
+      "result": {
+        "output": {
+          "type": "file",
+          "uri": "file:///tmp/opencode/spike/hello.txt",
+          "name": "hello.txt",
+          "content": "hello from probe\n",
+          "encoding": "utf8",
+          "mime": "text/plain"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Read file /tmp/opencode/spike/hello.txt, lines 1-1\n1: hello from probe"
+          }
+        ],
+        "metadata": {
+          "truncated": false
+        }
+      }
+    },
+    "shell": {
+      "tool": "shell",
+      "agent": "build",
+      "sessionID": "ses_e7200c3cdffe7FbcL5tuXXyGAh",
+      "messageID": "msg_18dff5502001AgG7TiJa2T5Nvl",
+      "id": "call_00_0jk3qg51vwzaw5ndpwji2z4e",
+      "status": "completed"
+    },
+    "editDenied": {
+      "tool": "edit",
+      "agent": "build",
+      "sessionID": "ses_e7200c3cdffe7FbcL5tuXXyGAh",
+      "messageID": "msg_18dff4ddb001kR2wcZAdS7am9e",
+      "id": "call_00_ix8stwvy7n84dja1a77obtn8",
+      "status": "error",
+      "error": {
+        "message": "[ck guard] spike denied this inner edit: guarded.txt is protected"
+      }
+    }
+  },
+  "modelVisible": {
+    "deny": {
+      "error": {
+        "type": "unknown",
+        "message": "[ck guard] spike denied this inner edit: guarded.txt is protected"
+      },
+      "content": []
+    },
+    "latch": {
+      "error": {
+        "type": "unknown",
+        "message": "[ck post-check] you edited a test file; tests must still pass before you continue"
+      },
+      "content": []
+    }
+  },
+  "latch": {
+    "armedIn": {
+      "tool": "spike_echo",
+      "status": "completed",
+      "id": "call_00_9zbs0kjcfeh9cshrnqt3gsq0"
+    },
+    "deliveredOnNextCall": {
+      "tool": "execute",
+      "agent": "build",
+      "sessionID": "ses_e7200c3cdffe7FbcL5tuXXyGAh",
+      "messageID": "msg_18dff481d001lXpYF3ELxcO0Mi",
+      "id": "call_00_6d4j2goq8p2t5p21oahj64kq",
+      "input": {
+        "code": "return await tools.spike_echo({ value: \"second\" })"
+      }
+    }
+  }
+}

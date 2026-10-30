@@ -1,0 +1,50 @@
+{
+  "name": "opencode-claude-kiro",
+  "version": "0.10.3",
+  "description": "claude-kiro spec-driven development for OpenCode: /spec commands, role agents, spec workflows and guard hooks. Needs the `ck` CLI.",
+  "type": "module",
+  "license": "MIT",
+  "author": {
+    "name": "Kutlay Hanli"
+  },
+  "homepage": "https://github.com/kutlayhanli/claude-kiro",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kutlayhanli/claude-kiro.git",
+    "directory": "opencode"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "claude-kiro",
+    "spec-driven-development",
+    "kiro",
+    "workflows",
+    "tdd"
+  ],
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "vendor"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "sync-vendor": "node scripts/sync-vendor.ts",
+    "vendor:check": "node scripts/sync-vendor.ts --check",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "prepack": "node scripts/sync-vendor.ts",
+    "prepublishOnly": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@opencode/plugin": "2.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
