@@ -91,8 +91,7 @@ def _fake_bin(tmp_path) -> Path:
     return path
 
 
-def test_run_arm_opencode_imports_the_record_and_bench_output(tmp_path, monkeypatch):
-    _fake_args_module(monkeypatch)
+def test_run_arm_opencode_imports_the_record_and_bench_output(tmp_path):
     _fake_bin(tmp_path)
     config_path, _ = _opencode_config(tmp_path)
     cfg = bench.load_config(config_path)
@@ -139,6 +138,16 @@ def test_run_arm_opencode_requires_a_full_model_ref(tmp_path, monkeypatch):
 
     with pytest.raises(bench.BenchError, match="full `model`"):
         bench.run_arm_opencode(cfg, arm, echo=lambda _: None)
+
+
+def test_cli_run_opencode_writes_a_result(tmp_path):
+    _fake_bin(tmp_path)
+    config_path, _ = _opencode_config(tmp_path)
+    result = CliRunner().invoke(cli, ["bench", "run", str(config_path), "--harness", "opencode"])
+    assert result.exit_code == 0, result.output
+    results = list((tmp_path / "results").glob("*.json"))
+    assert len(results) == 1
+    assert json.loads(results[0].read_text())["harness"] == "opencode"
 
 
 def test_cli_dry_run_names_the_opencode_harness(tmp_path):
