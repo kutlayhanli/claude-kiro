@@ -716,7 +716,7 @@ Skip the permission cases as root (`needs_user`).
 ---
 
 ### Task 24: Test the end-to-end paths and progress spooling under `ck run`
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 2.1, 3.1, 3.5, 3.7, 3.8, 3.9, 4.2, 5.1, 5.4, 7.1, 8.3, 8.5, 8.6, 8.7, 8.8, 8.9, 8.11
 **Description:** Implement TC-92, TC-93 and TC-95 through TC-97.
@@ -731,10 +731,10 @@ Skip permission cases as root.
 **Verify:** `uv run pytest -q tests/test_eta_e2e.py tests/test_eta_run_spool.py`
 **Verifies:** Task 25 (the claim, land, park and resolve chain end to end; spool and mirror under `ck run`)
 **Acceptance:**
-- [ ] Tests exercise real CLI chains, the real `ck run` command, a real child process, real progress files and a real notify script. Only `claude` is a fake, and it is test-owned
-- [ ] Before implementation they fail because the commands are missing and `ck run` sets no spool and mirrors nothing
-- [ ] No mocks or monkeypatching of project code. Message counts are exact
-- [ ] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
+- [x] Tests exercise real CLI chains, the real `ck run` command, a real child process, real progress files and a real notify script. Only `claude` is a fake, and it is test-owned
+- [x] Before implementation they fail because the commands are missing and `ck run` sets no spool and mirrors nothing
+- [x] No mocks or monkeypatching of project code. Message counts are exact
+- [x] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
 **Dependencies:** Task 2 (helpers, spec builder, notify wrappers)
 **Complexity:** Medium
 **Risk:** safety (asserts deferred notifications sent through the user's notify command and the spool deletion)
