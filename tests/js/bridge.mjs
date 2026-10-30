@@ -33,8 +33,11 @@ async function handle(req) {
     return { ladder: guardLadder(req.model) }
   }
   if (req.op === 'run') {
-    const clock = req.clock === 'virtual' ? new VirtualClock() : null
-    const timing = clock ? { sleep: clock.sleep, external: p => clock.external(p) } : req.clock === 'real' ? { sleep: ms => new Promise(r => setTimeout(r, ms)) } : {}
+    // With execCk and no clock given, default to 'virtual': the global pump would keep advancing simulated timers
+    // while a real subprocess is in flight, so such runs would not be time-stable.
+    const mode = req.clock ?? (req.execCk ? 'virtual' : undefined)
+    const clock = mode === 'virtual' ? new VirtualClock() : null
+    const timing = clock ? { sleep: clock.sleep, external: p => clock.external(p) } : mode === 'real' ? { sleep: ms => new Promise(r => setTimeout(r, ms)) } : {}
     const p = project({ ...req.project, ...timing, ...(req.execCk ? { execCk: req.execCk } : {}) })
     const slots = req.slots ?? undefined
     const args = { ...baseArgs, ...req.args, ...(slots ? { agentSlots: slots } : {}) }

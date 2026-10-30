@@ -61,13 +61,18 @@ export class VirtualClock {
     let value, error, failed = false
     promise.then(v => { settled = true; value = v }, e => { settled = true; failed = true; error = e })
     return new Promise(async (resolve, reject) => {
+      let idle = 0
       while (!settled) {
         await new Promise(r => setImmediate(r))  // a macrotask: every pending microtask has run first
         if (settled) break
-        if (this._external > 0 || !this._heap.length) {
-          if (this._external > 0 || !this._heap.length) await new Promise(r => setTimeout(r, 1))  // wait for real I/O
+        if (this._external > 0) { idle = 0; await new Promise(r => setTimeout(r, 1)); continue }  // wait for real I/O
+        if (!this._heap.length) {
+          // No timers and no wrapped external work: only unwrapped real I/O could still settle it. Give it a moment, then fail.
+          if (++idle > 2000) { reject(new Error('virtual clock idle: no timers and no external work, and the promise is unsettled')); return }
+          await new Promise(r => setTimeout(r, 1))
           continue
         }
+        idle = 0
         const t = this._pop()
         this._now = t.due
         t.resolve()

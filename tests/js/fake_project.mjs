@@ -22,21 +22,21 @@ function parseFlags(text) {
 // The text of the command after `after` up to the end of the line or the closing double quote.
 const rest = (prompt, re) => { const m = re.exec(prompt); return m ? m : null }
 export function findClaim(prompt) {
-  const m = rest(prompt, /worktree claim (\S+) (\d+)([^\n"]*)/)
+  const m = rest(prompt, /worktree claim (\S+) (\d+)([^\n"`]*)/)
   return m ? { spec: m[1], task: m[2], flags: parseFlags(m[3]) } : null
 }
 export function findLand(prompt) {
-  const m = rest(prompt, /worktree land (\S+) ([^\n"]*)/)
+  const m = rest(prompt, /worktree land (\S+) ([^\n"`]*)/)
   if (!m) return null
   const tasks = []
   for (const t of m[2].trim().split(/\s+/)) { if (!/^\d+$/.test(t)) break; tasks.push(t) }
   return { spec: m[1], tasks, flags: parseFlags(m[2].slice(m[2].indexOf('--') < 0 ? m[2].length : m[2].indexOf('--'))) }
 }
 const eventArgv = (spec, kind, run, extra = []) => ['progress', 'event', spec, kind, ...(run ? ['--run', run] : []), ...extra]
-// `ck ... plan ... --failed` and `ck ... progress event ...` commands in a prompt, as written (minus -C DIR).
+// `ck ... plan ... --failed`, `ck ... progress event ...` and `ck --version` commands in a prompt, as written (minus -C DIR).
 export function writtenCommands(prompt) {
   const out = []
-  for (const m of prompt.matchAll(/\bck (?:-C \S+ )?((?:plan|progress event) [^\n"`]*)/g)) {
+  for (const m of prompt.matchAll(/\bck (?:-C \S+ )?((?:plan|progress event) [^\n"`]*|--version)/g)) {
     if (m[1].startsWith('plan') && !/--failed/.test(m[1])) continue
     out.push(m[1].trim().split(/\s+/).filter(t => t !== '""' ))
   }
@@ -74,7 +74,7 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
   let rechecksLeftRed = recheckRed
   // RED landings left per task: checkRed tasks are red on their first landing, redLands sets a count.
   const redLeft = { ...Object.fromEntries(checkRed.map(n => [n, 1])), ...redLands }
-  const state = { deps: { ...deps }, done: new Set(done), merged: new Set(), events: [], prompts: {}, opts: {}, reviewCount: {}, attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0, landings: [], parks: [], revises: {}, resolved: new Set(), conflictsHit: {}, execLog: [] }
+  const state = { execResults: [], deps: { ...deps }, done: new Set(done), merged: new Set(), events: [], prompts: {}, opts: {}, reviewCount: {}, attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0, landings: [], parks: [], revises: {}, resolved: new Set(), conflictsHit: {}, execLog: [] }
   let clock = Date.parse('2026-10-04T10:00:00Z')
   const stamp = () => new Date((clock += 60000)).toISOString().replace('.000', '')
   const ready = exclude => {
@@ -98,10 +98,13 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
     if (!execCk || execCk.dry) return null
     const env = { ...process.env, ...(execCk.env || {}), CK_PROGRESS_TEST_KINDS: '1' }
     const [bin, ...pre] = execCk.cmd
-    const stdout = await external(new Promise(resolve => {
-      execFile(bin, [...pre, ...argv], { env, cwd: execCk.cwd || process.cwd(), encoding: 'utf8' }, (err, out) => resolve(out || ''))
+    const res = await external(new Promise(resolve => {
+      execFile(bin, [...pre, ...argv], { env, cwd: execCk.cwd || process.cwd(), encoding: 'utf8' }, (err, out, errOut) => {
+        resolve({ argv, code: err ? (typeof err.code === 'number' ? err.code : -1) : 0, error: err ? String(err.message) : null, stdout: out || '', stderr: errOut || '' })
+      })
     }))
-    try { return JSON.parse(stdout) } catch { return stdout.trim() }
+    state.execResults.push(res)  // the outcome is kept, never swallowed: tests assert the CLI really ran
+    try { return JSON.parse(res.stdout) } catch { return res.stdout.trim() }
   }
   const recordClaim = async prompt => {
     const c = findClaim(prompt)
@@ -126,7 +129,9 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
   }
   const agent = async (prompt, opts) => {
     const l = opts.label
-    if (execCk && !l.startsWith('land ')) { await recordClaim(prompt); await runWritten(prompt) }
+    // Land prompts get no claim (their landing events are recorded from the result below), but a command they
+    // write out is still run as written.
+    if (execCk) { if (!l.startsWith('land ')) await recordClaim(prompt); await runWritten(prompt) }
     state.events.push(l)
     state.prompts[l] = prompt
     state.opts[l] = opts

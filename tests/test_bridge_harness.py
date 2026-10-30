@@ -76,22 +76,59 @@ def test_execck_eta_answer_overrides():
         assert check(node(snippet)), mode
 
 
+REAL = "{ cmd: [" + json.dumps(sys.executable) + ", '-m', 'claude_kiro.cli'], env: {} }"
+
+
+def real_run(prompt: str, label: str = "task 1") -> dict:
+    """Feed one prompt to a fake project that runs commands through the real CLI; return execLog and execResults."""
+    snippet = (
+        "import { project } from './fake_project.mjs'\n"
+        f"const p = project({{ deps: {{ '1': [] }}, execCk: {REAL} }})\n"
+        f"await p.agent({json.dumps(prompt)}, {{ label: {json.dumps(label)} }})\n"
+        "console.log(JSON.stringify({ log: p.state.execLog, results: p.state.execResults }))"
+    )
+    return node(snippet)  # type: ignore[return-value]
+
+
 def test_execck_runs_a_backticked_real_ck_command():
+    out = real_run("Check the CLI with `ck --version` now")
+    assert out["log"] == [["--version"]]
+    (res,) = out["results"]
+    assert res["code"] == 0, res
+    assert res["stdout"].strip() and res["error"] is None  # the CLI really ran and printed its version
+    direct = subprocess.run([sys.executable, "-m", "claude_kiro.cli", "--version"], capture_output=True, text=True, timeout=60)
+    assert res["stdout"] == direct.stdout
+
+
+def test_execck_surfaces_a_failing_command():
+    out = real_run("Run `ck progress event demo bogus-kind --json` now")
+    (res,) = out["results"]
+    assert res["code"] != 0 and res["error"], res
+
+
+def test_execck_runs_commands_written_in_land_prompts_and_ignores_a_closing_backtick():
+    land = "ck -C /repo worktree land demo 1 --into x --progress-run R1 --json\nAlso `ck --version`"
+    out = real_run(land, "land 1")
+    assert ["--version"] in out["log"]
+    claim = "Claim: `ck -C /wt worktree claim demo 1 --progress-run R1 --progress-event task-start --attempt 1`"
     snippet = (
-        "import { project } from './fake_project.mjs'\n"
-        f"const p = project({{ deps: {{ '1': [] }}, execCk: {{ cmd: [{json.dumps(sys.executable)}, '-m', 'claude_kiro.cli'], env: {{}} }} }})\n"
-        "await p.agent('Check with `ck progress event demo bogus-kind --json` now', { label: 'task 1' })\n"
-        "console.log(JSON.stringify(p.state.execLog))"
+        "import { findClaim } from './fake_project.mjs'\n"
+        f"console.log(JSON.stringify(findClaim({json.dumps(claim)})))"
     )
-    assert node(snippet) == [["progress", "event", "demo", "bogus-kind", "--json"]]
-    proc = subprocess.run([sys.executable, "-m", "claude_kiro.cli", "--version"], capture_output=True, text=True, timeout=60)
-    assert proc.returncode == 0
-    snippet = (
-        "import { project } from './fake_project.mjs'\n"
-        f"const p = project({{ deps: {{ '1': [] }}, execCk: {{ cmd: [{json.dumps(sys.executable)}, '-m', 'claude_kiro.cli'], env: {{}} }} }})\n"
-        "console.log(JSON.stringify(await p.agent('x', { label: 'task 1' })))"
+    assert node(snippet)["flags"]["attempt"] == "1"
+
+
+def test_bridge_real_clock_runs_with_real_timers(bridge):  # noqa: F811
+    out = bridge.run({"deps": {"1": []}, "durations": {"1": 5}}, clock="real")
+    assert out["result"]
+
+
+def test_virtual_clock_fails_fast_when_idle_with_nothing_pending():
+    proc = subprocess.run(
+        ["node", "--input-type=module", "-e", "import { VirtualClock } from './virtual_clock.mjs'\nconst c = new VirtualClock()\ntry { await c.drive(new Promise(() => {})); console.log('no') } catch (e) { console.log(e.message) }"],
+        cwd=JS, capture_output=True, text=True, timeout=60,
     )
-    assert node(snippet)["status"] == "done"
+    assert "virtual clock idle" in proc.stdout, proc.stdout + proc.stderr
 
 
 def test_create_op_runs_spec_create_to_completion(bridge):  # noqa: F811
