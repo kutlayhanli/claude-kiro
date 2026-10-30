@@ -458,7 +458,7 @@ Seams: `match_pool` (S1); `size_factor` (S2); `fit_size` (S3); `start_model` (S1
 ---
 
 ### Task 15: Write the run-state and notification decision properties
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.7, 3.10, 5.1, 5.2, 5.3, 5.4, 8.5, 8.6, 8.7, 8.9, 8.10, 8.11
 **Description:** Write properties over the pure decision seams of `claude_kiro.eta.decide`, with run state from `claude_kiro.progress.fold(events)` and `Graph` from `claude_kiro.eta.history`.
@@ -473,12 +473,13 @@ Settings `derandomize=True, max_examples=200, database=None, deadline=None`. Eac
 **Properties:** P-5, P-6, P-7, P-16, P-17, P-18
 **Verifies:** Task 16 (`classify_hold`, `effective_now`, `notify_decision`, `notice_text`)
 **Acceptance:**
-- [ ] Properties call the pure decision seams directly, not a server or CLI
-- [ ] P-16..P-18 generators cover p50 moves in [-60, +120], waits 0..120, thresholds 1..60, every hold kind (whole-run and branch parks), stale and waiting views (questions and hand landings), completed and superseded ends, pending and sent notices, repeated states, and the seeded path/test/requirement strings
-- [ ] Settings are deterministic (`derandomize=True`, `database=None`)
-- [ ] Before implementation they fail at import of `claude_kiro.eta.decide` (missing behaviour)
-- [ ] No mocks of project code
-- [ ] Both files set `pytestmark` with `no_network`
+- [x] Properties call the pure decision seams directly, not a server or CLI
+- [x] P-16..P-18 generators cover p50 moves in [-60, +120], waits 0..120, thresholds 1..60, every hold kind (whole-run and branch parks), stale and waiting views (questions and hand landings), completed and superseded ends, pending and sent notices, repeated states, and the seeded path/test/requirement strings
+- [x] Settings are deterministic (`derandomize=True`, `database=None`)
+- [x] Before implementation they fail at import of `claude_kiro.eta.decide` (missing behaviour)
+- [x] No mocks of project code
+- [x] Both files set `pytestmark` with `no_network`
+**Implementation notes (task 15):** the tests propose these input shapes for Task 16: `NotifyInput(spec, state, p50_finish_min, waited_min, launch_p90_min, hold, cause, outcome, merged, total, wall_min, usd, now_hhmm)`, `SentNotice(kind, key, level)`, `Notice` with `kind`, `level`, `key`, `type`; a park hold is told apart by non-empty `Hold.waiting_on_you`; `Graph` is built with the design fields. Documented at the top of `tests/test_eta_notify_properties.py`.
 **Dependencies:** Task 1 (graph and event strategies)
 **Complexity:** Medium
 **Risk:** safety (guards which slip, blocked and done notifications go to the user's notify command and what they contain)
@@ -499,7 +500,7 @@ Settings `derandomize=True, max_examples=200, database=None, deadline=None`. Eac
 - [ ] A failed task with unfinished dependents holding the rest gives `blocked`, and any dependency cycle or unknown dependency gives `blocked` even when other tasks could still run, each naming the cause; a hand landing never does
 - [ ] An open wait gives `waiting`; a run with no event for over 120 minutes gives `stale`, also while a wait, hand landing or park is open; waited minutes never count toward `slipping`
 - [ ] Slip notices fire once per new threshold level; blocked once per reason, never for a park; done once, including a `superseded` end; nothing while waiting (hand landings included) or stale; each notice carries its `NOTICE_TYPES` type
-- [ ] Notice text contains no `/`, no test or requirement text and no prompt text
+- [ ] Notice text contains no file paths (a `/` inside `<merged>/<total> merged` is required by design S8), no test or requirement text and no prompt text
 - [ ] Status and log lines match the formats in the design; the cache check reuses only on identical digests; `effective_now` is constant while a wait is open
 **Dependencies:** Task 10 (reads `RunState`, `effective_min`), Task 12 (uses `Graph`), Task 15 (its tests are the oracle)
 **Complexity:** Medium
