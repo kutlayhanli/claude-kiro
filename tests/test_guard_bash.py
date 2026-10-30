@@ -173,7 +173,7 @@ def test_tc6_guard_off_means_both_hooks_stay_silent(project, session, agent_id):
     ck_json(project, guard={"tests": "off"})
     weaken = "sed -i '/assert add(1, 2)/d' tests/test_calc.py"
     for command in ("rm tests/test_calc.py", weaken):
-        git(project, "checkout", "-q", "--", ".")
+        git(project, "checkout", "-q", "--", "tests")  # restore the tests only: specs/ck.json keeps "off"
         out = run_bash(project, session, command, agent_id=agent_id)
         assert out.pre is None and out.ran, command
         assert out.post is None and post_message(out.post) is None, command

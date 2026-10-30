@@ -141,7 +141,7 @@ def test_dry_run_denies_destructive_git_and_credential_files(tmp_path, fake_home
         assert rule in denied, rule
     # The network allowlist and credential removal cover these now; no command-text rules.
     assert not any(r.startswith(("Bash(curl", "Bash(wget", "Bash(ssh", "Bash(git -c")) for r in denied)
-    assert plan["env"] == {"CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0"}
+    assert plan["env"] == {"CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0", "CK_RUN_HEADLESS": "1"}  # 8.3: every ck run child is headless
 
 
 def test_the_env_scrub_is_never_set_and_is_removed_from_the_child_env(tmp_path, fake_home, monkeypatch):
