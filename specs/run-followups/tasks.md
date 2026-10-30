@@ -351,7 +351,7 @@ Settings `derandomize=True, max_examples=200, database=None, deadline=None`. Dec
 ---
 
 ### Task 11: Write the history and bundled-defaults properties
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.3, 6.5, 6.6, 7.2, 7.3, 7.5
 **Description:** Write properties P-9, P-11 and P-19 over the pure seams of `claude_kiro.eta.history`, so they run as soon as the history module exists.
@@ -367,14 +367,15 @@ History inputs are `st.sets` of indices into records the real collector wrote, n
 **Properties:** P-9, P-11, P-19
 **Verifies:** Task 12 (`fit_model`, `fit_size`, `size_factor`, `match_pool`, `build_defaults`, `defaults_shape_ok`)
 **Acceptance:**
-- [ ] Properties call the pure history seams directly with history the real collector wrote, not a CLI or server
-- [ ] P-19's generators cover ids, names, paths, timestamps and titles from `CONFIDENTIAL`
-- [ ] Settings are deterministic (`derandomize=True`, `database=None`)
-- [ ] Before implementation they fail at import of `claude_kiro.eta.history` (missing behaviour)
-- [ ] No mocks of project code
-- [ ] Both files set `pytestmark` with `no_network`
+- [x] Properties call the pure history seams directly with history the real collector wrote, not a CLI or server
+- [x] P-19's generators cover ids, names, paths, timestamps and titles from `CONFIDENTIAL`
+- [x] Settings are deterministic (`derandomize=True`, `database=None`)
+- [x] Before implementation they fail at import of `claude_kiro.eta.history` (missing behaviour)
+- [x] No mocks of project code
+- [x] Both files set `pytestmark` with `no_network`
 **Dependencies:** Task 2 (history pools, `history_records`)
 **Complexity:** Medium
+**Implementation notes:** Sizes come from a pure `tasks_md_reader` built from the harness `impl_plan` (pool records carry no file/criteria counts). `build_defaults` returns `DefaultsResult(payload, runs)` and raises `ValueError` below `min_runs` (design.md; every record counts as one run). Model size is rebuilt as `SizeFit` from `model_to_json(m)["size"]`, bundled parts via `model_to_json(m)["bundledParts"]`.
 **Risk:** safety (guards the bundled defaults shipped in the published package against record-level data)
 
 ---
