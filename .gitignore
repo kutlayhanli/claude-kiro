@@ -20,3 +20,4 @@ opencode/vendor/
 opencode/node_modules/
 opencode/dist/
 opencode/test/.tmp/
+opencode/*.tgz

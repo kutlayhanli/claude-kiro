@@ -33,6 +33,13 @@ tree is a warning: interactive work may proceed, a benchmark run should not.
 }
 ```
 
+For a local checkout, pass the package directory instead (OpenCode installs a bare name from the
+npm registry, so an unpublished package must be a path):
+
+```jsonc
+{ "plugins": ["/absolute/path/to/opencode"] }
+```
+
 Setup registers the five commands, materializes six flat `.opencode/agents/ck-*.md` files, writes
 two rewritten resources under `.opencode/ck/`, and installs an `AGENTS.md` block between
 `<!-- ck:begin -->` and `<!-- ck:end -->`. Run it once and restart OpenCode.
