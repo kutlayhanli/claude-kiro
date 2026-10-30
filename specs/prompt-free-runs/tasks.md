@@ -135,7 +135,7 @@ test files, so this task makes them while In Progress.
 - `tests/test_guard.py` - split the Bash ask test; five frozen-spec tests become task-agent tests with main-session twins
 - `tests/test_plugin_modes.py` - plugin-silence test uses a git repo with the test on the base
 **Verify:** `uv run pytest -q -n auto tests/test_guard_bash.py tests/test_guard.py tests/test_guard_properties.py tests/test_guard_properties_hook.py tests/test_plugin_modes.py`
-**Verifies:** Task 11 (the rewritten pre-tool guard; its pure properties also cover foundation Task 10's seams)
+**Verifies:** Task 11 (the rewritten pre-tool guard; its pure properties also cover foundation Task 10's seams), Task 15 (P-24: `share.COMMAND_FAMILIES`)
 **Acceptance:**
 - [x] Every delete/move verb in TC-1, including the directory forms, asks (main, `ask`), denies (main, `deny`) and
       denies (task, `ask`); the file is untouched after each call.
@@ -510,8 +510,8 @@ snapshot", "Guard event").
 - `src/claude_kiro/cli/guard.py` - new, only with `run_marker`: `ck guard workflow-begin|workflow-end`
 - `src/claude_kiro/cli/main.py` - register `guard` when it exists
 **Verify:** `uv run pytest -q -n auto tests/test_guard_properties.py tests/test_caller_properties.py tests/test_guard_bash.py tests/test_guard.py tests/test_guard_callers.py tests/test_guard_postcheck.py tests/test_redteam_postcheck.py tests/test_postcheck_properties.py tests/test_guard_properties_hook.py tests/test_guard_log.py tests/test_plugin_modes.py tests/test_plugin.py tests/test_stats_leak.py tests/test_stats_export.py -k "not test_p24_family_names_are_the_documented_set"`
-**Verified by:** Task 3, Task 4, Task 5
-Run note (2026-10-30): P-24 (`test_p24_family_names_are_the_documented_set`) reads `share.COMMAND_FAMILIES`, which Task 15 adds and Task 15 depends on this task, so it runs under Task 15's Verify, not here.
+**Verified by:** Task 4, Task 5
+Run note (2026-10-30): P-24 (`test_p24_family_names_are_the_documented_set`) reads `share.COMMAND_FAMILIES`, which Task 15 adds and Task 15 depends on this task, so it runs under Task 15's Verify, not here. Task 3 is linked to Task 15 for P-24; its other tests still run in this task's Verify above.
 **Acceptance:**
 - [ ] As a task agent, each NFR replay case gives no output; `rm` / `rm -rf tests` of existing unowned tests is
       denied for a task agent and uses the configured mode for the main session, also through `cd` and by absolute
@@ -715,7 +715,7 @@ omitted when absent; `guardLog` and differences never leave). Regenerate `analyt
 - `analytics/SCHEMA.md` - regenerated field list
 - `src/claude_kiro/analytics/show.py` - `interruptions_view`, `interruptions_line`, render and JSON
 **Verify:** `uv run pytest -q -n auto tests/test_stats_interruptions.py tests/test_stats_properties_interruptions.py tests/test_stats_properties_shared.py tests/test_redteam_shared.py tests/test_stats_roles.py tests/test_stats_agents_collect.py tests/test_stats_collect.py tests/test_stats_show.py tests/test_stats_export.py tests/test_stats_properties_share.py` `uv run pytest -q tests/test_guard_properties.py::test_p24_family_names_are_the_documented_set`
-**Verified by:** Task 9, Task 8
+**Verified by:** Task 9, Task 8, Task 3
 **Acceptance:**
 - [ ] A workflow run and an agent-mode run with seeded interruptions get the matching totals by role and family
       (`other` for non-shell); a gate-only block counts nothing.
