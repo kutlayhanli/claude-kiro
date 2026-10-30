@@ -21,6 +21,7 @@ from .agents import agents
 from .update import update
 from .hooks import hook
 from .run import run
+from .handoff import handoff
 from .bench import bench, cost
 from .stats import stats
 from .worktree import lint, plan, waves, worktree
@@ -1155,6 +1156,7 @@ cli.add_command(waves)
 cli.add_command(plan)
 cli.add_command(lint)
 cli.add_command(agents)
+cli.add_command(handoff)
 cli.add_command(update)
 cli.add_command(run)
 cli.add_command(bench)

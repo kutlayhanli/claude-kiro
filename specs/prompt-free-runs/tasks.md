@@ -531,7 +531,7 @@ Run note (2026-10-30): P-24 (`test_p24_family_names_are_the_documented_set`) rea
 ---
 
 ### Task 12: Teach `ck run` create and review runs, and add `ck handoff`
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 3.2, 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9
 **Description:** In `src/claude_kiro/cli/run.py` add `--command implement|create|review` (default `implement`; prompts
