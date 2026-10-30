@@ -590,7 +590,7 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 ---
 
 ### Task 20: Test live, blocked, waiting-on-me and stale estimates through `ck eta`
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.9, 2.5, 3.10, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7
 **Description:** Implement TC-32 through TC-45, TC-94 and TC-102, plus red-team cases for 1.9, 2.5, 5.2 and 5.5.
@@ -607,11 +607,11 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 **Verify:** `uv run pytest -q -n auto tests/test_eta_live.py tests/test_eta_blocked.py tests/test_eta_redteam_estimate.py`
 **Verifies:** Task 22 (`ck eta` live, blocked, waiting, stale and ended views, `--watch`)
 **Acceptance:**
-- [ ] Tests exercise the real `ck eta` subprocess over real progress files and a real collected store. TC-34 uses real time and a real signal
-- [ ] Before implementation they fail because `ck eta`/`ck progress` are missing
-- [ ] No mocks of project code. Time comes only from `NOW_ENV`, except in TC-34
-- [ ] Each blocked case names the cause and the held tasks, and asserts no finish range
-- [ ] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
+- [x] Tests exercise the real `ck eta` subprocess over real progress files and a real collected store. TC-34 uses real time and a real signal
+- [x] Before implementation they fail because `ck eta`/`ck progress` are missing
+- [x] No mocks of project code. Time comes only from `NOW_ENV`, except in TC-34
+- [x] Each blocked case names the cause and the held tasks, and asserts no finish range
+- [x] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
 **Dependencies:** Task 2 (helpers, pools, progress append wrapper)
 **Complexity:** High
 **Risk:** safety (verifies a safety task that sends notifications)
