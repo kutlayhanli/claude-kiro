@@ -24,6 +24,10 @@ def _isolated_data_home(tmp_path_factory, monkeypatch):
     monkeypatch.delenv("CK_DATA_HOME", raising=False)
     monkeypatch.delenv("CK_RUN_SANDBOXED", raising=False)
     monkeypatch.delenv("CK_STATS_DRAFTER", raising=False)
+    # A suite run inside `ck run` inherits its child markers: CK_RUN_NOTIFY=parent would queue every notification
+    # for an outer `ck run` instead of sending it, and CK_PROGRESS_DIR would point progress at the outer spool.
+    monkeypatch.delenv("CK_RUN_NOTIFY", raising=False)
+    monkeypatch.delenv("CK_PROGRESS_DIR", raising=False)
 
 
 @pytest.fixture(autouse=True)
