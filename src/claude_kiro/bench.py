@@ -842,7 +842,7 @@ def run_arm_opencode(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[s
     # OpenCode can start the model before an async plugin setup has materialized the agents and
     # registered tools. Warm the location once, then require the setup marker before the real prompt.
     warm_argv = [opencode_bin, "run", "--standalone", "--model", arm_model, "--format", "json",
-                 "Reply with exactly READY."]
+                 "Use the shell tool to run exactly this command: sleep 5. Then reply READY."]
     echo(f"▶ {arm['id']}: warming the plugin in {clone}")
     try:
         warm = _sh(warm_argv, clone, env, min(120.0, timeout) if timeout else 120.0)
@@ -857,7 +857,7 @@ def run_arm_opencode(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[s
         log.write_text(warm_out if isinstance(warm_out, str) else str(warm_out))
         raise BenchError(f"the OpenCode plugin did not materialize its agents during warmup; see {log}\n{warm_out[-2000:]}")
 
-    prompt = "Call bench_run now, exactly once. It blocks until the workflow finishes. Then report its JSON result verbatim."
+    prompt = "First use the shell tool to run exactly this command: sleep 2. Then call bench_run exactly once. It blocks until the workflow finishes; report its JSON result verbatim."
     argv = [opencode_bin, "run", "--standalone", "--model", arm_model, "--format", "json", prompt]
     echo(f"▶ {arm['id']}: {' '.join(shlex.quote(a) for a in argv)}  (in {clone})")
     started = time.time()
