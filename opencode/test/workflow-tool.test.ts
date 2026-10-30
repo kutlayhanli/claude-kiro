@@ -111,6 +111,18 @@ return { structured, plain }
     const runDir = fake.runDir();
     assert.match(readFileSync(join(runDir, "result.json"), "utf8"), /PLAIN_OK/);
     assert.match(readFileSync(join(runDir, "run.log"), "utf8"), /workflow finished/);
+    const record = JSON.parse(readFileSync(join(runDir, "record.json"), "utf8"));
+    assert.equal(record.schema, "ck-opencode-run/1");
+    assert.equal(record.harness, "opencode");
+    assert.equal(record.workflow, "other");
+    assert.equal(record.status, "done");
+    assert.equal(record.agents.length, 2);
+    assert.equal(record.agents[0].status, "ok");
+    assert.equal(record.agents[1].status, "ok");
+    assert.equal(record.agents[0].label, "task 1");
+    assert.equal(record.agents[1].label, "review 1");
+    assert.ok(record.agents[0].tokens.input > 0);
+    assert.ok(record.agents[0].peakContext >= 0);
 
     await dispose();
   } finally {

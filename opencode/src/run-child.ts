@@ -50,6 +50,7 @@ export interface MessageInfo {
   content?: MessagePart[];
   finish?: string;
   error?: { message?: string };
+  tokens?: TokenUsage;
 }
 
 export type ChildErrorKind =
@@ -109,6 +110,7 @@ export interface ChildOutcome {
   rejections: number;
   notes: string[];
   guardEvents: readonly GuardEvent[];
+  peakContext: number;
 }
 
 interface AttemptResult {
@@ -121,6 +123,7 @@ interface AttemptResult {
   startedAt: number;
   endedAt: number;
   guardEvents: readonly GuardEvent[];
+  peakContext: number;
 }
 
 const EMPTY_TOKENS: TokenUsage = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } };
@@ -158,9 +161,16 @@ export async function runChild(options: RunChildOptions): Promise<ChildOutcome> 
         rejections: result.rejections,
         notes: resolved.notes,
         guardEvents: result.guardEvents,
+        peakContext: result.peakContext,
       };
     } catch (error) {
       const failure = asChildError(error, "failed");
+      failure.details.requestedModel ??= resolved.requested.model;
+      failure.details.requestedEffort ??= resolved.requested.effort;
+      failure.details.requestedVariant ??= resolved.requested.variant;
+      failure.details.resolvedModel ??= resolved.resolved;
+      failure.details.resolvedVariant ??= resolved.resolvedEffort;
+      failure.details.attempts ??= attempt;
       if (failure.kind !== "result" || attempt === attemptsAllowed) throw failure;
       lastFailure = failure;
     }
@@ -200,6 +210,17 @@ export function lastAssistantText(messages: readonly MessageInfo[]): string {
     if (joined) text = joined;
   }
   return text;
+}
+
+/** Peak context the child held: the largest input + cache read on one assistant message. */
+export function peakContextOf(messages: readonly MessageInfo[]): number {
+  let peak = 0;
+  for (const message of messages) {
+    if (message.type !== "assistant" || !message.tokens) continue;
+    const context = (message.tokens.input ?? 0) + (message.tokens.cache?.read ?? 0);
+    if (context > peak) peak = context;
+  }
+  return peak;
 }
 
 /** Whether the child's structured result tells the workflow about a guard stop. */
@@ -279,17 +300,34 @@ async function runAttempt(
         location: { directory: options.projectDir },
       });
     } catch (error) {
-      throw new ChildError("session", `could not create a child session: ${message(error)}`);
+      throw new ChildError("session", `could not create a child session: ${message(error)}`, {
+        startedAt,
+        endedAt: Date.now(),
+      });
     }
     sessionID = created.id;
 
     try {
       await options.ctx.session.prompt({ sessionID, text, delivery: "queue" });
     } catch (error) {
-      throw new ChildError("session", `could not prompt child ${sessionID}: ${message(error)}`);
+      throw new ChildError("session", `could not prompt child ${sessionID}: ${message(error)}`, {
+        sessionID,
+        startedAt,
+        endedAt: Date.now(),
+      });
     }
 
-    const info = await observe(options.ctx, sessionID, options.config);
+    let info: SessionView;
+    try {
+      info = await observe(options.ctx, sessionID, options.config);
+    } catch (error) {
+      if (error instanceof ChildError) {
+        error.details.sessionID ??= sessionID;
+        error.details.startedAt ??= startedAt;
+        error.details.endedAt ??= Date.now();
+      }
+      throw error;
+    }
     // A child can finish right after a weakening command; wait for its background gate before
     // deciding the result, or the post-check would arrive after the child was already accepted.
     try {
@@ -298,15 +336,20 @@ async function runAttempt(
         Math.max(5000, options.config.guard.timeouts.doneVerify * 1000 + 5000),
       );
     } catch (error) {
-      throw new ChildError("guard", message(error), { sessionID });
-    }
-    const messages = (await options.ctx.session.context({ sessionID })) as unknown as MessageInfo[];
-    const failure = failureOf(messages, info);
-    if (failure) {
-      throw new ChildError("failed", `child ${options.label} failed: ${failure}`, {
+      throw new ChildError("guard", message(error), {
         sessionID,
+        startedAt,
+        endedAt: Date.now(),
         tokens: info.tokens,
       });
+    }
+    const messages = (await options.ctx.session.context({ sessionID })) as unknown as MessageInfo[];
+    const peakContext = peakContextOf(messages);
+    const endedAt = Date.now();
+    const details = { sessionID, tokens: info.tokens, startedAt, endedAt, peakContext };
+    const failure = failureOf(messages, info);
+    if (failure) {
+      throw new ChildError("failed", `child ${options.label} failed: ${failure}`, details);
     }
 
     const zeroTokens = (info.tokens?.input ?? 0) === 0 && (info.tokens?.output ?? 0) === 0;
@@ -316,11 +359,10 @@ async function runAttempt(
         "agent",
         `agent ${JSON.stringify(agent)} produced no assistant message and no tokens; ` +
           `check that .opencode/agents/${agent}.md exists (OpenCode silently accepts unknown agent ids)`,
-        { sessionID },
+        details,
       );
     }
 
-    const endedAt = Date.now();
     const textValue = lastAssistantText(messages);
     const accepted = validator ? (resultTool?.accepted() ?? null) : null;
     const parsed = validator && !accepted ? parseJsonCandidate(textValue) : undefined;
@@ -347,7 +389,7 @@ async function runAttempt(
       throw new ChildError(
         "guard",
         `the child hit the guard and did not report guardStop: ${guardEvents[0]?.reason ?? "guard event"}`,
-        { sessionID, guardEvents },
+        { ...details, guardEvents, submission, rejections: resultTool?.rejections() ?? 0 },
       );
     }
 
@@ -362,6 +404,7 @@ async function runAttempt(
         startedAt,
         endedAt,
         guardEvents,
+        peakContext,
       };
     }
 
@@ -376,6 +419,7 @@ async function runAttempt(
         startedAt,
         endedAt,
         guardEvents,
+        peakContext,
       };
     }
 
@@ -383,13 +427,15 @@ async function runAttempt(
       throw new ChildError(
         "result",
         `the child finished without calling ${toolName}, and its answer is not JSON`,
-        { sessionID, text: textValue.slice(0, 1000) },
+        { ...details, submission, rejections: resultTool?.rejections() ?? 0, text: textValue.slice(0, 1000) },
       );
     }
     const issues: SchemaIssue[] = validator(parsed);
     if (issues.length > 0) {
       throw new ChildError("result", `the child's JSON answer does not match the schema:\n${formatIssues(issues)}`, {
-        sessionID,
+        ...details,
+        submission,
+        rejections: resultTool?.rejections() ?? 0,
         text: textValue.slice(0, 1000),
       });
     }
@@ -403,6 +449,7 @@ async function runAttempt(
       startedAt,
       endedAt,
       guardEvents,
+      peakContext,
     };
   } finally {
     if (resultTool) await resultTool.registration.dispose().catch(() => {});

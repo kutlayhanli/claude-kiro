@@ -92,9 +92,9 @@ and `ck stats` keep working.
 
 - **Identity:** `runId` is the workflow run id, not the OpenCode session id. `claudeCodeVersion` is
   always `null`; `collectorVersion` is the npm package version.
-- **Agents:** one row per `agent()` attempt. A whole-child retry appends a second row with the same
-  `label`/`phase` and `attempts: 2`; the failed first attempt keeps its own row with `status` set and
-  `error` populated. `seq` is unique per run.
+- **Agents:** one row per `agent()` call. `attempts` is the number of whole-child attempts (1 plus
+  the retry); `status`/`error` describe the attempt that ended the call. A failed first attempt is not
+  a separate row; the run-level `retries` sums `attempts - 1`. `seq` is unique per run.
 - **Model/effort:** `requested` is what ck asked for; `resolved` is the actual OpenCode ref.
   `requestedEffort` is the normalized ck effort (`low|medium|high|xhigh|max`) or `null`; `resolvedEffort`
   and `variant` are the actual variant, or `null` when the effort was dropped. Never infer the

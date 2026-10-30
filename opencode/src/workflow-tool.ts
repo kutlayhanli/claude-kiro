@@ -13,9 +13,17 @@ import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import type { Plugin } from "@opencode/plugin";
 import type { ToolEditor } from "@opencode/plugin/promise/tool";
-import { resolveStateDir, type CkConfig } from "./config.ts";
+import { resolveStateDir, selectAgent, type CkConfig } from "./config.ts";
+import type { GuardEvent } from "./guard.ts";
 import { createRunLogger, type RunLogger } from "./log.ts";
 import type { Catalog } from "./models.ts";
+import {
+  RunRecordWriter,
+  agentRowFromError,
+  agentRowFromOutcome,
+  packageVersion,
+  workflowNameOf,
+} from "./record.ts";
 import { ChildError, runChild } from "./run-child.ts";
 
 export interface WorkflowRuntime {
@@ -24,6 +32,8 @@ export interface WorkflowRuntime {
   catalog?: Catalog;
   packageRoot: string;
   projectDir: string;
+  /** `ck --version`, when the caller resolved it; the Python ingester fills it otherwise. */
+  ckVersion?: string | null;
 }
 
 export interface WorkflowInput {
@@ -208,6 +218,19 @@ async function startWorkflow(
   const logger = createRunLogger(join(runDir, "run.log"));
   logger.write(`run ${runId} ${target.name} project=${runtime.projectDir}`);
 
+  const record = new RunRecordWriter(join(runDir, "record.json"), {
+    runId,
+    workflow: workflowNameOf(target.name),
+    collectorVersion: packageVersion(runtime.packageRoot),
+    ckVersion: runtime.ckVersion ?? null,
+    projectRoot: runtime.projectDir,
+    spec: stringArg(args.spec ?? args.feature),
+    into: stringArg(args.into),
+    args,
+    startedAt: Date.now(),
+  });
+  record.start();
+
   const workflowPath = target.kind === "inline" ? join(runDir, "inline.mjs") : target.path;
   if (target.kind === "inline") writeFileSync(workflowPath, target.source);
   const argsPath = join(runDir, "args.json");
@@ -246,6 +269,7 @@ async function startWorkflow(
     if (finished) return;
     finished = true;
     logger.write(text);
+    record.finish({ status: "failed", endedAt: Date.now(), failureLabel: "port" });
     await post(runtime, sessionID, runId, logger, text, true);
   };
 
@@ -273,7 +297,7 @@ async function startWorkflow(
       if (!id) return;
       seq += 1;
       const number = seq;
-      void handleAgent(runtime, sessionID, logger, message, number)
+      void handleAgent(runtime, sessionID, logger, message, number, record)
         .then((result) => {
           if (result.ok) send({ t: "result", id, value: result.value });
           else send({ t: "result", id, error: result.error });
@@ -287,6 +311,7 @@ async function startWorkflow(
     if (message.t === "done") {
       const result = message.result ?? null;
       finished = true;
+      record.finish({ status: "done", result, endedAt: Date.now() });
       try {
         writeFileSync(join(runDir, "result.json"), `${JSON.stringify({ runId, workflow: target.name, result }, null, 2)}\n`);
       } catch (error) {
@@ -298,6 +323,7 @@ async function startWorkflow(
     }
     if (message.t === "error") {
       finished = true;
+      record.finish({ status: "failed", endedAt: Date.now() });
       logger.write(`workflow error: ${String(message.message ?? "unknown")}`);
       if (message.stack) logger.write(String(message.stack));
       void post(
@@ -333,6 +359,7 @@ async function handleAgent(
   logger: RunLogger,
   message: RunnerMessage,
   seq: number,
+  record: RunRecordWriter,
 ): Promise<{ ok: true; value: unknown } | { ok: false; error: string }> {
   const opts = isPlainObject(message.opts) ? message.opts : {};
   const label = typeof opts.label === "string" && opts.label ? opts.label : `agent ${seq}`;
@@ -340,6 +367,13 @@ async function handleAgent(
   const model = typeof opts.model === "string" ? opts.model : undefined;
   const effort = typeof opts.effort === "string" ? opts.effort : undefined;
   const schema = Object.prototype.hasOwnProperty.call(opts, "schema") ? opts.schema : undefined;
+  const meta = {
+    seq,
+    label,
+    phase,
+    agent: selectAgent(label, runtime.config.agents),
+    parentSessionID,
+  };
 
   try {
     const outcome = await runChild({
@@ -373,15 +407,25 @@ async function handleAgent(
           .slice(0, 1000)}`,
       );
     }
+    record.addAgent(agentRowFromOutcome(outcome, { ...meta, agent: outcome.agent }), outcome.guardEvents);
     return { ok: true, value: outcome.value };
   } catch (error) {
     if (error instanceof ChildError) {
       logger.write(`agent ${seq} ${label}: ${error.kind}: ${error.message}`);
+      const guardEvents = Array.isArray(error.details.guardEvents)
+        ? (error.details.guardEvents as GuardEvent[])
+        : [];
+      record.addAgent(agentRowFromError(error, meta), guardEvents);
       return { ok: false, error: error.message };
     }
     logger.write(`agent ${seq} ${label}: unexpected failure: ${messageOf(error)}`);
+    record.addAgent(agentRowFromError({ kind: "failed", message: messageOf(error) }, meta));
     return { ok: false, error: messageOf(error) };
   }
+}
+
+function stringArg(value: unknown): string | null {
+  return typeof value === "string" && value ? value : null;
 }
 
 async function post(
