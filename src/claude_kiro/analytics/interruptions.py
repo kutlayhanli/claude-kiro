@@ -239,6 +239,53 @@ def _empty_kinds() -> Dict[str, int]:
     return {k: 0 for k in KINDS}
 
 
+def _assemble_block(*, totals: Dict[str, int], by_role: Dict[str, Dict[str, Dict[str, int]]],
+                    wait_by_role: Dict[str, int], escalation_models: Dict[str, int], skipped: int,
+                    guard_log: Dict[str, Any]) -> dict:
+    """One shape for both sources: scanned transcripts and an OpenCode record's guard counts."""
+    return {
+        "v": SCHEMA_VERSION,
+        "totals": totals,
+        "byRole": by_role,
+        "waitMsByRole": wait_by_role,
+        "escalationModels": escalation_models,
+        "guardLog": guard_log,
+        "skippedLines": skipped,
+    }
+
+
+def native_block(*, guard: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]) -> dict:
+    """The interruptions block of a `ck-opencode-run/1` record (D7): its guard counts, no transcripts.
+
+    `guard` holds `denials`, `postCheckCatches`, `guardEscalations`, `headlessDenials` and `prompts`.
+    Per-role and per-command detail is not in the record, so `byRole` stays empty; the totals are exact.
+    """
+    def n(key: str) -> int:
+        v = guard.get(key)
+        return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else 0
+
+    totals = _empty_kinds()
+    totals["waitMs"] = 0
+    totals["guardDenials"] = n("denials")
+    totals["postCheckCatches"] = n("postCheckCatches")
+    totals["guardEscalations"] = n("guardEscalations")
+    totals["headlessDenials"] = n("headlessDenials")
+    totals["prompts"] = n("prompts")
+
+    escalation_models: Dict[str, int] = {}
+    for row in rows:
+        if row.get("step") != "guard":
+            continue
+        from claude_kiro.analytics import share
+        family = share.model_family(row.get("escalatedTo") or row.get("model"))
+        escalation_models[family] = escalation_models.get(family, 0) + 1
+    events = guard.get("events")
+    return _assemble_block(
+        totals=totals, by_role={}, wait_by_role={}, escalation_models=escalation_models, skipped=0,
+        guard_log={"state": "native", "events": len(events) if isinstance(events, list) else 0, "differences": {}},
+    )
+
+
 def collect_run_interruptions(*, agents: Sequence[Any], rows: Sequence[Mapping], session_jsonl: Optional[Path],
                               start_ms: Optional[int], wall_ms: Optional[int], session_ids: Collection[str],
                               open_end: bool = False,
@@ -303,13 +350,9 @@ def collect_run_interruptions(*, agents: Sequence[Any], rows: Sequence[Mapping],
     if log.events:
         _, differences = reconcile({k: totals[k] for k in _COMPARED}, log_counts)
 
-    block = {
-        "v": SCHEMA_VERSION,
-        "totals": totals,
-        "byRole": by_role,
-        "waitMsByRole": wait_by_role,
-        "escalationModels": escalation_models,
-        "guardLog": {"state": log.state, "events": len(log.events), "differences": differences},
-        "skippedLines": skipped,
-    }
+    block = _assemble_block(
+        totals=totals, by_role=by_role, wait_by_role=wait_by_role, escalation_models=escalation_models,
+        skipped=skipped,
+        guard_log={"state": log.state, "events": len(log.events), "differences": differences},
+    )
     return block, log.state in ("unreadable", "rotated")

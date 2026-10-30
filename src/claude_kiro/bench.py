@@ -39,10 +39,26 @@ SCHEMA = "ck-bench-result/1"
 # "pricing" in the bench config, e.g. {"opus": {"input": 5, "output": 25}}.
 # Cache writes (5-minute TTL) cost 1.25x input unless "cacheCreation" is set.
 PRICING_DATE = "2026-10"
-PRICING: Dict[str, Dict[str, float]] = {
+# OpenCode refs are exact `provider/model` keys (not families): "opencode" is also a provider
+# prefix of paid refs, so substring matching would price every paid model as free.
+OPENCODE_PRICING: Dict[str, Dict[str, Any]] = {
+    # Free tiers: explicit zero rates, so a free run is $0.00 rather than "cost unknown".
+    "opencode/deepseek-v4.1-flash-free": {"input": 0.0, "output": 0.0, "cacheRead": 0.0,
+                                          "cacheCreation": 0.0, "free": True},
+    "opencode/muse-spark-1.3-contributor-free": {"input": 0.0, "output": 0.0, "cacheRead": 0.0,
+                                                 "cacheCreation": 0.0, "free": True},
+    "opencode/mimo-v2.6-flash-free": {"input": 0.0, "output": 0.0, "cacheRead": 0.0,
+                                     "cacheCreation": 0.0, "free": True},
+    # Known paid refs (models.dev, 2026-10). Anything else stays unknown (None), never $0.
+    "opencode/deepseek-v4.1-flash": {"input": 0.30, "output": 1.20},
+    "opencode-go/deepseek-v4.1-flash": {"input": 0.15, "output": 0.60},
+    "opencode-go/muse-spark-1.3-contributor": {"input": 0.10, "output": 0.20},
+}
+PRICING: Dict[str, Dict[str, Any]] = {
     "haiku": {"input": 0.10, "output": 0.50, "cacheRead": 0.01},
     "sonnet": {"input": 2.0, "output": 10.0, "cacheRead": 0.20},
     "opus": {"input": 4.0, "output": 20.0, "cacheRead": 0.20},
+    **OPENCODE_PRICING,
 }
 CACHE_WRITE_FACTOR = 1.25
 USAGE_KEYS = ("input", "output", "cacheRead", "cacheCreation")
@@ -68,13 +84,17 @@ def normalize_model(model: Optional[str]) -> str:
 
 def model_family(model: Optional[str], pricing: Optional[dict] = None) -> Optional[str]:
     m = (model or "").lower()
-    for fam in list((pricing or {}).keys()) + list(PRICING):
-        if fam in m:
+    keys = list((pricing or {}).keys()) + list(PRICING)
+    for fam in keys:  # an exact provider/model ref wins over family substrings
+        if fam.lower() == m:
+            return fam
+    for fam in keys:
+        if fam.lower() in m:
             return fam
     return None
 
 
-def rates(model: Optional[str], pricing: Optional[dict] = None) -> Optional[Dict[str, float]]:
+def rates(model: Optional[str], pricing: Optional[dict] = None) -> Optional[Dict[str, Any]]:
     fam = model_family(model, pricing)
     if fam is None:
         return None
@@ -92,6 +112,8 @@ def price_usage(model: Optional[str], usage: Dict[str, int], pricing: Optional[d
     r = rates(model, pricing)
     if r is None:
         return None
+    if r.get("free") is True:
+        return 0.0
     return sum((usage.get(k) or 0) * r[k] for k in USAGE_KEYS) / 1e6
 
 
@@ -418,10 +440,48 @@ def session_spend(home: Path, session_id: str, run_id: Optional[str] = None, pri
     }
 
 
+def spend_from_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    """A `session_spend`-shaped report for a native run that has no Claude transcripts (D7)."""
+    run = next((c for c in record.get("costs") or []
+                if isinstance(c, dict) and c.get("scope") == "run"), {})
+    by_model: Dict[str, Dict[str, Optional[float]]] = {}
+    for model, cell in (record.get("byModel") or {}).items():
+        if not isinstance(cell, dict):
+            continue
+        row: Dict[str, Optional[float]] = {k: cell.get(k) for k in USAGE_KEYS}
+        row["usd"] = cell.get("usd")
+        by_model[str(model)] = row
+    tokens = sum(v for row in by_model.values() for v in (row.get(k) or 0 for k in USAGE_KEYS))
+    return {
+        "session_id": record.get("sessionId"),
+        "run_id": record.get("runId"),
+        "transcripts": 0,
+        "claude_usd": None,
+        "budget_usd": None,
+        "priced_usd": run.get("usd"),
+        "by_model": by_model,
+        "transcript_tokens": tokens,
+        "workflow_tokens": 0,
+        "workflow_transcript_tokens": 0,
+        "pricing_date": run.get("pricingDate") or PRICING_DATE,
+        "from_record": True,
+    }
+
+
 def spend_lines(s: Dict[str, Any]) -> List[str]:
     """A short human report of session_spend()."""
     what = f"workflow run {s['run_id']} (session {s['session_id']})" if s.get("run_id") else f"session {s['session_id']}"
     lines = [f"Spend for {what}:"]
+    if s.get("from_record"):
+        if s.get("priced_usd") is not None:
+            per = ", ".join(f"{m} ${u['usd']:.2f}" for m, u in sorted(s["by_model"].items())
+                            if u.get("usd") is not None)
+            lines.append(f"  ${s['priced_usd']:.2f} from the local run record at {s['pricing_date']} list prices"
+                         + (f" ({per})" if per else ""))
+        else:
+            models = ", ".join(sorted(s["by_model"])) or "the run models"
+            lines.append(f"  cost unknown: no list price for {models}")
+        return lines
     if s.get("claude_usd") is not None:
         cap = f" of the ${s['budget_usd']:.2f} budget" if s.get("budget_usd") else ""
         scope = " (whole session)" if s.get("run_id") else ""

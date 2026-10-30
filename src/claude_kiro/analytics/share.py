@@ -36,6 +36,10 @@ SOURCES = ("workflow", "agents")
 MISSING_KINDS = ("result", "runfile", "agent_entries", "transcripts", "meta", "timing", "ck_version")
 PHASES = ("plan", "wave", "tasks", "final_gate", "report", "requirements", "design_test_plan", "task_tracks", "link",
           "adversarial_review", "revise", "consistency_check", "other")
+HARNESSES = ("claude", "opencode", "other")
+FAILURE_LABELS = ("model", "port", "throttle", "spec", "env", "other")
+DEGRADED_KINDS = ("compaction", "other")
+EFFORT_VARIANTS = ("default", "high", "low", "max", "medium", "none", "other", "xhigh")
 
 COUNT_KEYS = (
     "tasks", "tasks_merged", "tasks_failed", "tasks_not_started", "waves", "agents", "attempts", "retries",
@@ -180,6 +184,18 @@ _TREE = _obj(
         "workflow": _enum(WORKFLOWS),
         "source": _enum(SOURCES),
         "variant": _enum(VARIANTS),
+        "harness": _enum(HARNESSES),
+        "throttles": _INT,
+        "retries": _INT,
+        "degraded": _list(_enum(DEGRADED_KINDS)),
+        "failure_label": _enum(FAILURE_LABELS),
+        "agents": _list(_obj({
+            "role": _enum(ROLES),
+            "model": _enum(MODEL_FAMILIES),
+            "requested_effort": _enum(_WITH_OTHER(EFFORTS)),
+            "resolved_effort": _enum(_WITH_OTHER(EFFORTS)),
+            "variant": _enum(EFFORT_VARIANTS),
+        })),
         "outcome": _enum(OUTCOMES),
         "month": _fmt("yyyy-mm", _MONTH_RE),
         "machine": _fmt("slug of 1-32 lowercase letters, digits, hyphens", _MACHINE_RE),
@@ -619,6 +635,32 @@ def _interruptions(local: Mapping) -> Optional[Dict[str, Any]]:
     return out
 
 
+def _agent_rows(local: Mapping) -> List[dict]:
+    """Per-agent effort/model rows; only runs that recorded effort fields export them (D7).
+
+    Labels, agent ids and phases never enter the shareable form: role, model family and fixed-set
+    effort/variant values only.
+    """
+    rows = _dicts(local.get("agents"))
+    if not any(a.get(k) is not None for a in rows
+               for k in ("requestedEffort", "resolvedEffort", "variant")):
+        return []
+    out: List[dict] = []
+    for a in rows:
+        row: Dict[str, Any] = {
+            "role": to_enum(a.get("role"), ROLES),
+            "model": model_alias(a.get("model")),
+        }
+        for out_key, key in (("requested_effort", "requestedEffort"), ("resolved_effort", "resolvedEffort")):
+            value = a.get(key)
+            if value is not None:
+                row[out_key] = to_enum(value, EFFORTS)
+        if a.get("variant") is not None:
+            row["variant"] = to_enum(a.get("variant"), EFFORT_VARIANTS)
+        out.append(row)
+    return out
+
+
 def build_shareable(local: Mapping, *, record_id: Optional[str] = None, machine_label: Optional[str] = None,
                     issue_codes: Optional[Iterable[str]] = None) -> Dict[str, Any]:
     """S14: a new shareable record from named fields of a local record. Never mutates `local`."""
@@ -645,6 +687,21 @@ def build_shareable(local: Mapping, *, record_id: Optional[str] = None, machine_
     name = local.get("workflowName")
     out["variant"] = ("iso" if name == "spec-implement-iso" else "default" if name in ("spec-implement", "spec-create")
                       else "other")
+    if isinstance(local.get("harness"), str):
+        out["harness"] = to_enum(local.get("harness"), HARNESSES)
+    for key in ("throttles", "retries"):
+        value = _int(local.get(key))
+        if value is not None:
+            out[key] = value
+    degraded = [to_enum(d, DEGRADED_KINDS) for d in local.get("degraded", [])] \
+        if isinstance(local.get("degraded"), list) else []
+    if degraded:
+        out["degraded"] = degraded
+    if local.get("failureLabel") is not None:
+        out["failure_label"] = to_enum(local.get("failureLabel"), FAILURE_LABELS)
+    agent_rows = _agent_rows(local)
+    if agent_rows:
+        out["agents"] = agent_rows
     from claude_kiro.agents import valid_machine_label
 
     if valid_machine_label(machine_label):
