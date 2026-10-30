@@ -102,7 +102,7 @@ recorded answer to 3.4: Task 11 and Task 14 build the fallback marker only when 
 ---
 
 ### Task 3: Test the Bash pre-check and the guard seams, and update the existing guard tests
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 2.2, 4.1, 4.2, 4.3, 5.1, 5.2, 10.2
 **Properties:** P-1, P-2, P-3, P-4, P-5, P-6, P-12, P-13, P-24
