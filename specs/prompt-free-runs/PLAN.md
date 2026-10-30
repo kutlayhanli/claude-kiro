@@ -1,7 +1,7 @@
 # Plan: Prompt-free runs
 
 **Status:** Decided
-**Updated:** 2026-10-29
+**Updated:** 2026-10-30
 **Evolves:** none (extends specs/run-analytics and specs/agent-mode-analytics for the analytics part)
 
 ## Problem
@@ -103,6 +103,54 @@ Success: an unattended run never stops for my approval, the guard still blocks a
 **Rejected:** workflow mode only - repeats the agent-mode-analytics gap.
 **Decided by:** user
 
+### D13: Hand-off when the worktree's spec differs from the main checkout's (review R2, D9)
+**Choice:** When `specs/<spec>` at the isolated worktree's HEAD is missing from or differs from the main checkout's HEAD and the main checkout is clean, `ck handoff` creates `<spec>-run` in the main checkout at the worktree's HEAD, switches to it and launches `ck run` there. This automates what we did by hand (`git switch -c <spec>-run <worktree HEAD>`, then `ck run <spec>`). When the main checkout is dirty, the worktree's spec has uncommitted changes, or the branch cannot be checked out there, it refuses and prints the exact recovery commands. An identical spec hands off on the main checkout's branch as before.
+**Why:** the spec is usually written in the isolated session and not landed yet; running on main would miss it, and refusing would only ask me to type the same two commands.
+**Rejected:** refuse and tell me to merge first - an extra round trip; run on main as-is - runs a stale or missing spec.
+**Decided by:** user
+
+### D14: /spec:review revise fixes to a started spec's requirements.md / test-plan.md (review R1, D10)
+**Choice:** The revise step does not apply a change to existing text of a started spec's requirements.md or test-plan.md, and does not drop it silently either: it comes back to me as a decision item (open questions, review.md "Needs Your Decision"), the path behaviour-changing fixes already use. The guard keeps treating revise agents as task agents for these files and its denial tells the agent to report the change as a decision. No interactive permission prompt from inside an agent.
+**Why:** there is value in asking for my approval at the spec steps; the contract of a started implementation should not change without me.
+**Rejected:** exempt review revise agents from the guard - changes the contract unattended; deny silently - the finding is lost.
+**Decided by:** user
+
+### D15: Needs-input notification in a sandboxed `ck run` (review V11, settles D7)
+**Choice:** `ck run`'s own unsandboxed parent process watches for new `.needs-input.json` park notes and runs the configured notify command once per note; inside `ck run`, `ck worktree park` defers to it.
+**Why:** keeps the sandbox tight (no access to my notify script or the ntfy host from inside it).
+**Rejected:** widen the sandbox for the notify command - more reach for every agent in the run.
+**Decided by:** user
+
+### D16: Scope of the fallback workflow marker (consistency C1.9)
+**Choice:** Narrow it. The marker is cleared at the start of every skill run (`workflow-begin` writes a fresh one) and on every prompt I submit (`UserPromptSubmit` hook `marker-clear`), and expires 15 minutes after the last guarded call that read it (each such call refreshes it; 15 min is above the Bash tool's 10-minute limit), instead of 24 h.
+**Why:** while it is active my own calls count as task agents; an interrupted Workflow run must not leave my session denied for a day.
+**Rejected:** accept the session-wide 24 h marker - my session is denied after an interrupt; a marker only Workflow agents carry - Claude Code offers no such field.
+**Decided by:** user
+
+### D17: Guard log that was never created (revise D11)
+**Choice:** A never-created guard log is state `ok` with zero events and adds nothing to `missing`. Only an unreadable log, or a rotated one whose oldest retained event is newer than the run start, is listed as missing.
+**Why:** on a machine where the guard never fired, "missing" would mark every run's figures as unknown for no reason.
+**Rejected:** list an absent log as missing - false alarms; create an empty log on install - conflicts with TC-51 / P-21 (no log file on passing calls).
+**Decided by:** user
+
+### D18: `find ... -delete` of an existing test (consistency C1.10)
+**Choice:** Keep the design: `find` deletions are not blocked before they run; the post-check catches them afterwards (2.10) and the gate re-checks at Done. Criterion 1.1 names its complete pre-block verb list (rm, mv, git rm, git mv, truncate, unlink).
+**Why:** a pre-block on `find` would also stop `find tests -name '*.pyc' -delete` and bring prompts back.
+**Rejected:** block `find` deletions before they run - blocks harmless cache cleanups; block only simple `-name` matches - partial and fragile.
+**Decided by:** user
+
+### D19: Test changes brought in by a merge (consistency C1.11)
+**Choice:** The post-check does not report a test file whose content after the command equals its content on the base ref or on a branch or commit the command merged, rebased or pulled in.
+**Why:** a task's required `git merge <into>` would otherwise report a legitimate change from the target as weakening, and the task would climb to Fable and park although `ck gate` passes.
+**Rejected:** leave merge/rebase/pull HEAD moves out of the old-HEAD comparison - also hides the command's own commits in the same line; report it as 2.1 said - false guard stops.
+**Decided by:** user
+
+### D20: Post-check scope (consistency C2.1)
+**Choice:** The snapshot covers only the checkouts and paths the command names; "every claimed task worktree" is dropped. A path a script builds at run time into another worktree is left to the gate.
+**Why:** with parallel agents, a change by another agent or a landing during my command must never be reported to the wrong agent (TC-77).
+**Rejected:** keep claimed worktrees and accept misattribution - wrong agents restore files and park; a per-agent worktree signal - needs new ck state.
+**Decided by:** user
+
 ## Delegated to Spec
 - Exact command-family classification rules, and the wait-time measurement (the gap between the guard's ask and the tool result, cross-checked with the guard log).
 - The PostToolUse post-check mechanics: which files it diffs (test paths changed since the command started, via `git status` / `git diff`), a cheap pre-filter so it doesn't diff after every Bash call, and the restore message wording.
@@ -122,6 +170,7 @@ Success: an unattended run never stops for my approval, the guard still blocks a
 - [x] How the guard tells a task agent from the main session -> D7.
 - [x] Whether isolation refusals happen outside worktree-isolated parent sessions -> no; D8.
 - [x] Ask vs deny when the guard catches real weakening in a headless run -> D6.
+- [x] Review open questions R1/D10, R2/D9, V11, D11, C1.9, C1.10, C1.11, C2.1 -> D13-D20.
 
 ## Research Notes
 ### Codebase
