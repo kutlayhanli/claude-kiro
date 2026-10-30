@@ -101,6 +101,18 @@ def stopped(ceiling: str, model: str) -> bool:
     return ceiling == "always" or RANK[model] <= RANK[ceiling]
 
 
+def ancestors(deps: Dict[str, List[str]], t: str) -> set:
+    """Every task `t` depends on, directly or through other tasks."""
+    seen: set = set()
+    todo = [d for d in deps.get(t, []) if d in deps]
+    while todo:
+        d = todo.pop()
+        if d not in seen:
+            seen.add(d)
+            todo.extend(x for x in deps.get(d, []) if x in deps)
+    return seen
+
+
 @st.composite
 def ladder_scenarios(draw):
     deps = draw(dags(max_tasks=5, dangling=False))
@@ -124,8 +136,14 @@ def test_p15_attempts_follow_the_ladder_rules(bridge, sc):  # noqa: F811
     run = prepare(deps, project, {"agents": roles(start, escalate, review=in_revise and bool(guarded)), "maxRetries": 2})
     out = bridge.run(run["project"], run["args"])
     labels = [e for e in out["events"] if not e.endswith(" end")]
+    # A guarded task whose ceiling is 'always' climbs through fable and parks unless the stop is in a revise call
+    # (fake_project stops only the first revise call). Its dependents never start (design 7.1).
+    parks = set() if in_revise else {t for t, c in guarded.items() if c == "always"}
     for t in deps:
         mine = [l for l in labels if TASK_LABEL.match(l) and TASK_LABEL.match(l).group(1) == t]
+        if ancestors(deps, t) & parks:
+            assert not mine, f"task {t} depends on a parked task but has attempts: {mine}"
+            continue
         guards = [TASK_LABEL.match(l) for l in mine if TASK_LABEL.match(l).group(2)]
         if t not in guarded:
             assert not guards, f"task {t}: guard attempt without a guard stop: {mine}"
@@ -166,20 +184,22 @@ def test_p16_parking_blocks_dependents_only(bridge, deps, data):  # noqa: F811
     result = out["result"]
     starts = {e for e in out["events"] if e.startswith("task ") and not e.endswith(" end")}
 
-    def blocked(t: str, seen=()) -> bool:
-        return t in parked or any(d in deps and d not in seen and blocked(d, seen + (t,)) for d in deps[t])
+    # A drawn task that depends, directly or through other tasks, on another drawn task never starts, so it
+    # cannot be unresolved through fable: only the drawn tasks with no drawn ancestor really park.
+    drawn = set(parked)
+    parks = {t for t in drawn if not (ancestors(deps, t) & drawn)}
 
     for t in ids:
         began = any(re.match(rf"^task {t}\b", e) for e in starts)
-        if blocked(t) and t not in parked:
+        if ancestors(deps, t) & parks:
             assert not began, f"task {t} depends on a parked task but started"
         else:
             assert began, f"task {t} depends on no parked task but never started"
     need = {n["task"] for n in result["needsInput"]}
     assert sorted(n["task"] for n in result["needsInput"]) == sorted(set(need)), "a parked task is listed twice"
-    assert need == set(parked)
+    assert need == parks
     listed = set(result["merged"]) | {f["task"] for f in result["failed"]} | {b["task"] for b in result["blockedOn"]}
     assert not (need & listed), f"parked tasks also listed elsewhere: {need & listed}"
-    for t in parked:
+    for t in parks:
         assert out["events"].count(f"park {t}") == 1, f"park {t} ran {out['events'].count(f'park {t}')} times"
-    assert not [e for e in out["events"] if e.startswith("park ") and e.split()[1] not in parked and not e.endswith(" end")]
+    assert not [e for e in out["events"] if e.startswith("park ") and e.split()[1] not in parks and not e.endswith(" end")]
