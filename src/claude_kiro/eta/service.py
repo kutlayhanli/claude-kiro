@@ -648,6 +648,11 @@ def _ended_block(project_dir: Path, spec: str, kind: str, state: progress.RunSta
                              "merged": end.get("merged"), "total": end.get("total"), "usd": end.get("usd"),
                              "vsLaunch": place, "next": None, "nothingLeft": False}
     if kind == "implement":
+        # "Open tasks that remain" (4.8) are the tasks tasks.md does not mark Done, not the tasks this run did not
+        # merge: the ended view is read from main after the run, where a merge that did not land on main (or was
+        # reverted) is still open work. TC-38 fixes this: a run that merged all six tasks while tasks.md ticks
+        # four still shows two open tasks with their launch estimate. So the run's merges are deliberately not
+        # passed in, and the launch estimate below starts from no events.
         try:
             fresh = _build_graph(project_dir, spec, [], settings["slots"], settings["source"])
         except NoEstimate:
@@ -963,6 +968,45 @@ def prepare_spool(main_root: Path, spec: str, env: Optional[Mapping[str, str]] =
     except OSError:
         return None
     return spool
+
+
+# --------------------------------------------------------------------------- run-start operations (used by `ck progress begin`)
+
+
+def fit_history(env: Optional[Mapping[str, str]] = None) -> Model:
+    """A fresh model fit from the recorded run history and the defaults (what a run snapshots at launch)."""
+    return _fit(_environ(env))
+
+
+def write_model_snapshot(path: Path, model: Model) -> None:
+    """Write `model` as an owner-only JSON snapshot at `path`."""
+    _write_private(Path(path), json.dumps(history.model_to_json(model), sort_keys=True))
+
+
+def run_settings(project_dir: Path, env: Optional[Mapping[str, str]] = None) -> Dict[str, Any]:
+    """The run settings an estimate uses: slots (and where they came from) and max concurrency."""
+    return _settings(Path(project_dir), _environ(env))
+
+
+def unfinished_runs(spec: str, project_dir: Path, env: Optional[Mapping[str, str]] = None) -> List[Tuple[Path, List[dict]]]:
+    """(progress file, events) for each run of `spec` in `project_dir` that has no end event."""
+    runs, _bad = _find_runs(spec, Path(project_dir), _environ(env))
+    return [(path, events) for path, events, _skipped in runs if not any(e.get("kind") == "end" for e in events)]
+
+
+def open_tasks(project_dir: Path, spec: str, settings: Mapping[str, Any]) -> List[str]:
+    """The tasks of `spec` not marked Done in its tasks.md, in plan order. Raises EtaError when there is no graph."""
+    graph = _build_graph(Path(project_dir), spec, [], settings["slots"], settings["source"])
+    return [t for t in graph.order if t not in graph.done]
+
+
+def launch_estimate(project_dir: Path, spec: str, kind: str, *, model: Model, settings: Mapping[str, Any],
+                    now: datetime, env: Optional[Mapping[str, str]] = None,
+                    deadline: Optional[float] = None) -> Dict[str, Any]:
+    """The launch view of a run that has no events yet. Raises EtaError (or a timeout past `deadline`)."""
+    view, _aux = _core(Path(project_dir), spec, kind, key=None, events=[], skipped=0, progress_file=None, now=now,
+                       seed=None, env=_environ(env), model=model, settings=settings, deadline=deadline)
+    return view
 
 
 # --------------------------------------------------------------------------- text

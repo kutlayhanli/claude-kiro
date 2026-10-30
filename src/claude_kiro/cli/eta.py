@@ -205,20 +205,18 @@ def _write_snapshot(key: str, env: Mapping[str, str], spec: str):
         except (OSError, ValueError):
             model = None
     if model is None:
-        model = svc._fit(env)
-    svc._write_private(pdir / f"{key}.model.json", json.dumps(history.model_to_json(model), sort_keys=True))
+        model = svc.fit_history(env)
+    svc.write_model_snapshot(pdir / f"{key}.model.json", model)
     return model
 
 
 def _supersede_unfinished(root: Path, spec: str, env: Mapping[str, str], now: datetime) -> None:
     svc = _service()
     try:
-        runs, _bad = svc._find_runs(spec, root, env)
+        runs = svc.unfinished_runs(spec, root, env)
     except Exception:  # noqa: BLE001
         return
-    for path, events, _skipped in runs:
-        if any(e.get("kind") == "end" for e in events):
-            continue
+    for path, events in runs:
         key = path.stem
         state = prog.fold(events)
         start = next((e for e in events if e.get("kind") == "start"), {})
@@ -241,16 +239,14 @@ def _launch_estimate(root: Path, spec: str, kind: str, env: Mapping[str, str], m
         open_ids = list(CREATE_PHASES)
     else:
         try:
-            graph = svc._build_graph(root, spec, [], settings["slots"], settings["source"])
-            open_ids = [t for t in graph.order if t not in graph.done]
+            open_ids = svc.open_tasks(root, spec, settings)
         except Exception:  # noqa: BLE001
             open_ids = []
     view = None
     try:
         deadline = time.monotonic() + _line_budget(env, 4.0)
-        view, _aux = svc._core(root, spec, kind, key=None, events=[], skipped=0, progress_file=None,
-                               now=prog.clock_now(env), seed=None, env=env, model=model, settings=settings,
-                               deadline=deadline)
+        view = svc.launch_estimate(root, spec, kind, model=model, settings=settings, now=prog.clock_now(env),
+                                   env=env, deadline=deadline)
     except Exception:  # noqa: BLE001 - EtaError, timeout or anything else: no estimate, the run goes on
         view = None
     return view, open_ids
@@ -286,7 +282,7 @@ def progress_begin(spec: str, kind: str, mode: str, as_json: bool) -> None:
         _supersede_unfinished(root, spec, env, now)
         key = prog.new_run_key(spec, now)
         model = _write_snapshot(key, env, spec)
-        settings = svc._settings(root, env)
+        settings = svc.run_settings(root, env)
         view, open_ids = _launch_estimate(root, spec, kind, env, model, settings)
         summary = _launch_summary(view)
         start = {"kind": "start", "at": _utc_iso(now), "run": key, "runKind": kind, "spec": spec, "root": str(root),
@@ -541,14 +537,14 @@ def status_line() -> None:
 
 @click.command("eta-defaults", hidden=True)
 @click.option("--out", "out_path", required=True, type=click.Path(dir_okay=False))
-@click.option("--min-runs", type=int, default=20, show_default=True)
-def eta_defaults(out_path: str, min_runs: int) -> None:
+@click.option("--min-runs", type=int, default=None, show_default="history.MIN_DEFAULT_RUNS (20)")
+def eta_defaults(out_path: str, min_runs: Optional[int]) -> None:
     """Write the bundled ETA cold-start aggregates from local history."""
     from ..eta import history
 
     records = store.load_records(os.environ)
     try:
-        built = history.build_defaults(records, min_runs=min_runs)
+        built = history.build_defaults(records, min_runs=history.MIN_DEFAULT_RUNS if min_runs is None else min_runs)
     except ValueError as exc:
         click.echo(f"❌ refusing to write defaults: {exc}")
         sys.exit(1)

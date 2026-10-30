@@ -463,8 +463,13 @@ def _extract(records: Sequence[Mapping], reader: Optional[Callable[[str, str], O
                 got = sizes.get(str(t.get("task"))) if isinstance(sizes, dict) else None
                 if got is not None:
                     size = int(got[0]) + int(got[1])
+            # A recorded wait of 0 ms (collect writes 0 when a task merged with no wait) is no wait data: it is
+            # stored as None, so the label (`bundledParts`) and the simulation agree. The simulation then samples
+            # the pool's own positive waits, else the bundled waits (7.3; design "Durations").
             review = _num(t.get("reviewWaitMs"))
             landing = _num(t.get("landingWaitMs"))
+            review = review if review is not None and review > 0 else None
+            landing = landing if landing is not None and landing > 0 else None
             tup: Tuple7 = (_r(minutes), retries, escalations, None if review is None else _r(review / 60000),
                            None if landing is None else _r(landing / 60000), _usd(rows), size)
             ex.tuples.append((f"{track}|{fam}|{risk}", tup))
@@ -495,9 +500,8 @@ def fit_model(records: Sequence[Mapping], defaults: Optional[Mapping], *,
     local_enough = n_tasks >= MIN_MATCH
     if not local_enough and bundled_tasks:
         parts += ["durations", "retries", "escalations"]
-    n_review = sum(1 for t in flat if t[3] is not None and t[3] > 0)  # zero waits are no wait data
-    n_landing = sum(1 for t in flat if t[4] is not None and t[4] > 0)
-    n_priced = sum(1 for t in flat if t[5] is not None)
+    n_review = sum(1 for t in flat if t[3] is not None)  # _extract stores zero waits as None (no wait data)
+    n_landing = sum(1 for t in flat if t[4] is not None)
     if n_review < MIN_MATCH and "reviewMinutes" in bundled_waits:
         parts.append("review wait")
     if n_landing < MIN_MATCH and "landingMinutes" in bundled_waits:
