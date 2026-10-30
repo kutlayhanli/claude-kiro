@@ -85,13 +85,13 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 **Verify:** `uv run pytest -q -n auto tests/test_eta_helpers.py`
 **Verifies:** None
 **Acceptance:**
-- [ ] Every command and environment name appears exactly once, as a constant
-- [ ] The pools are produced by running the real `ck stats collect --all` over fake Claude homes. No record JSON is hand-written
-- [ ] Pools are built once per xdist worker and copied per test. `-n auto` gives the same pool bytes on every worker
-- [ ] The harness smoke test passes against today's code (the post-rebase tree of the Precondition). It exercises only the existing collector and `ck plan`
-- [ ] No mocks or monkeypatching of `claude_kiro` code
-- [ ] Only invented spec/task/project names are used, and confidential seeds come from `stats_helpers.CONFIDENTIAL`
-- [ ] `tests/test_eta_helpers.py` sets `pytestmark` with `no_network`
+- [x] Every command and environment name appears exactly once, as a constant
+- [x] The pools are produced by running the real `ck stats collect --all` over fake Claude homes. No record JSON is hand-written
+- [x] Pools are built once per xdist worker and copied per test. `-n auto` gives the same pool bytes on every worker
+- [x] The harness smoke test passes against today's code (the post-rebase tree of the Precondition). It exercises only the existing collector and `ck plan`
+- [x] No mocks or monkeypatching of `claude_kiro` code
+- [x] Only invented spec/task/project names are used, and confidential seeds come from `stats_helpers.CONFIDENTIAL`
+- [x] `tests/test_eta_helpers.py` sets `pytestmark` with `no_network`
 **Dependencies:** None
 **Complexity:** High
 **Risk:** normal
