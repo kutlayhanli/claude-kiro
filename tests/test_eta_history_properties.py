@@ -28,9 +28,6 @@ SETTINGS = settings(
     suppress_health_check=list(HealthCheck),
 )
 
-MIN_SIZED = 30  # design.md constants: the fewest sized tasks a local size fit needs
-
-
 @functools.lru_cache(maxsize=1)
 def _pool():
     return tuple(h.history_records(h.POOL_IMPL))
@@ -80,7 +77,7 @@ def _defaults():
     from claude_kiro.eta import history
 
     result = history.build_defaults(list(_pool()) + list(_create_pool()), min_runs=history.MIN_DEFAULT_RUNS)
-    return result if isinstance(result, dict) else getattr(result, "payload", None) or getattr(result, "defaults")
+    return result.payload
 
 
 SIZE_PAIRS = st.one_of(
@@ -97,7 +94,8 @@ def test_p9_size_factor_is_monotone_and_never_zero(idx, pair):
 
     records = [_pool()[i] for i in sorted(idx)]
     model = history.fit_model(records, None, tasks_md_reader=_reader)
-    fit = model.size
+    s = history.model_to_json(model)["size"]
+    fit = history.SizeFit(exponent=s["exponent"], min_size=s["minSize"], median_size=s["medianSize"], source=s["source"])
     assert fit.source == "local", (len(records), fit)
     a, b = pair
     fa = history.size_factor(fit, a, None)
@@ -112,7 +110,7 @@ def test_p9_size_factor_is_monotone_and_never_zero(idx, pair):
 
 QUERIES = st.tuples(
     st.sampled_from(["impl", "test", "unknown"]),
-    st.sampled_from(["sonnet", "opus", "haiku", "inherit", "unknown"]),
+    st.sampled_from(["sonnet", "opus", "haiku", "fable", "inherit", "unknown"]),
     st.sampled_from(["normal", "safety"]),
 )
 

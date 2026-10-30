@@ -7,6 +7,8 @@ every `CONFIDENTIAL` value. Project modules are imported inside the test body so
 import copy
 import json
 
+import pytest
+
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
@@ -39,18 +41,23 @@ def _rotate(node, shift):
     return node
 
 
+def _store():
+    """Up to 60 distinct seeded records: unique runId (a CONFIDENTIAL string plus an index), CONFIDENTIAL planted in every other slot."""
+    out = []
+    for i in range(60):
+        rec = _rotate(copy.deepcopy(seeded_local_record("spec-implement" if i % 2 == 0 else "spec-create")), i)
+        rec["runId"] = f"{CONFIDENTIAL[i % len(CONFIDENTIAL)]}-{i:03d}"
+        out.append(rec)
+    return out
+
+
+STORE = _store()
+
+
 @st.composite
 def stores(draw):
-    count = draw(st.integers(0, 60))
-    kinds = draw(st.lists(st.sampled_from(["spec-implement", "spec-create"]), min_size=count, max_size=count))
-    shifts = draw(st.lists(st.integers(0, len(CONFIDENTIAL) - 1), min_size=count, max_size=count))
-    return [_rotate(copy.deepcopy(seeded_local_record(k)), s) for k, s in zip(kinds, shifts)]
-
-
-def _payload(result):
-    if isinstance(result, dict):
-        return result
-    return getattr(result, "payload", None) or getattr(result, "defaults", None)
+    idx = draw(st.sets(st.integers(0, len(STORE) - 1), max_size=len(STORE)))
+    return [STORE[i] for i in sorted(idx)]
 
 
 @SETTINGS
@@ -58,15 +65,12 @@ def _payload(result):
 def test_p19_bundled_defaults_hold_no_record_level_data(records, min_runs):
     from claude_kiro.eta import history
 
-    if len(records) < min_runs:
-        try:
-            result = history.build_defaults(records, min_runs=min_runs)
-        except ValueError:
-            return
-        assert not _payload(result), "refused below min_runs: no payload may be returned"
+    if len(records) < min_runs:  # design 7.5: every record is one run; fewer than min_runs refuses with ValueError
+        with pytest.raises(ValueError):
+            history.build_defaults(records, min_runs=min_runs)
         return
     result = history.build_defaults(records, min_runs=min_runs)
-    payload = _payload(result)
+    payload = result.payload
     assert payload, result
     ok, problems = history.defaults_shape_ok(payload)
     assert ok, problems

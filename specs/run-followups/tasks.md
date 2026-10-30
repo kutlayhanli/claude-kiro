@@ -375,7 +375,7 @@ History inputs are `st.sets` of indices into records the real collector wrote, n
 - [x] Both files set `pytestmark` with `no_network`
 **Dependencies:** Task 2 (history pools, `history_records`)
 **Complexity:** Medium
-**Implementation notes:** Sizes come from a pure `tasks_md_reader` built from the harness `impl_plan` (pool records carry no file/criteria counts). `build_defaults` result is read as a dict or an object with `payload`/`defaults`; below `min_runs` either `ValueError` or an empty payload counts as refusal. Model size is read as `model.size`, bundled parts via `model_to_json(m)["bundledParts"]`.
+**Implementation notes:** Sizes come from a pure `tasks_md_reader` built from the harness `impl_plan` (pool records carry no file/criteria counts). `build_defaults` returns `DefaultsResult(payload, runs)` and raises `ValueError` below `min_runs` (design.md; every record counts as one run). Model size is rebuilt as `SizeFit` from `model_to_json(m)["size"]`, bundled parts via `model_to_json(m)["bundledParts"]`.
 **Risk:** safety (guards the bundled defaults shipped in the published package against record-level data)
 
 ---
