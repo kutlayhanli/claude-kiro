@@ -155,12 +155,12 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 **Properties:** P-20, P-21, P-22, P-23, P-27
 **Verifies:** Task 5 (the verify-file lint rule and its CLI output)
 **Acceptance:**
-- [ ] Tests exercise the real `ck lint` / `ck plan` click entry points over real tasks.md files and this repository's real specs
-- [ ] Before implementation the positive cases fail because no `verify-file` entry is reported, not because of fixture errors. `tests/test_lint.py` stays green, and the red-team false-positive guards pass before and after. TC-100 passes before and after (a regression guard for the existing import check)
-- [ ] No mocks of project code
-- [ ] P-20..P-23 and P-27 generators cover every surface form, narrowed form, exemption and near-miss negative in the rows. Settings are `derandomize=True, max_examples=200, database=None, deadline=None`
-- [ ] Each of 13.4 and 13.5 has at least three red-team cases
-- [ ] Every new `test_lint_verify_*.py` file sets `pytestmark` with `no_network`
+- [x] Tests exercise the real `ck lint` / `ck plan` click entry points over real tasks.md files and this repository's real specs
+- [x] Before implementation the positive cases fail because no `verify-file` entry is reported, not because of fixture errors. `tests/test_lint.py` stays green, and the red-team false-positive guards pass before and after. TC-100 passes before and after (a regression guard for the existing import check)
+- [x] No mocks of project code
+- [x] P-20..P-23 and P-27 generators cover every surface form, narrowed form, exemption and near-miss negative in the rows. Settings are `derandomize=True, max_examples=200, database=None, deadline=None`
+- [x] Each of 13.4 and 13.5 has at least three red-team cases
+- [x] Every new `test_lint_verify_*.py` file sets `pytestmark` with `no_network`
 **Dependencies:** None
 **Complexity:** Medium
 **Risk:** normal
