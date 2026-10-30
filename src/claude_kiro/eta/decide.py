@@ -352,6 +352,8 @@ def eta_log_line(what: str, view: Mapping[str, Any], prev_p50: Optional[str]) ->
     if state == "waiting" or w is not None:
         return "%s · waiting on you %d min" % (what, w or 0)
     t50 = _hhmm(fin.get("p50")) if fin else None
+    if t50 is None and view.get("open") == 0 and view.get("runKind") != "create":
+        t50 = _hhmm(view.get("now"))  # nothing left to run: it finishes now
     line = "%s · ETA %s" % (what, t50 or "?")
     cur, prev = _parse_iso(fin.get("p50")) if fin else None, _parse_iso(prev_p50)
     if cur and prev:

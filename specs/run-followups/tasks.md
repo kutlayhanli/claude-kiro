@@ -810,7 +810,7 @@ Skip permission cases as root.
 ---
 
 ### Task 27: Thread progress and ETA lines through both workflows, the skills and agent mode (vendored copies landed by hand)
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 3.1, 3.2, 3.4, 5.4, 5.5, 8.1, 8.2, 8.7, 12.3, 13.3
 **Description:** One task for every protected-path edit, so the hand landing happens once. This task owns Harness Contract H-11 (workflow scripts) and H-14 (agent-mode documents). Edit the plugin sources, then copy them byte for byte (scripts) or through `claude_kiro.plugin.vendor_files()` rendering (markdown) into the vendored copies. `plugin/workflows/spec-implement.js` gets new args `progressRun` and `etaLine` (string or null). At start it logs `etaLine || 'ETA unavailable'` right after the `N task(s) remaining` line. When `progressRun` is set, `taskPrompt`, `retryPrompt`, `revisePrompt`, `landFixPrompt` and `resolvePrompt` append `--progress-run <key> --progress-event <kind> --progress-model <model or inherit> --attempt <k>` to their claim command (`escalation` when the attempt runs on a ladder model, else `retry`). `landPrompt` appends `--progress-run <key>`, `LAND` gains `eta: {type: 'string'}` ("the `eta` field from the JSON, copied as is"), and after each landing the script logs `res.eta || 'ETA unavailable'`. `planPrompt` appends `--progress-run <key> --failed <ids>` when tasks have failed. The scheduler, decisions block, labels and other prompts are unchanged; without `progressRun` the script behaves exactly as today; add no clock or timer code (12.3). `plugin/workflows/spec-create.js` gets the same two args. With `progressRun`, each phase's agent prompts gain a first step `ck -C <root> progress event <feature> phase-start --phase "<title>" --run <key>` and a last step `... step-end --phase "<title>" --run <key> --json`, whose `eta` is copied into `WRITE_RESULT`/`FINDINGS`/`VERDICTS` (new optional `eta` string). The script logs `etaLine` at start and `eta || 'ETA unavailable'` when a phase's last agent returns. `plugin/skills/implement/SKILL.md` and `plugin/skills/create/SKILL.md` run `ck progress begin <spec> --kind ... --mode workflow --json` before launching and pass `progressRun`/`etaLine`. They wrap each prompt-free-runs AskUserQuestion in `approval-start --reason question` / `approval-end`. After the run and `ck stats collect`, they run `ck progress end <spec> --outcome <outcome> [--record <id>] --json` and quote its line and warnings. The implement skill's step 3 names the new verify-file lint error and its fix, and refuses to start on it; its single-task path (`/spec:implement <spec> X`) runs `ck lint <spec> --json` and refuses to start when a `verify-file` entry has `task == X`, quoting the entry's message (13.3). `plugin/resources/without-workflow-tool.md` tells agent mode to run the same commands itself, with the same events and fields: `progress begin --mode agents`, the same claim/land/plan flags, the `eta` line after each landing, `task-failed` on a failure, approval waits, `progress end`, `phase-start`/`step-end` at each create phase boundary, and to stop on a verify-file lint error (including the single-task refusal).
@@ -828,14 +828,14 @@ Skip permission cases as root.
 **Verify:** `uv run pytest -q tests/test_eta_workflow.py tests/test_eta_agent_docs.py` `uv run pytest -q tests/test_scheduler_virtual_clock.py tests/test_workflow_scripts.py` `uv run pytest -q -n auto tests/test_plugin.py tests/test_plugin_modes.py` `node tests/js/spec_implement.test.mjs` `node tests/js/spec_create.test.mjs` `node tests/js/landing_speed.test.mjs` `node tests/js/finish_first.test.mjs`
 **Verified by:** Task 26 (TC-25, TC-26, TC-29b, TC-51, TC-52, TC-54b, TC-60b, TC-78 documents, TC-87, TC-98, P-24)
 **Acceptance:**
-- [ ] With `progressRun`, an implement run's prompts carry the claim, land and plan progress flags, and the run logs one start ETA line plus one ETA line per landing
-- [ ] With `progressRun`, a create run writes phase-start/phase-end per phase and logs an ETA line per phase end
-- [ ] A null, missing or non-string `eta` logs `ETA unavailable` and the run's merges and outcome are unchanged
-- [ ] Without `progressRun`, both scripts emit the same prompts and results as before
-- [ ] The skills run `ck progress begin` before and `ck progress end` after the Workflow call, and wrap each question in approval-start/end
-- [ ] The agent-mode guide names the same commands, events and fields as the Workflow prompts
-- [ ] Shipped scripts contain no clock or timer code; packaged and vendored copies are identical
-- [ ] The implement skill and the agent-mode guide name the verify-file lint error and refuse to start on it, including a single-task run of the offending task
+- [x] With `progressRun`, an implement run's prompts carry the claim, land and plan progress flags, and the run logs one start ETA line plus one ETA line per landing
+- [x] With `progressRun`, a create run writes phase-start/phase-end per phase and logs an ETA line per phase end
+- [x] A null, missing or non-string `eta` logs `ETA unavailable` and the run's merges and outcome are unchanged
+- [x] Without `progressRun`, both scripts emit the same prompts and results as before
+- [x] The skills run `ck progress begin` before and `ck progress end` after the Workflow call, and wrap each question in approval-start/end
+- [x] The agent-mode guide names the same commands, events and fields as the Workflow prompts
+- [x] Shipped scripts contain no clock or timer code; packaged and vendored copies are identical
+- [x] The implement skill and the agent-mode guide name the verify-file lint error and refuse to start on it, including a single-task run of the offending task
 **Dependencies:** Task 22 (prompts run `ck progress begin|event|end`), Task 25 (prompts pass the new claim/land/plan flags), Task 26 (its tests are the oracle)
 **Complexity:** High
 **Risk:** safety (its prompts and skills run the progress commands that send notifications through the user's notify command)

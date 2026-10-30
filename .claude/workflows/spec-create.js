@@ -41,6 +41,38 @@ if (!ROOT || !DIR || !A.feature) {
   throw new Error('spec-create needs args.projectRoot, args.specDir and args.feature')
 }
 
+// Progress and ETA (run-followups): the skill runs `ck progress begin` and passes its run key and start line. Without
+// a run key the prompts and results are what they always were. No clock or timer code here.
+const PROGRESS_RUN = typeof A.progressRun === 'string' && A.progressRun ? A.progressRun : null
+const ETA_LINE = typeof A.etaLine === 'string' && A.etaLine ? A.etaLine : null
+const ETA = { type: 'string', description: 'the eta field of the step-end JSON, copied as is' }
+const phaseOpen = new Map()   // phase title -> agents of that phase still running
+const progressEvent = (kind, title, tail) => `ck -C ${ROOT} progress event ${A.feature} ${kind} --phase "${title}" --run ${PROGRESS_RUN}${tail || ''}`
+// An agent of a phase: its first step records phase-start, its last records step-end and hands back the eta line.
+async function pagent(prompt, opts) {
+  if (!PROGRESS_RUN) return agent(prompt, opts)
+  const title = opts.phase
+  const wrapped = `First step, before anything else, run:
+${progressEvent('phase-start', title)}
+
+${prompt}
+
+Last step, after everything else is done, run:
+${progressEvent('step-end', title, ' --json')}
+Copy the "eta" field of the JSON it prints, as is, into "eta" in your answer (leave it out if the JSON has none).`
+  phaseOpen.set(title, (phaseOpen.get(title) || 0) + 1)
+  let res = null
+  try {
+    res = await agent(wrapped, opts)
+  } finally {
+    const left = phaseOpen.get(title) - 1
+    phaseOpen.set(title, left)
+    if (left === 0) log(res && typeof res.eta === 'string' && res.eta ? res.eta : 'ETA unavailable')
+  }
+  return res
+}
+if (PROGRESS_RUN) log(ETA_LINE || 'ETA unavailable')
+
 const BRIEF = `
 Feature: ${A.feature}
 Project root: ${ROOT}
@@ -67,6 +99,7 @@ const WRITE_RESULT = {
     summary: { type: 'string', description: '2-4 sentences: what the document commits to' },
     assumptions: { type: 'array', items: { type: 'string' } },
     concerns: { type: 'array', items: { type: 'string' }, description: 'conflicts or risks the user should know about' },
+    eta: ETA,
   },
   required: ['path', 'summary', 'assumptions', 'concerns'],
 }
@@ -79,7 +112,7 @@ const authored = {}
 
 if (MODE === 'create') {
   phase('Requirements')
-  authored.requirements = await agent(`
+  authored.requirements = await pagent(`
 You are writing the requirements document of a spec.
 
 ${BRIEF}
@@ -133,7 +166,7 @@ Write the file, then return the structured result.`, { label: 'write requirement
   // the tests stay an independent oracle instead of mirroring the design.
   phase('Design + Test Plan')
   const [design, testPlan] = await parallel([
-    () => agent(`
+    () => pagent(`
 You are writing the design document of a spec.
 
 ${BRIEF}
@@ -183,7 +216,7 @@ Rules:
 
 Write the file, then return the structured result.`, { label: 'write design.md', phase: 'Design + Test Plan', schema: WRITE_RESULT }),
 
-    () => agent(`
+    () => pagent(`
 You are a test architect writing the test plan of a spec. A design is being written in parallel; do NOT read or wait for design.md. Work from the requirements and from how this codebase is actually tested and run, so the tests are an independent check on whatever the implementation turns out to be.
 
 ${BRIEF}
@@ -280,7 +313,7 @@ Return the structured result after writing the file.`, { label: 'write test-plan
 
   phase('Task Tracks')
   const [implTasks, testTasks] = await parallel([
-    () => agent(`
+    () => pagent(`
 You are writing the IMPLEMENTATION track of a spec's task list. Another agent is writing the test track in parallel from ${TPL}; tests are not your job.
 
 ${BRIEF}
@@ -300,7 +333,7 @@ ${RISK_RULE}
 
 Write the draft file, then return the structured result.`, { label: 'write implementation track', phase: 'Task Tracks', schema: WRITE_RESULT }),
 
-    () => agent(`
+    () => pagent(`
 You are writing the TEST track of a spec's task list. Another agent is writing the implementation track in parallel.
 
 ${BRIEF}
@@ -333,7 +366,7 @@ Write the draft file, then return the structured result.`, { label: 'write test 
   }
 
   phase('Link')
-  authored.tasks = await agent(`
+  authored.tasks = await pagent(`
 You are merging two task tracks into the final task list of a spec. Tooling parses the result, so follow the format exactly.
 
 ${BRIEF}
@@ -410,6 +443,7 @@ const FINDINGS = {
         required: ['id', 'file', 'location', 'severity', 'problem', 'evidence', 'fix', 'needsUserDecision'],
       },
     },
+    eta: ETA,
   },
   required: ['findings'],
 }
@@ -429,6 +463,7 @@ const VERDICTS = {
         required: ['id', 'refuted', 'reason'],
       },
     },
+    eta: ETA,
   },
   required: ['verdicts'],
 }
@@ -491,7 +526,7 @@ const LENSES = [
 phase('Adversarial Review')
 const reviewed = await pipeline(
   LENSES,
-  lens => agent(`
+  lens => pagent(`
 You are an adversarial reviewer of a spec. Assume it is wrong until the files prove otherwise. Your job is to find concrete defects that would cause failed implementation, rework, or a feature that does not do what was decided.
 
 ${BRIEF}
@@ -510,7 +545,7 @@ Rules:
     if (!review) return null // reviewer died; counted as a lost lens below
     const findings = review.findings || []
     if (!findings.length) return { lens: lens.key, findings: [], verdicts: [] }
-    return agent(`
+    return pagent(`
 You are a skeptic. A reviewer raised the findings below against a spec. Try to REFUTE each one.
 
 ${BRIEF}
@@ -604,7 +639,7 @@ const GOVERNING_RULE = `**Fixes that change behaviour.** A fix changes behaviour
 
 const FROZEN_RULE = `**Frozen spec.** First read the Status line of every task in ${DIR}/tasks.md. If any task is not Not Started, implementation has started and requirements.md and test-plan.md are the contract it is checked against. Then a fix that changes or removes existing text in requirements.md or test-plan.md (rewording, renumbering, narrowing, weakening or deleting an existing requirement, criterion, test case or property) is one you do NOT apply, whatever the finding says. Return it under "escalated" instead: the finding id, the question (for example "Change <id> although implementation has started?"), and 2-3 options: one with the proposed text verbatim, and one "leave the spec as is". It goes in "escalated" only, not in "fixed" or "notFixed". Fixes that only add (a new requirement or criterion, a new test case or property, a new task, design or tasks.md edits) are add-only and are applied as usual. When every task is Not Started, this rule does not apply.`
 
-const revision = await agent(`
+const revision = await pagent(`
 You are revising a spec after adversarial review.
 
 ${BRIEF}
@@ -674,6 +709,7 @@ Return the structured result.`, {
       },
       result: { type: 'string', enum: ['Ready', 'Ready after decisions', 'Needs work'] },
       schedule: { type: 'string', description: 'the ready-at-start and critical-path lines' },
+      eta: ETA,
     },
     required: ['fixed', 'notFixed', 'escalated', 'result', 'schedule'],
   },
@@ -709,6 +745,7 @@ const CONTRADICTIONS = {
         required: ['id', 'kind', 'description', 'changedSide', 'otherSide', 'resolution'],
       },
     },
+    eta: ETA,
   },
   required: ['contradictions'],
 }
@@ -727,7 +764,7 @@ if (toFix.length) {
     const previous = pass > 1
       ? `\nThis is pass ${pass}. Pass ${pass - 1} fixed these contradictions; check its edits especially, since a fix can introduce a new contradiction:\n${JSON.stringify(lastFixed.map(c => ({ id: c.id, fix: c.fix, changedSide: c.changedSide })), null, 2)}\nDo not re-report contradictions already resolved; report only what remains or is new.\n`
       : ''
-    const check = await agent(`
+    const check = await pagent(`
 You are the consistency check of a spec, run after a revision that applied many review fixes in one pass. The review lenses only saw the spec before those fixes, so nobody has checked the fixes against each other or against the criteria they did not mention. A fix that silently changes governed behaviour (for example making the system refuse something a criterion says it re-evaluates) is the defect you are here to catch.
 
 ${BRIEF}

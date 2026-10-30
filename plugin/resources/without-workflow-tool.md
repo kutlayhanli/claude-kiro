@@ -64,6 +64,22 @@ If `begin` failed or printed no id, use the same descriptions without the `[ck:<
 
 When the report is composed, the last step of the run is the collect, outside the sandbox: run `ck stats collect --agents <run_id> --auto` and quote the line it prints (where the record went, or why it was skipped; if it failed, quote the retry command it gives). Never let its result change what you report about the run. If `begin` failed, there is no collect: end the report with this line in place of the collect step: `⚠ ck stats begin failed: this run is not recorded in ck stats`
 
+## Progress and ETA
+
+Run the progress commands yourself, with the same events and fields the Workflow scripts' prompts carry (`<spec>` is the spec or feature name, `<key>` the run key). Progress never holds the run up: a command that fails or prints no JSON is ignored, and a missing `eta` shows as `ETA unavailable`.
+
+1. **Begin**, right after `ck stats begin` and before the first Agent call: `ck progress begin <spec> --kind <kind> --mode agents --json`. Keep its `run` as `<key>` and show me its `etaLine` first, as the Workflow's `etaLine` start line (`ETA unavailable` when there is none).
+2. **Claims.** Every task, retry, revision, land-fix and resolve prompt claims with `ck -C <worktree> worktree claim <spec> <N> [--takeover] --progress-run <key> --progress-event <kind> --progress-model <model or inherit> --attempt <k>`. `<kind>` is `task-start` for the first attempt (`--attempt 1`), then `retry`, `revision`, `landfix` or `resolve` for that kind of prompt, and `escalation` instead when the attempt runs on a model from the role's ladder; `--attempt` is the attempt number and `--progress-model` the Agent call's `model`.
+3. **Landing.** Land with `ck worktree land <spec> <N...> --into <into> --gate --install --release --progress-run <key> --json`. After each landing show me the `eta` field of its JSON as one line (`ETA unavailable` when it is missing or not a string).
+4. **Plan.** When tasks have failed, plan with `ck plan <spec> --json --exclude <ids> --progress-run <key> --failed <ids>`, the failed task numbers.
+5. **Failures and waits.** When a task fails, run `ck progress event <spec> task-failed --run <key> --task <N>`. Around every question you put to me with AskUserQuestion run `ck progress event <spec> approval-start --run <key> --reason question` before it and `ck progress event <spec> approval-end --run <key>` after my answer.
+6. **/spec:create and /spec:review phases.** At the start of each phase of the spec-create script (each agent of that phase), run `ck progress event <spec> phase-start --phase "<title>" --run <key>`, and as the last step of each such agent `ck progress event <spec> step-end --phase "<title>" --run <key> --json`; copy the `eta` of that JSON into the agent's answer and show it to me when the phase's last agent returns.
+7. **End**, after the report is composed and `ck stats collect --agents <run_id> --auto` has run: `ck progress end <spec> --outcome <outcome> [--record <id>] --json`. Quote the line it prints and every warning line it prints.
+
+## Lint errors that stop the run
+
+Before a whole-spec run, run `ck lint <spec> --json`. A `verify-file` entry (a task's **Verify:** command names a test file that no task lists in its **Files:**) means its gate could never pass: refuse to start the run, show me each entry's message and tell me to fix tasks.md, as the command's step 3 says. A single-task run (`/spec:implement <spec> X`) refuses to start the same way when a `verify-file` entry has `task == X`: quote that entry's message and do not launch the task.
+
 ## Translating a script
 
 | In the script | With the Agent tool |
@@ -94,7 +110,7 @@ You are the scheduler that `<plugin-root>/workflows/spec-implement.js` would be.
    - Not `done` with `gatePassed: true` and no `guardStop`: start one retry (retry prompt, same type, `--takeover`). If the retry fails too and the role has an `escalate` list (from `ck agents --json`), start one more retry per model in it, in order, passing that model as the Agent call's `model` (same type and effort). If those fail too, the task fails. Its dependents never start. With `"onFailure": "halt"` (I asked to stop at the first failure), stop launching.
    - Done and the reviewer is enabled: start `spec:reviewer` in the background with the review prompt. For a task `ck plan` lists as `safety` in `risk`, pass the reviewer's `risky_model` as the Agent call's `model` and its `risky_effort` as the `effort`. On `changes`, send the revise prompt to the same implementer with SendMessage (it keeps its context), or start a new agent of its type with the revise prompt if SendMessage isn't available. Then review again, up to the reviewer's `rounds`, then one more revision per `escalate` model (a new agent of its type with the Agent call's `model` set to it). If blocking findings remain, the task fails: "review: blocking findings remain after N revision(s)".
 4. **Land in batches, one landing at a time.** Only one landing runs at any moment. When it ends, take every task waiting to merge, up to the batch window (start at `mergeBatch`, default 4; halve it after a red or bisected landing, minimum 1; add 1 after a green one, up to `mergeBatch`), and land them with one command from the main checkout, **in the background** (Bash `run_in_background`), waiting for its exit code (a slow gate is not a red gate):
-   `ck worktree land <spec> <N…> --into <into> --gate --install --release --json`
+   `ck worktree land <spec> <N…> --into <into> --gate --install --release --progress-run <key> --json`
    It prechecks each branch with `git merge-tree` (nothing touches the target on a conflict), merges the clean ones, refreshes dependencies, gates the batch once, and bisects a red batch by itself. Per task in its JSON:
    - MERGED: done.
    - DEFERRED: it conflicts only with an earlier task of this batch; put it first in the next landing.
