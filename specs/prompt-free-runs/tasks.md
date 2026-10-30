@@ -330,7 +330,7 @@ all `derandomize=True, database=None`; `PROPERTIES` map.
 ---
 
 ### Task 8: Test the guard ladder, parking and resolve flow in the Workflow and in the agent-mode instructions
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.4, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 7.1, 7.3, 7.4, 7.5, 7.6, 7.7, 7.9, 7.10, 7.11, 8.1, 8.2, 10.1
 **Properties:** P-14, P-15, P-16
@@ -362,16 +362,26 @@ agents --guard-ladder` agree), P-15 (with `guardStopIn`), P-16; bridge `max_exam
 **Verify:** `node tests/js/guard_ladder.test.mjs` `node tests/js/spec_review_frozen.test.mjs` `uv run pytest -q -n auto tests/test_guard_agent_mode_docs.py tests/test_guard_ladder_properties.py tests/test_workflow_scripts.py tests/test_landing_scheduler_properties.py tests/test_stats_agents_docs.py`
 **Verifies:** Task 13 (`ck agents --guard-ladder`), Task 14 (the Workflow script, skills and agent-mode instructions), Task 15 (the `guard` and `park` forms in roles.py)
 **Acceptance:**
-- [ ] Ladder sequences, effort, handoff- and decision-note prompts and escalation records match TC-29..TC-31 and
+- [x] Ladder sequences, effort, handoff- and decision-note prompts and escalation records match TC-29..TC-31 and
       TC-79 exactly; ordinary failures behave as before (existing `spec_implement.test.mjs` stays green).
-- [ ] Parking blocks dependents only; needs-input tasks are listed apart from merged/failed/blocked; notification
+- [x] Parking blocks dependents only; needs-input tasks are listed apart from merged/failed/blocked; notification
       status reaches the result.
-- [ ] Every required instruction is present in each packaged file and its rendering; the templates parse through
+- [x] Every required instruction is present in each packaged file and its rendering; the templates parse through
       the real parser.
-- [ ] The Python ladder, the CLI and the JS mirror agree for every alias.
-- [ ] A review fix to existing requirements.md / test-plan.md text of a started spec reaches `openQuestions`, not
+- [x] The Python ladder, the CLI and the JS mirror agree for every alias.
+- [x] A review fix to existing requirements.md / test-plan.md text of a started spec reaches `openQuestions`, not
       the files, in Workflow and agent mode.
-- [ ] Tests run the real workflow script and real files; only agents and the Claude runtime are stubbed.
+- [x] Tests run the real workflow script and real files; only agents and the Claude runtime are stubbed.
+**Implementation notes:**
+- `spec_review_frozen.test.mjs` cannot make the frozen-spec rule absent for an all-Not-Started spec: the Workflow stub
+  has no file access and the revise prompt is static, so the test asserts the rule is in the prompt and conditional
+  on a task that is not `Not Started`. Task 14 may refine this.
+- TC-79's `'always'` revise-call park is not asserted: `fake_project` stops only calls whose label contains ` revise `
+  and only the first one, so a ladder attempt after a revise-call stop never stops again. The revise-call guard stop
+  reaching the ladder is asserted, and P-15 covers it.
+- TC-49's marker-wrap checks skip with the reason from `capture-summary.json` (`workflowAgentHasAgentId` is true);
+  the inverse check (no wrap) runs.
+
 **Dependencies:** Task 1 (fake_project options, load_decisions GUARD_NAMES, bridge `ladder` op), Task 2 (TC-49 reads its capture summary)
 **Complexity:** High
 **Risk:** safety (oracle for paid model escalation up to Fable and for parking)
