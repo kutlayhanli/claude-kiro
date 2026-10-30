@@ -188,7 +188,7 @@ def claimed_task_worktree(project: Path, spec: str, n: int | str, *, base: Optio
     entry = next(e for e in json.loads(made.stdout) if str(e["task"]) == str(n))
     assert entry["state"] in ("CREATED", "EXISTS"), entry
     path = (Path(project) / entry["path"]).resolve()
-    claimed = ck_run_cmd(path, "worktree", "claim", spec, str(n))
+    claimed = ck_run_cmd(project, "worktree", "claim", spec, str(n))
     assert claimed.returncode == 0, claimed.stdout + claimed.stderr
     return path
 
@@ -292,4 +292,23 @@ def test_hook_input_and_post_message_shapes():
     assert post_message(None) is None
 
 
-__all__ = [name for name in dir() if not name.startswith("_") and name != "test_hook_input_and_post_message_shapes"]
+__all__ = ['BashOutcome',
+    'CK',
+    'big_repo',
+    'ck_json',
+    'ck_run_cmd',
+    'claimed_task_worktree',
+    'commit_on_base',
+    'fake_git',
+    'fake_sandbox_tools',
+    'guard_events',
+    'hook_input',
+    'new_on_branch',
+    'notify_script',
+    'parking_fake_claude',
+    'post_message',
+    'pre',
+    'run_bash',
+    'set_notify',
+    'sleeping_fake_claude',
+    'worktree_of']

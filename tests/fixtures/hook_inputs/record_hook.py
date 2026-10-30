@@ -4,7 +4,7 @@
 Usage in a hook command: python3 record_hook.py <out-dir>
 
 Writes one file per call, `<out-dir>/<event>-<seq>.json`, holding {"input": <stdin JSON>, "env": {CLAUDE_*/CK_* keys},
-"envAll": {all keys}}. For a PostToolUse call whose Bash command contains CAPTURE_BLOCK it blocks with a
+"envAll": {all keys; values outside the allowlist are "<redacted>"}}. For a PostToolUse call whose Bash command contains CAPTURE_BLOCK it blocks with a
 `[ck post-check]` message, so the session transcript holds a real `hook_blocking_error` line. Never fails a call
 otherwise: it prints nothing and exits 0.
 """
@@ -12,6 +12,20 @@ import json
 import os
 import sys
 import time
+
+
+SAFE_PREFIXES = ("CLAUDE_", "CK_")
+SAFE_KEYS = ("CLAUDECODE", "CI", "GITHUB_ACTIONS", "TERM", "LANG", "SHLVL")
+SECRET_WORDS = ("TOKEN", "KEY", "SECRET", "AUTH", "PASSWORD", "CREDENTIAL")
+
+
+def scrub_env(env):
+    """Keep every key; keep the value only for allowlisted keys that do not look like a credential."""
+    res = {}
+    for k, v in env.items():
+        ok = (k.startswith(SAFE_PREFIXES) or k in SAFE_KEYS) and not any(w in k.upper() for w in SECRET_WORDS)
+        res[k] = v if ok else "<redacted>"
+    return res
 
 
 def main() -> int:
@@ -25,8 +39,8 @@ def main() -> int:
     event = str(data.get("hook_event_name", "unknown")) if isinstance(data, dict) else "unknown"
     record = {
         "input": data,
-        "env": {k: v for k, v in os.environ.items() if k.startswith(("CLAUDE_", "CK_"))},
-        "envAll": dict(os.environ),
+        "env": scrub_env({k: v for k, v in os.environ.items() if k.startswith(("CLAUDE_", "CK_"))}),
+        "envAll": scrub_env(dict(os.environ)),
     }
     name = f"{event}-{time.time_ns()}-{os.getpid()}.json"
     with open(os.path.join(out_dir, name), "w") as fh:

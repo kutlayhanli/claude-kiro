@@ -7,7 +7,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT="${1:-$HERE}"
 RAW="$(mktemp -d)"
 PROJECT="$(mktemp -d)"
-trap 'rm -rf "$PROJECT"' EXIT
+chmod 0700 "$RAW"
+trap 'rm -rf "$PROJECT" "$RAW"' EXIT
 
 command -v claude >/dev/null || { echo "claude not found on PATH" >&2; exit 1; }
 mkdir -p "$OUT"
@@ -123,24 +124,32 @@ for name, rec in wanted.items():
 head = wanted["headless-pretooluse.json"]
 if head is not None:
     env = dict(head["envAll"])
-    env["HOME"] = "<HOME>"
-    env["PATH"] = "<PATH>"
+    pass  # record_hook.py already redacted every value outside the allowlist; keep the keys as recorded
     write("headless-env.json", scrub(env))
 
 # postcheck-block-attachment.json: the real `hook_blocking_error` transcript line from the CAPTURE_BLOCK call.
 block_line = None
-for tp in glob.glob(os.path.join(os.environ.get("CLAUDE_CONFIG_DIR", os.path.join(home, ".claude")), "projects", "*", "*.jsonl")):
-    with open(tp) as fh:
-        for line in fh:
-            if "hook_blocking_error" in line and "[ck post-check]" in line:
-                try:
-                    block_line = json.loads(line)
-                except ValueError:
-                    pass
+post = next((r for r in records if r["input"].get("hook_event_name") == "PostToolUse"
+             and "CAPTURE_BLOCK" in command_of(r)), None)
+if post is not None:
+    want_id = post["input"].get("tool_use_id")
+    config = os.environ.get("CLAUDE_CONFIG_DIR", os.path.join(home, ".claude"))
+    real_project = os.path.realpath(project)
+    encoded = {re.sub(r"[^A-Za-z0-9]", "-", p) for p in (project, real_project)}
+    for enc in encoded:
+        for tp in glob.glob(os.path.join(config, "projects", enc, "*.jsonl")):
+            with open(tp) as fh:
+                for line in fh:
+                    if "hook_blocking_error" in line and "[ck post-check]" in line and want_id and want_id in line:
+                        try:
+                            block_line = json.loads(line)
+                        except ValueError:
+                            pass
 if block_line is not None:
     write("postcheck-block-attachment.json", scrub(block_line))
 else:
-    print("WARNING: no hook_blocking_error line found in the session transcripts", file=sys.stderr)
+    print("ERROR: no hook_blocking_error line for the CAPTURE_BLOCK call in this project's transcripts", file=sys.stderr)
+    sys.exit(1)
 
 wf = wanted["workflow-agent-pretooluse.json"]
 ag = wanted["agent-tool-subagent-pretooluse.json"]

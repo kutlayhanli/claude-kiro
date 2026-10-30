@@ -1401,11 +1401,14 @@ def tool_use(tool_use_id: str, tool: str, command: Optional[str] = None, *, ts_m
         "content": [{"type": "tool_use", "id": tool_use_id, "name": tool, "input": tool_input}]}}
 
 
+GUARD_CATEGORIES = ("test_delete", "test_move", "test_weakening", "spec_edit", "post_check_weakening")
+
+
 # Interruption kinds an event can have, with the share.INTERRUPTION_KINDS name each one counts under (None = a near-miss).
 EVENT_KINDS: Dict[str, Optional[str]] = {
     "prompt": "prompts", "guard_denial": "guard_denials", "post_check": "post_check_catches",
     "auto": "auto_mode_denials", "headless": "headless_denials", "reject": "user_rejects", "isolation": "isolation_refusals",
-    "gate_block": None, "rtk_allow": None, "quoted": None, "malformed": None,
+    "gate_block": None, "guard_nodecision": None, "error_midtext": None, "rtk_allow": None, "quoted": None, "malformed": None,
 }
 COUNTED_KINDS = tuple(k for k, v in EVENT_KINDS.items() if v)
 FAMILY_COMMANDS: Dict[str, str] = {
@@ -1443,6 +1446,12 @@ def _event_lines(i: int, event: Tuple[Any, ...]) -> List[Any]:
         lines.append(postcheck_attachment(tid, "the command edited a test file", ts_ms=ts_ms, gate_text="ck gate: 1 failed" if i % 2 else ""))
     elif kind in ("auto", "headless", "reject", "isolation"):
         lines.append(denial_result(tid, kind if kind != "isolation" else ("isolation" if i % 2 else "isolation_agent"), ts_ms=ts_ms))
+    elif kind == "guard_nodecision":
+        line = guard_attachment(tid, "allow", "x", ts_ms=ts_ms)
+        line["attachment"]["stdout"] = "{}"  # a guard hook that printed no decision
+        lines.append(line)
+    elif kind == "error_midtext":
+        lines.append(_result_line(tid, "make: *** failed while printing 'Denied by hook: [ck guard]' mid-text, exit 2", ts_ms=ts_ms + 1, is_error=True))
     elif kind == "gate_block":
         lines.append(gate_block_attachment(tid, ts_ms=ts_ms))
     elif kind == "rtk_allow":
@@ -1493,9 +1502,10 @@ def write_guard_log(env: Dict[str, str], events: Sequence[dict]) -> Path:
     rows = []
     for e in events:
         row = {"v": 1, "ts": iso_ms(e.get("ts_ms", to_ms("2026-10-12T09:01:00Z"))), "sessionId": "session-1", "agentId": None, "agentType": None,
-               "caller": "task_agent", "tool": "Bash", "decision": "deny", "category": "destroy", "reason": "[ck guard] Denied", "path": "",
+               "caller": "task_agent", "tool": "Bash", "decision": "deny", "category": "test_delete", "reason": "[ck guard] Denied", "path": "",
                "command": None, "family": "other", "toolUseId": None}
         row.update({k: v for k, v in e.items() if k != "ts_ms"})
+        assert row["category"] in GUARD_CATEGORIES, row["category"]
         rows.append(json.dumps(row))
     with path.open("a") as fh:
         fh.write("".join(r + "\n" for r in rows))
@@ -1523,6 +1533,20 @@ def expected_counts(events: Sequence[Tuple[Any, ...]]) -> dict:
             out["waitMs"] += wait
             out["waitMsByRole"][role] = out["waitMsByRole"].get(role, 0) + wait
     return out
+
+
+def local_kinds(counts: dict) -> dict:
+    """camelCase spelling (the LOCAL record's `interruptions.byRole` / totals keys) of a snake_case `expected_counts` mapping
+    of kind -> n. The shared record uses the snake_case names."""
+    def camel(name):
+        head, *rest = name.split("_")
+        return head + "".join(w.title() for w in rest)
+    return {camel(k): v for k, v in counts.items()}
+
+
+def local_by_role(expected: dict) -> dict:
+    """`expected["byRole"]` with the kind names in camelCase, for comparing against the local record."""
+    return {r: {f: local_kinds(k) for f, k in fams.items()} for r, fams in expected["byRole"].items()}
 
 
 def interruption_strategy():
