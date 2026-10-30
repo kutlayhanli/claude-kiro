@@ -114,11 +114,16 @@ files exist, and nothing reports it at launch. TC-100 pins that behaviour.
     fully mirrored after exit, it and its sidecars are deleted from the spool (3.8).
   - Time-only slip check (D14, 8.5): every 30th watcher tick (about once a minute; the test hook
     `CK_ETA_RECHECK_S` sets the interval in seconds), for each spool run with a `start` and no `end`, the watcher
-    calls `eta.service.after_event(key, now=..., env=<env with CK_PROGRESS_DIR=spool>)` in the parent. It folds the
+    calls `eta.service.after_event(key, now=..., env=<env with CK_PROGRESS_DIR=spool>, root=main_root,
+    notify_command=<run.notify_command resolved from main_root>)` in the parent. It folds the
     spool file, simulates from the spool's model snapshot, and runs `notify_decision`. A due notice is sent
     directly through `notify.send` (the parent is outside the sandbox, and `CK_RUN_NOTIFY=parent` is set only for
     the child), and `notified` is appended to the spool file, so the child's own later decisions see it and the
-    mirror copies it. A slip that comes from time alone, during a running task with no new event, is sent within
+    mirror copies it. The spool's `start` line is written by the sandboxed child, so its `root` is never trusted for
+    the notify command or the send's working directory: an `after_event` call on an untrusted run (read under
+    `CK_PROGRESS_DIR`, mirrored with `spool: true`, or with no `root`) that is given neither `root` nor
+    `notify_command` and is not queueing for the parent decides and records nothing, so it can never mark a notice
+    sent. A slip that comes from time alone, during a running task with no new event, is sent within
     about a minute.
 - `src/claude_kiro/agents.py`: `DEFAULTS["run"]["eta_slip_minutes"] = 15` and `ROLE_KEYS["run"]` gains it. A value
   must be a whole number of 1 or more (`ck agents set run.eta_slip_minutes 20`) (8.5).
@@ -357,8 +362,9 @@ def simulate_create(model: Model, state: RunState, *, now_min: float, n: int, se
 # eta/service.py
 def estimate(project_dir: Path, spec: str, kind: Optional[str] = None, *, now: datetime, seed: Optional[int] = None,
              env=None) -> EtaView
-def after_event(key: str, *, now: datetime, budget_s: float = 3.0, env=None) -> Optional[str]   # the log line or None; also the time-only slip check (D14)
-def send_done_for_superseded(key: str, *, now: datetime, env=None) -> None   # after begin/prepare_spool append end outcome superseded: the old run's done notice (D18)
+def after_event(key: str, *, now: datetime, budget_s: float = 3.0, env=None, root: Optional[Path] = None,
+                notify_command=<unset>) -> Optional[str]   # the log line or None; also the time-only slip check (D14); root/notify_command: the caller's trusted project root and command (ck run's watcher passes both)
+def send_done_for_superseded(key: str, *, now: datetime, env=None, root: Optional[Path] = None) -> None   # after begin/prepare_spool append end outcome superseded: the old run's done notice (D18); pass root for a run that may have been spooled
 def prepare_spool(main_root: Path, spec: str, env=None) -> Optional[Path]   # supersedes unfinished data-dir runs of spec (3.9) and sends their done notice (D18); spool dir with .gitignore and <spec>.prepared-model.json
 
 # lint.py

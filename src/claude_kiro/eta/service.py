@@ -12,6 +12,7 @@ import json
 import os
 import re
 import statistics
+import tempfile
 import time
 from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path
@@ -97,14 +98,28 @@ def _at(launch: datetime, eff_min: float, waited_min: float, env: Mapping[str, s
 
 
 def _write_private(path: Path, text: str) -> None:
-    tmp = path.with_name(path.name + ".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    """Write `text` to `path` (0600) through a fresh, exclusively created temp file in the same directory.
+
+    The directory may be the spool, which a sandboxed child can write: a planted `<path>.tmp` symlink or a symlinked
+    `path` must never make this (possibly unsandboxed) process write through to another file."""
+    if path.is_symlink():
+        raise OSError("refusing to write through a symlink: %s" % path)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix="." + path.name + ".", suffix=".tmp")
     try:
-        os.write(fd, text.encode("utf-8"))
-    finally:
-        os.close(fd)
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, path)
+        try:
+            data = text.encode("utf-8")
+            while data:
+                data = data[os.write(fd, data):]
+        finally:
+            os.close(fd)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 class _EnvOverlay:
@@ -690,8 +705,10 @@ def estimate(project_dir: Path, spec: str, kind: Optional[str] = None, *, now: d
     digest = _events_digest(path)
     now_iso = _iso_local(now, e)
     if key and seed is None:
+        # Reuse only a view computed for this same `now`: state, the stale check, waiting minutes, running minutes and a
+        # slip from time alone all move with the clock, so a cache from an earlier `now` is never served (3.10, D16).
         cache = _read_cache(key, e)
-        if cache is not None and decide.cache_fresh(cache, digest, model.digest):
+        if cache is not None and cache.get("now") == now_iso and decide.cache_fresh(cache, digest, model.digest):
             return _from_cache(cache, path, now_iso)  # type: ignore[arg-type]
     view, _ = _core(project_dir, spec, kind, key=key, events=events, skipped=skipped, progress_file=path, now=now,
                     seed=seed, env=e, model=model, settings=settings, extra_notes=extra)
@@ -748,6 +765,17 @@ def _notify_input(view: Mapping[str, Any], aux: _Aux, spec: str, env: Mapping[st
         wall_min=wall, usd=usd, now_hhmm=_local(when, env).strftime("%H:%M"))
 
 
+def _start_untrusted(start: Mapping[str, Any], env: Mapping[str, str]) -> bool:
+    """True when the run's `start` line may have been written by a sandboxed child: read from the spool
+    (`CK_PROGRESS_DIR`), mirrored from one (`spool: true`), or with no `root` at all. Its root then names neither the
+    notify command nor the working directory of a direct send."""
+    return bool(env.get("CK_PROGRESS_DIR")) or bool(start.get("spool")) or not start.get("root")
+
+
+def _queues_for_parent(env: Mapping[str, str]) -> bool:
+    return env.get("CK_RUN_NOTIFY") == "parent"
+
+
 def _dispatch(key: str, notices: Sequence[decide.Notice], cwd: Path, command: Optional[str],
               env: Mapping[str, str], direct: bool) -> None:
     """Send (or queue for `ck run`) each due notice and record it. Called under `notice_lock`; never raises."""
@@ -797,15 +825,16 @@ def after_event(key: str, *, now: datetime, budget_s: Optional[float] = None,
             project_dir, spec = Path(str(start.get("root"))), str(start.get("spec"))
             if not _valid_spec(spec):
                 return None
-            untrusted = root is None and bool(e.get("CK_PROGRESS_DIR"))
+            untrusted = root is None and _start_untrusted(start, e)
             if root is not None:
                 project_dir = Path(root)
             kind = str(start.get("runKind") or "implement")
             settings = _settings(project_dir, e)
             if notify_command is not _UNSET:
                 settings["notify_command"] = notify_command
-            elif untrusted:
-                settings["notify_command"] = None
+            # An untrusted call that would send directly decides nothing and records nothing, so it can never mark a
+            # notice as sent (S7 dedupe) without sending it; queueing for `ck run` (CK_RUN_NOTIFY=parent) is unaffected.
+            can_notify = not (untrusted and notify_command is _UNSET and not _queues_for_parent(e))
             model = _load_model(key, spec, e)
             digest = _events_digest(path)
             now_iso = _iso_local(now, e)
@@ -818,17 +847,23 @@ def after_event(key: str, *, now: datetime, budget_s: Optional[float] = None,
             _check_deadline(deadline)
             _write_cache(key, view, digest, model.digest, e)
             view["_timeOnly"] = bool(fresh_events and cache.get("now") != now_iso)  # type: ignore[union-attr]
-            ni = _notify_input(view, aux, spec, e)
-            notices = decide.notify_decision(ni, state.sent, settings["threshold"])
-            _dispatch(key, notices, project_dir, settings["notify_command"], e, direct=False)
+            if can_notify:
+                ni = _notify_input(view, aux, spec, e)
+                notices = decide.notify_decision(ni, state.sent, settings["threshold"])
+                _dispatch(key, notices, project_dir, settings["notify_command"], e, direct=False)
             view.pop("_timeOnly", None)
             return decide.eta_log_line(_what(events), view, prev_p50)
     except Exception:  # noqa: BLE001 - never breaks the writer
         return None
 
 
-def _send_done(key: str, *, now: datetime, env: Mapping[str, str], direct: bool) -> None:
-    """Dispatch the done notice of an ended run (once: S7 skips a run that already has one)."""
+def _send_done(key: str, *, now: datetime, env: Mapping[str, str], direct: bool,
+               root: Optional[Path] = None) -> None:
+    """Dispatch the done notice of an ended run (once: S7 skips a run that already has one).
+
+    `root` is the caller's trusted project root. Without it, a run whose `start` may come from a sandboxed child
+    (`_start_untrusted`) is only queued for `ck run` (CK_RUN_NOTIFY=parent); a direct send is skipped and nothing is
+    recorded, so the notice is never marked sent without being sent."""
     now = _aware(now)
     with progress.notice_lock(key, env):
         events, _skipped = progress.read_events(progress.run_file(key, env))
@@ -836,7 +871,15 @@ def _send_done(key: str, *, now: datetime, env: Mapping[str, str], direct: bool)
         state = progress.fold(events)
         if start is None or state.ended is None:
             return
-        project_dir, spec = Path(str(start.get("root"))), str(start.get("spec"))
+        spec = str(start.get("spec"))
+        if root is not None:
+            project_dir = Path(root)
+        elif _start_untrusted(start, env):
+            if direct or not _queues_for_parent(env):
+                return
+            project_dir = Path(str(start.get("root")))
+        else:
+            project_dir = Path(str(start.get("root")))
         settings = _settings(project_dir, env)
         launch = progress._parse(state.launch_at) or now
         aux = _Aux()
@@ -851,17 +894,21 @@ def _send_done(key: str, *, now: datetime, env: Mapping[str, str], direct: bool)
         _dispatch(key, notices, project_dir, settings["notify_command"], env, direct=direct)
 
 
-def notify_done(key: str, *, now: datetime, env: Optional[Mapping[str, str]] = None) -> None:
-    """After `end` is appended: send the run's done notice (or queue it under `CK_RUN_NOTIFY=parent`). Never raises."""
+def notify_done(key: str, *, now: datetime, env: Optional[Mapping[str, str]] = None,
+                root: Optional[Path] = None) -> None:
+    """After `end` is appended: send the run's done notice (or queue it under `CK_RUN_NOTIFY=parent`). Never raises.
+
+    Pass `root` (the caller's own project root) when the run may have been spooled: see `_send_done`."""
     try:
-        _send_done(key, now=now, env=_environ(env), direct=False)
+        _send_done(key, now=now, env=_environ(env), direct=False, root=root)
     except Exception:  # noqa: BLE001
         pass
 
 
-def send_done_for_superseded(key: str, *, now: datetime, env: Optional[Mapping[str, str]] = None) -> None:
+def send_done_for_superseded(key: str, *, now: datetime, env: Optional[Mapping[str, str]] = None,
+                             root: Optional[Path] = None) -> None:
     """After a run's `end` outcome `superseded` is appended: its done notice (D18), stale runs included."""
-    notify_done(key, now=now, env=env)
+    notify_done(key, now=now, env=env, root=root)
 
 
 # --------------------------------------------------------------------------- spool
@@ -885,7 +932,7 @@ def prepare_spool(main_root: Path, spec: str, env: Optional[Mapping[str, str]] =
                                         "total": None, "usd": None}, data_env)
             if err is None:
                 try:
-                    _send_done(key, now=now, env=data_env, direct=True)
+                    _send_done(key, now=now, env=data_env, direct=True, root=main_root)
                 except Exception:  # noqa: BLE001
                     pass
     except Exception:  # noqa: BLE001 - spool preparation continues
