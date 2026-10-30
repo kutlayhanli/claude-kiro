@@ -538,6 +538,7 @@ def run(spec: str, extra: tuple, model: str, effort: str, budget: float, max_tur
                f"{PERMISSION_MODE}, budget ${_number(budget)}, max {max_turns} turns); log: {log}")
     child_env = {k: v for k, v in os.environ.items() if k not in ENV_UNSET}
     child_env.update(env)
+    child_env["CK_RUN_NOTIFY"] = "parent"  # `ck worktree park` defers; the watcher below sends the notification
     if settings is not None:
         child_env["CK_RUN_SANDBOXED"] = "1"
     with log.open("w") as out, (err.open("w") if err else open(os.devnull, "w")) as errf:
@@ -549,7 +550,12 @@ def run(spec: str, extra: tuple, model: str, effort: str, budget: float, max_tur
         header.write(f"argv: {json.dumps(argv)}\n\n")
         header.flush()
         started = time.time()
-        code = subprocess.call(argv, cwd=cwd, env=child_env, stdout=out, stderr=errf if err else subprocess.STDOUT)
+        watcher = NotifyWatcher(cwd, name, wt_dir, run_role.get("notify_command"), header)
+        watcher.start()
+        try:
+            code = subprocess.call(argv, cwd=cwd, env=child_env, stdout=out, stderr=errf if err else subprocess.STDOUT)
+        finally:
+            watcher.finish()
         # Real spend, from the transcripts (outside the sandbox, which hides ~/.claude from the run).
         spend = spend_report(cwd, session_id, started)
         if spend:
@@ -561,6 +567,91 @@ def run(spec: str, extra: tuple, model: str, effort: str, budget: float, max_tur
         click.echo(line)
     click.echo(f"{'✓' if code == 0 else '❌'} claude exited {code}; log: {log}")
     sys.exit(code)
+
+
+class NotifyWatcher:
+    """Sends one notification per new park note while the child runs (7.12).
+
+    Runs in `ck run`'s own process, outside the sandbox: a task agent's `ck worktree park` only writes the note
+    (CK_RUN_NOTIFY=parent). Notes present at start belong to earlier runs and are not announced again. A final
+    sweep after the child exits catches a note written in its last 2 s. Outcomes go to the run log.
+    """
+
+    INTERVAL = 2.0
+
+    def __init__(self, cwd: Path, spec: str, wt_dir: Optional[Path], command: Optional[str], log) -> None:
+        import threading
+
+        self.cwd, self.spec, self.command, self.log = cwd, spec, command, log
+        self.dir = wt_dir
+        self.counts = {"sent": 0, "failed": 0, "not_configured": 0}
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._seen = {key for key, _ in self._scan()}
+
+    def _scan(self):
+        found = []
+        if self.dir is None or not self.dir.is_dir():
+            return found
+        for path in sorted(self.dir.glob(f"{self.spec}-task-*.needs-input.json")):
+            try:
+                data = json.loads(path.read_text())
+                stamp = path.stat().st_mtime_ns
+            except (OSError, ValueError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            task = path.name[len(f"{self.spec}-task-"):-len(".needs-input.json")]
+            found.append(((str(path), str(data.get("parkedAt", "")), stamp), task))
+        return found
+
+    def _sweep(self) -> None:
+        from .. import notify
+
+        for key, task in self._scan():
+            if key in self._seen:
+                continue
+            self._seen.add(key)
+            outcome = notify.send(self.command, notify.notify_message(self.spec, task), self.cwd)
+            self.counts[outcome.status] = self.counts.get(outcome.status, 0) + 1
+            if outcome.status == "sent":
+                line = f"ck run: notification sent for {self.spec} task {task}"
+            elif outcome.status == "not_configured":
+                line = f"ck run: notification not configured for {self.spec} task {task}: {outcome.detail}"
+            else:
+                line = f"ck run: notification failed for {self.spec} task {task}: {outcome.detail}"
+            self._write(line)
+
+    def _write(self, line: str) -> None:
+        with self._lock:
+            try:
+                self.log.write(line + "\n")
+                self.log.flush()
+            except (OSError, ValueError):
+                pass
+
+    def _loop(self) -> None:
+        while not self._stop.wait(self.INTERVAL):
+            try:
+                self._sweep()
+            except Exception as e:  # a watcher must never fail the run
+                self._write(f"ck run: notification watcher error: {e}")
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def finish(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=30)
+        try:
+            self._sweep()
+        except Exception as e:
+            self._write(f"ck run: notification watcher error: {e}")
+        total = sum(self.counts.values())
+        if total:
+            self._write(f"ck run: notifications for needs-input tasks: {self.counts['sent']} sent, "
+                        f"{self.counts['failed']} failed, {self.counts['not_configured']} not configured")
 
 
 # --- ck doctor --unattended ----------------------------------------------------
