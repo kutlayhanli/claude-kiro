@@ -56,6 +56,15 @@ def test_134_near_miss_file_names_in_the_test_tasks_files(tmp_path, owned):
     silent(tmp_path, shape(t_files=(owned,)))
 
 
+@pytest.mark.parametrize("owned", [PERF + " ", PERF + "  "])
+def test_134_trailing_space_in_the_files_entry_is_not_a_different_file(tmp_path, owned):
+    """Paired with the positive control: whitespace inside the backticks must not hide F from the rule."""
+    control_fires(tmp_path)
+    write_spec(tmp_path, shape(t_files=(owned,)))
+    assert [(e["task"], e["needs"]) for e in entries(tmp_path)] == [("8", "13")]
+    assert ck(tmp_path, "lint", "sim").exit_code == 1
+
+
 @pytest.mark.parametrize("verify", [f"uv run pytest -q {PERF}.orig", f"uv run pytest -q {PERF}c", f"uv run pytest -q x{PERF}", f"uv run pytest -q ../{PERF}x", "uv run pytest -q tests/test_perf"])
 def test_134_near_miss_file_names_in_x_verify(tmp_path, verify):
     silent(tmp_path, shape(x_verify=verify))

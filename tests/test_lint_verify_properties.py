@@ -56,13 +56,15 @@ class Cmd:
     items: List[Item]
     flags: List[str] = field(default_factory=list)
     k: Optional[str] = None
+    order: int = 0  # 0 keeps options before the files; otherwise options are interleaved among the files
 
     def render(self) -> str:
-        parts = [self.prefix, *self.flags]
-        if self.k:
-            parts.append(self.k)
-        parts += [i.render() for i in self.items]
-        return " ".join(parts)
+        opts = [*self.flags] + ([self.k] if self.k else [])
+        parts = [i.render() for i in self.items]
+        for n, o in enumerate(opts):
+            pos = 0 if self.order == 0 else (self.order * (n + 1)) % (len(parts) + 1)
+            parts.insert(pos, o)
+        return " ".join([self.prefix, *parts])
 
     def occurrences(self) -> List[Tuple[str, bool]]:
         """(file, narrowed) for every exact test-file token."""
@@ -197,7 +199,7 @@ def cmds(draw) -> Cmd:
     its = draw(st.lists(items(), min_size=0, max_size=3))
     flags = draw(st.lists(st.sampled_from(FLAGS), max_size=2, unique=True))
     k = draw(st.one_of(st.none(), st.none(), st.sampled_from(K_FORMS)))
-    return Cmd(draw(st.sampled_from(PREFIXES)), its, flags, k)
+    return Cmd(draw(st.sampled_from(PREFIXES)), its, flags, k, draw(st.integers(0, 5)))
 
 
 @st.composite
@@ -246,6 +248,9 @@ def test_generator_reaches_positive_cases():
     assert oracle(spec)
     cyclic = find(specs(cyclic=True), lambda s: bool(oracle(s)) and any("99" in t.deps for t in s.tasks), settings=settings_)
     assert oracle(cyclic)
+    # P-22 and P-27 return early on an empty oracle: prove they get non-trivial examples (several entries, several tasks).
+    rich = find(specs(), lambda s: len({k[0] for k in oracle(s)}) >= 2 and len(oracle(s)) >= 3, settings=settings_)
+    assert len(oracle(rich)) >= 3
 
 
 # --------------------------------------------------------------------------- P-20
@@ -282,7 +287,7 @@ def p21_cases(draw):
         its = [Item(p, None) for p in pre] + own
         if draw(st.booleans()):
             its.insert(draw(st.integers(0, len(its))), draw(st.sampled_from([Item(f, f), Item("./" + f, f), Item(f, f, "::test_x"), Item(f, f, "::C::test_y")])))
-        cmd_list.append(Cmd(draw(st.sampled_from(PREFIXES)), its, draw(st.lists(st.sampled_from(FLAGS), max_size=3, unique=True)), draw(st.one_of(st.none(), st.sampled_from(K_FORMS)))))
+        cmd_list.append(Cmd(draw(st.sampled_from(PREFIXES)), its, draw(st.lists(st.sampled_from(FLAGS), max_size=3, unique=True)), draw(st.one_of(st.none(), st.sampled_from(K_FORMS))), draw(st.integers(0, 5))))
     return f, cmd_list
 
 
@@ -339,6 +344,8 @@ def test_p23_cycles_and_dangling_ids_never_raise(spec):
     found, full = run(spec)  # must not raise
     if has_cycle(spec):
         assert full["cycles"], "a dependency cycle is still reported"
+    # Looser than the row: the oracle runs over the whole graph (reachability through a cycle is still a real
+    # ancestor), so found entries need only be a subset of it.
     assert keys(found) <= oracle(spec)
     for e in found:
         assert e["chain"][0] == e["needs"] and e["chain"][-1] == e["task"]
@@ -365,7 +372,7 @@ def narrow_file(spec: Spec, x: str, f: str, how: str) -> None:
                 i.suffix = ""
             new_cmds.append(Cmd(c.prefix, mine, [], how_k(how)))
             if rest:
-                new_cmds.append(Cmd(c.prefix, rest, c.flags, c.k))
+                new_cmds.append(Cmd(c.prefix, rest, c.flags, c.k, c.order))
     task.cmds = new_cmds
 
 
@@ -385,15 +392,22 @@ def test_p27_exemptions_are_exact_and_reversible(spec, pick, edit):
     edited = copy.deepcopy(spec)
     if edit == "verifies":
         edited.get(t).verifies.append(x)
-        expected = {k for k in base if not (k[0] == x and k[2] == t)}
     elif edit == "vby":
         edited.get(x).vby.append(t)
-        expected = {k for k in base if not (k[0] == x and k[2] == t)}
     else:
         narrow_file(edited, x, f, edit)
-        expected = {k for k in base if not (k[0] == x and k[1] == f)}
+    expected = {k for k in base if not (k[0] == x and k[2] == t)} if edit in ("verifies", "vby") else {
+        k for k in base if not (k[0] == x and k[1] == f)
+    }
     after, _ = run(edited)
-    assert keys(after) == expected
+    if edit in ("verifies", "vby"):
+        # T now verifies X, so T may newly be required to verify X as a Y for X's own ancestors: only
+        # entries with needs == x and testTask == t may be added. Everything else survives unchanged.
+        assert expected <= keys(after)
+        assert all(k[3] == x and k[2] == t for k in keys(after) - base)
+        assert not any(k[0] == x and k[2] == t for k in keys(after))
+    else:
+        assert keys(after) == expected
     if edit in ("colon", "k", "kexpr", "keq"):
         restored = copy.deepcopy(edited)
         restored.get(x).cmds.append(Cmd("uv run pytest", [Item(f, f)]))
