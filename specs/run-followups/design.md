@@ -391,7 +391,7 @@ status line call these functions and never re-implement the rule.
 | S10 `eta_log_line` | `eta/decide.py` | `eta_log_line(what: str, view: EtaView, prev_p50: Optional[str]) -> str` | `ETA 17:34 (p90 17:50), critical 1→2→3` at start (create: `ETA 17:34 (p90 17:50), 7 phases`). Later lines are `<what> · ETA HH:MM`, with ` (+N)` / ` (-N)` when the median moved by a whole minute or more, or `<what> · blocked`, or `<what> · waiting on you N min` whenever a wait is open, including a hand landing that stays open while other tasks land (8.1, D17). |
 | S11 `cache_fresh` | `eta/decide.py` | `cache_fresh(cache: Optional[Mapping], digest: EventsDigest, model_digest: str) -> bool` | Reuse only when the cache's events digest (byte size, line count, last line hash) and model digest equal the current ones (4.6). |
 | S12 `effective_now` | `eta/decide.py` (built on the pure `progress.effective_min`, which the simulator also uses for start times) | `effective_now(state: RunState, now_min: float) -> Tuple[float, float]` | Returns `(now_eff, waited_min)`. Effective time is wall time minus the minutes during which at least one approval wait was open before it. While a wait is open, `now_eff` is the effective time at which the current wait began, so a simulation at `now_eff` gives the same remaining work at any wall time during the wait: frozen by construction, with no cache needed (5.4). After it closes, `now_eff = effective(now)` and `waited_min` includes it (5.5). |
-| S13 `verify_file_cycles` | `lint.py` | `verify_file_cycles(tasks: Dict[str, SpecTask], config: dict) -> List[dict]` | For each impl task X that is not Done, each test path F named explicitly in X's `**Verify:**` commands (see S14) with at least one occurrence not narrowed (13.10), each test task T with F in its `**Files:**` that does not also verify X (skip when X in `T.verifies` or T in `X.verified_by`, 13.9), and each impl task Y verified by T (T in `Y.verified_by` or Y in `T.verifies`): an error when Y ≠ X and X is an ancestor of Y. The chain is the shortest dependency path Y → … → X. Unknown task ids and cycles are skipped, never raised (13.1, 13.4, 13.5, 13.7, 13.9, 13.10). The agent-mode-analytics task 8 shape still fires: task 8 had Verified by: None and an un-narrowed Verify. |
+| S13 `verify_file_cycles` | `lint.py` | `verify_file_cycles(tasks: Dict[str, SpecTask], config: dict) -> List[dict]` | For each impl task X that is not Done, each test path F named explicitly in X's `**Verify:**` commands (see S14) with at least one occurrence not narrowed (13.10), each test task T with F in its `**Files:**` (each Files path compared after stripping surrounding whitespace, also whitespace inside the backticks; the comparison is otherwise exact and case-sensitive, so `tests/Test_Perf.py` is not `tests/test_perf.py`) that does not also verify X (skip when X in `T.verifies` or T in `X.verified_by`, 13.9), and each impl task Y verified by T (T in `Y.verified_by` or Y in `T.verifies`): an error when Y ≠ X and X is an ancestor of Y. The chain is the shortest dependency path Y → … → X. Unknown task ids and cycles are skipped, never raised (13.1, 13.4, 13.5, 13.7, 13.9, 13.10). The agent-mode-analytics task 8 shape still fires: task 8 had Verified by: None and an un-narrowed Verify. |
 | S14 `verify_paths` | `lint.py` | `verify_paths(command: str, config: dict) -> List[Tuple[str, bool]]` | `(path, narrowed)` pairs for the tokens of a Verify command (`shlex.split`, falling back to `str.split` on a parse error), with `::selector` cut and a leading `./` stripped, kept when `is_test_path(token, config)` and the token holds no glob character (`*?[`) and does not end in `/` (13.6, Assumptions). `narrowed` is True when the token carried a `::` selector, or when the command holds a `-k` option (`-k EXPR`, `-kEXPR`, `-k=EXPR`), which narrows every file in that command (13.10). |
 | S15 `overlap_guard` | `analytics/backfill.py` | `overlap_guard(store_error: Optional[str], malformed: Sequence[str], dry_run: bool) -> GuardDecision` | `store_error is None` and no malformed record file → write allowed, exit unchanged. Otherwise the cause is the store error, or `malformed record <file>` (each file named). With no dry run: write nothing, exit 1, message `cannot check backfill overlaps: <cause>; nothing written`. With a dry run: list the groups, exit 1, note `overlaps not checked: <cause>` (9.1, 9.2, 9.3). |
 | S16 `writer_for` | `analytics/collect.py` | `writer_for(record: Optional[Mapping]) -> Literal["agents", "workflow"]` | `"agents"` iff `record.get("source") == "agents"` (11.2). |
@@ -506,9 +506,10 @@ are `unknown`, and `escalations` is a list of model names):
 - `escalations` = `len(list)`; a non-list value → 0. `retries` = `attempts - 1` when `attempts` is an int ≥ 1, else 0.
 It holds no ids, names, paths or timestamps, so it is safe in the spool directory. The task tuples come from
 `tasks[]` of implement records with `ok` true. The model is the family of the task's first implementer/test-writer
-agent row. `usd` is the sum of that task's agent `usd`, or None when any of those rows is unpriced. `size` is
+agent row. `usd` is the sum of that task's agent `usd`, or None when any of those rows is unpriced. A row whose `usd` is
+missing, null, zero or negative zero counts as unpriced (1.9): costless records store `usd` 0. `size` is
 `filesCount + criteriaCount`, or a count from the spec's tasks.md (6.3), or None. Phase samples come from create
-records' `phases` (non-null minutes). `usd` comes from the agents' `usd` grouped by `phase`.
+records' `phases` (positive minutes only: a null or zero-minute phase is not sampled, 2.5). `usd` comes from the agents' `usd` grouped by `phase`.
 
 ### Bundled defaults (`ck-eta-defaults/1`, `src/claude_kiro/resources/eta_defaults.json`)
 
@@ -571,6 +572,35 @@ class Hold:
     held: Tuple[str, ...]                  # parked tasks and their dependents (or the tasks a failure/cycle holds)
     waiting_on_you: Tuple[str, ...]        # parked tasks and dependents
     whole_run: bool                        # True when no open task outside `held` can still run (5.2: no runnableDone); never sends a notice (8.9, D15)
+
+@dataclass(frozen=True)
+class NotifyInput:                         # S7 input; built by the service from the fold, the hold and the view
+    spec: str
+    state: str                             # a `decide_state` (S6) value
+    p50_finish_min: Optional[float]        # minutes from launch to the finish p50; None when there is no finish
+    waited_min: float                      # closed approval-wait minutes (S12)
+    launch_p90_min: Optional[float]        # minutes from launch to the launch estimate's finish p90; None when unknown
+    hold: Hold                             # S5 result
+    cause: Optional[str]                   # latest change cause (enum-built text, S8 slip cause)
+    outcome: Optional[str]                 # the end outcome; None until the run ends
+    merged: Optional[int]; total: Optional[int]
+    wall_min: Optional[float]              # wall minutes since launch
+    usd: Optional[float]
+    now_hhmm: str                          # local HH:MM of `now`, for S8 text
+
+@dataclass(frozen=True)
+class SentNotice:                          # from `notified` / `notify-pending` events
+    kind: Literal["slip", "blocked", "done"]
+    key: str
+    level: Optional[int]                   # the slip level, else None
+
+@dataclass(frozen=True)
+class Notice:                              # S7 output, rendered by S8
+    kind: Literal["slip", "blocked", "done"]
+    level: Optional[int]                   # the slip level, else None
+    key: str                               # dedupe key: "slip", the hold's reason_key, or "done"
+    type: str                              # NOTICE_TYPES[kind]
+    source: NotifyInput                    # the input S8 renders the text from
 ```
 
 Simulation (pure). One run of `simulate_implement` uses `random.Random(seed)`. The default seed is
@@ -787,7 +817,12 @@ not spooled. Every path decides and sends under `progress.notice_lock`, and ever
   a wait, a hand landing or a park is open (D16). A later `begin` that supersedes it still sends its done notice
   (D18).
 - **13.7** Dependency cycles or unknown ids: `verify_file_cycles` walks ancestors with a seen-set and skips unknown
-  ids. `dependency_cycles` and the unknown-dependency reporting stay as they are.
+  ids. `dependency_cycles` and the unknown-dependency reporting stay as they are. Because `ck lint` text mode
+  printed no unknown-dependency error before (only `ck waves` did, and only on an acyclic graph), `ck lint` text
+  mode now also prints one line per unknown dependency, `⚠ Task <N> depends on unknown Task <ids>` (the
+  `waves.compute_waves` wording), computed straight from the parsed Dependencies, so it is printed also when
+  the graph has a dependency cycle. `--json` keeps its shape (no new key). TC-82 asserts the unknown id appears
+  in the text output.
 
 ## Security, Performance, Migration
 

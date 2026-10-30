@@ -99,7 +99,7 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 ---
 
 ### Task 3: Extend the Node test harness: execCk agents, a create op and a virtual clock
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.4, 8.1, 8.2, 12.1, 12.3
 **Description:** Build the test-only JS harness the Workflow tests and the deterministic P-10 need (test-plan Test Infrastructure item 2, Harness Contract H-15). The virtual clock is test infrastructure: nothing in `plugin/` or `.claude/` changes (12.3).
@@ -120,12 +120,12 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 **Verify:** `uv run pytest -q tests/test_bridge_harness.py` `node tests/js/spec_create.test.mjs` `node tests/js/spec_implement.test.mjs` `node tests/js/landing_speed.test.mjs` `node tests/js/finish_first.test.mjs`
 **Verifies:** None
 **Acceptance:**
-- [ ] The existing JS suites and `tests/test_landing_scheduler_properties.py` pass unchanged
-- [ ] No file under `plugin/workflows/` or `.claude/workflows/` is touched
-- [ ] `execCk` runs the real CLI as a subprocess, and the landing sets it records come from the fake project's own result. Agents are the only fakes
-- [ ] `sleep(ms)` resolves exactly at `now() + ms` virtual time, in (due, creation) order, and virtual time advances only after pending microtasks drain
-- [ ] Without a `clock`, the bridge and the JS suites run on real timers exactly as today
-- [ ] Harness self-tests pass against today's workflow scripts
+- [x] The existing JS suites and `tests/test_landing_scheduler_properties.py` pass unchanged
+- [x] No file under `plugin/workflows/` or `.claude/workflows/` is touched
+- [x] `execCk` runs the real CLI as a subprocess, and the landing sets it records come from the fake project's own result. Agents are the only fakes
+- [x] `sleep(ms)` resolves exactly at `now() + ms` virtual time, in (due, creation) order, and virtual time advances only after pending microtasks drain
+- [x] Without a `clock`, the bridge and the JS suites run on real timers exactly as today
+- [x] Harness self-tests pass against today's workflow scripts
 **Dependencies:** None
 **Complexity:** Medium
 **Risk:** normal
@@ -133,7 +133,7 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 ---
 
 ### Task 4: Test the Verify-file cycle lint (CLI cases, properties, red-team)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7, 13.8, 13.9, 13.10
 **Description:** Implement TC-77 through TC-84, TC-99 and TC-100, properties P-20 through P-23 and P-27, and red-team cases for the SHALL NOT clauses 13.4 and 13.5. Reuse `ck`, `block` and `write_spec` from `tests/test_lint.py`.
@@ -155,12 +155,12 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 **Properties:** P-20, P-21, P-22, P-23, P-27
 **Verifies:** Task 5 (the verify-file lint rule and its CLI output)
 **Acceptance:**
-- [ ] Tests exercise the real `ck lint` / `ck plan` click entry points over real tasks.md files and this repository's real specs
-- [ ] Before implementation the positive cases fail because no `verify-file` entry is reported, not because of fixture errors. `tests/test_lint.py` stays green, and the red-team false-positive guards pass before and after. TC-100 passes before and after (a regression guard for the existing import check)
-- [ ] No mocks of project code
-- [ ] P-20..P-23 and P-27 generators cover every surface form, narrowed form, exemption and near-miss negative in the rows. Settings are `derandomize=True, max_examples=200, database=None, deadline=None`
-- [ ] Each of 13.4 and 13.5 has at least three red-team cases
-- [ ] Every new `test_lint_verify_*.py` file sets `pytestmark` with `no_network`
+- [x] Tests exercise the real `ck lint` / `ck plan` click entry points over real tasks.md files and this repository's real specs
+- [x] Before implementation the positive cases fail because no `verify-file` entry is reported, not because of fixture errors. `tests/test_lint.py` stays green, and the red-team false-positive guards pass before and after. TC-100 passes before and after (a regression guard for the existing import check)
+- [x] No mocks of project code
+- [x] P-20..P-23 and P-27 generators cover every surface form, narrowed form, exemption and near-miss negative in the rows. Settings are `derandomize=True, max_examples=200, database=None, deadline=None`
+- [x] Each of 13.4 and 13.5 has at least three red-team cases
+- [x] Every new `test_lint_verify_*.py` file sets `pytestmark` with `no_network`
 **Dependencies:** None
 **Complexity:** Medium
 **Risk:** normal
@@ -168,24 +168,24 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 ---
 
 ### Task 5: Add the Verify-file cycle check to `ck lint`
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7, 13.8, 13.9, 13.10
-**Description:** Add two pure functions to `src/claude_kiro/lint.py` (design seams S13 and S14). This task owns Harness Contract H-10's `lint_spec` entries. `verify_paths(command, config)` tokenises one Verify command with `shlex.split` (falling back to `str.split` on a parse error), cuts any `::selector`, strips a leading `./`, and keeps a token only when `is_test_path(token, config)` holds, it has no glob character (`*?[`) and it does not end in `/`. It returns `(path, narrowed)` pairs: `narrowed` is True when the token carried a `::` selector or the command holds a `-k` option (`-k EXPR`, `-kEXPR`, `-k=EXPR`) (13.10, D12). `verify_file_cycles(tasks, config)` loops over impl tasks X that are not Done, each path F from `verify_paths` over X's `verify` commands that has at least one un-narrowed occurrence (13.10), each test task T whose `files` contain F and that does not also verify X (skip when `X in T.verifies` or `T in X.verified_by`, 13.9), and each impl task Y that T verifies (`Y in T.verifies` or `T in Y.verified_by`). It reports an entry when Y != X and X is an ancestor of Y. The chain is the shortest dependency path Y -> ... -> X (BFS over `dependencies`, with a seen-set, skipping unknown ids), so cycles never raise. Each entry is `{"kind": "verify-file", "task": X, "file": F, "testTask": T, "needs": Y, "chain": [Y, ..., X], "message": ...}`, with the message text from the design's Lint entry section, including the suggestion to narrow X's Verify. In `lint_spec`, append these entries to `verifyCycles` after the import-based entries. Run the new check even when the graph has a dependency cycle; the import-based check stays skipped in that case, as today. Existing import-based entries keep their exact keys and get no `kind`. In `cli/worktree.py` `lint`, print the new entries as `✗ verify-file cycle: <message>` and change the success line to `✓ no verify-order cycles found (checked Python imports of existing test files and Verify test files owned by test tasks)`. `--json` keeps its shape. Exit 1 follows from a non-empty `verifyCycles`, and `ck plan` already puts `verifyCycles` tasks in `blocked`, so the workflow's start refusal needs no new wiring. The skill text for 13.3 is in Task 27.
+**Description:** Add two pure functions to `src/claude_kiro/lint.py` (design seams S13 and S14). This task owns Harness Contract H-10's `lint_spec` entries. `verify_paths(command, config)` tokenises one Verify command with `shlex.split` (falling back to `str.split` on a parse error), cuts any `::selector`, strips a leading `./`, and keeps a token only when `is_test_path(token, config)` holds, it has no glob character (`*?[`) and it does not end in `/`. It returns `(path, narrowed)` pairs: `narrowed` is True when the token carried a `::` selector or the command holds a `-k` option (`-k EXPR`, `-kEXPR`, `-k=EXPR`) (13.10, D12). `verify_file_cycles(tasks, config)` loops over impl tasks X that are not Done, each path F from `verify_paths` over X's `verify` commands that has at least one un-narrowed occurrence (13.10), each test task T whose `files` contain F (compare each Files path after `.strip()`, since the parser keeps whitespace inside the backticks; the comparison is otherwise exact and case-sensitive) and that does not also verify X (skip when `X in T.verifies` or `T in X.verified_by`, 13.9), and each impl task Y that T verifies (`Y in T.verifies` or `T in Y.verified_by`). It reports an entry when Y != X and X is an ancestor of Y. The chain is the shortest dependency path Y -> ... -> X (BFS over `dependencies`, with a seen-set, skipping unknown ids), so cycles never raise. Each entry is `{"kind": "verify-file", "task": X, "file": F, "testTask": T, "needs": Y, "chain": [Y, ..., X], "message": ...}`, with the message text from the design's Lint entry section, including the suggestion to narrow X's Verify. In `lint_spec`, append these entries to `verifyCycles` after the import-based entries. Run the new check even when the graph has a dependency cycle; the import-based check stays skipped in that case, as today. Existing import-based entries keep their exact keys and get no `kind`. In `cli/worktree.py` `lint`, print the new entries as `✗ verify-file cycle: <message>` and change the success line to `✓ no verify-order cycles found (checked Python imports of existing test files and Verify test files owned by test tasks)`. Text mode also prints one line per task with a dependency on an unknown task id, `⚠ Task <N> depends on unknown Task <ids>`, computed from the parsed Dependencies so it is printed also when the graph has a cycle (13.7; `ck lint` printed no unknown-dependency error before). `--json` keeps its shape. Exit 1 follows from a non-empty `verifyCycles`, and `ck plan` already puts `verifyCycles` tasks in `blocked`, so the workflow's start refusal needs no new wiring. The skill text for 13.3 is in Task 27.
 **Files:**
 - `src/claude_kiro/lint.py` - add `verify_paths`, `verify_file_cycles`; append their entries in `lint_spec`, also when cycles exist
-- `src/claude_kiro/cli/worktree.py` - `lint` text output for `verify-file` entries and the new success line
+- `src/claude_kiro/cli/worktree.py` - `lint` text output for `verify-file` entries, unknown-dependency lines and the new success line
 **Verify:** `uv run pytest -q -n auto tests/test_lint_verify_files.py tests/test_lint_verify_properties.py tests/test_lint_verify_redteam.py tests/test_lint.py`
 **Verified by:** Task 4 (TC-77..TC-84, TC-99, TC-100, P-20..P-23, P-27, red-team 13.4, 13.5)
 **Acceptance:**
-- [ ] An impl task X whose Verify names F, where F is in the Files of test task T, T verifies Y, and Y depends on X (directly or transitively), gives one `verify-file` entry naming X, F, T, Y and the chain Y -> ... -> X, and `ck lint` exits 1
-- [ ] T verifies Y via either T's `**Verifies:**` or Y's `**Verified by:**`
-- [ ] No entry when F is in no test task's Files, when no Y verified by T depends on X, or when X is Done
-- [ ] No entry for a T that also verifies X (either form), and none when every occurrence of F in X's Verify is narrowed by `::` or `-k`; a bare occurrence in any command still reports it
-- [ ] F matches when written as `./F` or inside a longer command with flags and several files; globs and directory arguments are not matched
-- [ ] A tasks.md with a dependency cycle or an unknown task id reports the existing cycle/unknown errors and does not crash
-- [ ] `ck lint --json` lists the new entries in `verifyCycles` beside unchanged import-based entries (no `kind` on those)
-- [ ] On copies of every spec in this repository with statuses reset to Not Started, `ck lint` reports no new verify-file entry (landing-speed tasks 9 and 17 included); the pre-fix agent-mode-analytics tasks.md reports exactly one (X, Y) pair (task 8, needs 13)
+- [x] An impl task X whose Verify names F, where F is in the Files of test task T, T verifies Y, and Y depends on X (directly or transitively), gives one `verify-file` entry naming X, F, T, Y and the chain Y -> ... -> X, and `ck lint` exits 1
+- [x] T verifies Y via either T's `**Verifies:**` or Y's `**Verified by:**`
+- [x] No entry when F is in no test task's Files, when no Y verified by T depends on X, or when X is Done
+- [x] No entry for a T that also verifies X (either form), and none when every occurrence of F in X's Verify is narrowed by `::` or `-k`; a bare occurrence in any command still reports it
+- [x] F matches when written as `./F` or inside a longer command with flags and several files; globs and directory arguments are not matched
+- [x] A tasks.md with a dependency cycle or an unknown task id reports the existing cycle/unknown errors and does not crash
+- [x] `ck lint --json` lists the new entries in `verifyCycles` beside unchanged import-based entries (no `kind` on those)
+- [x] On copies of every spec in this repository with statuses reset to Not Started, `ck lint` reports no new verify-file entry (landing-speed tasks 9 and 17 included); the pre-fix agent-mode-analytics tasks.md reports exactly one (X, Y) pair (task 8, needs 13)
 **Dependencies:** Task 4 (its tests are the oracle)
 **Complexity:** Medium
 **Risk:** normal
@@ -193,7 +193,7 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 ---
 
 ### Task 6: Make P-10 deterministic on the virtual clock
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 12.1, 12.2, 12.3, 12.4
 **Description:** Story 12 is a test-only change: the fix is this rewrite, on the virtual clock Task 3 adds to the harness. Implement TC-73 through TC-76, properties P-25 and P-26, and red-team cases for 12.3.
@@ -211,11 +211,11 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 **Properties:** P-25, P-26
 **Verifies:** None
 **Acceptance:**
-- [ ] Tests exercise the real `plugin/workflows/spec-implement.js` through the bridge. Only the clock and agents are test doubles, and both are test-owned
-- [ ] The rewritten P-10 is at least as strong as today's (exact equality of events and result) and has no re-run loop
-- [ ] The P-25/P-26 generators are the existing `scenarios()` with `SETTINGS` (deterministic)
-- [ ] TC-75 passes on today's scripts and fails if a clock code token leaks into them
-- [ ] TC-76's default part runs in seconds. The 50-run stress is opt-in
+- [x] Tests exercise the real `plugin/workflows/spec-implement.js` through the bridge. Only the clock and agents are test doubles, and both are test-owned
+- [x] The rewritten P-10 is at least as strong as today's (exact equality of events and result) and has no re-run loop
+- [x] The P-25/P-26 generators are the existing `scenarios()` with `SETTINGS` (deterministic)
+- [x] TC-75 passes on today's scripts and fails if a clock code token leaks into them
+- [x] TC-76's default part runs in seconds. The 50-run stress is opt-in
 **Dependencies:** Task 1 (`busy`), Task 3 (the virtual clock in the bridge)
 **Complexity:** Medium
 **Risk:** normal
@@ -509,7 +509,7 @@ Settings `derandomize=True, max_examples=200, database=None, deadline=None`. Eac
 ---
 
 ### Task 17: Write the approval-wait shift property over the ETA service
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.5, 5.7, 8.5
 **Description:** Write property P-8 in `tests/test_eta_service_properties.py`. Metamorphic: inserting a closed approval wait of W minutes (an `approval-start` and a matching `approval-end`) at an insertion point, with every later event and `now` shifted by W, shifts finish p10/p50/p90 by exactly W, never moves the state from `on-track` to `slipping`, and adds no slip notification. Build a temp project with `eta_helpers.eta_spec`, copy a `POOL_IMPL` store, write the two event sequences with `eta_helpers.append_events` into separate temp `CK_PROGRESS_DIR`s, and call `claude_kiro.eta.service.estimate(project_dir, spec, now=..., seed=..., env=...)` in-process on each with the same explicit seed, comparing the views; feed the views to `decide.notify_decision` for the slip check. Domain: `events()` x W in 1..240 x insertion point, with `now` within 120 minutes of the last event so neither run is stale (a stale run has no finish to shift, 3.10). Settings `derandomize=True, max_examples=50, database=None, deadline=None`. Declare `PROPERTIES = {"P-8": ...}`.
@@ -519,13 +519,14 @@ Settings `derandomize=True, max_examples=200, database=None, deadline=None`. Eac
 **Properties:** P-8
 **Verifies:** Task 18 (`estimate` with approval waits)
 **Acceptance:**
-- [ ] The property calls `service.estimate` in-process over a real tasks.md, a store the real collector wrote and real progress files, not the CLI
-- [ ] Settings are deterministic and every call has the same explicit seed
-- [ ] Before implementation it fails at import of `claude_kiro.eta.service` (missing behaviour)
-- [ ] No mocks of project code
-- [ ] The file sets `pytestmark` with `no_network`
+- [x] The property calls `service.estimate` in-process over a real tasks.md, a store the real collector wrote and real progress files, not the CLI
+- [x] Settings are deterministic and every call has the same explicit seed
+- [x] Before implementation it fails at import of `claude_kiro.eta.service` (missing behaviour)
+- [x] No mocks of project code
+- [x] The file sets `pytestmark` with `no_network`
 **Dependencies:** Task 2 (pools, spec builder, `append_events`), Task 1 (strategies)
 **Complexity:** Medium
+**Implementation notes:** `NotifyInput`, `SentNotice` and `Notice` are now defined in design.md's Estimator types (the shape Task 15's tests proposed); `_slip_notices` builds exactly `decide.NotifyInput` and reads `Notice.kind`, with the hold read back from the view's `blocked`/`waitingOnYou`/`runnableDone`. The start event's `launch` is the design's `LaunchSummary` mapped from the launch view's `remainingMinutes` and `cost`. The start event carries `maxConcurrent: None` and no `model`/`modelDigest` (no snapshot is written, so the service fits from the store). About half the drawn cases are clean (acyclic, no park or failure), and the test asserts at least 5 of the 50 examples compared a non-null finish. Launch p90 comes from a third `estimate` over the start event alone.
 **Risk:** safety (asserts no spurious slip notification reaches the user's notify command)
 
 ---
@@ -563,7 +564,7 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 ---
 
 ### Task 19: Test the launch estimates (implement, size signal, create, cold start) through `ck eta`
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 4.1, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 7.1, 7.2, 7.3, 7.4, 7.5
 **Description:** Implement TC-1 through TC-20 and TC-46 through TC-50 as CLI integration tests, plus red-team cases for 6.2 and 7.2. Each test runs the real `ck eta` subprocess against an `eta_spec` repo and a copied pool, with `CK_NOW=2026-10-30T15:00:00Z`, `TZ=UTC` and `CK_AGENT_SLOTS` set.
@@ -581,12 +582,12 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 **Verify:** `uv run pytest -q -n auto tests/test_eta_implement.py tests/test_eta_size.py tests/test_eta_create.py tests/test_eta_coldstart.py tests/test_eta_redteam_records.py`
 **Verifies:** Task 22 (`ck eta` launch estimates over the service, history, size counts and bundled defaults; `ck stats eta-defaults`)
 **Acceptance:**
-- [ ] Tests exercise the real boundary: the `ck eta`, `ck progress` and `ck stats eta-defaults` subprocesses, real tasks.md, real `ck plan`, the packaged resource, and a store written by the real collector
-- [ ] Before implementation they fail because `ck eta`, the commands, the resource and the `filesCount`/`criteriaCount` fields do not exist, not because of fixture errors
-- [ ] No mocks of project code. Time is pinned only through `NOW_ENV`, randomness only through `--seed`, and slots only through `CK_AGENT_SLOTS`
-- [ ] TC-6 asserts byte-identical seeded output, and at most 1 min drift per quantile without a seed
-- [ ] TC-12 and the 6.2 red-team cases assert the size keys never reach shareable output; the defaults check reads this repository's real spec names as near-miss negatives
-- [ ] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
+- [x] Tests exercise the real boundary: the `ck eta`, `ck progress` and `ck stats eta-defaults` subprocesses, real tasks.md, real `ck plan`, the packaged resource, and a store written by the real collector
+- [x] Before implementation they fail because `ck eta`, the commands, the resource and the `filesCount`/`criteriaCount` fields do not exist, not because of fixture errors
+- [x] No mocks of project code. Time is pinned only through `NOW_ENV`, randomness only through `--seed`, and slots only through `CK_AGENT_SLOTS`
+- [x] TC-6 asserts byte-identical seeded output, and at most 1 min drift per quantile without a seed
+- [x] TC-12 and the 6.2 red-team cases assert the size keys never reach shareable output; the defaults check reads this repository's real spec names as near-miss negatives
+- [x] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
 **Dependencies:** Task 2 (helpers, pools, spec builder)
 **Complexity:** High
 **Risk:** safety (verifies a safety task, and asserts size counts and record-level data never reach exported records or the bundled defaults)
@@ -594,7 +595,7 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 ---
 
 ### Task 20: Test live, blocked, waiting-on-me and stale estimates through `ck eta`
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.9, 2.5, 3.10, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7
 **Description:** Implement TC-32 through TC-45, TC-94 and TC-102, plus red-team cases for 1.9, 2.5, 5.2 and 5.5.
@@ -611,11 +612,11 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 **Verify:** `uv run pytest -q -n auto tests/test_eta_live.py tests/test_eta_blocked.py tests/test_eta_redteam_estimate.py`
 **Verifies:** Task 22 (`ck eta` live, blocked, waiting, stale and ended views, `--watch`)
 **Acceptance:**
-- [ ] Tests exercise the real `ck eta` subprocess over real progress files and a real collected store. TC-34 uses real time and a real signal
-- [ ] Before implementation they fail because `ck eta`/`ck progress` are missing
-- [ ] No mocks of project code. Time comes only from `NOW_ENV`, except in TC-34
-- [ ] Each blocked case names the cause and the held tasks, and asserts no finish range
-- [ ] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
+- [x] Tests exercise the real `ck eta` subprocess over real progress files and a real collected store. TC-34 uses real time and a real signal
+- [x] Before implementation they fail because `ck eta`/`ck progress` are missing
+- [x] No mocks of project code. Time comes only from `NOW_ENV`, except in TC-34
+- [x] Each blocked case names the cause and the held tasks, and asserts no finish range
+- [x] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
 **Dependencies:** Task 2 (helpers, pools, progress append wrapper)
 **Complexity:** High
 **Risk:** safety (verifies a safety task that sends notifications)
@@ -623,7 +624,7 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 ---
 
 ### Task 21: Test the status line, progress-driven notifications and the performance NFRs
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.9, 3.10, 4.4, 8.1, 8.2, 8.3, 8.4, 8.5, 8.7, 8.8, 8.10, 8.11
 **Description:** Implement the cases whose entry points are `ck progress`, `ck eta --watch`'s time-only check, `ck-status-line` and the maintainer commands: TC-53(a), TC-54 (CLI part), TC-55, TC-56, TC-57, TC-59, TC-60 (CLI part), TC-61, TC-85, TC-86, TC-89, TC-90 and TC-101, plus red-team cases for 8.3 and 8.4. P-16, P-17 and P-18 live in Task 15.
@@ -640,12 +641,12 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 **Verify:** `uv run pytest -q -n auto tests/test_eta_surfaces.py tests/test_eta_notify.py tests/test_eta_redteam_surfaces.py` `uv run pytest -q tests/test_eta_perf.py`
 **Verifies:** Task 22 (`ck progress` log lines and notifications, the status line, the backtest command)
 **Acceptance:**
-- [ ] Tests exercise the real `ck-status-line` entry point with stdin JSON, real `ck progress` and `ck eta --watch` subprocesses, a real notify subprocess and real config. TC-57(b) uses a real-time watcher with `RECHECK_ENV=1` and a test-level timeout
-- [ ] Before implementation they fail because the status line and the progress commands are missing
-- [ ] No mocks of project code. The notify command is a real script. Message counts are exact (no "at least")
-- [ ] Timing thresholds match the NFRs exactly, with the right baseline for each; the calibration figure is opt-in
-- [ ] Each red-team clause has at least two cases; a FIFO case times out at the test level rather than hanging the suite
-- [ ] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
+- [x] Tests exercise the real `ck-status-line` entry point with stdin JSON, real `ck progress` and `ck eta --watch` subprocesses, a real notify subprocess and real config. TC-57(b) uses a real-time watcher with `RECHECK_ENV=1` and a test-level timeout
+- [x] Before implementation they fail because the status line and the progress commands are missing
+- [x] No mocks of project code. The notify command is a real script. Message counts are exact (no "at least")
+- [x] Timing thresholds match the NFRs exactly, with the right baseline for each; the calibration figure is opt-in
+- [x] Each red-team clause has at least two cases; a FIFO case times out at the test level rather than hanging the suite
+- [x] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
 **Dependencies:** Task 2 (helpers, notify wrappers, pools, baselines)
 **Complexity:** High
 **Risk:** safety (exercises notifications sent through the user's `run.notify_command`)
@@ -680,7 +681,7 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 ---
 
 ### Task 23: Test the run progress file through the real writers (claim, land, plan, park, concurrency, privacy)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 3.2, 3.3, 3.5, 3.6, 3.7, 3.8, 3.9, 4.2, 5.4, 8.1, 8.5, 8.6, 8.9, 8.10
 **Description:** Implement TC-21, TC-22, TC-23, TC-24, TC-27, TC-28, TC-29(a), TC-30, TC-31, TC-88, TC-53(b), TC-58 and TC-103, plus red-team cases for 3.5, 3.8, 8.6, 8.9 and 8.10. P-14 and P-15 live in Task 9.
@@ -703,11 +704,11 @@ Skip the permission cases as root (`needs_user`).
 **Verify:** `uv run pytest -q -n auto tests/test_eta_progress.py tests/test_eta_writers.py tests/test_eta_redteam_writers.py`
 **Verifies:** Task 25 (progress events from `ck worktree claim`, `land`, `plan`, `park`, `resolve`)
 **Acceptance:**
-- [ ] Tests exercise real `ck progress`, `ck worktree claim/land/park/resolve/report` and `ck plan` subprocesses, real concurrent processes, a real notify script, real file modes and real file bytes
-- [ ] Before implementation they fail because `ck progress`, the `--progress-run` flags and `claude_kiro.progress` are missing
-- [ ] No mocks of project code. Message counts are exact
-- [ ] TC-27 runs real parallel subprocesses and checks for lost or interleaved lines
-- [ ] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
+- [x] Tests exercise real `ck progress`, `ck worktree claim/land/park/resolve/report` and `ck plan` subprocesses, real concurrent processes, a real notify script, real file modes and real file bytes
+- [x] Before implementation they fail because `ck progress`, the `--progress-run` flags and `claude_kiro.progress` are missing
+- [x] No mocks of project code. Message counts are exact
+- [x] TC-27 runs real parallel subprocesses and checks for lost or interleaved lines
+- [x] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
 **Dependencies:** Task 2 (helpers, spec builder, notify wrappers)
 **Complexity:** High
 **Risk:** safety (verifies a safety task whose land and park events trigger notifications)
@@ -715,7 +716,7 @@ Skip the permission cases as root (`needs_user`).
 ---
 
 ### Task 24: Test the end-to-end paths and progress spooling under `ck run`
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 2.1, 3.1, 3.5, 3.7, 3.8, 3.9, 4.2, 5.1, 5.4, 7.1, 8.3, 8.5, 8.6, 8.7, 8.8, 8.9, 8.11
 **Description:** Implement TC-92, TC-93 and TC-95 through TC-97.
@@ -730,10 +731,10 @@ Skip permission cases as root.
 **Verify:** `uv run pytest -q tests/test_eta_e2e.py tests/test_eta_run_spool.py`
 **Verifies:** Task 25 (the claim, land, park and resolve chain end to end; spool and mirror under `ck run`)
 **Acceptance:**
-- [ ] Tests exercise real CLI chains, the real `ck run` command, a real child process, real progress files and a real notify script. Only `claude` is a fake, and it is test-owned
-- [ ] Before implementation they fail because the commands are missing and `ck run` sets no spool and mirrors nothing
-- [ ] No mocks or monkeypatching of project code. Message counts are exact
-- [ ] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
+- [x] Tests exercise real CLI chains, the real `ck run` command, a real child process, real progress files and a real notify script. Only `claude` is a fake, and it is test-owned
+- [x] Before implementation they fail because the commands are missing and `ck run` sets no spool and mirrors nothing
+- [x] No mocks or monkeypatching of project code. Message counts are exact
+- [x] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
 **Dependencies:** Task 2 (helpers, spec builder, notify wrappers)
 **Complexity:** Medium
 **Risk:** safety (asserts deferred notifications sent through the user's notify command and the spool deletion)
@@ -768,7 +769,7 @@ Skip permission cases as root.
 ---
 
 ### Task 26: Test both Workflow scripts, the skills and the agent-mode documents writing the same events
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 3.2, 3.4, 3.7, 5.4, 8.1, 8.2, 8.7, 8.8, 13.3
 **Description:** Implement TC-25, TC-26, TC-29(b), TC-51, TC-52, TC-54 (bridge part), TC-60 (bridge part), TC-87, TC-98 and the document part of TC-78, plus property P-24.
@@ -788,12 +789,13 @@ Skip permission cases as root.
 **Properties:** P-24
 **Verifies:** Task 27 (workflow scripts, skills and agent-mode documents)
 **Acceptance:**
-- [ ] Tests exercise the real `plugin/workflows/spec-implement.js` and `spec-create.js` under the stub runtime, real `ck` subprocesses and real progress files. Agents are the only fakes, and landing results come from the fake project, not from running `land --gate`
-- [ ] Before implementation they fail because the scripts embed no `--progress-run` flags, log no ETA lines, and the skills hold no progress commands
-- [ ] No mocks of project code
-- [ ] P-24 uses the existing `SETTINGS` (deterministic), covers finish-first on and off and slots 1..6, and inspects the prompts the script builds
-- [ ] The agent-mode and skill checks read both packaged and vendored copies; the agent-mode set is cross-checked against the Workflow prompts
-- [ ] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
+- [x] Tests exercise the real `plugin/workflows/spec-implement.js` and `spec-create.js` under the stub runtime, real `ck` subprocesses and real progress files. Agents are the only fakes, and landing results come from the fake project, not from running `land --gate`
+- [x] Before implementation they fail because the scripts embed no `--progress-run` flags, log no ETA lines, and the skills hold no progress commands
+- [x] No mocks of project code
+- [x] P-24 uses the existing `SETTINGS` (deterministic), covers finish-first on and off and slots 1..6, and inspects the prompts the script builds
+- [x] The agent-mode and skill checks read both packaged and vendored copies; the agent-mode set is cross-checked against the Workflow prompts
+- [x] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
+**Implementation notes:** `tests/js/fake_project.mjs` `writtenCommands` (Task 3's helper) cut a command at its first double quote, so `progress event ... --phase "Design + Test Plan" --run K --json` lost its phase title and flags. It now tokenizes double-quoted values as one argument (a fix needed by the create-op tests; no assertion changed; `tests/test_bridge_harness.py` still passes). Until Tasks 22, 25 and 27 land the tests fail because `ck progress` does not exist and the scripts/documents carry no progress flags.
 **Dependencies:** Task 2 (helpers), Task 3 (bridge `execCk`, `create` op, virtual clock)
 **Complexity:** High
 **Risk:** safety (exercises a failing notification command during a run)

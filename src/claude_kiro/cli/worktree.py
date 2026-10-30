@@ -177,10 +177,21 @@ def lint(spec: str, as_json: bool, contracts: bool, tasks, base, strict: bool):
                 click.echo(f"  ✗ dependency cycle: {' -> '.join('Task ' + n for n in cycle)}")
         else:
             click.echo("  ✓ no dependency cycles")
+        from ..hooks._shared.spec_parser import parse_tasks
+
+        parsed = parse_tasks(_spec_dir(Path.cwd(), spec) / "tasks.md")
+        known = {t.num for t in parsed}
+        for t in parsed:
+            unknown = [d for d in t.dependencies if d not in known]
+            if unknown:
+                click.echo(f"  ⚠ Task {t.num} depends on unknown Task {', '.join(unknown)}")
         for item in result["verifyCycles"]:
-            click.echo(f"  ✗ verify-order cycle: {item['message']}")
+            if item.get("kind") == "verify-file":
+                click.echo(f"  ✗ verify-file cycle: {item['message']}")
+            else:
+                click.echo(f"  ✗ verify-order cycle: {item['message']}")
         if not result["verifyCycles"] and not result["cycles"]:
-            click.echo("  ✓ no verify-order cycles found (checked Python imports of existing test files)")
+            click.echo("  ✓ no verify-order cycles found (checked Python imports of existing test files and Verify test files owned by test tasks)")
         if result["reasonless"]:
             click.echo(f"  ⚠ {len(result['reasonless'])} dependenc{'y' if len(result['reasonless']) == 1 else 'ies'} without a stated reason (each one serializes work):")
             for item in result["reasonless"][:25]:

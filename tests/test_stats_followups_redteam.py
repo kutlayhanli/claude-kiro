@@ -166,13 +166,14 @@ def test_93_an_unreadable_record_refuses_backfill(env):
     assert BAD_NAME in r.output, r.output
 
 
+# ids=: a 200 KB payload in the test id overflows PYTEST_CURRENT_TEST for the ck subprocess (exec arg limit)
 @pytest.mark.parametrize("name,payload", [
     ("binary", b"\xff\xfe\x00\x01 not text"),
     ("nul_bytes", b"\x00" * 64),
     ("deeply_nested", b"[" * 200_000),
     ("one_byte_short", None),
     ("own_dry_run_output", None),
-])
+], ids=["binary", "nul_bytes", "deeply_nested", "one_byte_short", "own_dry_run_output"])
 def test_93_near_miss_and_hostile_record_bytes_refuse_backfill(env, name, payload):
     pending_store(env)
     if name == "one_byte_short":
