@@ -89,18 +89,21 @@ The gate for everything else: if `agent()` cannot run a child reliably, nothing 
   `opencode` binary). The binary is `node` from `PATH` (v22.22.3 here; `bun` is not on `PATH`), and
   `spawn` + stdio `"ipc"` + `child.send` was verified working from inside the Bun-hosted plugin
   (spike 21). Preflight requires `node --version >= 20`.
-- Runner defines `globalThis.agent/phase/parallel/pipeline/log/args` **before** importing the
-  workflow module, then `import(pathToFileURL(workflowPath))`. `meta` is read from the module.
-  For `script` (the inline-script path the one-task flow uses), the runner evaluates the string with
-  `vm.runInThisContext` inside a function that has the same globals in scope.
+- Runner compiles the workflow **as a function body**, not a module: the scripts start with
+  `export const meta` and end with a top-level `return`, so `import()` is impossible. It strips the
+  `meta` declaration (keeping the line count so stack traces still line up), evaluates the literal,
+  then runs `new AsyncFunction("args","agent","phase","parallel","pipeline","log", body)`. Inline
+  `script` bodies take the same path; they simply have no `meta`.
 - IPC protocol, one JSON object per line, both directions:
   - child → parent: `{t:"agent", id, prompt, opts}` · `{t:"phase", ...}` · `{t:"log", text}` ·
     `{t:"done", result}` · `{t:"error", message, stack}`
   - parent → child: `{t:"result", id, value|error}` · `{t:"cancel", id}`
-- Parent on `phase`/`log`: append to the run log and post a **synthetic** message to the parent
-  session (`ctx.session.prompt({delivery:"queue"})`, no interruption). Phase-level granularity only.
-- Parent on `done`: post the final result as a synthetic message, close the record (D7), notify
-  if `run.notify_command` is configured.
+- Parent on `phase`/`log`: append to the run log and post a transcript-only synthetic message
+  (`ctx.session.synthetic({sessionID, text})`, no delivery). It is visible in the transcript but does
+  not start a model turn; phase-level granularity only.
+- Parent on `done`: post the final result with `ctx.session.prompt({delivery:"queue"})` so the parent
+  wakes once, then close the record (D7) and notify if `run.notify_command` is configured. Failures
+  wake the session the same way.
 - Cancellation: `session.interrupt` on the parent, or the run's wall-clock cap, sends `cancel` and
   kills the child tree.
 
@@ -146,20 +149,29 @@ future workflow schema change fails loudly).
 
 ### 1.4 Acceptance
 
-- [ ] A trivial 2-phase workflow with three `agent()` calls runs end to end and returns its result.
-- [ ] `spec-implement.js` and `spec-create.js` are executed **unmodified** (diff of the vendored copy
-      against `plugin/workflows/` is empty at build time).
-- [ ] A step with a schema gets a validated object; a deliberately wrong submission gets field errors
-      and then succeeds; a never-submitting child fails the step with a clear error.
-- [ ] A child whose model is missing/invalid fails at resolution, not 20 minutes in.
-- [ ] Guard-denied child halts the step; `[ck guard]` text is in the error.
-- [ ] `deepseek-v4.1-flash-free` completes a 1-task workflow (smoke).
-- [ ] Tokens, cost and wall clock per child appear in the run log.
+- [x] A trivial 2-phase workflow with three `agent()` calls runs end to end and returns its result.
+      Live on 2026-10-30 with `opencode-go/beam-free`: `ALPHA`, `BETA`, `{ok:true}`, in 4.5 s.
+- [x] `spec-implement.js` and `spec-create.js` are vendored **unmodified** (`sync-vendor --check`
+      compares source and copy digests). Executing both real workflows is still pending E0.
+- [x] A step with a schema gets a validated object; a deliberately wrong submission gets field errors
+      and then succeeds; a never-submitting child fails the step with a clear error. (Live structured
+      step plus the fake-session rejection/retry test.)
+- [x] A child whose model is missing/invalid fails at resolution, not 20 minutes in.
+- [ ] Guard-denied child halts the step; `[ck guard]` text is in the error. (Phase 3.)
+- [ ] `deepseek-v4.1-flash-free` completes a 1-task workflow (smoke). Blocked: `provider.free-limit`
+      429 until ~01:00Z; `claude-sonnet-5-5` returns `provider.quota` 402 (account unfunded).
+- [x] Tokens, cost and wall clock per child appear in the run log.
 
 ### 1.5 Calibration gate
 
 `/spec/implement` on one small spec with `opencode/claude-sonnet-5-5` (E0). **If this fails, stop
 and fix the port** — every cheap-model number below it would be measuring the port, not the model.
+
+Attempted on 2026-10-30. Sonnet failed before the first model step with `provider.quota` / HTTP 402
+"Insufficient account funds"; `opencode/deepseek-v4.1-flash-free` failed with `provider.free-limit` /
+HTTP 429, `retryAfterMs` ~19.7 M. The bridge itself was then proven live on `opencode-go/beam-free`.
+E0 remains **blocked on quota/funding**, not on the port, and must be rerun before any benchmark
+number is trusted.
 
 ---
 
@@ -295,7 +307,7 @@ informational. Runs automatically at the start of `/spec/implement`.
 |---|---|---|
 | E0 | `opencode/claude-sonnet-5-5` | calibration; gates everything |
 | E1 | `opencode/deepseek-v4.1-flash-free` | free tier A (200K/32K, weak Terminal-Bench) |
-| E2 | `opencode/muse-spark-1.3-contributor-free` | free tier B (1M/131K) |
+| E2 | `opencode-go/muse-spark-1.3-contributor` (confirm the free id) | free tier B (1M/131K) |
 | baseline | Opus 5.5 / Sonnet 5.5 | from `ck bench` on Claude Code |
 
 3 reps per spec, same base commit, fresh worktree, pass@1 + pass^3 + wall clock + tokens + $ +

@@ -42,6 +42,8 @@ export interface GuardConfig {
 
 export interface RunConfig {
   childTimeoutMinutes: number;
+  /** How long a child may sit without starting before it is treated as a dead agent id. */
+  startTimeoutSeconds: number;
   pollIntervalMs: number;
   /** In-child result rejections allowed before one whole-child retry. */
   resultRepairAttempts: number;
@@ -101,6 +103,7 @@ export function defaultConfig(): CkConfig {
     },
     run: {
       childTimeoutMinutes: 90,
+      startTimeoutSeconds: 60,
       pollIntervalMs: 250,
       resultRepairAttempts: 1,
       stateDir: null,
@@ -126,6 +129,15 @@ export function globalConfigPath(env: Readonly<Record<string, string | undefined
 
 export function projectConfigPath(directory: string): string {
   return join(directory, "specs", "ck.json");
+}
+
+/** Where run logs and records live. Always outside the worktree under test. */
+export function resolveStateDir(
+  config: CkConfig,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  if (config.run.stateDir) return config.run.stateDir;
+  return join(env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "claude-kiro", "opencode");
 }
 
 export function loadConfig(input: LoadConfigInput): LoadedConfig {
@@ -387,6 +399,10 @@ function mergeRun(
   if (value.childTimeoutMinutes !== undefined) {
     target.run.childTimeoutMinutes = positiveNumber(value.childTimeoutMinutes, `${source}: run.childTimeoutMinutes`, true);
     sources["run.childTimeoutMinutes"] = source;
+  }
+  if (value.startTimeoutSeconds !== undefined) {
+    target.run.startTimeoutSeconds = positiveNumber(value.startTimeoutSeconds, `${source}: run.startTimeoutSeconds`, true);
+    sources["run.startTimeoutSeconds"] = source;
   }
   if (value.pollIntervalMs !== undefined) {
     const poll = positiveNumber(value.pollIntervalMs, `${source}: run.pollIntervalMs`, true);

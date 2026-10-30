@@ -15,11 +15,19 @@ Decisions are locked in order. Anything not listed under "Locked" is still open.
 - The plugin registers a tool literally named `workflow`, so `Call the Workflow tool with name:
   "spec:spec-create"` in the existing skill text needs no edits.
 - The tool runs the existing `plugin/workflows/*.js` **verbatim** in a child `node` process with a
-  `vm` runtime mapping `agent(prompt, {label, phase, model, effort, schema})`, `phase()`,
+  runtime mapping `agent(prompt, {label, phase, model, effort, schema})`, `phase()`,
   `parallel()`, `pipeline()`, `log()`, `args`. No workflow edits.
+- **The scripts are function bodies, not ES modules.** Each starts with `export const meta = {…}` and
+  ends with a top-level `return {…}`; `import()` would reject both. The runner removes the `meta`
+  declaration (preserving line numbers), evaluates it, and compiles the rest with
+  `new AsyncFunction("args", "agent", "phase", "parallel", "pipeline", "log", body)`. Inline `script`
+  bodies take the same path (they simply have no `meta`).
 - Execution is **background**, like Claude Code: the tool returns a run id immediately and the parent
-  session is not frozen (spawn-worktree launches several runs without waiting). Completion arrives as
-  a synthetic message; progress arrives as phase-level synthetic messages.
+  session is not frozen (spawn-worktree launches several runs without waiting). Progress is a
+  transcript-only `ctx.session.synthetic({sessionID, text})` message (no delivery, no model turn);
+  completion and failure use `ctx.session.prompt({delivery:"queue"})` so the parent wakes exactly once
+  to report the result. Verified live: two phase messages caused zero extra turns, the final one caused
+  one.
 - **`agent()` completion is observed, not awaited.** `session.prompt` only enqueues; `session.wait` can
   resolve before the run starts (verified: 3 ms with the child idle). `runChild` therefore watches
   `session.get().time.busy` appear and then `time.idle ≥ busy`, cross-checks
@@ -77,6 +85,10 @@ Model facts that drove the ladder discussion (models.dev, 2026-10-30):
 | `opencode-go/deepseek-v4.1-flash` | 1,000,000 | 384,000 | 0.15 / 0.60 | low, high, max |
 | `opencode/muse-spark-1.3-contributor-free` | 1,048,576 | 131,072 | 0 / 0 | see catalog |
 | `opencode-go/muse-spark-1.3-contributor` | 1,048,576 | 131,072 | 0.10 / 0.20 | see catalog |
+
+`opencode models` on the same day listed `opencode/muse-spark-1.3` and
+`opencode-go/muse-spark-1.3-contributor`; the `-contributor-free` id was **not** present. Confirm the
+E2 id and its price before running that arm.
 
 AA Coding Agent Index v2.0 (equal weight FrontierCode v1.1, Terminal-Bench 4.0, SWE-Atlas-QnA-AA):
 Opus 5.5 61.7 ($11.42/task), Sonnet 5.5 59.3, GPT-6 Astra 54.7, GPT-6.1 Sol 54.1 ($1.50),
@@ -284,7 +296,7 @@ Order matters: the calibration run gates the rest.
 |---|---|---|---|
 | E0 | Calibration | `opencode/claude-sonnet-5-5` | Prove the port itself works. If E0 fails, stop — nothing below is interpretable. |
 | E1 | Free tier A | `opencode/deepseek-v4.1-flash-free` | 200K/32K limit, FC 52.6 but TB 28.3. Expect gate/worktree failures. |
-| E2 | Free tier B | `opencode/muse-spark-1.3-contributor-free` | 1M/131K, no AA agent score. Different family, better terminal use in the AA row (31.8). |
+| E2 | Free tier B | `opencode-go/muse-spark-1.3-contributor` (confirm the free id) | 1M/131K, no AA agent score. Different family, better terminal use in the AA row (31.8). |
 
 E1 and E2 are both **all roles pinned to one model** for the first pass, exactly as Claude Code's
 all-Opus/all-Sonnet runs are single-model. Role-specific ladders come after these two numbers exist.

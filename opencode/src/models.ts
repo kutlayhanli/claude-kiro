@@ -141,7 +141,7 @@ export function resolveModel(requested: string, options: ResolveModelOptions): R
   }
 
   if (requested === INHERIT) {
-    notes.push("model inherit uses the session model and no variant");
+    notes.push("model inherit uses the session model");
     return {
       requested: { model: requested, effort: rawEffort },
       resolved: null,

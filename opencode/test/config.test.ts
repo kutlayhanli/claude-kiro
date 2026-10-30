@@ -9,6 +9,7 @@ import {
   defaultConfig,
   globalConfigPath,
   loadConfig,
+  resolveStateDir,
   selectAgent,
 } from "../src/config.ts";
 
@@ -57,6 +58,7 @@ test("defaults are usable without any config file", () => {
     ]);
     assert.equal(config.guard.enabled, true);
     assert.equal(config.run.childTimeoutMinutes, 90);
+    assert.equal(config.run.startTimeoutSeconds, 60);
     assert.equal(config.run.resultRepairAttempts, 1);
     assert.equal(config.run.stateDir, null);
     assert.equal(sources["models.sonnet"], "default");
@@ -241,6 +243,16 @@ test("opencode.run.notifyCommand wins over the ck fallback", () => {
   } finally {
     f.cleanup();
   }
+});
+
+test("run state lives outside the project unless configured", () => {
+  const config = defaultConfig();
+  assert.equal(
+    resolveStateDir(config, { XDG_STATE_HOME: "/var/tmp/state" }),
+    "/var/tmp/state/claude-kiro/opencode",
+  );
+  config.run.stateDir = "/var/tmp/ck-runs";
+  assert.equal(resolveStateDir(config, { XDG_STATE_HOME: "/var/tmp/state" }), "/var/tmp/ck-runs");
 });
 
 test("selectAgent applies the default review mapping and falls through to the worker", () => {
