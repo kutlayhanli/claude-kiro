@@ -94,6 +94,21 @@ harnesses see the same rule.
 `ck bench import` is still the collection format; the native record is kept under
 `bench/runs/opencode-state/<arm>/claude-kiro/opencode/runs/`.
 
+## Model availability (checked 2026-10-30)
+
+| Ref | Status |
+|---|---|
+| `opencode/claude-sonnet-5-5` | HTTP 402, account unfunded — the intended E0 baseline |
+| `opencode/deepseek-v4.1-flash-free` | HTTP 429, `retryAfterMs` ~19.7 M — E1 |
+| `opencode-go/muse-spark-1.3-contributor` | HTTP 400, workspace must allow train-on-request-data — E2 |
+| `opencode-go/deepseek-v4-pro` | works; live demo arm merged 1/1 in 4.31 min, $0.00 reported |
+| `opencode-go/claude-haiku-5-5` | works, but too weak for E0 |
+| `opencode-go/beam-free` | works; used for the repeated harness E2E (1.1 min) |
+
+Use `opencode models | grep <name>` to confirm a ref before adding an arm. A 402 is a funding
+blocker, a 429 is a throttle (retry later), and a 400 privacy error needs a workspace setting; none
+of those is a port failure.
+
 ## Claude Code baseline
 
 Run the same specs on the same base with `ck bench` on Claude Code. Use a separate `results_dir`;

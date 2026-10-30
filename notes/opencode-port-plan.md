@@ -392,6 +392,14 @@ release is 0.11.0. The E0 command is ready; top up the OpenCode account or wait 
 window, then run `ck bench run bench-opencode.json --harness opencode --only <spec>--sonnet-5-5--r1`
 before the cheap arms.
 
+**Strong-model calibration on an available ref (2026-10-30):** `opencode-go/deepseek-v4-pro` works
+and the live demo arm merged 1/1 with a green final gate in 4.31 min, peak context 27,258, 119,617
+input / 6,619 output / 950,016 cache-read tokens, and a provider-reported $0.00. This proves the port
+under a strong model, but it is **not** the Sonnet E0 baseline; a cross-model number cannot be
+compared with Claude Code Sonnet. `opencode-go/claude-haiku-5-5` also responds but is not an E0
+candidate; `opencode-go/muse-spark-1.3-contributor` is blocked by the workspace's
+train-on-request-data privacy setting.
+
 **Full suite (post-merge, 0.11.0):** `uv run pytest -q -n auto` → **2938 passed, 16 skipped** in 4:03.
 `opencode/test/*.test.ts` → **142 passed**. `tsc --noEmit` clean.
 
