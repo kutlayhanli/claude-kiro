@@ -28,6 +28,8 @@ from eta_strategies import (
     EV_APPROVAL_END,
     EV_APPROVAL_START,
     EV_END,
+    EV_HAND_LANDING,
+    EV_MERGE,
     EV_START,
     events,
     graphs,
@@ -114,15 +116,24 @@ def _finish(view: Dict[str, Any]) -> Optional[Dict[str, datetime]]:
 
 
 def _closed_wait_minutes(evs: List[Dict[str, Any]], launch: datetime) -> float:
-    """Minutes during which at least one wait was open and has closed (overlaps merged), from the events alone."""
+    """Minutes during which at least one wait was open and has closed (overlaps merged), from the events alone.
+
+    A wait is an approval-start/approval-end pair, or a `hand-landing` (id `hand-<task>`) closed by that task's `merge`.
+    """
     opened: Dict[str, datetime] = {}
     spans = []
     for ev in evs:
         at = _parse(ev["at"])
-        if ev["kind"] == EV_APPROVAL_START:
+        kind = ev["kind"]
+        if kind == EV_APPROVAL_START:
             opened.setdefault(ev["id"], at)
-        elif ev["kind"] == EV_APPROVAL_END and ev["id"] in opened:
+        elif kind == EV_APPROVAL_END and ev["id"] in opened:
             spans.append((opened.pop(ev["id"]), at))
+        elif kind == EV_HAND_LANDING:
+            opened.setdefault("hand-" + str(ev["task"]), at)
+        elif kind == EV_MERGE and "hand-" + str(ev.get("task")) in opened:
+            wid = "hand-" + str(ev["task"])
+            spans.append((opened.pop(wid), at))
     total, cur_s, cur_e = 0.0, None, None
     for s, e in sorted(spans):
         if cur_e is None or s > cur_e:
@@ -136,6 +147,30 @@ def _closed_wait_minutes(evs: List[Dict[str, Any]], launch: datetime) -> float:
     return total
 
 
+def _no_hold() -> Any:
+    from claude_kiro.eta import decide
+
+    hold_cls = getattr(decide, "Hold", None)
+    if hold_cls is not None:
+        try:
+            return hold_cls(kind="none", reason=None, reason_key=None, held=(), waiting_on_you=(), whole_run=False)
+        except TypeError:
+            pass
+    return SimpleNamespace(kind="none", reason=None, reason_key=None, held=(), waiting_on_you=(), whole_run=False)
+
+
+def _is_slip(notice: Any) -> bool:
+    """True when the notice is a slip notice, by its key or by its NOTICE_TYPES type, whatever the field is named."""
+    from claude_kiro.eta import decide
+
+    slip_type = getattr(decide, "NOTICE_TYPES", {}).get("slip")
+    for name in ("kind", "notice", "type", "notice_type", "notification_type"):
+        value = notice.get(name) if isinstance(notice, dict) else getattr(notice, name, None)
+        if value is not None and (value == "slip" or (slip_type is not None and value == slip_type)):
+            return True
+    return False
+
+
 def _slip_notices(view: Dict[str, Any], evs: List[Dict[str, Any]], launch_p90_min: Optional[float],
                   spec: str = SPEC) -> List[Any]:
     """The slip notices `decide.notify_decision` would send for this view with nothing sent before."""
@@ -147,10 +182,27 @@ def _slip_notices(view: Dict[str, Any], evs: List[Dict[str, Any]], launch_p90_mi
     waited = _closed_wait_minutes(evs, launch)
     ni = SimpleNamespace(
         spec=spec, state=view["state"], p50_finish_min=p50_min, p50=p50_min, waited_min=waited, waited=waited,
-        launch_p90_min=launch_p90_min, launch_p90=launch_p90_min, hold=None, ended=view.get("ended"),
+        launch_p90_min=launch_p90_min, launch_p90=launch_p90_min, hold=_no_hold(), ended=view.get("ended"),
         view=view, kind=view.get("runKind"),
     )
-    return [n for n in decide.notify_decision(ni, (), THRESHOLD_MIN) if getattr(n, "kind", None) == "slip"]
+    return [n for n in decide.notify_decision(ni, (), THRESHOLD_MIN) if _is_slip(n)]
+
+
+def test_slip_helper_can_see_a_slip():
+    """Guard: the helper must report a slip when one is plain, so an unexpected notice shape fails loudly here."""
+    start = "2026-01-01T00:00:00Z"
+    view = {"state": "slipping", "ended": False, "runKind": "implement",
+            "finish": {q: (_parse(start) + timedelta(minutes=m)).strftime(ISO_FMT)
+                       for q, m in (("p10", 300), ("p50", 400), ("p90", 500))}}
+    evs = [{"at": start, "kind": EV_START}]
+    slips = _slip_notices(view, evs, launch_p90_min=100.0)
+    assert slips, "notify_decision returned no slip notice for p50 400 vs launch p90 100: notice shape unrecognised"
+
+
+def _launch_summary(view: Dict[str, Any]) -> Dict[str, Any]:
+    return {"finish": [view["finish"][q] for q in ("p10", "p50", "p90")] if view.get("finish") else None,
+            "remainingMin": view.get("remainingMin"), "usd": view.get("usd"),
+            "confidence": view.get("confidence", "low")}
 
 
 @st.composite
@@ -164,7 +216,7 @@ def shifted_runs(draw):
 
 
 @settings(derandomize=True, max_examples=50, database=None, deadline=None,
-          suppress_health_check=list(HealthCheck))
+          suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large, HealthCheck.filter_too_much])
 @given(shifted_runs())
 def test_p8_approval_wait_shifts_the_estimate(case):
     graph, evs, wait, insert_at, since_last = case
@@ -174,7 +226,13 @@ def test_p8_approval_wait_shifts_the_estimate(case):
                            files=g["files"], criteria=g["criteria"], deps=tuple(g["deps"]))
                  for tid, g in graph.items()]
         repo = h.eta_spec(root / "project", tasks, spec=SPEC)
-        start = dict(evs[0], root=str(repo), mode="workflow", slots=int(SLOTS), slotsSource="runtime", spool=False)
+        key = "demo--20260101T000000Z-" + evs[0]["run"]
+        start0 = dict(evs[0], run=key, root=str(repo), mode="workflow", slots=int(SLOTS), slotsSource="runtime",
+                      spool=True)
+        launch_view = _write_view(repo, key, [start0], _parse(start0["at"]))
+        launch_fin = _finish(launch_view)
+        launch_p90 = None if launch_fin is None else (launch_fin["p90"] - _parse(start0["at"])).total_seconds() / 60
+        start = dict(start0, launch=_launch_summary(launch_view))
         base = [start, *evs[1:]]
         anchor = _parse(base[insert_at - 1]["at"])
         opened = {"schema": start["schema"], "at": anchor.strftime(ISO_FMT), "kind": EV_APPROVAL_START,
@@ -184,11 +242,9 @@ def test_p8_approval_wait_shifts_the_estimate(case):
         with_wait = [*base[:insert_at], opened, closed, *[_shifted(e, wait) for e in base[insert_at:]]]
         now_a = _parse(base[-1]["at"]) + timedelta(minutes=since_last)
         now_b = now_a + timedelta(minutes=wait)
-        key = "demo--20260101T000000Z-" + start["run"]
 
         view_a = _write_view(repo, key, base, now_a)
         view_b = _write_view(repo, key, with_wait, now_b)
-        launch_view = _write_view(repo, key, [start], _parse(start["at"]))
 
         fin_a, fin_b = _finish(view_a), _finish(view_b)
         if fin_a is None or fin_b is None:
@@ -199,8 +255,6 @@ def test_p8_approval_wait_shifts_the_estimate(case):
 
         assert not (view_a["state"] == "on-track" and view_b["state"] == "slipping"), (view_a["state"], view_b["state"])
 
-        launch_fin = _finish(launch_view)
-        launch_p90 = None if launch_fin is None else (launch_fin["p90"] - _parse(start["at"])).total_seconds() / 60
         slips_a = _slip_notices(view_a, base, launch_p90)
         slips_b = _slip_notices(view_b, with_wait, launch_p90)
         assert len(slips_b) <= len(slips_a), (len(slips_a), len(slips_b))
