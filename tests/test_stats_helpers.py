@@ -263,7 +263,8 @@ def test_seeded_home_plants_every_confidential_string(tmp_path):
 def test_seeded_local_record_has_the_contract_keys_and_plants_strings(kind):
     rec = seeded_local_record(kind)
     common = {"schema", "runId", "workflow", "outcome", "ckVersion", "collectorVersion", "claudeCodeVersion", "startTime", "wallMs",
-              "agentsConfig", "projectPseudonym", "outcomeInferred", "sessionId", "workflowName", "status", "project", "terms", "costs", "byModel", "byRole", "byPhase", "byTask", "agents", "missing"}
+              "agentsConfig", "projectPseudonym", "outcomeInferred", "sessionId", "workflowName", "status", "project", "terms", "costs", "byModel", "byRole", "byPhase", "byTask", "agents", "missing",
+              "interruptions"}  # every collected record carries it (prompt-free-runs design.md:137)
     # design.md ImplementMetrics / CreateMetrics, as listed in the test plan's Harness Contract
     extra = ({"tasks", "landings", "fullGates", "finalGate", "crossTests", "fixerEscalations", "phases",
               "reportSource", "taskSpanMinutes", "stats"} if kind == "spec-implement"
