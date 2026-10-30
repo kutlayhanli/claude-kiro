@@ -335,14 +335,20 @@ informational. Runs automatically at the start of `/spec/implement`.
 
 ### 4.2 Step 2 (launcher + collector, after the first results)
 
-- `ck bench run --harness opencode`: launcher in `bench.py` (~line 635) that starts an
-  OpenCode session instead of `ck run`, and a collector that reads the `ck-run-local` record by run
-  id. Both collectors behind one interface.
+**Status:** code-complete, tested with a fake `opencode`; no real arm has run because E0 is blocked
+on quota. `ck bench run --harness opencode` clones at the base, writes the arm's alias map, assembles
+the `spec-implement` args (`bench_opencode.workflow_args`), installs the probe, runs
+`opencode run --standalone`, imports `bench-output.json`, and overlays native tokens/cost. Guard
+denials, a non-`done` record, a timeout or a nonzero exit mark the arm fail-closed. Release is 0.11.0.
+
+- `ck bench run --harness opencode`: launcher in `bench.py` (`run_arm_opencode`) and a collector
+  that reads the native record; the probe path is used because `opencode run` cannot dispatch slash
+  commands and a bare `opencode serve` did not activate the clone's plugins.
 - **Launch caveat:** a bare `opencode serve` did not activate the clone's project plugins (a session
   with `location.directory` still listed no commands). The proven path is the harness-probe tool:
   copy a small `bench-probe.js` into the clone, have it call the `workflow` tool and poll the record,
-  and run it through `opencode run --standalone` so the turn stays alive. The launcher still has to
-  assemble the `spec-implement` args from `ck plan`/`ck agents`; see
+  and run it through `opencode run --standalone` so the turn stays alive. The launcher assembles the
+  `spec-implement` args from `ck plan`/`ck agents`; see
   `notes/opencode-bench-launcher.md`.
 
 ### 4.3 Experiments
@@ -356,6 +362,12 @@ informational. Runs automatically at the start of `/spec/implement`.
 
 3 reps per spec, same base commit, fresh worktree, pass@1 + pass^3 + wall clock + tokens + $ +
 escalations + throttles + peak context, every failure labelled `model|port|throttle|spec|env`.
+
+**Blocked on quota (2026-10-30):** `opencode/claude-sonnet-5-5` returns HTTP 402 "Insufficient
+account funds"; `opencode/deepseek-v4.1-flash-free` returns 429 with `retryAfterMs` ~19.7 M. The
+release is 0.11.0. The E0 command is ready; top up the OpenCode account or wait for the free-tier
+window, then run `ck bench run bench-opencode.json --harness opencode --only <spec>--sonnet-5-5--r1`
+before the cheap arms.
 
 ---
 
