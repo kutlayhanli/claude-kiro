@@ -4,12 +4,15 @@
 //   {op:'run', project, args, slots}                  -> {ok:true, result, logs, trace, prompts, opts, events}
 // Any throw -> {ok:false, error}. Durations in the project options are milliseconds (1-40).
 import readline from 'node:readline'
-import { runWorkflow } from './load_workflow.mjs'
+import { runWorkflow, useVirtualTime } from './load_workflow.mjs'
 import { project } from './fake_project.mjs'
 import { loadDecisions, SCRIPT, GUARD_NAMES } from './load_decisions.mjs'
 
 
-const baseArgs = { spec: 'demo', root: '/repo', into: 'integrate/demo', targetDir: '/repo/.ck/worktrees/demo-integration' }
+// Fake agent durations run on a virtual clock, so a scenario replays identically however loaded the machine is.
+useVirtualTime()
+
+const baseArgs ={ spec: 'demo', root: '/repo', into: 'integrate/demo', targetDir: '/repo/.ck/worktrees/demo-integration' }
 
 async function handle(req) {
   if (req.op === 'ready') {

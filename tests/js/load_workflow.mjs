@@ -76,4 +76,32 @@ export function loadFunction(scriptPath, name) {
   try { return new Function(`${body}\nreturn ${name}`)() } catch (e) { throw new Error(`function ${name} cannot be evaluated alone: ${e.message}`) }
 }
 
-export const sleep = ms => new Promise(r => setTimeout(r, ms))
+// Virtual time (opt-in, used by the bridge): `sleep` timers fall due on a simulated clock that moves only when
+// every promise chain has settled, earliest due first and, on a tie, in the order they were set. Real timers let
+// load (another test process, a GC pause) reorder two timers due within a millisecond of each other, so two runs
+// of one scenario could differ; on the virtual clock a scenario always plays out the same way.
+let virtual = null
+export function useVirtualTime() {
+  if (virtual) return
+  virtual = { now: 0, seq: 0, timers: [], pumping: false }
+}
+function pump() {
+  const v = virtual
+  if (!v.timers.length) { v.pumping = false; return }
+  let i = 0
+  for (let j = 1; j < v.timers.length; j++) {
+    const a = v.timers[j], b = v.timers[i]
+    if (a.due < b.due || (a.due === b.due && a.seq < b.seq)) i = j
+  }
+  const [t] = v.timers.splice(i, 1)
+  v.now = t.due
+  t.resolve()
+  setImmediate(pump)  // runs after the microtasks the resolved timer started have all settled
+}
+export const sleep = ms => {
+  if (!virtual) return new Promise(r => setTimeout(r, ms))
+  return new Promise(resolve => {
+    virtual.timers.push({ due: virtual.now + Math.max(1, Number(ms) || 0)  /* as setTimeout: under 1 ms means 1 ms */, seq: virtual.seq++, resolve })
+    if (!virtual.pumping) { virtual.pumping = true; setImmediate(pump) }
+  })
+}

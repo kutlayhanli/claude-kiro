@@ -386,6 +386,42 @@ def _task_span_minutes(record: Mapping[str, Any]) -> Optional[float]:
     return float(v) if _num(v) else None
 
 
+_LADDER_ORDER = ("sonnet", "opus", "fable")
+
+
+def interruptions_view(record: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    """The record's interruption counts, or None for a record without them (built before the feature)."""
+    block = record.get("interruptions") if isinstance(record, Mapping) else None
+    if not isinstance(block, Mapping) or not isinstance(block.get("totals"), Mapping):
+        return None
+    return dict(block)
+
+
+def interruptions_line(view: Optional[Mapping[str, Any]]) -> str:
+    """One line: prompts and wait, guard denials and escalations, refusals, then any non-zero extra kinds."""
+    totals = view.get("totals") if isinstance(view, Mapping) else None
+    if not isinstance(totals, Mapping):
+        return "interruptions: not recorded"
+
+    def n(key: str) -> int:
+        v = totals.get(key)
+        return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else 0
+
+    models_raw = view.get("escalationModels") if isinstance(view.get("escalationModels"), Mapping) else {}
+    present = [m for m, c in models_raw.items() if isinstance(m, str) and isinstance(c, int) and c > 0]
+    models = [m for m in _LADDER_ORDER if m in present] + sorted(m for m in present if m not in _LADDER_ORDER)
+    esc = n("guardEscalations")
+    esc_text = f"{esc} escalation{'' if esc == 1 else 's'}" + (f" ({', '.join(models)})" if esc and models else "")
+    minutes = int(round(n("waitMs") / 60000))
+    line = (f"interruptions: {n('prompts')} prompts ({minutes} min waiting) · {n('guardDenials')} guard denials"
+            f" → {esc_text} · {n('isolationRefusals')} refusals")
+    for key, word in (("postCheckCatches", "post-check catches"), ("autoModeDenials", "auto-mode denials"),
+                      ("headlessDenials", "headless denials"), ("userRejects", "rejections")):
+        if n(key):
+            line += f" · {n(key)} {word}"
+    return line
+
+
 def run_breakdown(record: Mapping[str, Any]) -> Dict[str, Any]:
     tasks = _implement_tasks(record)
     by_task = record.get("byTask") if isinstance(record.get("byTask"), Mapping) else {}
@@ -443,6 +479,7 @@ def run_breakdown(record: Mapping[str, Any]) -> Dict[str, Any]:
     impl_span = _task_span_minutes(record)
     return {
         "record": record,
+        "interruptions": interruptions_view(record),
         "run": {
             "run_id": record.get("runId"),
             "date": _date(record),
@@ -591,6 +628,7 @@ def render_run(view: Mapping[str, Any]) -> List[str]:
         f"cost: {_usd(run.get('cost_usd'))}" + (f" ({src})" if src else f" ({UNKNOWN} source)"),
         f"tasks: {_fmt(run.get('tasks_merged'))} merged, {_fmt(run.get('tasks_failed'))} failed, "
         f"{_fmt(run.get('tasks_total'))} total",
+        interruptions_line(view.get("interruptions")),
         "",
     ]
     for title, key in (("by role", "by_role"), ("by phase", "by_phase"), ("by model", "by_model")):
@@ -677,6 +715,7 @@ def run_json(view: Mapping[str, Any]) -> Dict[str, Any]:
     ld = view.get("landings") or {}
     rates = view.get("rates") or {}
     out: Dict[str, Any] = dict(record)
+    out["interruptions"] = view.get("interruptions")
     # the queue and split fields live in the record file and in queueWait / waitSplit; the existing
     # `agents` and `tasks` values keep their pre-change shape here
     if isinstance(record.get("agents"), list):
