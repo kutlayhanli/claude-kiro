@@ -338,15 +338,27 @@ def has_cycle(spec: Spec) -> bool:
     return any(n not in state and visit(n) for n in known)
 
 
+def acyclic_part(spec: Spec) -> Spec:
+    """A copy of spec without the dependency edges on a cycle (a depends on d, and d reaches a or d is a)."""
+    out = copy.deepcopy(spec)
+    for t in out.tasks:
+        t.deps = [d for d in spec.get(t.num).deps if d != t.num and not (d in {u.num for u in spec.tasks} and reaches(spec, d, t.num))]
+    return out
+
+
 @SETTINGS
 @given(spec=specs(cyclic=True))
 def test_p23_cycles_and_dangling_ids_never_raise(spec):
     found, full = run(spec)  # must not raise
     if has_cycle(spec):
         assert full["cycles"], "a dependency cycle is still reported"
-    # Looser than the row: the oracle runs over the whole graph (reachability through a cycle is still a real
-    # ancestor), so found entries need only be a subset of it.
-    assert keys(found) <= oracle(spec)
+    # The row's oracle over the acyclic part: drop every dependency edge that lies on a cycle (self-loops and
+    # edges inside a strongly connected component). Every entry that oracle finds needs no cycle to hold, so it
+    # must be reported. Reachability through a cycle is still a real ancestor (Task 5: X is an ancestor of Y), so
+    # entries are bounded above by the whole-graph oracle rather than equal to the acyclic one.
+    acyclic = acyclic_part(spec)
+    assert not has_cycle(acyclic)
+    assert oracle(acyclic) <= keys(found) <= oracle(spec)
     for e in found:
         assert e["chain"][0] == e["needs"] and e["chain"][-1] == e["task"]
 

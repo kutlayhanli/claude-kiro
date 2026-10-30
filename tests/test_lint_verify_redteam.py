@@ -53,12 +53,16 @@ def silent(tmp_path, blocks: str):
 
 @pytest.mark.parametrize("owned", ["tests/Test_Perf.py", "tests/test_perf.PY", "tests/test_perf.py.orig", "tests/test_perf.pyc", "tests/sub/tests/test_perf.py", "xtests/test_perf.py"])
 def test_134_near_miss_file_names_in_the_test_tasks_files(tmp_path, owned):
+    """Path matching is exact and case-sensitive (design.md S13), so the case variants are other files."""
     silent(tmp_path, shape(t_files=(owned,)))
 
 
 @pytest.mark.parametrize("owned", [PERF + " ", PERF + "  "])
 def test_134_trailing_space_in_the_files_entry_is_not_a_different_file(tmp_path, owned):
-    """Paired with the positive control: whitespace inside the backticks must not hide F from the rule."""
+    """Paired with the positive control: whitespace inside the backticks must not hide F from the rule.
+
+    Specified in design.md S13 and Task 5: each Files path is compared after stripping surrounding whitespace.
+    """
     control_fires(tmp_path)
     write_spec(tmp_path, shape(t_files=(owned,)))
     assert [(e["task"], e["needs"]) for e in entries(tmp_path)] == [("8", "13")]

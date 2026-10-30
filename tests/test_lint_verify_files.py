@@ -213,7 +213,8 @@ def test_tc82_cycles_and_unknown_tasks_never_hide_entries(tmp_path):
     data = lint_json(tmp_path)
     assert {frozenset(c) for c in data["cycles"]} == {frozenset({"11", "12"})}
     assert [(e["task"], e["needs"]) for e in data["verifyCycles"] if e.get("kind") == "verify-file"] == [("8", "13")]
-    assert "99" in out.output, "the unknown-task error is still reported"
+    # design.md 13.7 / Task 5: text mode prints `⚠ Task <N> depends on unknown Task <ids>`, also with a cycle.
+    assert "Task 14 depends on unknown Task 99" in out.output, "the unknown-task error is still reported"
     assert "verify-file cycle" in out.output
 
 
