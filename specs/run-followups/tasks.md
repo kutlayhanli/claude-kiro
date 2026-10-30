@@ -624,7 +624,7 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 ---
 
 ### Task 21: Test the status line, progress-driven notifications and the performance NFRs
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.9, 3.10, 4.4, 8.1, 8.2, 8.3, 8.4, 8.5, 8.7, 8.8, 8.10, 8.11
 **Description:** Implement the cases whose entry points are `ck progress`, `ck eta --watch`'s time-only check, `ck-status-line` and the maintainer commands: TC-53(a), TC-54 (CLI part), TC-55, TC-56, TC-57, TC-59, TC-60 (CLI part), TC-61, TC-85, TC-86, TC-89, TC-90 and TC-101, plus red-team cases for 8.3 and 8.4. P-16, P-17 and P-18 live in Task 15.
@@ -641,12 +641,12 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 **Verify:** `uv run pytest -q -n auto tests/test_eta_surfaces.py tests/test_eta_notify.py tests/test_eta_redteam_surfaces.py` `uv run pytest -q tests/test_eta_perf.py`
 **Verifies:** Task 22 (`ck progress` log lines and notifications, the status line, the backtest command)
 **Acceptance:**
-- [ ] Tests exercise the real `ck-status-line` entry point with stdin JSON, real `ck progress` and `ck eta --watch` subprocesses, a real notify subprocess and real config. TC-57(b) uses a real-time watcher with `RECHECK_ENV=1` and a test-level timeout
-- [ ] Before implementation they fail because the status line and the progress commands are missing
-- [ ] No mocks of project code. The notify command is a real script. Message counts are exact (no "at least")
-- [ ] Timing thresholds match the NFRs exactly, with the right baseline for each; the calibration figure is opt-in
-- [ ] Each red-team clause has at least two cases; a FIFO case times out at the test level rather than hanging the suite
-- [ ] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
+- [x] Tests exercise the real `ck-status-line` entry point with stdin JSON, real `ck progress` and `ck eta --watch` subprocesses, a real notify subprocess and real config. TC-57(b) uses a real-time watcher with `RECHECK_ENV=1` and a test-level timeout
+- [x] Before implementation they fail because the status line and the progress commands are missing
+- [x] No mocks of project code. The notify command is a real script. Message counts are exact (no "at least")
+- [x] Timing thresholds match the NFRs exactly, with the right baseline for each; the calibration figure is opt-in
+- [x] Each red-team clause has at least two cases; a FIFO case times out at the test level rather than hanging the suite
+- [x] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
 **Dependencies:** Task 2 (helpers, notify wrappers, pools, baselines)
 **Complexity:** High
 **Risk:** safety (exercises notifications sent through the user's `run.notify_command`)
@@ -716,7 +716,7 @@ Skip the permission cases as root (`needs_user`).
 ---
 
 ### Task 24: Test the end-to-end paths and progress spooling under `ck run`
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 2.1, 3.1, 3.5, 3.7, 3.8, 3.9, 4.2, 5.1, 5.4, 7.1, 8.3, 8.5, 8.6, 8.7, 8.8, 8.9, 8.11
 **Description:** Implement TC-92, TC-93 and TC-95 through TC-97.
@@ -731,10 +731,10 @@ Skip permission cases as root.
 **Verify:** `uv run pytest -q tests/test_eta_e2e.py tests/test_eta_run_spool.py`
 **Verifies:** Task 25 (the claim, land, park and resolve chain end to end; spool and mirror under `ck run`)
 **Acceptance:**
-- [ ] Tests exercise real CLI chains, the real `ck run` command, a real child process, real progress files and a real notify script. Only `claude` is a fake, and it is test-owned
-- [ ] Before implementation they fail because the commands are missing and `ck run` sets no spool and mirrors nothing
-- [ ] No mocks or monkeypatching of project code. Message counts are exact
-- [ ] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
+- [x] Tests exercise real CLI chains, the real `ck run` command, a real child process, real progress files and a real notify script. Only `claude` is a fake, and it is test-owned
+- [x] Before implementation they fail because the commands are missing and `ck run` sets no spool and mirrors nothing
+- [x] No mocks or monkeypatching of project code. Message counts are exact
+- [x] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
 **Dependencies:** Task 2 (helpers, spec builder, notify wrappers)
 **Complexity:** Medium
 **Risk:** safety (asserts deferred notifications sent through the user's notify command and the spool deletion)
