@@ -1032,9 +1032,10 @@ def run_arm_opencode(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[s
             acc["cacheRead"] += int((tokens.get("cache") or {}).get("read") or 0)
             acc["cacheCreation"] += int((tokens.get("cache") or {}).get("write") or 0)
         result["tokens_by_model"] = by_model
+        native_by_session = {agent.get("sessionID"): agent for agent in native_agents if agent.get("sessionID")}
         native_by_label = {agent.get("label"): agent for agent in native_agents if agent.get("label")}
         for row in result.get("agents") or []:
-            native = native_by_label.get(row.get("label"))
+            native = native_by_session.get(row.get("agent_id")) or native_by_label.get(row.get("label"))
             if not native:
                 continue
             row["peak_context"] = native.get("peakContext")
