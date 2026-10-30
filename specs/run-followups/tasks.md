@@ -726,10 +726,10 @@ Skip permission cases as root.
 **Verify:** `uv run pytest -q tests/test_eta_e2e.py tests/test_eta_run_spool.py`
 **Verifies:** Task 25 (the claim, land, park and resolve chain end to end; spool and mirror under `ck run`)
 **Acceptance:**
-- [ ] Tests exercise real CLI chains, the real `ck run` command, a real child process, real progress files and a real notify script. Only `claude` is a fake, and it is test-owned
-- [ ] Before implementation they fail because the commands are missing and `ck run` sets no spool and mirrors nothing
-- [ ] No mocks or monkeypatching of project code. Message counts are exact
-- [ ] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
+- [x] Tests exercise real CLI chains, the real `ck run` command, a real child process, real progress files and a real notify script. Only `claude` is a fake, and it is test-owned
+- [x] Before implementation they fail because the commands are missing and `ck run` sets no spool and mirrors nothing
+- [x] No mocks or monkeypatching of project code. Message counts are exact
+- [x] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
 **Dependencies:** Task 2 (helpers, spec builder, notify wrappers)
 **Complexity:** Medium
 **Risk:** safety (asserts deferred notifications sent through the user's notify command and the spool deletion)
