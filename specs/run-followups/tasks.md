@@ -681,7 +681,7 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 ---
 
 ### Task 23: Test the run progress file through the real writers (claim, land, plan, park, concurrency, privacy)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 3.2, 3.3, 3.5, 3.6, 3.7, 3.8, 3.9, 4.2, 5.4, 8.1, 8.5, 8.6, 8.9, 8.10
 **Description:** Implement TC-21, TC-22, TC-23, TC-24, TC-27, TC-28, TC-29(a), TC-30, TC-31, TC-88, TC-53(b), TC-58 and TC-103, plus red-team cases for 3.5, 3.8, 8.6, 8.9 and 8.10. P-14 and P-15 live in Task 9.
@@ -704,11 +704,11 @@ Skip the permission cases as root (`needs_user`).
 **Verify:** `uv run pytest -q -n auto tests/test_eta_progress.py tests/test_eta_writers.py tests/test_eta_redteam_writers.py`
 **Verifies:** Task 25 (progress events from `ck worktree claim`, `land`, `plan`, `park`, `resolve`)
 **Acceptance:**
-- [ ] Tests exercise real `ck progress`, `ck worktree claim/land/park/resolve/report` and `ck plan` subprocesses, real concurrent processes, a real notify script, real file modes and real file bytes
-- [ ] Before implementation they fail because `ck progress`, the `--progress-run` flags and `claude_kiro.progress` are missing
-- [ ] No mocks of project code. Message counts are exact
-- [ ] TC-27 runs real parallel subprocesses and checks for lost or interleaved lines
-- [ ] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
+- [x] Tests exercise real `ck progress`, `ck worktree claim/land/park/resolve/report` and `ck plan` subprocesses, real concurrent processes, a real notify script, real file modes and real file bytes
+- [x] Before implementation they fail because `ck progress`, the `--progress-run` flags and `claude_kiro.progress` are missing
+- [x] No mocks of project code. Message counts are exact
+- [x] TC-27 runs real parallel subprocesses and checks for lost or interleaved lines
+- [x] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
 **Dependencies:** Task 2 (helpers, spec builder, notify wrappers)
 **Complexity:** High
 **Risk:** safety (verifies a safety task whose land and park events trigger notifications)
