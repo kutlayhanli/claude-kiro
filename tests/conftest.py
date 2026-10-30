@@ -49,6 +49,53 @@ def _isolated_gate_registry(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("CK_GATE_REGISTRY", str(tmp_path_factory.mktemp("gates")))
 
 
+_HEADLESS_VARS = ("CK_RUN_HEADLESS", "CLAUDE_CODE_ENTRYPOINT")
+_RUN_CHILD_ENV: list = []  # computed once per process; [] until then
+
+
+def _run_child_env_names() -> list:
+    """The variables `ck run` sets for its child, read from `ck run --dry-run --json`'s `env`.
+
+    Empty when the dry run fails (a no-op, never an error): the suite must not depend on `ck run` working."""
+    if _RUN_CHILD_ENV:
+        return _RUN_CHILD_ENV[0]
+    import sys
+    import tempfile
+
+    names: list = []
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "proj"
+            (root / "specs" / "demo").mkdir(parents=True)
+            (root / "specs" / "demo" / "tasks.md").write_text("# Tasks\n\n### Task 1: a\n**Status:** Not Started\n**Dependencies:** None\n")
+            subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            for tool in ("bwrap", "socat"):
+                (bin_dir / tool).write_text("#!/bin/sh\nexit 0\n")
+                (bin_dir / tool).chmod(0o755)
+            env = {k: v for k, v in os.environ.items() if k not in _HEADLESS_VARS}
+            env.update(HOME=str(Path(tmp) / "home"), PATH=str(bin_dir) + os.pathsep + os.environ.get("PATH", ""), XDG_DATA_HOME=str(Path(tmp) / "xdg"))
+            (Path(tmp) / "home").mkdir()
+            out = subprocess.run([sys.executable, "-m", "claude_kiro.cli", "run", "demo", "--dry-run", "--json"], cwd=root, env=env,
+                                 capture_output=True, text=True, timeout=60)
+            if out.returncode == 0:
+                plan_env = json.loads(out.stdout).get("env", {})
+                names = [k for k in plan_env if isinstance(k, str)]
+    except Exception:
+        names = []
+    _RUN_CHILD_ENV.append(names)
+    return names
+
+
+@pytest.fixture(autouse=True)
+def _not_headless(monkeypatch):
+    """A suite run inside `ck run` or `claude -p` must not classify every main-session test as a task agent:
+    remove the headless markers and every variable `ck run` sets for its child."""
+    for name in (*_HEADLESS_VARS, *_run_child_env_names()):
+        monkeypatch.delenv(name, raising=False)
+
+
 NETGUARD_DIR = Path(__file__).parent / "netguard"
 
 
