@@ -76,7 +76,7 @@ bodies only, so all files collect before the implementation exists.
 ---
 
 ### Task 2: Capture real Claude Code hook inputs (lands by hand)
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 3.1, 3.2, 3.3, 3.4, 10.1
 **Description:** I run this task myself, outside any sandbox, before the run reaches Tasks 4, 8, 11 and 14: it starts paid
