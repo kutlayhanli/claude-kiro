@@ -13,6 +13,7 @@ import click
 from .. import agents as ag
 from .. import bench
 from ..analytics import agentcollect, agentrun, guardlog
+from ..analytics import backfill as _backfill
 from ..analytics import collect as col
 from ..analytics import runfile, store
 
@@ -241,7 +242,14 @@ def collect_cmd(run_id: Optional[str], collect_everything: bool, agents_id: Opti
     if not decision.ok:
         if decision.exit_code == 0:
             shown = agents_id if agents_id is not None else run_id
+            if auto and shown is not None:
+                try:
+                    store.append_collect_log(agentrun.auto_id_log_line(shown, decision.message or "", _utc_iso()))
+                except OSError:
+                    pass
             click.echo(f"⚠ could not collect {shown}: {decision.message}; retry: ck stats collect --agents {shown}")
+        elif as_json:
+            click.echo(json.dumps({"error": decision.message}))
         else:
             click.echo(f"❌ {decision.message}")
         sys.exit(decision.exit_code)
@@ -250,7 +258,10 @@ def collect_cmd(run_id: Optional[str], collect_everything: bool, agents_id: Opti
             sys.exit(collect_agents_auto(agents_id))
         home = bench.claude_home()
         if _classify(home) == "sandboxed":
-            click.echo(f"❌ {_sandbox_text(home)}")
+            if as_json:
+                click.echo(json.dumps({"run_id": agents_id, "result": "failed", "error": f"sandboxed: {_sandbox_text(home)}"}))
+            else:
+                click.echo(f"❌ {_sandbox_text(home)}")
             sys.exit(1)
         _collect_agents_one(home, agents_id, as_json)
         return
@@ -350,20 +361,39 @@ def _collect_backfill(home: Path, gap_minutes: Optional[int], dry_run: bool, as_
     gap = gap_minutes or agentrun.DEFAULT_GAP_MINUTES
     plan = agentcollect.plan_backfill(home, gap_minutes=gap)
     groups, excluded = plan.plan.groups, plan.plan.excluded
+    guard = _backfill.overlap_guard(plan.store_error, plan.malformed_records, dry_run)
+    check = plan.overlap_check
+    malformed = list(plan.malformed_records)
+    if not guard.write and not dry_run:
+        message = guard.note or ""
+        if as_json:
+            click.echo(json.dumps({"error": message, "results": [], "collected": 0, "already_had": 0, "updated": 0,
+                                   "failed": 0, "excluded": len(excluded), "malformedRecords": malformed,
+                                   "overlapCheck": check}))
+        else:
+            click.echo(f"❌ {message}")
+        sys.exit(guard.exit_code or 1)
     if not groups:
         if as_json:
             if dry_run:
-                click.echo(json.dumps({"groups": [], "excluded": [{"agentId": a, "reason": r} for a, _s, r in excluded]}))
+                click.echo(json.dumps({"groups": [], "excluded": [{"agentId": a, "reason": r} for a, _s, r in excluded],
+                                       "overlapCheck": check, "malformedRecords": malformed}))
             else:
                 click.echo(json.dumps({"results": [], "collected": 0, "already_had": 0, "updated": 0, "failed": 0,
-                                       "excluded": len(excluded)}))
+                                       "excluded": len(excluded), "overlapCheck": check}))
+            if guard.exit_code:
+                sys.exit(guard.exit_code)
             return
         click.echo("ℹ️ no unmarked spec-agent runs to backfill")
         if dry_run:
             for aid, _sid, reason in excluded:
                 click.echo(f"left out: {aid}  {reason}")
+            if guard.note:
+                click.echo(f"⚠ {guard.note}")
         else:
             click.echo(f"left out: {len(excluded)}")
+        if guard.exit_code:
+            sys.exit(guard.exit_code)
         return
 
     def wall(g) -> int:
@@ -378,7 +408,10 @@ def _collect_backfill(home: Path, gap_minutes: Optional[int], dry_run: bool, as_
                 "groups": [{"id": g.record_id, "session": g.session_id, "spec": g.spec, "agents": len(g.agent_ids),
                             "start": iso(g.start_ms), "wallMinutes": wall(g), "usd": plan.est_usd.get(g.record_id)}
                            for g in groups],
-                "excluded": [{"agentId": a, "reason": r} for a, _s, r in excluded]}))
+                "excluded": [{"agentId": a, "reason": r} for a, _s, r in excluded],
+                "overlapCheck": check, "malformedRecords": malformed}))
+            if guard.exit_code:
+                sys.exit(guard.exit_code)
             return
         for g in groups:
             usd = plan.est_usd.get(g.record_id)
@@ -390,6 +423,10 @@ def _collect_backfill(home: Path, gap_minutes: Optional[int], dry_run: bool, as_
                 click.echo(f"  {aid}  {role}")
         for aid, _sid, reason in excluded:
             click.echo(f"left out: {aid}  {reason}")
+        if guard.note:
+            click.echo(f"⚠ {guard.note}")
+        if guard.exit_code:
+            sys.exit(guard.exit_code)
         return
 
     outcomes = agentcollect.collect_backfill(home, plan, now=_now())
@@ -399,7 +436,8 @@ def _collect_backfill(home: Path, gap_minutes: Optional[int], dry_run: bool, as_
     if as_json:
         click.echo(json.dumps({"results": [{"id": o.run_id, "result": o.kind if o.kind in counts else "failed"} for o in outcomes],
                                "collected": counts["collected"], "already_had": counts["unchanged"],
-                               "updated": counts["updated"], "failed": counts["failed"], "excluded": len(excluded)}))
+                               "updated": counts["updated"], "failed": counts["failed"], "excluded": len(excluded),
+                               "overlapCheck": check}))
     else:
         click.echo(f"collected: {counts['collected']}")
         click.echo(f"already had: {counts['unchanged']}")
@@ -432,12 +470,17 @@ def _collect_one(home: Path, run_id: str, as_json: bool) -> None:
 
 def _collect_all(home: Path, as_json: bool) -> None:
     summary = col.collect_all(home, now=_now())
+    sweep_failure: Optional[str] = None
     try:
         agent_outcomes = agentcollect.collect_open_manifests(home, now=_now())
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001 - reported below as a failure; workflow outcomes still count
         agent_outcomes = ()
+        sweep_failure = f"open-manifest sweep failed: {type(e).__name__}: {str(e)[:200]}"
     kinds: List[str] = []
     failures: List[Tuple[str, str]] = []
+    if sweep_failure:
+        kinds.append("failed")
+        failures.append(("open-manifests", sweep_failure))
     skipped = 0
     abandoned: List[str] = []
     for o in list(summary.outcomes) + list(agent_outcomes):
@@ -449,7 +492,7 @@ def _collect_all(home: Path, as_json: bool) -> None:
             continue
         if o.kind == "collected":
             try:
-                if o.run_id.startswith("ag_"):
+                if col.writer_for(o.record) == "agents":
                     _path, k = agentcollect.finish_collected(o)
                 else:
                     _path, k = _write(o)

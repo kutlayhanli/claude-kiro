@@ -271,6 +271,33 @@ def _timestamps(path: Path) -> Tuple[Optional[int], Optional[int]]:
     return first, last
 
 
+def _timestamps_and_head(path: Path) -> Tuple[Tuple[Optional[int], Optional[int]], Dict[str, Optional[str]]]:
+    """`_timestamps` and `_head` of one transcript from a single open (11.3)."""
+    head: Dict[str, Optional[str]] = {"cwd": None, "gitBranch": None, "version": None}
+    first = last = None
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for n, line in enumerate(fh):
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(d, dict):
+                    continue
+                if n < _HEAD_LINES and not all(head.values()):
+                    for k in head:
+                        if head[k] is None and isinstance(d.get(k), str) and d[k]:
+                            head[k] = d[k]
+                ms = _to_ms(d.get("timestamp"))
+                if ms is None:
+                    continue
+                first = ms if first is None else min(first, ms)
+                last = ms if last is None else max(last, ms)
+    except OSError:
+        pass
+    return (first, last), head
+
+
 def _read_json(path: Path) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -362,6 +389,39 @@ class _Agent:
     meta_path: Optional[Path]
     queued_ms: Optional[int] = None
     agent_type: Optional[str] = None
+    span: Optional[Tuple[Optional[int], Optional[int]]] = None  # (first, last) transcript timestamps, when known
+    head: Optional[Dict[str, Optional[str]]] = None  # `_head` of the transcript, when read together with the span
+
+
+def writer_for(record: Mapping) -> str:
+    """S16: which writer persists a record: "agents" for agent-mode records, else "workflow"."""
+    return "agents" if isinstance(record, Mapping) and record.get("source") == "agents" else "workflow"
+
+
+def _task_sizes(root: Optional[str], spec: Optional[str]) -> Optional[Dict[str, Tuple[int, int]]]:
+    """task number -> (files, criteria) from <root>/specs/<spec>/tasks.md; None when it cannot be read."""
+    if not root or not spec:
+        return None
+    from claude_kiro.hooks._shared.spec_parser import parse_tasks_text
+    from claude_kiro.paths import SPECS_DIR
+
+    try:
+        text = (Path(root) / SPECS_DIR / spec / "tasks.md").read_text(encoding="utf-8")
+        return {t.num: (len(t.files), len(t.requirements)) for t in parse_tasks_text(text)}
+    except (OSError, ValueError):
+        return None
+
+
+def _add_task_sizes(record: dict, root: Optional[str], spec: Optional[str]) -> None:
+    tasks = record.get("tasks")
+    if not isinstance(tasks, list):
+        return
+    sizes = _task_sizes(root, spec)
+    for t in tasks:
+        if not isinstance(t, dict):
+            continue
+        size = sizes.get(str(t.get("task"))) if sizes is not None else None
+        t["filesCount"], t["criteriaCount"] = size if size is not None else (None, None)
 
 
 def _build_agent(a: _Agent, workflow_name: str, pricing: dict, missing: List[dict],
@@ -399,11 +459,11 @@ def _build_agent(a: _Agent, workflow_name: str, pricing: dict, missing: List[dic
                 status = "truncated" if _is_truncated(a.transcript) else "unparseable"
             else:
                 status = "truncated" if _is_truncated(a.transcript) else "ok"
-        v = _head(a.transcript)["version"]
+        v = (a.head if a.head is not None else _head(a.transcript))["version"]
         if v:
             versions[v] += 1
         if timing_from_transcript:
-            first_ts, last_ts = _timestamps(a.transcript)
+            first_ts, last_ts = a.span if a.span is not None else _timestamps(a.transcript)
     if status == "missing":
         missing.append({"agentId": aid, "what": "transcript"})
     elif status == "unparseable":
@@ -911,6 +971,8 @@ def _build_record(*, run_id: str, workflow_name: str, run_data: Optional[Mapping
                               "gapMinutes": ctx.gap_minutes}
     else:
         record.update(_workflow_metrics(kind, workflow_name, result, rows, run_data))
+    if kind == "spec-implement":
+        _add_task_sizes(record, root, spec)
     return record
 
 
