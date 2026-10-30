@@ -673,6 +673,8 @@ def run_arm(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[str], None
     results_dir, bench_dir = Path(cfg["results_dir"]), Path(cfg["bench_dir"])
     clone = bench_dir / arm["id"]
     env = {**os.environ, **cfg["env"]}
+    # subprocess(cwd=...) does not update PWD; OpenCode uses PWD to pick the project location.
+    env["PWD"] = str(clone)
     ck = cfg["ck"]
     if clone.exists():
         shutil.rmtree(clone)  # a half-finished earlier attempt
@@ -842,7 +844,7 @@ def run_arm_opencode(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[s
     # OpenCode can start the model before an async plugin setup has materialized the agents and
     # registered tools. Warm the location once, then require the setup marker before the real prompt.
     warm_argv = [opencode_bin, "run", "--standalone", "--model", arm_model, "--format", "json",
-                 "Use the shell tool to run exactly this command: sleep 5. Then reply READY."]
+                 "Use the shell tool to run exactly this command: sleep 30. Then reply READY."]
     echo(f"▶ {arm['id']}: warming the plugin in {clone}")
     try:
         warm = _sh(warm_argv, clone, env, min(120.0, timeout) if timeout else 120.0)
