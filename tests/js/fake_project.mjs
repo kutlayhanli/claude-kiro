@@ -111,7 +111,14 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
     return within ? { file: 'tests/test_guarded.py', kind: 'test', test: 'tests/test_guarded.py::test_x', requirement: '1.1' } : null
   }
   // Run one `ck` command through execCk (or, in dry mode, only record it). Returns the parsed --json output, if any.
-  const runCk = argv => execCkRun(execCk, argv, { log: state.execLog, results: state.execResults, external })
+  // Calls run one at a time in call order, so agents resume in a fixed order however fast each subprocess is
+  // (otherwise two identical runs stamp concurrent tasks in different orders).
+  let ckChain = Promise.resolve()
+  const runCk = argv => {
+    const done = ckChain.then(() => execCkRun(execCk, argv, { log: state.execLog, results: state.execResults, external }))
+    ckChain = done.catch(() => {})
+    return done
+  }
   const recordClaim = async prompt => {
     const c = findClaim(prompt)
     if (!c || !c.flags['progress-run'] || !c.flags['progress-event']) return
