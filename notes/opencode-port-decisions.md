@@ -63,8 +63,10 @@ Decisions are locked in order. Anything not listed under "Locked" is still open.
 - The mapping is **config, not code**, so strict Claude parity is one line away.
 - Role agents carry **no `model:`** in their frontmatter; `ck agents` plus per-call opts stay the single
   source of truth.
-- Read-only is enforced by the agent file's `permissions:` block (`edit`/`write`/`shell` → `deny`), which
-  was verified to remove the tools entirely rather than merely refuse them (spike 8).
+- Read-only is enforced by the agent file's `permissions:` block (`edit`/`write`/`patch` → `deny`), which
+  was verified to remove the tools entirely rather than merely refuse them (spike 8). **`shell` stays
+  allowed**: the source reviewer has `Bash`, and its prompt runs `git diff` and `ck lint --contracts`.
+  Denying shell would break the review. The Phase 3 guard is the shell-level control.
 - Children do not inherit the parent's agent or permissions; they get the mapped agent's explicit set.
 - OpenCode subagent nesting stays at its default depth of 1 (a known, recorded difference).
 
@@ -376,7 +378,8 @@ read or append to them — see finding 12). Each probe is a throwaway plugin aga
    is exactly the `submit_result_<seq>` lifecycle.
 8. **Read-only role agent (D3).** `.opencode/agents/spec-reviewer.md` with
    `permissions: [{action: edit|write|shell, resource: "*", effect: deny}]` produced a child that has
-   **no edit/write/shell tools at all** — it reported "no tool named edit is available". Inner tool
+   **no edit/write/shell tools at all** — it reported "no tool named edit is available". (The shipped
+   reviewer denies edit/write/patch but keeps shell, for the `git diff`/`ck lint` reasons in D3.) Inner tool
    events carried `agent: "spec-reviewer"`, so attribution is per-child and automatic.
 9. **Permission ask (D9c).** `ctx.permission.assert({sessionID, action, resources})` resolves when
    allowed (edit, shell) and **blocks waiting for a human** on `.env` reads — it did not resolve within

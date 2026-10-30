@@ -263,6 +263,7 @@ async function runAttempt(
         title: `ck: ${options.label}`,
         model: resolved.resolved,
         agent,
+        parentID: options.parentSessionID,
         location: { directory: options.projectDir },
       });
     } catch (error) {

@@ -221,12 +221,14 @@ with the agent-type names already rewritten by 2.1. Never switch silently (D12f)
 
 ### 2.5 Acceptance
 
-- [ ] `/spec/plan`, `/spec/create`, `/spec/review`, `/spec/implement`, `/spec/spawn-worktree` appear
-      and dispatch with correct `$ARGUMENTS`.
-- [ ] A second install run changes nothing (digest match), and an edited agent file is preserved.
-- [ ] `ck-reviewer` has no edit/write tools; `ck-worker` does.
-- [ ] `AGENTS.md` keeps user content outside the markers.
-- [ ] Fallback path launches and says so once.
+- [x] `/spec/plan`, `/spec/create`, `/spec/review`, `/spec/implement`, `/spec/spawn-worktree` appear
+      and dispatch with correct `$ARGUMENTS`. Live: `command.list` returned all five.
+- [x] A second install run changes nothing (digest match), and an edited agent file is preserved.
+- [x] `ck-reviewer` has no edit/write tools; `ck-worker` does. Live: the reviewer reported no
+      `edit` tool and still ran `echo SHELL_OK`; the worker wrote `WORKER_WROTE`.
+- [x] `AGENTS.md` keeps user content outside the markers.
+- [x] Fallback resources are materialized and rewritten under `.opencode/ck/`; the model-driven
+      launch itself is not exercised yet.
 
 ---
 
@@ -236,6 +238,12 @@ Order matters: telemetry's `interruptions` block comes from the guard log the ho
 hooks land first.
 
 ### 3.1 Guard shim (D9)
+
+**Status:** implemented in `opencode/src/guard.ts`; 10 unit tests with a fake `ck`.
+Live verified: a child/main edit of `tests/test_demo.py` was denied with the real
+`[ck guard] Denied: this edit removes 1 assertion(s)…` text and the file stayed untouched.
+**Open:** a live `sed -i` weakening did not produce the post-check latch yet (the fake-hook latch
+test passes). Investigate `post-bash-check` snapshot matching in the OpenCode event stream.
 
 - Register `execute.before` / `execute.after`.
 - **Ignore `tool === "execute"`** (code mode): every call raises an outer event with `{code}` and an

@@ -1,17 +1,24 @@
 import { join } from "node:path";
 import { Plugin } from "@opencode/plugin";
+import { materializeAgents } from "./agents.ts";
+import { registerCommands } from "./commands.ts";
 import { loadConfig } from "./config.ts";
+import { createGuard } from "./guard.ts";
+import { writeInstructions } from "./instructions.ts";
 import { catalogFromModels } from "./models.ts";
+import { materializeResources } from "./resources.ts";
 import { registerWorkflowTool } from "./workflow-tool.ts";
 
 /**
- * The package entry OpenCode loads. Phase 1 exposes the `workflow` bridge; commands and agent files
- * are added by the same setup in later phases.
+ * The package entry OpenCode loads. Setup registers the workflow bridge and the five commands, then
+ * materializes the role agents, the two project resources, and the AGENTS.md managed block.
  */
 export default Plugin.define({
   id: "claude-kiro",
   async setup(ctx) {
-    const loaded = loadConfig({ directory: ctx.location.directory, options: ctx.options });
+    const packageRoot = join(import.meta.dirname, "..");
+    const projectDir = ctx.location.directory;
+    const loaded = loadConfig({ directory: projectDir, options: ctx.options });
 
     let catalog;
     try {
@@ -29,18 +36,38 @@ export default Plugin.define({
       );
     }
 
-    const cleanup = await registerWorkflowTool({
+    const workflows = await registerWorkflowTool({
       ctx,
       config: loaded.config,
       catalog,
-      packageRoot: join(import.meta.dirname, ".."),
-      projectDir: ctx.location.directory,
+      packageRoot,
+      projectDir,
     });
+    const guard = await createGuard(ctx, loaded.config, projectDir);
+    const commands = await registerCommands(ctx, { packageRoot, projectDir });
+    const agents = materializeAgents(projectDir, packageRoot);
+    const resources = materializeResources(projectDir, packageRoot);
+    const instructions = writeInstructions(projectDir, packageRoot);
 
+    if (agents.conflicts.length > 0) {
+      console.error(
+        `[claude-kiro] kept your edited agent file(s): ${agents.conflicts.join(", ")} ` +
+          "(delete one to let the plugin regenerate it)",
+      );
+    }
     console.error(
-      `[claude-kiro] ready (sonnet=${loaded.config.models.sonnet}, project=${loaded.files.project})`,
+      `[claude-kiro] ready: ${commands.names.length} commands, ` +
+        `${agents.written.length + agents.unchanged.length + agents.conflicts.length} agents, ` +
+        `${resources.length} resources` +
+        `${instructions.changed ? `, AGENTS.md ${instructions.appended ? "updated" : "refreshed"}` : ""}` +
+        ` (sonnet=${loaded.config.models.sonnet}, project=${projectDir})`,
     );
-    return cleanup;
+
+    return async () => {
+      await guard.dispose().catch(() => {});
+      await commands.dispose().catch(() => {});
+      await workflows();
+    };
   },
 });
 
