@@ -536,6 +536,13 @@ def test_tc77_eight_concurrent_pairs_each_catch_their_own_file_once(project, ses
     monkeypatch.setenv("TMPDIR", str(tmp))
     for n in range(8):
         commit_on_base(project, f"tests/test_c{n}.py", "def test_x():\n    assert 1\n    assert 2\n")
+    probe_command = "sed -i '/assert 2/d' tests/test_c0.py"
+    probe = hook_input(project, session, "Bash", agent_id="agent-probe", tool_use_id="toolu_probe", command=probe_command)
+    assert cli_hook("pre-tool-guard", probe, env=os.environ.copy(), cwd=project).returncode == 0
+    assert list(tmp.glob("**/guardsnap-*")) != []  # a pre hook alone leaves a snapshot, so "none left" below means something
+    done = hook_input(project, session, "Bash", agent_id="agent-probe", tool_use_id="toolu_probe", event="PostToolUse",
+                      tool_response={"stdout": "", "stderr": "", "interrupted": False}, command=probe_command)
+    assert cli_hook("post-bash-check", done, env=os.environ.copy(), cwd=project).returncode == 0
     with ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(lambda n: _pair(project, session, n, os.environ.copy()), range(8)))
     for n, rel, pre_done, ran, post_done in results:

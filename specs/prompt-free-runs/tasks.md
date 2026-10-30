@@ -244,13 +244,16 @@ TC-53 plants a log just under `guardlog.GUARD_LOG_LIMIT`; TC-55 runs real `ck st
 **Complexity:** High
 **Risk:** safety (oracle for catching shell-made test weakening and for keeping confidential command text local)
 
----
-
 **Implementation notes (task 5):**
 - Shared CLI helpers (`cli_hook`, `cli_cycle`, `py_heredoc`) live in `tests/test_guard_postcheck.py` and are imported by the red-team and guard-log files.
 - TC-75(b) deviation: the plan checks out `main`'s version of the test after `feature` added an assertion. That version equals the base ref's content, which D19 exempts, so the case as written contradicts TC-82/D19. The test first moves `main` on with a weaker version (no longer the merge-base's content), so the checkout brings in content that is neither the base ref's nor an incoming merge ref's, and still exercises "HEAD moves, file clean afterwards".
 - TC-55: the machine label (slug-only) is the free-text slot a record carries, so the refusal-on-export-and-submit half plants a slug-shaped value; command, path and reason texts are covered through the note flow.
-- Red team: non-JSON stdin is left to the hook runner (TC-24 covers it); the red-team cases send well-formed JSON with hostile contents, plus invalid UTF-8 inside the JSON string.
+- Red team: non-JSON stdin is left to the hook runner (TC-24 covers it); the red-team cases send well-formed JSON with hostile contents, plus invalid UTF-8 inside the JSON string. That case pins `LC_ALL=C.UTF-8` and `PYTHONUTF8=0`; Task 11 should read `sys.stdin.buffer` and decode with `errors='replace'` so the hook is quiet under any locale.
+- P-7 draws its starting body and path from four templates (pytest, jest/vitest, go, rspec), committed on the base, with per-language skip/only markers.
+- P-10: for the `data_dir` and `read_only` failures the post-check must equal the baseline post-check (not `None` as the test-plan row reads), since a logging failure must not change a catch. Spec question: correct the P-10 row in test-plan.md to say so. Likewise the TC-75(b) row still says the unadapted case is caught, which contradicts D19/TC-82; the row should be corrected to match D19.
+- TC-77 asserts a snapshot appears under `TMPDIR` after a pre hook alone (`<TMPDIR>/.../guardsnap-*`), so the "none left behind" check is not vacuous; design.md should name the snapshot directory explicitly.
+
+---
 
 ### Task 6: Test the hand-off of whole-spec runs to `ck run`
 **Status:** Done

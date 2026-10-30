@@ -70,6 +70,9 @@ def repo(tmp_path_factory):
         (root / "calc.py").write_text(CALC)
         (root / "tests").mkdir()
         (root / "tests" / "test_calc.py").write_text(CALC_TEST)
+        for template in TEMPLATES.values():
+            (root / template.path).parent.mkdir(parents=True, exist_ok=True)
+            (root / template.path).write_text(template.text)
         (root / "conftest.py").write_text("import sys, pathlib\nsys.path.insert(0, str(pathlib.Path(__file__).parent))\n")
         (root / "specs" / "calc").mkdir(parents=True)
         (root / "specs" / "calc" / "requirements.md").write_text("# Feature: Calc\n- 1.1 WHEN asked THE SYSTEM SHALL subtract\n")
@@ -176,19 +179,140 @@ mutation_names = st.sampled_from(sorted(MUTATIONS))
 tools = st.sampled_from(TOOLS)
 vias = st.sampled_from(VIAS)
 
+# --------------------------------------------------------------------------- P-7 templates (pytest, jest/vitest, go, rspec)
+
+
+class Template:
+    def __init__(self, path, text, assert_key, first, second, comment, extra, skips):
+        self.path, self.text, self.assert_key = path, text, assert_key
+        self.first, self.second, self.comment, self.extra, self.skips = first, second, comment, extra, skips
+
+
+JEST_TEST = """const { add } = require('../calc')
+
+it('adds', () => {
+  expect(add(1, 2)).toBe(3)
+})
+
+it('adds negatives', () => {
+  expect(add(-1, -1)).toBe(-2)
+})
+"""
+GO_TEST = """package calc
+
+import "testing"
+
+func TestAdd(t *testing.T) {
+\tif add(1, 2) != 3 {
+\t\tt.Fatal("x")
+\t}
+}
+
+func TestAddNegative(t *testing.T) {
+\tif add(-1, -1) != -2 {
+\t\tt.Fatal("y")
+\t}
+}
+"""
+RSPEC_TEST = """require_relative '../calc'
+
+it 'adds' do
+  expect(add(1, 2)).to eq(3)
+end
+
+it 'adds negatives' do
+  add(-1, -1).should == -2
+end
+"""
+
+TEMPLATES = {
+    "pytest": Template(
+        "tests/test_calc.py", CALC_TEST, "assert add(1, 2) == 3", "def test_add():", "def test_add_negative", "# ",
+        "\n\ndef test_zero():\n    assert add(0, 0) == 0\n",
+        [lambda t: t.replace("def test_add():", "@pytest.mark.skip\ndef test_add():", 1),
+         lambda t: t.replace("def test_add():\n", "def test_add():\n    pytest.skip('x')\n", 1),
+         lambda t: t.replace("def test_add():", "@pytest.mark.xfail\ndef test_add():", 1),
+         lambda t: "@unittest.skip('x')\n" + t,
+         lambda t: t + "\nit.only('x', () => {})\n"]),
+    "jest": Template(
+        "tests/calc.test.js", JEST_TEST, "expect(add(1, 2))", "it('adds',", "it('adds negatives'", "// ",
+        "\nit('zero', () => {\n  expect(add(0, 0)).toBe(0)\n})\n",
+        [lambda t: t.replace("it('adds',", "it.skip('adds',", 1),
+         lambda t: t.replace("it('adds',", "xit('adds',", 1),
+         lambda t: t.replace("it('adds',", "it.only('adds',", 1),
+         lambda t: t.replace("it('adds',", "test.todo('adds',", 1),
+         lambda t: t.replace("it('adds negatives',", "describe.skip('adds negatives',", 1)]),
+    "go": Template(
+        "calc_test.go", GO_TEST, 't.Fatal("x")', "func TestAdd(", "func TestAddNegative", "// ",
+        "\nfunc TestZero(t *testing.T) {\n\tif add(0, 0) != 0 {\n\t\tt.Fatal(\"z\")\n\t}\n}\n",
+        [lambda t: t.replace("func TestAdd(t *testing.T) {\n", "func TestAdd(t *testing.T) {\n\tt.Skip(\"x\")\n", 1),
+         lambda t: t.replace("func TestAddNegative(t *testing.T) {\n", "func TestAddNegative(t *testing.T) {\n\tt.SkipNow()\n", 1)]),
+    "rspec": Template(
+        "spec/calc_spec.rb", RSPEC_TEST, "expect(add(1, 2))", "it 'adds' do", "it 'adds negatives'", "# ",
+        "\nit 'zero' do\n  expect(add(0, 0)).to eq(0)\nend\n",
+        [lambda t: t.replace("it 'adds' do", "xit('adds') do", 1),
+         lambda t: t.replace("it 'adds' do", "it.skip 'adds' do", 1),
+         lambda t: t.replace("it 'adds negatives' do", "describe.skip 'adds negatives' do", 1)]),
+}
+
+
+def template_mutation(tpl: Template, name: str, index: int) -> str:
+    """The new text for mutation `name` applied to the template's starting body."""
+    from claude_kiro.hooks._shared.test_heuristics import ASSERTION
+
+    t = tpl.text
+    if name == "drop_assert":
+        return _lines_without(t, tpl.assert_key)
+    if name == "drop_test":
+        return t[: t.index(tpl.second)]
+    if name == "drop_all_asserts":
+        return "".join(line for line in t.splitlines(keepends=True) if not ASSERTION.search(line))
+    if name == "skip_marker":
+        return tpl.skips[index % len(tpl.skips)](t)
+    if name == "rename":
+        return t.replace("add(1, 2)", "add(2, 1)")
+    if name == "comment_out":
+        return "".join(tpl.comment + line if tpl.assert_key in line else line for line in t.splitlines(keepends=True))
+    if name == "add_test":
+        return t + tpl.extra
+    if name == "reorder":
+        head, first, second = t[: t.index(tpl.first)], t[t.index(tpl.first): t.index(tpl.second)], t[t.index(tpl.second):]
+        return head + second.rstrip("\n") + "\n\n" + first.rstrip("\n") + "\n"
+    if name == "empty":
+        return ""
+    raise KeyError(name)
+
+
+TEMPLATE_MUTATIONS = ["drop_assert", "drop_test", "drop_all_asserts", "skip_marker", "rename", "comment_out", "add_test", "reorder", "empty"]
+
+
+def template_command(tpl: Template, name: str, tool: str, path: str, find_root: str, new: str) -> str:
+    q = shlex.quote(path)
+    if name == "drop_assert" and tool == "sed":
+        return f"sed -i {shlex.quote('/' + tpl.assert_key + '/d')} {q}"
+    if name == "drop_assert" and tool == "perl":
+        return f"perl -ni -e {shlex.quote('print unless /\\Q' + tpl.assert_key + '\\E/')} {q}"
+    if name == "drop_assert" and tool == "find":
+        return f"find {shlex.quote(find_root)} -name {shlex.quote(Path(path).name)} -exec sed -i {shlex.quote('/' + tpl.assert_key + '/d')} {{}} +"
+    if tool == "redirect":
+        return f": > {q}" if new == "" else f"cat > {q} <<'EOF_X'\n{new}EOF_X"
+    return f"python3 - <<'EOF_X'\nopen({path!r}, 'w').write({new!r})\nEOF_X"
+
 
 # --------------------------------------------------------------------------- P-7
 
 
 @settings(**SETTINGS)
-@given(name=mutation_names, tool=tools, in_worktree=st.booleans(), commit=st.booleans(), via=vias)
-def test_p7_post_check_reports_exactly_what_the_edit_path_would_block(repo, name, tool, in_worktree, commit, via):
+@given(lang=st.sampled_from(sorted(TEMPLATES)), name=st.sampled_from(TEMPLATE_MUTATIONS), index=st.integers(0, 6), tool=tools,
+       in_worktree=st.booleans(), commit=st.booleans(), via=vias)
+def test_p7_post_check_reports_exactly_what_the_edit_path_would_block(repo, lang, name, index, tool, in_worktree, commit, via):
     reset(repo)
-    new = MUTATIONS[name][0](CALC_TEST)
+    tpl = TEMPLATES[lang]
+    new = template_mutation(tpl, name, index)
     root = repo.wt if in_worktree else repo.root
-    target = root / CALC_PATH
-    path = str(target) if in_worktree else CALC_PATH
-    command = command_for(name, tool, path, f"{root}/tests" if in_worktree else "tests")
+    target = root / tpl.path
+    path = str(target) if in_worktree else tpl.path
+    command = template_command(tpl, name, tool, path, f"{root}/{Path(tpl.path).parent}" if in_worktree else str(Path(tpl.path).parent), new)
     if commit:
         command += f" && git -C {shlex.quote(str(root))} commit -qam x"
     session = f"p7-{uuid.uuid4().hex}"
@@ -197,12 +321,12 @@ def test_p7_post_check_reports_exactly_what_the_edit_path_would_block(repo, name
     verdict, post, ran = run_cycle(repo.root, session, command, via=via)
     assert ran, verdict
     message = post_message(post)
-    if new == CALC_TEST:
+    if new == tpl.text:
         return  # D19: the base ref's own content is exempt
-    assert (message is not None) == write_blocks, (name, tool, command, message)
+    assert (message is not None) == write_blocks, (lang, name, tool, command, message)
     if write_blocks:
-        assert CALC_PATH in message
-        for kind in kind_texts(CALC_TEST, new):
+        assert tpl.path in message
+        for kind in kind_texts(tpl.text, new):
             assert kind in message, (kind, message)
 
 

@@ -147,7 +147,8 @@ def test_nul_and_odd_characters_in_the_command_give_no_output(project, session, 
 def test_invalid_utf8_inside_the_command_gives_no_output(project, via):
     raw = (b'{"hook_event_name": "PostToolUse", "tool_name": "Bash", "session_id": "s", "cwd": "' + str(project).encode()
            + b'", "tool_input": {"command": "sed -i \xff\xfe tests/test_calc.py"}}')
-    check_quiet(cli_hook(via, raw=raw, cwd=project), strict=True)
+    env = {**os.environ, "LC_ALL": "C.UTF-8", "PYTHONUTF8": "0"}  # pinned: the stdin decoding must not depend on the machine's locale
+    check_quiet(cli_hook(via, raw=raw, env=env, cwd=project), strict=True)
 
 
 @pytest.mark.parametrize("tool_input", [{"command": 7}, None, {}, {"command": ["sed", "-i"]}, {"command": ""}])
