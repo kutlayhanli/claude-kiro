@@ -73,6 +73,10 @@ class Bridge:
         out.pop("ok")
         return out
 
+    def ladder(self, model: Optional[str]) -> List[Any]:
+        """The decisions block's `guardLadder(model)`: the models a guard-stopped task is retried on."""
+        return self._ok({"op": "ladder", "model": model})["ladder"]
+
     def close(self) -> None:
         with contextlib.suppress(Exception):
             self.proc.stdin.close()

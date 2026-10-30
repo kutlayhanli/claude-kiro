@@ -1,26 +1,34 @@
 // Long-lived JSON-lines bridge: one request object per stdin line, one response object per stdout line.
 //   {op:'ready', order, deps, done, exclude, blocked} -> {ok:true, ready}
-//   {op:'run', project, args, slots}                  -> {ok:true, result, logs, trace, prompts, events}
+//   {op:'ladder', model}                              -> {ok:true, ladder}
+//   {op:'run', project, args, slots}                  -> {ok:true, result, logs, trace, prompts, opts, events}
 // Any throw -> {ok:false, error}. Durations in the project options are milliseconds (1-40).
 import readline from 'node:readline'
-import { runWorkflow } from './load_workflow.mjs'
+import { runWorkflow, useVirtualTime } from './load_workflow.mjs'
 import { project } from './fake_project.mjs'
-import { loadDecisions, SCRIPT } from './load_decisions.mjs'
+import { loadDecisions, SCRIPT, GUARD_NAMES } from './load_decisions.mjs'
 
 
-const baseArgs = { spec: 'demo', root: '/repo', into: 'integrate/demo', targetDir: '/repo/.ck/worktrees/demo-integration' }
+// Fake agent durations run on a virtual clock, so a scenario replays identically however loaded the machine is.
+useVirtualTime()
+
+const baseArgs ={ spec: 'demo', root: '/repo', into: 'integrate/demo', targetDir: '/repo/.ck/worktrees/demo-integration' }
 
 async function handle(req) {
   if (req.op === 'ready') {
     const { readyTasks } = req.script ? loadDecisions(req.script) : loadDecisions()  // req.script: test hook for a script without markers
     return { ready: readyTasks({ order: req.order ?? Object.keys(req.deps), deps: req.deps, done: req.done ?? [], exclude: req.exclude ?? [], blocked: req.blocked ?? [] }) }
   }
+  if (req.op === 'ladder') {
+    const { guardLadder } = loadDecisions({ extra: GUARD_NAMES })
+    return { ladder: guardLadder(req.model) }
+  }
   if (req.op === 'run') {
     const p = project(req.project)
     const slots = req.slots ?? undefined
     const args = { ...baseArgs, ...req.args, ...(slots ? { agentSlots: slots } : {}) }
     const { result, logs, trace } = await runWorkflow(SCRIPT, { agent: p.agent, args, slots })
-    return { result, logs, trace, prompts: p.state.prompts, events: p.state.events }
+    return { result, logs, trace, prompts: p.state.prompts, opts: p.state.opts, events: p.state.events }
   }
   throw new Error(`unknown op: ${req.op}`)
 }

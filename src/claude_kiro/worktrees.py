@@ -26,7 +26,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from fnmatch import fnmatchcase
 from pathlib import Path
-from typing import Callable, Dict, Iterator, List, Optional, Tuple
+from typing import Callable, Dict, Iterator, List, Mapping, Optional, Tuple
 
 from claude_kiro.config import load_config
 from claude_kiro.paths import LEGACY_WORKTREES_DIR, WORKTREES_DIR
@@ -73,6 +73,9 @@ def _cleanup_merged(root: Path, target: Path, path: Path, branch: str) -> str:
     `git worktree remove` failing with "Device or resource busy".)
     """
     problems = []
+    with contextlib.suppress(OSError):
+        path.with_name(path.name + ".decision.md").unlink()
+        path.with_name(path.name + ".needs-input.json").unlink()
     if path.exists():
         # Clean apart from ignored files (.venv, node_modules), checked before merging;
         # --force lets git drop those.
@@ -318,8 +321,115 @@ def claim(root: Path, spec: str, num: str, owner: str, takeover: bool = False) -
         git(root, "worktree", "unlock", str(path))
     owner = f"{owner} (claim {secrets.token_hex(4)} at {_now()})"
     git(root, "worktree", "lock", "--reason", owner, str(path))
+    unpark(root, spec, num)  # a fresh attempt clears the park note; the decision note stays
     took = f" (took over stale claim: {stale})" if stale else " (took over)" if reason else ""
     return Outcome(num, "CLAIMED", owner + took, rel, branch)
+
+
+def _private_write(path: Path, text: str, append: bool = False) -> None:
+    """Write `text` to `path` with mode 0600 (created private, then re-chmodded)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | (os.O_APPEND if append else os.O_TRUNC)
+    fd = os.open(str(path), flags, 0o600)
+    with os.fdopen(fd, "a" if append else "w") as f:
+        f.write(text)
+    os.chmod(path, 0o600)
+
+
+_SAFE_ID = re.compile(r"[0-9A-Za-z_][0-9A-Za-z_.\-]*")
+
+
+def _check_ids(spec: str, num: str) -> None:
+    for what, value in (("spec", spec), ("task", num)):
+        if not isinstance(value, str) or not _SAFE_ID.fullmatch(value) or ".." in value:
+            raise WorktreeError(f"invalid {what} name {value!r}")
+
+
+def park_path(root: Path, spec: str, num: str) -> Path:
+    return worktrees_dir(root, spec) / f"{spec}-task-{num}.needs-input.json"
+
+
+def decision_path(root: Path, spec: str, num: str) -> Path:
+    return worktrees_dir(root, spec) / f"{spec}-task-{num}.decision.md"
+
+
+def park(root: Path, spec: str, num: str, note: Mapping) -> Path:
+    """Write the park note (0600) for a task that needs my decision; returns its path.
+
+    `priorDecision` is true when a decision note already exists for the task.
+    """
+    import json
+
+    _check_ids(spec, num)
+    body = {
+        "schema": "ck-park/1",
+        "spec": spec,
+        "task": num,
+        "file": str(note.get("file", "")),
+        "kind": str(note.get("kind", "")),
+        "test": str(note.get("test", "")),
+        "requirement": str(note.get("requirement", "")),
+        "decision": str(note.get("decision", "")),
+        "parkedAt": _now(),
+        "priorDecision": decision_path(root, spec, num).exists(),
+    }
+    path = park_path(root, spec, num)
+    try:
+        _private_write(path, json.dumps(body, indent=2) + "\n")
+    except OSError as e:
+        raise WorktreeError(f"cannot write {path}: {e}")
+    return path
+
+
+def parked(root: Path, spec: str) -> Dict[str, dict]:
+    """task -> park note for every readable park note of the spec."""
+    import json
+
+    found: Dict[str, dict] = {}
+    prefix, suffix = f"{spec}-task-", ".needs-input.json"
+    for directory in dict.fromkeys((configured_dir(root), root / LEGACY_WORKTREES_DIR)):
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.glob(f"{prefix}*{suffix}")):
+            num = path.name[len(prefix):-len(suffix)]
+            if num in found:
+                continue
+            try:
+                data = json.loads(path.read_text())
+            except (OSError, ValueError):
+                continue
+            if isinstance(data, dict):
+                data.setdefault("task", num)
+                found[num] = data
+    return found
+
+
+def unpark(root: Path, spec: str, num: str) -> None:
+    for directory in dict.fromkeys((worktrees_dir(root, spec), configured_dir(root), root / LEGACY_WORKTREES_DIR)):
+        with contextlib.suppress(OSError):
+            (directory / f"{spec}-task-{num}.needs-input.json").unlink()
+
+
+DECISION_FOOTER = ("If this says the test or requirement is wrong, it has already been changed in the main checkout; "
+                   "do not change it yourself.")
+
+
+def resolve(root: Path, spec: str, num: str, answer: str) -> Path:
+    """Store my answer in the task's decision note (0600, appended), clear the park note; returns the note."""
+    _check_ids(spec, num)
+    path = decision_path(root, spec, num)
+    existing = ""
+    with contextlib.suppress(OSError):
+        existing = path.read_text()
+    if existing:
+        existing = existing.replace("\n" + DECISION_FOOTER + "\n", "\n").rstrip("\n") + "\n\n"
+    text = existing + f"## {_now()}\n\n{answer}\n\n{DECISION_FOOTER}\n"
+    try:
+        _private_write(path, text)
+    except OSError as e:
+        raise WorktreeError(f"cannot write {path}: {e}")
+    unpark(root, spec, num)
+    return path
 
 
 def release(root: Path, spec: str, num: str) -> Outcome:
@@ -763,6 +873,7 @@ def report(root: Path, spec: str, into: Optional[str] = None) -> Dict:
     - done: Done in tasks.md on `into` but with no merge commit (an earlier run, a direct commit).
     - failed: not merged or Done, and the task branch has commits that are not on `into`.
     - blocked: none of the above, and a dependency is not Done on `into` ("on" lists them).
+    - needsInput: a park note exists (`ck worktree park`) and the task is neither merged nor Done.
     - unstarted: the rest: ready to start, but nothing was committed for it.
 
     Every task of tasks.md is in exactly one list. Agent results are not consulted.
@@ -795,7 +906,8 @@ def report(root: Path, spec: str, into: Optional[str] = None) -> Dict:
         if match and match.group(1) in known and match.group(1) not in merges:
             merges[match.group(1)] = {"commit": sha, "mergedAt": at, "subject": subject}
 
-    out: Dict[str, List[Dict]] = {"merged": [], "done": [], "failed": [], "blocked": [], "unstarted": []}
+    out: Dict[str, List[Dict]] = {"merged": [], "done": [], "failed": [], "blocked": [], "unstarted": [], "needsInput": []}
+    notes = parked(root, spec)
     for task in tasks:
         n = task.num
         if n in merges:
@@ -803,6 +915,12 @@ def report(root: Path, spec: str, into: Optional[str] = None) -> Dict:
             continue
         if n in done:
             out["done"].append({"task": n})
+            continue
+        if n in notes:
+            note = notes[n]
+            out["needsInput"].append({"task": n, "file": note.get("file", ""), "kind": note.get("kind", ""),
+                                      "test": note.get("test", ""), "requirement": note.get("requirement", ""),
+                                      "decision": note.get("decision", ""), "parkedAt": note.get("parkedAt", "")})
             continue
         branch = task_branch(spec, n)
         ahead = int(git(root, "rev-list", "--count", f"{into}..{branch}").stdout.strip() or 0) if branch_exists(root, branch) else 0

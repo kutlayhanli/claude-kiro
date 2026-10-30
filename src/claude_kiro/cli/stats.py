@@ -12,7 +12,7 @@ import click
 
 from .. import agents as ag
 from .. import bench
-from ..analytics import agentcollect, agentrun
+from ..analytics import agentcollect, agentrun, guardlog
 from ..analytics import collect as col
 from ..analytics import runfile, store
 
@@ -626,7 +626,7 @@ def _export_into(checkout: Path, reexport, note: bool, yes: bool, announce_nothi
     interactive = sys.stdin.isatty() and sys.stdout.isatty() and not yes
     identity = leak.git_identity(checkout)
     non_ck = leak.non_ck_workflow_names(bench.claude_home())
-    terms = leak.build_terms(records, identity, non_ck)
+    terms = leak.build_terms(records, identity, non_ck, guardlog.leak_terms())
     notes = {}
     if note and not interactive:
         click.echo("⚠ issues note withheld: needs interactive approval")
@@ -772,7 +772,7 @@ def submit_cmd(to: Optional[str], note: bool, yes: bool):
 
     records, _bad = store.load_records_counted()
     identity = leak.git_identity(checkout)
-    terms = leak.build_terms(records, identity, leak.non_ck_workflow_names(bench.claude_home()))
+    terms = leak.build_terms(records, identity, leak.non_ck_workflow_names(bench.claude_home()), guardlog.leak_terms())
     hits = leak.scan({**{f.rel_path: f.text for f in files}, **text}, terms)
     if hits:
         for h in hits:

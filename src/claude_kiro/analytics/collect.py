@@ -887,6 +887,18 @@ def _build_record(*, run_id: str, workflow_name: str, run_data: Optional[Mapping
         "agents": rows,
         "missing": missing,
     }
+    from claude_kiro.analytics import interruptions
+
+    try:
+        block, log_missing = interruptions.collect_run_interruptions(
+            agents=agents, rows=rows, session_jsonl=session_jsonl, start_ms=start_ms, wall_ms=wall_ms,
+            open_end=ctx is not None, session_ids=[session_dir.name])
+    except Exception:  # noqa: BLE001 - counting interruptions must never stop a record from being built
+        block, log_missing = None, False
+    if block is not None:
+        record["interruptions"] = block
+    if log_missing:
+        missing.append({"agentId": None, "what": "guard_log"})
     if ctx is not None:
         from claude_kiro.analytics import agentcollect
         metrics = agentcollect.agent_metrics(ctx, rows)

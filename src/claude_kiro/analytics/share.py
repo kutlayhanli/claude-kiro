@@ -44,6 +44,12 @@ COUNT_KEYS = (
     "review_fixed", "review_not_fixed", "review_escalated", "refuted", "lenses_lost",
     "consistency_passes", "consistency_fixed", "open_questions", "agents_other",
 )
+INTERRUPTION_ROLES = ("implementer", "test-writer", "reviewer", "fixer", "resolver", "orchestrator")
+COMMAND_FAMILIES = ("sed", "rm", "mv", "git", "python", "redirect", "other")
+INTERRUPTION_KINDS = ("prompts", "guard_denials", "post_check_catches", "guard_escalations",
+                      "auto_mode_denials", "headless_denials", "user_rejects", "isolation_refusals")
+# shared kind name -> the local record's camelCase name
+_LOCAL_KIND = {k: (lambda h, *r: h + "".join(w.title() for w in r))(*k.split("_")) for k in INTERRUPTION_KINDS}
 USAGE_KEYS = ("input", "output", "cacheRead", "cacheCreation")
 
 _FIELD_SETS = {
@@ -204,6 +210,13 @@ _TREE = _obj(
             "estimated": _BOOL,
             "by_model": _map(_MODEL_KEYS, _NUM),
             "by_role": _map(ROLES, _NUM),
+        }),
+        "interruptions": _obj({
+            **{k: _INT for k in INTERRUPTION_KINDS},
+            "wait_minutes": _NUM,
+            "escalation_models": _map(MODEL_FAMILIES, _INT),
+            "by_role": _map(INTERRUPTION_ROLES, _map(COMMAND_FAMILIES, _obj({k: _INT for k in INTERRUPTION_KINDS}))),
+            "wait_minutes_by_role": _map(INTERRUPTION_ROLES, _NUM),
         }),
         "issues": _list(_enum(ISSUE_CODES)),
         "missing": _list(_enum(MISSING_KINDS)),
@@ -554,6 +567,58 @@ def _cost(local: Mapping, usd_by_model: Dict[str, float], usd_by_role: Dict[str,
     return cost
 
 
+def _interruptions(local: Mapping) -> Optional[Dict[str, Any]]:
+    """The shareable interruption counts: fixed-set keys and numbers only, None when the record has none (10.7)."""
+    block = local.get("interruptions")
+    if not isinstance(block, Mapping) or not isinstance(block.get("totals"), Mapping):
+        return None
+
+    def counts(src: Any) -> Dict[str, int]:
+        out: Dict[str, int] = {}
+        if isinstance(src, Mapping):
+            for shared, local_name in _LOCAL_KIND.items():
+                v = _int(src.get(local_name))
+                if v:
+                    out[shared] = v
+        return out
+
+    totals = block["totals"]
+    out: Dict[str, Any] = {k: _int(totals.get(_LOCAL_KIND[k])) or 0 for k in INTERRUPTION_KINDS}
+    wait = _num(totals.get("waitMs") / 60000 if _num(totals.get("waitMs")) is not None else None)
+    out["wait_minutes"] = wait if wait is not None else 0.0
+    models: Dict[str, int] = {}
+    raw_models = block.get("escalationModels")
+    if isinstance(raw_models, Mapping):
+        for k, v in raw_models.items():
+            if isinstance(k, str) and k in MODEL_FAMILIES and _int(v):
+                models[k] = _int(v)  # type: ignore[assignment]
+    if models:
+        out["escalation_models"] = models
+    by_role: Dict[str, Dict[str, Dict[str, int]]] = {}
+    raw_by_role = block.get("byRole")
+    if isinstance(raw_by_role, Mapping):
+        for role, fams in raw_by_role.items():
+            if not (isinstance(role, str) and role in INTERRUPTION_ROLES and isinstance(fams, Mapping)):
+                continue
+            for family, cell in fams.items():
+                if not (isinstance(family, str) and family in COMMAND_FAMILIES):
+                    continue
+                c = counts(cell)
+                if c:
+                    by_role.setdefault(role, {})[family] = c
+    if by_role:
+        out["by_role"] = by_role
+    waits: Dict[str, float] = {}
+    raw_waits = block.get("waitMsByRole")
+    if isinstance(raw_waits, Mapping):
+        for role, ms in raw_waits.items():
+            if isinstance(role, str) and role in INTERRUPTION_ROLES and _num(ms):
+                waits[role] = round(ms / 60000, 2)
+    if waits:
+        out["wait_minutes_by_role"] = waits
+    return out
+
+
 def build_shareable(local: Mapping, *, record_id: Optional[str] = None, machine_label: Optional[str] = None,
                     issue_codes: Optional[Iterable[str]] = None) -> Dict[str, Any]:
     """S14: a new shareable record from named fields of a local record. Never mutates `local`."""
@@ -639,6 +704,10 @@ def build_shareable(local: Mapping, *, record_id: Optional[str] = None, machine_
     cost = _cost(local, model_usd, role_usd)
     if cost:
         out["cost"] = cost
+
+    interruptions = _interruptions(local)
+    if interruptions is not None:
+        out["interruptions"] = interruptions
 
     out["issues"] = sorted({c for c in codes if isinstance(c, str) and c in ISSUE_CODES})
     out["missing"] = _missing(local)

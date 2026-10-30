@@ -54,6 +54,25 @@ Nothing outside this list is ever exported. Pattern syntax: `*` = a segment whos
 - `durations.task_span_minutes`: non-negative number
 - `durations.wall_minutes`: non-negative number
 - `id`: format: 16 lowercase hex characters
+- `interruptions.auto_mode_denials`: non-negative integer
+- `interruptions.by_role.*.*.auto_mode_denials`: non-negative integer
+- `interruptions.by_role.*.*.guard_denials`: non-negative integer
+- `interruptions.by_role.*.*.guard_escalations`: non-negative integer
+- `interruptions.by_role.*.*.headless_denials`: non-negative integer
+- `interruptions.by_role.*.*.isolation_refusals`: non-negative integer
+- `interruptions.by_role.*.*.post_check_catches`: non-negative integer
+- `interruptions.by_role.*.*.prompts`: non-negative integer
+- `interruptions.by_role.*.*.user_rejects`: non-negative integer
+- `interruptions.escalation_models.*`: non-negative integer
+- `interruptions.guard_denials`: non-negative integer
+- `interruptions.guard_escalations`: non-negative integer
+- `interruptions.headless_denials`: non-negative integer
+- `interruptions.isolation_refusals`: non-negative integer
+- `interruptions.post_check_catches`: non-negative integer
+- `interruptions.prompts`: non-negative integer
+- `interruptions.user_rejects`: non-negative integer
+- `interruptions.wait_minutes`: non-negative number
+- `interruptions.wait_minutes_by_role.*`: non-negative number
 - `issues[]`: enum: `conflict_not_resolved`, `consistency_conflicts`, `cross_test_blocking`, `escalated`, `escalated_to_opus`, `gate_red_after_merge`, `landing_bisected`, `landing_red`, `permission_refusal`, `plan_cycle`, `planning_failed`, `red_on_landing_fixed`, `report_from_agents`, `resolver_rounds_exceeded`, `retry_no_commits`, `review_blocking_unresolved`, `review_contract_mismatch`, `review_escalated`, `review_lenses_lost`, `review_needs_work`, `run_blocked`, `run_halted`, `transcripts_missing`, `unknown_roles`, `unreviewed_merge`, `worktree_busy`
 - `machine`: format: slug of 1-32 lowercase letters, digits, hyphens
 - `missing[]`: enum: `agent_entries`, `ck_version`, `meta`, `result`, `runfile`, `timing`, `transcripts`

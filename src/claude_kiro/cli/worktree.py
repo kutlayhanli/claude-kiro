@@ -1,6 +1,7 @@
 """`ck worktree` and `ck waves`: the stable commands parallel task agents call."""
 
 import json
+import os
 import socket
 import sys
 from pathlib import Path
@@ -447,6 +448,7 @@ def report_cmd(spec, into, as_json):
     failed:    the task branch has commits that never landed
     blocked:   a dependency is not Done on the target ("on")
     unstarted: ready, but nothing was committed for it
+    needs input: parked with `ck worktree park`; waits for `ck worktree resolve`
     Each task is in exactly one list. Agent claims are not consulted; an
     orchestrator adds its agents' reasons to this as annotations.
     """
@@ -466,3 +468,102 @@ def report_cmd(spec, into, as_json):
         items = result[key]
         shown = ", ".join(f"{e['task']} (on {', '.join(e['on'])})" if key == "blocked" else e["task"] for e in items)
         click.echo(f"  {key} {len(items)}{': ' + shown if shown else ''}")
+    waiting = result.get("needsInput", [])
+    if waiting:
+        # Unindented on purpose: a notification message and this line must not share a 12-character window.
+        click.echo(f"needs input {len(waiting)}: " + ", ".join(f"{e['task']} ({e['decision']})" for e in waiting))
+        for e in waiting:
+            click.echo(f"    task {e['task']} ({e['file']}, {e['kind']}):")
+            click.echo(f"      test: {e['test']}")
+            click.echo(f"      requirement: {e['requirement']}")
+        click.echo("    Answer with `ck worktree resolve <spec> <N>` (answer JSON on stdin), then run the spec again.")
+
+
+def _read_stdin_object(what: str) -> dict:
+    """The JSON object on stdin, or exit 3 with a message."""
+    try:
+        data = json.loads(sys.stdin.read())
+    except ValueError as e:
+        click.echo(f"❌ {what}: stdin is not valid JSON ({e})")
+        sys.exit(3)
+    if not isinstance(data, dict):
+        click.echo(f"❌ {what}: stdin must be a JSON object")
+        sys.exit(3)
+    return data
+
+
+@worktree.command("park")
+@click.argument("spec")
+@click.argument("task")
+@click.option("--no-notify", is_flag=True, help="Write the park note without sending a notification")
+@click.option("--json", "as_json", is_flag=True)
+def park_cmd(spec, task, no_notify, as_json):
+    """Park TASK as needing my decision: write the note, send one notification.
+
+    \b
+    Reads {"file", "kind", "test", "requirement", "decision"} as JSON on stdin.
+    The notification (run.notify_command) names the spec and task only, never
+    the quoted text. Exits 0 once the note is written, even if the notification
+    failed; exits 3 when the note cannot be written or stdin is not valid JSON.
+    Inside `ck run` (CK_RUN_NOTIFY=parent) ck run's own process sends it.
+    """
+    from .. import agents as ag
+    from .. import notify
+
+    root = _root()
+    name = _spec_name(spec)
+    note = _read_stdin_object("park")
+    try:
+        path = wt.park(root, name, task, note)
+    except wt.WorktreeError as e:
+        click.echo(f"❌ {e}")
+        sys.exit(3)
+    if no_notify:
+        status, detail = "skipped", "--no-notify"
+    elif os.environ.get("CK_RUN_NOTIFY") == "parent":
+        status, detail = "deferred", "ck run sends it"
+    else:
+        try:
+            command = ag.resolve(root)["roles"]["run"]["notify_command"]
+        except ag.AgentConfigError as e:
+            command = None
+            outcome = notify.NotifyOutcome("failed", f"cannot read run.notify_command: {e}")
+        else:
+            outcome = notify.send(command, notify.notify_message(name, task), root)
+        status, detail = outcome.status, outcome.detail
+    result = {"parked": True, "note": str(path), "notification": status, "detail": detail}
+    if as_json:
+        click.echo(json.dumps(result, indent=2))
+    else:
+        click.echo(f"parked {name} task {task}: {path}")
+        click.echo(f"notification: {status}" + (f" ({detail})" if detail else ""))
+
+
+@worktree.command("resolve")
+@click.argument("spec")
+@click.argument("task")
+@click.option("--json", "as_json", is_flag=True)
+def resolve_cmd(spec, task, as_json):
+    """Record my answer for a parked TASK, clear its park note.
+
+    Reads {"answer": "..."} as JSON on stdin. Every later attempt of the task
+    reads the decision note first.
+    """
+    root = _root()
+    name = _spec_name(spec)
+    data = _read_stdin_object("resolve")
+    answer = data.get("answer")
+    if not isinstance(answer, str) or not answer.strip():
+        click.echo("❌ resolve: stdin must be {\"answer\": \"<text>\"}")
+        sys.exit(3)
+    try:
+        had = task in wt.parked(root, name)
+        path = wt.resolve(root, name, task, answer)
+    except wt.WorktreeError as e:
+        click.echo(f"❌ {e}")
+        sys.exit(3)
+    result = {"resolved": True, "decisionNote": str(path), "hadParkNote": bool(had)}
+    if as_json:
+        click.echo(json.dumps(result, indent=2))
+    else:
+        click.echo(f"resolved {name} task {task}: {path}")

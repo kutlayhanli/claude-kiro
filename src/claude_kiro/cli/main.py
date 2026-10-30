@@ -21,6 +21,7 @@ from .agents import agents
 from .update import update
 from .hooks import hook
 from .run import run
+from .handoff import handoff
 from .bench import bench, cost
 from .stats import stats
 from .worktree import lint, plan, waves, worktree
@@ -66,10 +67,14 @@ def cli(ctx: click.Context, hook_name: Optional[str], plugin_hook: bool, directo
         try:
             # Read JSON from stdin
             input_data = sys.stdin.read()
-            input_json = json.loads(input_data) if input_data else {}
+            try:
+                input_json = json.loads(input_data) if input_data else {}
+            except ValueError:
+                input_json = {}  # unusable input never fails a hook; the hook sees no fields
 
             # A user-scope plugin loads in every project; its hooks only act in ck projects.
-            if plugin_hook and not _is_ck_project(Path(input_json.get("cwd") or os.getcwd())):
+            cwd_hint = input_json.get("cwd") if isinstance(input_json, dict) else None
+            if plugin_hook and not _is_ck_project(Path(cwd_hint if isinstance(cwd_hint, str) and cwd_hint else os.getcwd())):
                 sys.exit(0)
 
             # Execute the hook
@@ -1155,6 +1160,7 @@ cli.add_command(waves)
 cli.add_command(plan)
 cli.add_command(lint)
 cli.add_command(agents)
+cli.add_command(handoff)
 cli.add_command(update)
 cli.add_command(run)
 cli.add_command(bench)

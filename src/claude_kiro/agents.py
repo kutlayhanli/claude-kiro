@@ -89,7 +89,10 @@ DEFAULTS: Dict[str, Dict[str, Any]] = {
             "finish_first": True,
             # analytics: record each `ck run` into the local stats database. machine_label: a slug
             # naming this machine in exports (null = unset).
-            "analytics": True, "machine_label": None},
+            "analytics": True, "machine_label": None,
+            # notify_command: a shell command `ck` runs (in the main checkout) when a task parks as needs-input;
+            # it gets a Notification-hook JSON on stdin and CK_NOTIFY_MESSAGE. null = no notification.
+            "notify_command": None},
 }
 
 ROLE_KEYS = {
@@ -100,7 +103,7 @@ ROLE_KEYS = {
     "fixer": {"model", "effort", "escalate"},
     "orchestrator": {"model", "effort"},
     "resolver": {"model", "effort"},
-    "run": {"max_concurrent", "allowed_domains", "budget_usd", "budget_per_task_usd", "finish_first", "analytics", "machine_label"},
+    "run": {"max_concurrent", "allowed_domains", "budget_usd", "budget_per_task_usd", "finish_first", "analytics", "machine_label", "notify_command"},
 }
 UNLIMITED = "unlimited"
 
@@ -184,6 +187,12 @@ def _coerce(role: str, key: str, value: Any) -> Any:
             return None
         if not valid_machine_label(value):
             raise AgentConfigError(MACHINE_LABEL_ERROR)
+        return value
+    if key == "notify_command" and role == "run":
+        if value is None or (isinstance(value, str) and value.strip().lower() in ("none", "default", "null")):
+            return None
+        if not isinstance(value, str) or not value.strip():
+            raise AgentConfigError("run.notify_command must be a non-empty command, or default to remove it")
         return value
     if isinstance(value, str) and value.lower() in ("null", "none", "default"):
         value = None
@@ -273,7 +282,7 @@ def parse_override(text: str) -> Tuple[str, str, str]:
     role, key = path.split(".", 1)
     key = key.strip()
     # Whitespace is part of a machine label or boolean word, so it must be rejected, not trimmed away.
-    return role.strip(), key, value if key in ("machine_label", "analytics") else value.strip()
+    return role.strip(), key, value if key in ("machine_label", "analytics", "notify_command") else value.strip()
 
 
 def resolve(project_dir: Path, overrides: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -407,6 +416,22 @@ def model_family(model: str) -> Optional[str]:
         if family in text:
             return family
     return None
+
+
+GUARD_LADDER = ("sonnet", "opus", "fable")
+
+
+def guard_ladder(model: Optional[str]) -> List[str]:
+    """Models to try, in order, after a guard stop on `model`: the ladder models ranked above its family.
+
+    The single source of the rule (S20). None, inherited or unknown gives all three; `fable` gives [].
+    It ignores implementer.escalate.
+    """
+    family = model_family(model) if isinstance(model, str) else None
+    if family is None:
+        return list(GUARD_LADDER)
+    rank = MODELS.index(family)
+    return [m for m in GUARD_LADDER if MODELS.index(m) > rank]
 
 
 def meets_planning_bar(model: str, effort: Optional[str], planning: Dict[str, Any]) -> Tuple[bool, str]:

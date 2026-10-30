@@ -6,6 +6,13 @@ allowed-tools: Read, Edit, Write, Grep, Glob, AskUserQuestion, Workflow, Agent, 
 
 Review the specification: $ARGUMENTS
 
+## Step 0: Hand-off check
+
+Before anything else, and before choosing between the Workflow tool and agent mode, run `ck handoff review $ARGUMENTS --json` (from where you are now). It decides whether this run belongs in the main checkout instead of this isolated session, and answers with one JSON object:
+- `handoff: false`: nothing to hand off. Continue with the steps below. Its `interactive` field says whether I am at the session (true) or this is an unattended run (false).
+- `handoff: true` and `launched: true`: the run now continues in the main checkout under `ck run`. Print `command`, `mainCheckout`, `runBranch`, `follow` (how to watch the log) and `report` to me, then stop. Do nothing else.
+- `handoff: true` and `launched: false`, or the command exits non-zero or fails to run: print its `error` and the `manualCommand` it gives, then stop. Never start the run from this session after a failed hand-off.
+
 # Spec-Review: Adversarial Review of an Existing Spec
 
 Use this after the spec or the code has drifted, after hand edits, or for specs written before `/spec:create` reviewed its own output. It runs the review half of the `spec-create` workflow: four reviewers attack the spec (plan fidelity, codebase grounding, implementability, test adequacy), a separate skeptic tries to refute each finding, and the survivors are applied. A fix that would change behaviour a criterion or property governs comes back to me as a decision instead, and a consistency check then diffs the revised files against a pre-revision snapshot and checks the changes against the criteria and properties. On an older spec without `test-plan.md`, the test-adequacy lens flags it and the revision adds one.

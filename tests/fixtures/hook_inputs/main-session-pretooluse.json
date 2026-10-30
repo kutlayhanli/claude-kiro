@@ -1,0 +1,18 @@
+{
+  "cwd": "/work/demo",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PreToolUse",
+  "permission_mode": "auto",
+  "prompt_id": "prompt-0002",
+  "scratchpad_dir": "/tmp/claude-1000/-work-demo/session-0002/scratchpad",
+  "session_id": "session-0002",
+  "tool_input": {
+    "command": "echo CAPTURE_MAIN",
+    "description": "Print CAPTURE_MAIN"
+  },
+  "tool_name": "Bash",
+  "tool_use_id": "toolu-0005",
+  "transcript_path": "/home/user/.claude/projects/demo/transcript.jsonl"
+}
