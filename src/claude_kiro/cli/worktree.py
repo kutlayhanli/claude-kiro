@@ -145,10 +145,30 @@ def _chain_lengths(deps: dict, done: set) -> dict:
 @click.argument("spec")
 @click.option("--exclude", default="", help="Comma-separated tasks to leave out of `ready` (running or failed)")
 @click.option("--json", "as_json", is_flag=True, hidden=True)  # output is always JSON; accepted because the docs and workflow pass it
-def plan(spec: str, exclude: str, as_json: bool):
+@click.option("--progress-run", default=None, help="Run key whose progress file records --failed tasks")
+@click.option("--failed", default="", help="Comma-separated tasks that failed (recorded once each in the progress file)")
+def plan(spec: str, exclude: str, as_json: bool, progress_run, failed: str):
     """Machine-readable plan for SPEC (JSON): deps, done, ready-to-start tasks (longest remaining chain first), lint results, and display waves."""
     excluded = {x.strip() for x in exclude.split(",") if x.strip()}
     click.echo(json.dumps(_plan(Path.cwd(), spec, excluded), indent=2))
+    ids = [x.strip() for x in failed.split(",") if x.strip()]
+    if progress_run and ids:
+        _record_failed(_spec_name(spec), progress_run, ids)
+
+
+def _record_failed(spec: str, key: str, ids) -> None:
+    try:
+        from .. import progress as prog
+
+        events, _ = prog.read_events(prog.run_file(key, os.environ))
+        state = prog.fold(events)
+        start = next((e for e in events if e.get("kind") == "start"), {})
+        known = {str(t) for t in (start.get("open") or [])}
+        todo = [t for t in dict.fromkeys(ids) if t in known and not (t in state.tasks and state.tasks[t].status == "failed")]
+    except Exception:  # noqa: BLE001
+        return
+    if todo:
+        _record_progress(spec, key, [("task-failed", {"task": t}) for t in todo])
 
 
 @click.command()
@@ -243,6 +263,44 @@ def _lint_contracts(spec: str, as_json: bool, tasks, base, strict: bool) -> None
         sys.exit(1)
 
 
+# --------------------------------------------------------------------------- progress events
+
+
+def _record_progress(spec: str, key, builds, *, eta: bool = False):
+    """Append events to a run's progress file, then recompute. Returns (eta line or None, failure text or None).
+
+    `key` is a run key, or None to use the spec's active run (park/resolve). `builds` is a list of
+    (kind, options) pairs. A progress failure never reaches the caller's output or exit code."""
+    try:
+        from .. import progress as prog
+        from . import eta as ce
+
+        env = os.environ
+        now = prog.clock_now(env)
+        if key is None:
+            key = prog.active_run(spec, _root(), env, now=now)
+            if not key:
+                return None, None
+        events, _ = prog.read_events(prog.run_file(key, env))
+        failure = None
+        for kind, opts in builds:  # one bad event does not drop the others
+            try:
+                ev = ce._build_event(spec, kind, events, now, opts, True)
+            except Exception as exc:  # noqa: BLE001
+                failure = failure or f"failed: {type(exc).__name__}: {exc}"
+                continue
+            err = prog.append(key, ev, env)
+            if err is not None:
+                return None, f"failed: {err}"
+            events.append(ev)
+        from ..eta import service
+
+        line = service.after_event(key, now=prog.clock_now(env), env=env)
+        return (line if eta else None), failure
+    except Exception as exc:  # noqa: BLE001 - progress never changes a command
+        return None, f"failed: {type(exc).__name__}: {exc}"
+
+
 @click.group()
 def worktree():
     """Create, claim, merge, and inspect per-task git worktrees.
@@ -293,7 +351,12 @@ def integration_cmd(spec, base):
 @click.argument("task")
 @click.option("--owner", default=None, help="Who holds the claim (default: ck task agent on <host>); a token and the time are appended")
 @click.option("--takeover", is_flag=True, help="Take over a claim left by an agent that is gone, however recent")
-def claim_cmd(spec, task, owner, takeover):
+@click.option("--progress-run", default=None, help="Run key to record a progress event in (only when the claim succeeds)")
+@click.option("--progress-event", type=click.Choice(["task-start", "retry", "escalation", "revision", "landfix", "resolve"]),
+              default=None, help="Kind of progress event for this claim")
+@click.option("--progress-model", default=None, help="Model of the agent that will work on the task")
+@click.option("--attempt", type=int, default=None, help="Attempt number for the progress event")
+def claim_cmd(spec, task, owner, takeover, progress_run, progress_event, progress_model, attempt):
     """Mark a task worktree as in use (git worktree lock). Fails with BUSY if already claimed.
 
     A claim with no activity (claim, `ck gate` run, commit) for claim_stale_minutes
@@ -301,7 +364,11 @@ def claim_cmd(spec, task, owner, takeover):
     """
     root = _root()
     owner = owner or f"ck task agent on {socket.gethostname()}"
-    _emit([wt.claim(root, _spec_name(spec), task, owner, takeover=takeover)], False)
+    outcome = wt.claim(root, _spec_name(spec), task, owner, takeover=takeover)
+    if outcome.state == "CLAIMED" and progress_run and progress_event:
+        _record_progress(_spec_name(spec), progress_run,
+                         [(progress_event, {"task": task, "model": progress_model, "attempt": attempt})])
+    _emit([outcome], False)
 
 
 @worktree.command("release")
@@ -355,6 +422,26 @@ def _gate_fn(spec: str):
     return gate
 
 
+def _record_landing(spec: str, key: str, result: dict) -> dict:
+    """Append the landing, merge and hand-landing events; return `result` with `eta` (and `progress` on failure)."""
+    states = {}
+    for item in result["tasks"]:
+        states.setdefault(item["state"], []).append(str(item["task"]))
+    gates = result.get("gates") or []
+    green = all(bool(g.get("green")) for g in gates) if gates else not states.get("RED")
+    builds = [("landing", {"tasks": ",".join(str(i["task"]) for i in result["tasks"]),
+                           "merged": ",".join(states.get("MERGED", [])), "red": ",".join(states.get("RED", [])),
+                           "conflict": ",".join(states.get("CONFLICT", [])),
+                           "protected": ",".join(states.get("PROTECTED", [])), "green": green})]
+    builds += [("merge", {"task": t}) for t in states.get("MERGED", [])]
+    builds += [("hand-landing", {"task": t}) for t in states.get("PROTECTED", [])]
+    line, failure = _record_progress(spec, key, builds, eta=True)
+    result = {**result, "eta": line}
+    if failure:
+        result["progress"] = failure
+    return result
+
+
 def _priority(target: Path, spec: str) -> dict:
     """Longest remaining dependency chain per task, from tasks.md on the target (critical path lands first)."""
     from ..waves import plan_waves
@@ -377,8 +464,9 @@ def _priority(target: Path, spec: str) -> dict:
 @click.option("--install", "do_install", is_flag=True, help="Refresh dependencies in the target (specs/ck.json \"install\", or detected) before each gate")
 @click.option("--release", "release_claims", is_flag=True, help="Release claims left on the task worktrees (their agents have finished)")
 @click.option("--keep", is_flag=True, help="Keep merged tasks' worktrees and branches")
+@click.option("--progress-run", default=None, help="Run key to record the landing in; adds an `eta` line to the JSON")
 @click.option("--json", "as_json", is_flag=True)
-def land_cmd(spec, tasks, into, do_gate, do_install, release_claims, keep, as_json):
+def land_cmd(spec, tasks, into, do_gate, do_install, release_claims, keep, progress_run, as_json):
     """Land a batch of TASKS on the target: precheck, merge, one gate, bisect if red.
 
     \b
@@ -417,6 +505,8 @@ def land_cmd(spec, tasks, into, do_gate, do_install, release_claims, keep, as_js
         else:
             click.echo(f"❌ {e}")
         sys.exit(3)
+    if progress_run:
+        result = _record_landing(name, progress_run, result)
     if as_json:
         click.echo(json.dumps(result, indent=2))
     else:
@@ -542,6 +632,7 @@ def park_cmd(spec, task, no_notify, as_json):
         else:
             outcome = notify.send(command, notify.notify_message(name, task), root)
         status, detail = outcome.status, outcome.detail
+    _record_progress(name, None, [("park", {"task": task})])
     result = {"parked": True, "note": str(path), "notification": status, "detail": detail}
     if as_json:
         click.echo(json.dumps(result, indent=2))
@@ -573,6 +664,8 @@ def resolve_cmd(spec, task, as_json):
     except wt.WorktreeError as e:
         click.echo(f"❌ {e}")
         sys.exit(3)
+    if had:
+        _record_progress(name, None, [("unpark", {"task": task})])
     result = {"resolved": True, "decisionNote": str(path), "hadParkNote": bool(had)}
     if as_json:
         click.echo(json.dumps(result, indent=2))

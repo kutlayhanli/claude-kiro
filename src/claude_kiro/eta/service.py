@@ -483,6 +483,8 @@ def _core(project_dir: Path, spec: str, kind: str, *, key: Optional[str], events
     # ---- basis and confidence
     basis_src = str(model.basis.get("source", "none"))
     parts = [p for p in model.bundled_parts if (p == "phases") == (kind == "create")]
+    if basis_src == "mixed" and not parts:  # bundled parts of the other kind of run do not make this estimate mixed
+        basis_src = "local"
     view["basis"] = {"source": basis_src, "tasks": int(model.basis.get("tasks", 0)),
                      "runs": int(model.basis.get("runs" if kind == "implement" else "createRuns", 0)),
                      "widestMatch": "none", "bundledParts": parts,
@@ -499,7 +501,7 @@ def _core(project_dir: Path, spec: str, kind: str, *, key: Optional[str], events
     merged_count = running = 0
     if graph is not None:
         held = set(hold.held)
-        merged_set = {t for t, p in state.tasks.items() if p.status == "merged" and t in graph.order}
+        merged_set = {t for t, p in state.tasks.items() if p.status == "merged" and t in graph.deps}
         merged_count = len(merged_set)
         rows = []
         for t in graph.order:
@@ -731,13 +733,19 @@ def _what(events: Sequence[Mapping[str, Any]]) -> str:
     real = [ev for ev in events if ev.get("kind") not in _NOTICE_KINDS]
     if not real:
         return ""
+    # `ck worktree land` writes `landing` and then one `merge`/`hand-landing` per task: they are one event to a reader.
+    tail = len(real)
+    while tail > 1 and real[tail - 1].get("kind") in ("merge", "hand-landing"):
+        tail -= 1
+    if tail < len(real) and real[tail - 1].get("kind") == "landing":
+        real = real[:tail]
     last = real[-1]
     kind = last.get("kind")
     if kind == "start":
         return ""
     if kind == "landing":
-        merged = [str(x) for x in (last.get("merged") or [])]
-        return "landed %s" % ",".join(merged) if merged else "landing"
+        landed = [str(x) for x in (last.get("merged") or last.get("tasks") or [])]
+        return "landed %s" % ",".join(landed) if landed else "landing"
     state = progress.fold(real)
     return state.last_event[1] if state.last_event else str(kind)
 
@@ -848,6 +856,9 @@ def after_event(key: str, *, now: datetime, budget_s: Optional[float] = None,
             cache = _read_cache(key, e)
             fresh_events = cache is not None and decide.cache_fresh(cache, digest, model.digest)
             prev_p50 = ((cache or {}).get("finish") or {}).get("p50") if cache else None
+            if prev_p50 is None and cache is None:  # first recompute: the launch estimate is the line to compare with
+                fin = (state.launch or {}).get("finish")
+                prev_p50 = fin[1] if isinstance(fin, list) and len(fin) == 3 and isinstance(fin[1], str) else None
             _check_deadline(deadline)
             view, aux = _core(project_dir, spec, kind, key=key, events=events, skipped=skipped, progress_file=path,
                               now=now, seed=None, env=e, model=model, settings=settings, deadline=deadline)

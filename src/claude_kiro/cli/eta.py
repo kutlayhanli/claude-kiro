@@ -325,10 +325,18 @@ def _build_event(spec: str, kind: str, events: Sequence[Mapping], now: datetime,
     task = o.get("task")
     base: Dict[str, Any] = {"kind": kind, "at": _utc_iso(now)}
 
+    start = next((e for e in events if e.get("kind") == "start"), {})
+    known = {str(t) for t in (start.get("open") or []) if isinstance(t, (str, int))}
+
     def need_task() -> str:
         if task is None or not str(task).strip():
             raise ValueError(f"{kind} needs --task")
+        if kind == "task-failed" and str(task) not in known:  # free text from a flag never reaches the file
+            raise ValueError(f"{kind}: task is not one of the run's tasks")
         return str(task)
+
+    def known_ids(text: Optional[str]) -> List[str]:
+        return [t for t in _split(text) if t in known]
 
     def need_phase() -> str:
         phase = o.get("phase")
@@ -366,8 +374,9 @@ def _build_event(spec: str, kind: str, events: Sequence[Mapping], now: datetime,
     elif kind in ("merge", "hand-landing"):
         base.update(task=need_task())
     elif kind == "landing":
-        base.update(tasks=_split(o.get("tasks")), merged=_split(o.get("merged")), red=_split(o.get("red")),
-                    conflict=_split(o.get("conflict")), protected=_split(o.get("protected")), green=o.get("green"))
+        base.update(tasks=known_ids(o.get("tasks")), merged=known_ids(o.get("merged")), red=known_ids(o.get("red")),
+                    conflict=known_ids(o.get("conflict")), protected=known_ids(o.get("protected")),
+                    green=o.get("green"))
     return base
 
 
@@ -417,10 +426,18 @@ def progress_event(spec, kind, run_key, task, model, attempt, phase, reason, tas
             state = prog.fold(events)
             if state.phase_running == ev["phase"]:
                 ev = None  # already running: idempotent
-            elif state.phase_running:
-                err = prog.append(key, {"kind": "phase-end", "at": _utc_iso(now), "phase": state.phase_running}, env)
-                if err:
-                    raise OSError(err)
+            else:
+                # every phase that was started and never got a phase-end is closed before the next one starts
+                opened: List[str] = []
+                for old in events:
+                    if old.get("kind") == "phase-start" and old.get("phase") not in opened:
+                        opened.append(old.get("phase"))
+                    elif old.get("kind") == "phase-end" and old.get("phase") in opened:
+                        opened.remove(old.get("phase"))
+                for phase in opened:
+                    err = prog.append(key, {"kind": "phase-end", "at": _utc_iso(now), "phase": phase}, env)
+                    if err:
+                        raise OSError(err)
         if ev is not None:
             err = prog.append(key, ev, env)
             if err is not None:

@@ -321,7 +321,8 @@ def claim(root: Path, spec: str, num: str, owner: str, takeover: bool = False) -
         git(root, "worktree", "unlock", str(path))
     owner = f"{owner} (claim {secrets.token_hex(4)} at {_now()})"
     git(root, "worktree", "lock", "--reason", owner, str(path))
-    unpark(root, spec, num)  # a fresh attempt clears the park note; the decision note stays
+    if unpark(root, spec, num):  # a fresh attempt clears the park note; the decision note stays
+        _record_unpark(root, spec, num)
     took = f" (took over stale claim: {stale})" if stale else " (took over)" if reason else ""
     return Outcome(num, "CLAIMED", owner + took, rel, branch)
 
@@ -404,10 +405,31 @@ def parked(root: Path, spec: str) -> Dict[str, dict]:
     return found
 
 
-def unpark(root: Path, spec: str, num: str) -> None:
+def unpark(root: Path, spec: str, num: str) -> bool:
+    """Remove the park note; True when one was removed."""
+    removed = False
     for directory in dict.fromkeys((worktrees_dir(root, spec), configured_dir(root), root / LEGACY_WORKTREES_DIR)):
-        with contextlib.suppress(OSError):
+        try:
             (directory / f"{spec}-task-{num}.needs-input.json").unlink()
+            removed = True
+        except OSError:
+            pass
+    return removed
+
+
+def _record_unpark(root: Path, spec: str, num: str) -> None:
+    """Append `unpark` to the spec's active run. Never raises: progress does not change a claim."""
+    try:
+        from . import progress
+
+        env = os.environ
+        now = progress.clock_now(env)
+        key = progress.active_run(spec, root, env, now=now)
+        if key:
+            progress.append(key, {"kind": "unpark", "at": now.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                  "task": num}, env)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 DECISION_FOOTER = ("If this says the test or requirement is wrong, it has already been changed in the main checkout; "
