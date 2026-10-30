@@ -259,7 +259,7 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 ---
 
 ### Task 8: Harden agent-mode analytics and store task size counts in local records
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 6.1, 6.2, 9.1, 9.2, 9.3, 9.4, 10.1, 10.2, 10.3, 11.1, 11.2, 11.3, 11.4
 **Description:** The D7 fixes from the agent-mode-analytics review plus the D4 size inputs, in one change set because they share `analytics/collect.py`, `agentcollect.py` and `cli/stats.py`. This task owns Harness Contract H-12.
