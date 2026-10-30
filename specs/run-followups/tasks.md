@@ -676,7 +676,7 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 ---
 
 ### Task 23: Test the run progress file through the real writers (claim, land, plan, park, concurrency, privacy)
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 3.1, 3.2, 3.3, 3.5, 3.6, 3.7, 3.8, 3.9, 4.2, 5.4, 8.1, 8.5, 8.6, 8.9, 8.10
 **Description:** Implement TC-21, TC-22, TC-23, TC-24, TC-27, TC-28, TC-29(a), TC-30, TC-31, TC-88, TC-53(b), TC-58 and TC-103, plus red-team cases for 3.5, 3.8, 8.6, 8.9 and 8.10. P-14 and P-15 live in Task 9.
