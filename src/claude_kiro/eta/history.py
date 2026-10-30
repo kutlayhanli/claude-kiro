@@ -502,7 +502,7 @@ def fit_model(records: Sequence[Mapping], defaults: Optional[Mapping], *,
         parts.append("review wait")
     if n_landing < MIN_MATCH and "landingMinutes" in bundled_waits:
         parts.append("landing wait")
-    if n_priced < MIN_MATCH and bundled_usd:
+    if not local_enough and bundled_usd:  # bundled cost prices bundled tuples only
         parts.append("cost")
 
     bsz = d.get("size")

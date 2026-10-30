@@ -123,7 +123,7 @@ def _plan(graph: Graph, model: Model, task: str, roles: Mapping) -> _Plan:
             rev_pool=tuple(s[3] for s in samples if s[3] is not None),
             land_pool=tuple(s[4] for s in samples if s[4] is not None),
             bundled_slots=(), step_index=step,
-            priced=any(u is not None for u in usd) or bool(model.bundled_usd),
+            priced=any(u is not None for u in usd),
         )
     if match.quantiles is not None:
         factor = size_factor(model.size, task_size, None)
@@ -156,10 +156,8 @@ def _draw(plan: _Plan, model: Model, up: float, ur: float, ul: float, uc: float)
             cost: Optional[float] = plan.usd[i]
         elif plan.rate is not None:
             cost = slot * plan.rate
-        elif model.bundled_usd:
-            cost = slot * _at(model.bundled_usd, uc)
         else:
-            cost = None
+            cost = None  # matched local tuples without a price: cost unknown (1.9)
         return slot, rev, land, cost
     slot = _at(plan.bundled_slots, up)
     rev = _wait((), bw_rev, ur)

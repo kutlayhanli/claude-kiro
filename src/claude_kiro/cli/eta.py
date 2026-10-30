@@ -200,6 +200,7 @@ def _write_snapshot(key: str, env: Mapping[str, str], spec: str):
     if env.get("CK_PROGRESS_DIR"):
         prepared = pdir / f"{spec}.prepared-model.json"
         try:
+            # model_from_json returns None unless the snapshot's digest matches its body
             model = history.model_from_json(json.loads(prepared.read_text(encoding="utf-8")))
         except (OSError, ValueError):
             model = None
@@ -606,7 +607,7 @@ def eta_backtest(as_json: bool) -> None:
         wall_ms = rec.get("wallMs")
         if not isinstance(wall_ms, (int, float)) or isinstance(wall_ms, bool) or wall_ms <= 0:
             continue
-        runs += 1
+        counted = False
         try:
             model = history.fit_model(records[:i], defaults, tasks_md_reader=lambda root, spec: None)
             if is_create:
@@ -617,12 +618,15 @@ def eta_backtest(as_json: bool) -> None:
                     continue
                 sim = simulate.simulate_implement(graph, model, empty, now_min=0.0, n=400, seed=1)
             if sim.remaining_min is None:
-                continue
+                continue  # nothing was re-estimated: not counted
+            runs += 1
+            counted = True
             wall = wall_ms / 60000.0
             if sim.remaining_min[0] <= wall <= sim.remaining_min[2]:
                 inside += 1
         except Exception:  # noqa: BLE001 - a run that cannot be re-estimated counts as outside
-            continue
+            if not counted:
+                runs += 1
     rate = (inside / runs) if runs else 0.0
     body = {"runs": runs, "inside": inside, "rate": round(rate, 4)}
     if as_json:
