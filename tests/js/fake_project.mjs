@@ -1,6 +1,47 @@
 // A fake project for the spec-implement workflow tests: `ck plan` semantics over deps/done, task
 // durations, failures, timestamps. Shared by spec_implement.test.mjs and the bridge.
-import { sleep } from './load_workflow.mjs'
+import { execFile } from 'node:child_process'
+import { sleep as realSleep } from './load_workflow.mjs'
+
+// --- execCk: the fake agents record progress events through the real CLI -------------------------------------
+// The shipped prompts put their claim and land commands against paths the fake project never creates, and land
+// carries --gate --install --release, so the commands are never run as written. The agent parses the progress
+// flags out of them and runs `ck progress event ...` instead (the claim and landing kinds are accepted only under
+// CK_PROGRESS_TEST_KINDS=1, which is set here). Everything else the CLI prints comes from the real subprocess.
+const FLAG_VALUE = /^[^-\s"][^\s"]*$/
+function parseFlags(text) {
+  const toks = text.trim().split(/\s+/)
+  const flags = {}
+  for (let i = 0; i < toks.length; i++) {
+    if (!toks[i].startsWith('--')) continue
+    const next = toks[i + 1]
+    if (next !== undefined && FLAG_VALUE.test(next)) { flags[toks[i].slice(2)] = next; i++ } else flags[toks[i].slice(2)] = true
+  }
+  return flags
+}
+// The text of the command after `after` up to the end of the line or the closing double quote.
+const rest = (prompt, re) => { const m = re.exec(prompt); return m ? m : null }
+export function findClaim(prompt) {
+  const m = rest(prompt, /worktree claim (\S+) (\d+)([^\n"]*)/)
+  return m ? { spec: m[1], task: m[2], flags: parseFlags(m[3]) } : null
+}
+export function findLand(prompt) {
+  const m = rest(prompt, /worktree land (\S+) ([^\n"]*)/)
+  if (!m) return null
+  const tasks = []
+  for (const t of m[2].trim().split(/\s+/)) { if (!/^\d+$/.test(t)) break; tasks.push(t) }
+  return { spec: m[1], tasks, flags: parseFlags(m[2].slice(m[2].indexOf('--') < 0 ? m[2].length : m[2].indexOf('--'))) }
+}
+const eventArgv = (spec, kind, run, extra = []) => ['progress', 'event', spec, kind, ...(run ? ['--run', run] : []), ...extra]
+// `ck ... plan ... --failed` and `ck ... progress event ...` commands in a prompt, as written (minus -C DIR).
+export function writtenCommands(prompt) {
+  const out = []
+  for (const m of prompt.matchAll(/\bck (?:-C \S+ )?((?:plan|progress event) [^\n"`]*)/g)) {
+    if (m[1].startsWith('plan') && !/--failed/.test(m[1])) continue
+    out.push(m[1].trim().split(/\s+/).filter(t => t !== '""' ))
+  }
+  return out
+}
 
 // Same as cli/worktree.py::_chain_lengths: for each open task, the open tasks on its longest chain of dependents.
 function chainLengths(deps, done) {
@@ -29,11 +70,11 @@ function chainLengths(deps, done) {
 //   guardStopIn: {n: 'revise'}             the guard stop of task n happens in its first revise call, not its task call
 //   parkOutcome: {parked, notification, detail}  answer of the `park <N>` agent (default parked, sent, '')
 //   worktree: {n: {state, detail}}         the first task agent of n returns that worktree outcome (default CREATED)
-export function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [], gitReport = null, conflictRounds = {}, planDurations = {}, externalDone = null, planFail = [], worktree = {}, guardStops = {}, guardStopIn = {}, parkOutcome = null }) {
+export function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [], gitReport = null, conflictRounds = {}, planDurations = {}, externalDone = null, planFail = [], worktree = {}, guardStops = {}, guardStopIn = {}, parkOutcome = null, execCk = null, etaAnswer = null, sleep = realSleep, external = p => p }) {
   let rechecksLeftRed = recheckRed
   // RED landings left per task: checkRed tasks are red on their first landing, redLands sets a count.
   const redLeft = { ...Object.fromEntries(checkRed.map(n => [n, 1])), ...redLands }
-  const state = { deps: { ...deps }, done: new Set(done), merged: new Set(), events: [], prompts: {}, opts: {}, reviewCount: {}, attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0, landings: [], parks: [], revises: {}, resolved: new Set(), conflictsHit: {} }
+  const state = { deps: { ...deps }, done: new Set(done), merged: new Set(), events: [], prompts: {}, opts: {}, reviewCount: {}, attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0, landings: [], parks: [], revises: {}, resolved: new Set(), conflictsHit: {}, execLog: [] }
   let clock = Date.parse('2026-10-04T10:00:00Z')
   const stamp = () => new Date((clock += 60000)).toISOString().replace('.000', '')
   const ready = exclude => {
@@ -51,8 +92,41 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
     const within = ceiling === 'always' || (rank !== undefined && MODEL_RANK[rank] <= MODEL_RANK[ceiling])
     return within ? { file: 'tests/test_guarded.py', kind: 'test', test: 'tests/test_guarded.py::test_x', requirement: '1.1' } : null
   }
+  // Run one `ck` command through execCk (or, in dry mode, only record it). Returns the parsed --json output, if any.
+  const runCk = async argv => {
+    state.execLog.push(argv)
+    if (!execCk || execCk.dry) return null
+    const env = { ...process.env, ...(execCk.env || {}), CK_PROGRESS_TEST_KINDS: '1' }
+    const [bin, ...pre] = execCk.cmd
+    const stdout = await external(new Promise(resolve => {
+      execFile(bin, [...pre, ...argv], { env, cwd: execCk.cwd || process.cwd(), encoding: 'utf8' }, (err, out) => resolve(out || ''))
+    }))
+    try { return JSON.parse(stdout) } catch { return stdout.trim() }
+  }
+  const recordClaim = async prompt => {
+    const c = findClaim(prompt)
+    if (!c || !c.flags['progress-run'] || !c.flags['progress-event']) return
+    const f = c.flags
+    await runCk(eventArgv(c.spec, f['progress-event'], f['progress-run'], ['--task', c.task, ...(f['progress-model'] ? ['--model', f['progress-model']] : []), ...(f.attempt ? ['--attempt', f.attempt] : [])]))
+  }
+  const runWritten = async prompt => { for (const argv of writtenCommands(prompt)) await runCk(argv) }
+  // Record the landing and one merge / hand-landing per task, from this fake project's own result. Returns the eta.
+  const recordLanding = async (prompt, tasks, out) => {
+    const land = findLand(prompt)
+    const key = land && land.flags['progress-run']
+    if (!key) return undefined
+    const of = st => out.filter(o => o.state === st).map(o => o.task)
+    const list = (flag, v) => (v.length ? [flag, v.join(',')] : [])
+    let last = await runCk(eventArgv(land.spec, 'landing', key, ['--json', '--tasks', tasks.join(','), ...list('--merged', of('MERGED')), ...list('--red', of('RED')), ...list('--conflict', of('CONFLICT')), ...list('--protected', of('PROTECTED'))]))
+    for (const o of out) {
+      const kind = o.state === 'MERGED' ? 'merge' : o.state === 'PROTECTED' ? 'hand-landing' : null
+      if (kind) last = await runCk(eventArgv(land.spec, kind, key, ['--json', '--task', o.task]))
+    }
+    return last && typeof last === 'object' ? last.eta : null
+  }
   const agent = async (prompt, opts) => {
     const l = opts.label
+    if (execCk && !l.startsWith('land ')) { await recordClaim(prompt); await runWritten(prompt) }
     state.events.push(l)
     state.prompts[l] = prompt
     state.opts[l] = opts
@@ -138,7 +212,14 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
         if (red.includes(n)) { redLeft[n]--; out.push({ task: n, state: 'RED', checkGreen: false, checkTail: `red: task ${n}` }) }
         else { state.done.add(n); state.merged.add(n); out.push({ task: n, state: 'MERGED', checkGreen: true, mergedAt: stamp() }) }
       }
-      return { tasks: out, gates, bisected: gates.length > 1, startedAt, finishedAt: stamp() }
+      const answer = { tasks: out, gates, bisected: gates.length > 1, startedAt, finishedAt: stamp() }
+      if (execCk) {
+        const eta = await recordLanding(prompt, tasks, out)
+        if (etaAnswer === 'null') answer.eta = null
+        else if (etaAnswer === 'number') answer.eta = 42
+        else if (etaAnswer !== 'missing' && eta !== undefined) answer.eta = eta
+      }
+      return answer
     }
     if (l.startsWith('resolve')) {
       const n = l.match(/resolve (\d+)/)[1]
