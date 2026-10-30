@@ -16,9 +16,10 @@
 """
 
 import re
+import shlex
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 from claude_kiro.config import load_config
 from claude_kiro.hooks._shared.spec_parser import SpecTask, parse_tasks
@@ -177,6 +178,96 @@ def verify_order_cycles(tasks: Dict[str, SpecTask], project_dir: Path, config: O
     return found
 
 
+_GLOB_CHARS = ("*", "?", "[")
+
+
+def verify_paths(command: str, config: dict) -> List[Tuple[str, bool]]:
+    """(path, narrowed) pairs for the test-file tokens of one Verify command.
+
+    narrowed is True when the token carried a `::` selector, or when the command
+    holds a `-k` option (which narrows every file in it)."""
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = command.split()
+    command_narrowed = any(tok == "-k" or (tok.startswith("-k") and len(tok) > 2) for tok in tokens)
+    out: List[Tuple[str, bool]] = []
+    for tok in tokens:
+        selected = "::" in tok
+        path = tok.split("::")[0].removeprefix("./")
+        if not path or path.endswith("/") or any(c in path for c in _GLOB_CHARS):
+            continue
+        if not is_test_path(path, config):
+            continue
+        out.append((path, selected or command_narrowed))
+    return out
+
+
+def _shortest_chain(tasks: Dict[str, SpecTask], start: str, target: str) -> Optional[List[str]]:
+    """Shortest dependency path start -> ... -> target (BFS over dependencies), or None."""
+    parents: Dict[str, Optional[str]] = {start: None}
+    queue = [start]
+    while queue:
+        node = queue.pop(0)
+        if node == target:
+            chain = []
+            cur: Optional[str] = node
+            while cur is not None:
+                chain.append(cur)
+                cur = parents[cur]
+            return chain[::-1]  # start first: [start, ..., target]
+        for dep in tasks[node].dependencies:
+            if dep in tasks and dep not in parents:
+                parents[dep] = node
+                queue.append(dep)
+    return None
+
+
+def verify_file_cycles(tasks: Dict[str, SpecTask], config: dict) -> List[Dict]:
+    """Impl task X whose Verify runs test file F, where test task T owns F, T verifies impl task Y,
+    and Y depends on X (directly or transitively): X's gate can't pass before Y lands."""
+    found: List[Dict] = []
+    for x_num, x in tasks.items():
+        if x.track == "test" or x.done:
+            continue
+        files: List[str] = []
+        for command in x.verify:
+            for path, narrowed in verify_paths(command, config):
+                if not narrowed and path not in files:
+                    files.append(path)
+        for path in files:
+            for t_num, t in tasks.items():
+                if t.track != "test" or path not in {f.strip() for f in t.files}:
+                    continue
+                if x_num in t.verifies or t_num in x.verified_by:
+                    continue
+                ys = [y for y in t.verifies if y in tasks]
+                ys += [y for y, task in tasks.items() if t_num in task.verified_by and y not in ys]
+                for y_num in ys:
+                    if y_num == x_num or tasks[y_num].track == "test":
+                        continue
+                    chain = _shortest_chain(tasks, y_num, x_num)
+                    if chain is None:
+                        continue
+                    found.append(
+                        {
+                            "kind": "verify-file",
+                            "task": x_num,
+                            "file": path,
+                            "testTask": t_num,
+                            "needs": y_num,
+                            "chain": chain,
+                            "message": (
+                                f"Task {x_num}'s Verify runs {path}, which Task {t_num} (test track) owns and which "
+                                f"verifies Task {y_num}; Task {y_num} depends on Task {x_num} ({' -> '.join(chain)}), "
+                                f"so Task {x_num}'s gate can't pass before Task {y_num} lands. "
+                                f"Narrow Task {x_num}'s Verify to test files that don't need Task {y_num}."
+                            ),
+                        }
+                    )
+    return found
+
+
 def reasonless_dependencies(tasks: Dict[str, SpecTask]) -> List[Dict[str, str]]:
     """Dependencies with no stated reason. Depending on your own verifying test
     task is implicitly justified (its tests are the oracle), so it isn't listed.
@@ -245,11 +336,12 @@ def task_risk(tasks: Dict[str, SpecTask], config: dict) -> Dict:
 def lint_spec(spec_dir: Path, project_dir: Path) -> Dict:
     tasks = {t.num: t for t in parse_tasks(spec_dir / "tasks.md")}
     cycles = dependency_cycles(tasks)
-    risk = task_risk(tasks, load_config(project_dir))
+    config = load_config(project_dir)
+    risk = task_risk(tasks, config)
     return {
         "riskUntagged": risk["riskUntagged"],
         "cycles": cycles,
-        "verifyCycles": [] if cycles else verify_order_cycles(tasks, project_dir),
+        "verifyCycles": ([] if cycles else verify_order_cycles(tasks, project_dir, config)) + verify_file_cycles(tasks, config),
         "reasonless": reasonless_dependencies(tasks),
         "criticalPath": [] if cycles else critical_path(tasks),
     }

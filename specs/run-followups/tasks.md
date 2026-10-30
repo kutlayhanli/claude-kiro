@@ -168,7 +168,7 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 ---
 
 ### Task 5: Add the Verify-file cycle check to `ck lint`
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7, 13.8, 13.9, 13.10
 **Description:** Add two pure functions to `src/claude_kiro/lint.py` (design seams S13 and S14). This task owns Harness Contract H-10's `lint_spec` entries. `verify_paths(command, config)` tokenises one Verify command with `shlex.split` (falling back to `str.split` on a parse error), cuts any `::selector`, strips a leading `./`, and keeps a token only when `is_test_path(token, config)` holds, it has no glob character (`*?[`) and it does not end in `/`. It returns `(path, narrowed)` pairs: `narrowed` is True when the token carried a `::` selector or the command holds a `-k` option (`-k EXPR`, `-kEXPR`, `-k=EXPR`) (13.10, D12). `verify_file_cycles(tasks, config)` loops over impl tasks X that are not Done, each path F from `verify_paths` over X's `verify` commands that has at least one un-narrowed occurrence (13.10), each test task T whose `files` contain F (compare each Files path after `.strip()`, since the parser keeps whitespace inside the backticks; the comparison is otherwise exact and case-sensitive) and that does not also verify X (skip when `X in T.verifies` or `T in X.verified_by`, 13.9), and each impl task Y that T verifies (`Y in T.verifies` or `T in Y.verified_by`). It reports an entry when Y != X and X is an ancestor of Y. The chain is the shortest dependency path Y -> ... -> X (BFS over `dependencies`, with a seen-set, skipping unknown ids), so cycles never raise. Each entry is `{"kind": "verify-file", "task": X, "file": F, "testTask": T, "needs": Y, "chain": [Y, ..., X], "message": ...}`, with the message text from the design's Lint entry section, including the suggestion to narrow X's Verify. In `lint_spec`, append these entries to `verifyCycles` after the import-based entries. Run the new check even when the graph has a dependency cycle; the import-based check stays skipped in that case, as today. Existing import-based entries keep their exact keys and get no `kind`. In `cli/worktree.py` `lint`, print the new entries as `✗ verify-file cycle: <message>` and change the success line to `✓ no verify-order cycles found (checked Python imports of existing test files and Verify test files owned by test tasks)`. Text mode also prints one line per task with a dependency on an unknown task id, `⚠ Task <N> depends on unknown Task <ids>`, computed from the parsed Dependencies so it is printed also when the graph has a cycle (13.7; `ck lint` printed no unknown-dependency error before). `--json` keeps its shape. Exit 1 follows from a non-empty `verifyCycles`, and `ck plan` already puts `verifyCycles` tasks in `blocked`, so the workflow's start refusal needs no new wiring. The skill text for 13.3 is in Task 27.
@@ -178,14 +178,14 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 **Verify:** `uv run pytest -q -n auto tests/test_lint_verify_files.py tests/test_lint_verify_properties.py tests/test_lint_verify_redteam.py tests/test_lint.py`
 **Verified by:** Task 4 (TC-77..TC-84, TC-99, TC-100, P-20..P-23, P-27, red-team 13.4, 13.5)
 **Acceptance:**
-- [ ] An impl task X whose Verify names F, where F is in the Files of test task T, T verifies Y, and Y depends on X (directly or transitively), gives one `verify-file` entry naming X, F, T, Y and the chain Y -> ... -> X, and `ck lint` exits 1
-- [ ] T verifies Y via either T's `**Verifies:**` or Y's `**Verified by:**`
-- [ ] No entry when F is in no test task's Files, when no Y verified by T depends on X, or when X is Done
-- [ ] No entry for a T that also verifies X (either form), and none when every occurrence of F in X's Verify is narrowed by `::` or `-k`; a bare occurrence in any command still reports it
-- [ ] F matches when written as `./F` or inside a longer command with flags and several files; globs and directory arguments are not matched
-- [ ] A tasks.md with a dependency cycle or an unknown task id reports the existing cycle/unknown errors and does not crash
-- [ ] `ck lint --json` lists the new entries in `verifyCycles` beside unchanged import-based entries (no `kind` on those)
-- [ ] On copies of every spec in this repository with statuses reset to Not Started, `ck lint` reports no new verify-file entry (landing-speed tasks 9 and 17 included); the pre-fix agent-mode-analytics tasks.md reports exactly one (X, Y) pair (task 8, needs 13)
+- [x] An impl task X whose Verify names F, where F is in the Files of test task T, T verifies Y, and Y depends on X (directly or transitively), gives one `verify-file` entry naming X, F, T, Y and the chain Y -> ... -> X, and `ck lint` exits 1
+- [x] T verifies Y via either T's `**Verifies:**` or Y's `**Verified by:**`
+- [x] No entry when F is in no test task's Files, when no Y verified by T depends on X, or when X is Done
+- [x] No entry for a T that also verifies X (either form), and none when every occurrence of F in X's Verify is narrowed by `::` or `-k`; a bare occurrence in any command still reports it
+- [x] F matches when written as `./F` or inside a longer command with flags and several files; globs and directory arguments are not matched
+- [x] A tasks.md with a dependency cycle or an unknown task id reports the existing cycle/unknown errors and does not crash
+- [x] `ck lint --json` lists the new entries in `verifyCycles` beside unchanged import-based entries (no `kind` on those)
+- [x] On copies of every spec in this repository with statuses reset to Not Started, `ck lint` reports no new verify-file entry (landing-speed tasks 9 and 17 included); the pre-fix agent-mode-analytics tasks.md reports exactly one (X, Y) pair (task 8, needs 13)
 **Dependencies:** Task 4 (its tests are the oracle)
 **Complexity:** Medium
 **Risk:** normal
