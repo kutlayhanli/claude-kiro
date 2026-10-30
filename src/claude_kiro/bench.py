@@ -679,6 +679,10 @@ def _terminal_record(runs: Path, since: float) -> bool:
         except (OSError, ValueError):
             continue
         if isinstance(data, dict) and data.get("status") in ("done", "failed", "partial"):
+            # The plugin finishes the record just before writing bench-output.json. Waiting for the
+            # companion file avoids terminating the CLI between the two writes.
+            if data.get("status") == "done" and not (path.parent / "bench-output.json").is_file():
+                continue
             return True
     return False
 

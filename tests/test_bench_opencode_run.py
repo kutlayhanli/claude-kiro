@@ -131,6 +131,8 @@ def test_run_opencode_stops_when_the_record_closes(tmp_path):
             (pathlib.Path({str(tmp_path / "child.pid")!r})).write_text(str(child.pid))
             time.sleep(0.5)
             pathlib.Path({str(run / "record.json")!r}).write_text(json.dumps({{"status": "done"}}))
+            time.sleep(0.3)
+            pathlib.Path({str(run / "bench-output.json")!r}).write_text("{{}}")
             time.sleep(120)
             """
         )
