@@ -509,8 +509,9 @@ snapshot", "Guard event").
 - `src/claude_kiro/hooks/_shared/run_marker.py` - new, only when the capture shows no `agent_id`: session workflow marker
 - `src/claude_kiro/cli/guard.py` - new, only with `run_marker`: `ck guard workflow-begin|workflow-end`
 - `src/claude_kiro/cli/main.py` - register `guard` when it exists
-**Verify:** `uv run pytest -q -n auto tests/test_guard_properties.py tests/test_caller_properties.py tests/test_guard_bash.py tests/test_guard.py tests/test_guard_callers.py tests/test_guard_postcheck.py tests/test_redteam_postcheck.py tests/test_postcheck_properties.py tests/test_guard_properties_hook.py tests/test_guard_log.py tests/test_plugin_modes.py tests/test_plugin.py tests/test_stats_leak.py tests/test_stats_export.py`
+**Verify:** `uv run pytest -q -n auto tests/test_guard_properties.py tests/test_caller_properties.py tests/test_guard_bash.py tests/test_guard.py tests/test_guard_callers.py tests/test_guard_postcheck.py tests/test_redteam_postcheck.py tests/test_postcheck_properties.py tests/test_guard_properties_hook.py tests/test_guard_log.py tests/test_plugin_modes.py tests/test_plugin.py tests/test_stats_leak.py tests/test_stats_export.py -k "not test_p24_family_names_are_the_documented_set"`
 **Verified by:** Task 3, Task 4, Task 5
+Run note (2026-10-30): P-24 (`test_p24_family_names_are_the_documented_set`) reads `share.COMMAND_FAMILIES`, which Task 15 adds and Task 15 depends on this task, so it runs under Task 15's Verify, not here.
 **Acceptance:**
 - [ ] As a task agent, each NFR replay case gives no output; `rm` / `rm -rf tests` of existing unowned tests is
       denied for a task agent and uses the configured mode for the main session, also through `cd` and by absolute
@@ -713,7 +714,7 @@ omitted when absent; `guardLog` and differences never leave). Regenerate `analyt
 - `src/claude_kiro/analytics/share.py` - enums, `_TREE.interruptions`, `_interruptions`
 - `analytics/SCHEMA.md` - regenerated field list
 - `src/claude_kiro/analytics/show.py` - `interruptions_view`, `interruptions_line`, render and JSON
-**Verify:** `uv run pytest -q -n auto tests/test_stats_interruptions.py tests/test_stats_properties_interruptions.py tests/test_stats_properties_shared.py tests/test_redteam_shared.py tests/test_stats_roles.py tests/test_stats_agents_collect.py tests/test_stats_collect.py tests/test_stats_show.py tests/test_stats_export.py tests/test_stats_properties_share.py`
+**Verify:** `uv run pytest -q -n auto tests/test_stats_interruptions.py tests/test_stats_properties_interruptions.py tests/test_stats_properties_shared.py tests/test_redteam_shared.py tests/test_stats_roles.py tests/test_stats_agents_collect.py tests/test_stats_collect.py tests/test_stats_show.py tests/test_stats_export.py tests/test_stats_properties_share.py` `uv run pytest -q tests/test_guard_properties.py::test_p24_family_names_are_the_documented_set`
 **Verified by:** Task 9, Task 8
 **Acceptance:**
 - [ ] A workflow run and an agent-mode run with seeded interruptions get the matching totals by role and family
