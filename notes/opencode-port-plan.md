@@ -173,6 +173,12 @@ HTTP 429, `retryAfterMs` ~19.7 M. The bridge itself was then proven live on `ope
 E0 remains **blocked on quota/funding**, not on the port, and must be rerun before any benchmark
 number is trusted.
 
+A real `spec-create.js` run on `opencode-go/beam-free` reached `design.md` (requirements 18 s,
+design 172 s, both structured results accepted) and was stopped at `test-plan.md` after the 10-minute
+outer timeout. The record correctly captured the two successes and the killed child as a
+`session_error` with `failureLabel: "port"`. The workflow source is bridge-compatible; this model is
+simply too slow for a whole spec.
+
 ---
 
 ## Phase 2 — Commands, agents, instructions, fallback (D3, D8, D10, D11)
