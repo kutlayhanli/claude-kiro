@@ -559,7 +559,7 @@ Run note (2026-10-30): P-24 (`test_p24_family_names_are_the_documented_set`) rea
 ---
 
 ### Task 12: Teach `ck run` create and review runs, and add `ck handoff`
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 3.2, 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9
 **Description:** In `src/claude_kiro/cli/run.py` add `--command implement|create|review` (default `implement`; prompts
@@ -583,17 +583,17 @@ an existing `<spec>-run` branch), call `decide_handoff`; when it carries `run_br
 **Verify:** `uv run pytest -q -n auto tests/test_handoff.py tests/test_handoff_properties.py tests/test_run.py`
 **Verified by:** Task 6
 **Acceptance:**
-- [ ] `ck run myspec --command create --dry-run --json` builds `/spec:create myspec` with the same sandbox, budget
+- [x] `ck run myspec --command create --dry-run --json` builds `/spec:create myspec` with the same sandbox, budget
       and turn cap as implement; `--command review` without `tasks.md` refuses with exit 2.
-- [ ] From a linked worktree under `.claude/worktrees/`, `ck handoff implement myspec --json` launches `ck run` from
+- [x] From a linked worktree under `.claude/worktrees/`, `ck handoff implement myspec --json` launches `ck run` from
       the main checkout with `--log` before `--`; the printed log is the file `ck run` writes.
-- [ ] From the main checkout, a worktree outside `.claude/worktrees/`, or with a single task number, it prints
+- [x] From the main checkout, a worktree outside `.claude/worktrees/`, or with a single task number, it prints
       `handoff: false` and launches nothing.
-- [ ] Missing sandbox tools, missing spec, or a child that exits within 3 s gives exit 3 with `error` and
+- [x] Missing sandbox tools, missing spec, or a child that exits within 3 s gives exit 3 with `error` and
       `manualCommand`; nothing runs in the isolated session.
-- [ ] A spec present only on the worktree's branch, with a clean main checkout, runs on a new `<spec>-run` branch at
+- [x] A spec present only on the worktree's branch, with a clean main checkout, runs on a new `<spec>-run` branch at
       the worktree's HEAD; a dirty main checkout or a taken branch gives exit 3 with the recovery commands.
-- [ ] Existing implement-mode `ck run` tests still pass.
+- [x] Existing implement-mode `ck run` tests still pass.
 **Dependencies:** Task 10 (calls `decide_handoff`, `is_headless`), Task 6 (its tests are the oracle)
 **Complexity:** Medium
 **Risk:** safety (launches a detached paid headless run)
