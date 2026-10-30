@@ -103,6 +103,16 @@ def session_mode(cwd: Any, kind: str) -> Optional[str]:
 def _checkout_of(path: Path, cwd: Path) -> Optional[Path]:
     """The checkout holding `path` (its own, for a task worktree), else `cwd` when the path is inside it."""
     top = git_utils.find_toplevel(path)
+    if top is not None and _rel(path, top) is not None:
+        return top
+    # A symlink that leads into another checkout: judge the file where it really is.
+    try:
+        real = path.resolve()
+    except (OSError, RuntimeError, ValueError):
+        real = None
+    real_top = git_utils.find_toplevel(real) if real is not None else None
+    if real_top is not None and _rel(path, real_top) is not None:
+        return real_top
     if top is not None:
         return top
     try:

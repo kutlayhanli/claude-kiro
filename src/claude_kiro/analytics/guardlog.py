@@ -7,6 +7,7 @@ cannot be written changes nothing the agent sees.
 
 import json
 import os
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,9 +15,16 @@ from typing import Any, Collection, Dict, List, Literal, Mapping, Optional, Tupl
 
 from claude_kiro.analytics import store
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - not POSIX
+    fcntl = None  # type: ignore[assignment]
+
 GUARD_LOG_LIMIT = 1_048_576
 LOG_NAME = "guard-events.jsonl"
 ROTATED_NAME = "guard-events.1.jsonl"
+LOCK_NAME = "guard-events.lock"
+LOCK_WAIT_S = 0.5
 
 
 @dataclass(frozen=True)
@@ -74,6 +82,40 @@ def _to_json(event: GuardEvent) -> Dict[str, Any]:
     }
 
 
+def _lock(directory: Path) -> Optional[int]:
+    """An exclusive lock on the data dir's guard lock file (fd), or None when it cannot be had within LOCK_WAIT_S.
+
+    Without the lock the event is still appended, only rotation is skipped (a later append rotates).
+    """
+    if fcntl is None:
+        return None
+    try:
+        fd = os.open(directory / LOCK_NAME, os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError:
+        return None
+    deadline = time.monotonic() + LOCK_WAIT_S
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fd
+        except OSError:
+            if time.monotonic() >= deadline:
+                os.close(fd)
+                return None
+            time.sleep(0.01)
+
+
+def _unlock(fd: Optional[int]) -> None:
+    if fd is None:
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)  # type: ignore[union-attr]
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 def append_event(event: GuardEvent, env: Optional[Mapping[str, str]] = None) -> bool:
     """Append one event; rotate first when the file is at the limit. False when it could not be written."""
     try:
@@ -85,16 +127,22 @@ def append_event(event: GuardEvent, env: Optional[Mapping[str, str]] = None) -> 
             os.chmod(directory, 0o700)
         except OSError:
             pass
+        lock = _lock(directory)
         try:
-            if path.stat().st_size >= GUARD_LOG_LIMIT:
-                os.replace(path, _rotated_path(env))
-        except FileNotFoundError:
-            pass
-        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-        try:
-            os.write(fd, line.encode("utf-8"))
+            if lock is not None:
+                # Re-checked under the lock: two hooks that both saw the limit rotate once, not twice.
+                try:
+                    if path.stat().st_size >= GUARD_LOG_LIMIT:
+                        os.replace(path, _rotated_path(env))
+                except FileNotFoundError:
+                    pass
+            fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+            try:
+                os.write(fd, line.encode("utf-8"))
+            finally:
+                os.close(fd)
         finally:
-            os.close(fd)
+            _unlock(lock)
         try:
             os.chmod(path, 0o600)
         except OSError:

@@ -165,6 +165,19 @@ def _rel_paths(checkout: str, paths: List[str]) -> Optional[List[str]]:
     return out or None
 
 
+def _test_scope(named: Optional[List[str]], tests: List[str], config: Mapping[str, Any]) -> Optional[List[str]]:
+    """The named paths that can hold a test: a test file, a directory with test files, or the checkout root.
+
+    A command that names only other files (a bare `python rewrite.py`) names no test, so every test file of the
+    checkout is a candidate (None), as design.md "Pre-command snapshot" says.
+    """
+    if named is None:
+        return None
+    kept = [n for n in named
+            if n == "" or is_test_file(n, config) or any(t.startswith(n.rstrip("/") + "/") for t in tests)]
+    return kept or None
+
+
 def _candidates(files: List[str], named: Optional[List[str]]) -> List[str]:
     if named is None:
         return files
@@ -207,7 +220,7 @@ def take_snapshot(input_data: Mapping[str, Any], command: str, caller: str) -> O
             if status is None or files is None:
                 continue
             tests = [f for f in files if is_test_file(f, config)]
-            named = _rel_paths(checkout, paths)
+            named = _test_scope(_rel_paths(checkout, paths), tests, config)
             wanted = set(_candidates(tests, named))
             dirty: Dict[str, Any] = {}
             for rel in status:
@@ -281,7 +294,8 @@ def _merge_refs(command: str) -> List[str]:
         verb = words[j]
         args = [w for w in words[j + 1:j + 8] if not w.startswith("-")]
         if verb == "pull":
-            args = args[1:2] if len(args) >= 2 else ["@{u}"]
+            # `git pull <remote> <branch>` brings in the fetched commit, not the local `<branch>`.
+            args = ["FETCH_HEAD", f"{args[0]}/{args[1]}", args[1]] if len(args) >= 2 else ["@{u}", "FETCH_HEAD"]
         refs.extend(args[:3])
     return refs
 
