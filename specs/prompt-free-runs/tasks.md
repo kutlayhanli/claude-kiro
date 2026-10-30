@@ -195,7 +195,7 @@ metamorphic rule) and P-32 (`run_marker` lifecycle with an injected clock, skipp
 ---
 
 ### Task 5: Test the shell post-check and the private guard event log
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 1.6, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 2.10, 3.4, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6
 **Properties:** P-7, P-8, P-9, P-10, P-21
