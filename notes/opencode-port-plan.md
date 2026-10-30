@@ -317,15 +317,22 @@ informational. Runs automatically at the start of `/spec/implement`.
   type:"workflow_agent", agentId, label, model, state, durationMs, tokens}]}` — the shape
   `ck bench import` accepts. **Live-verified:** the generated file imported into
   `smoke--beam-free--r1.json` with all three agents, wall time and context-token estimates.
-- Small script `opencode/scripts/arm.sh` (spec, model, rep) that starts one run in a fresh worktree
-  with `CK_RUN_HEADLESS=1`, waits for the record, and prints the bench output path.
+- `opencode/scripts/arm.mjs` starts one run against an OpenCode service and waits for the record.
+  It can `--check` the registered commands, and dispatches `session.command` (with discovery/auth)
+  for the launcher path.
 - `ck bench import` + `ck bench score` unchanged.
 
 ### 4.2 Step 2 (launcher + collector, after the first results)
 
 - `ck bench run --harness opencode`: launcher in `bench.py` (~line 635) that starts an
-  `opencode run --standalone --model …` session instead of `ck run`, and a collector that reads the
-  `ck-run-local` record by run id. Both collectors behind one interface.
+  OpenCode session instead of `ck run`, and a collector that reads the `ck-run-local` record by run
+  id. Both collectors behind one interface.
+- **Launch caveat:** a bare `opencode serve` did not activate the clone's project plugins (a session
+  with `location.directory` still listed no commands). The proven path is the harness-probe tool:
+  copy a small `bench-probe.js` into the clone, have it call the `workflow` tool and poll the record,
+  and run it through `opencode run --standalone` so the turn stays alive. The launcher still has to
+  assemble the `spec-implement` args from `ck plan`/`ck agents`; see
+  `notes/opencode-bench-launcher.md`.
 
 ### 4.3 Experiments
 
