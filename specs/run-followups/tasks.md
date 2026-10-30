@@ -509,7 +509,7 @@ Settings `derandomize=True, max_examples=200, database=None, deadline=None`. Eac
 ---
 
 ### Task 17: Write the approval-wait shift property over the ETA service
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.5, 5.7, 8.5
 **Description:** Write property P-8 in `tests/test_eta_service_properties.py`. Metamorphic: inserting a closed approval wait of W minutes (an `approval-start` and a matching `approval-end`) at an insertion point, with every later event and `now` shifted by W, shifts finish p10/p50/p90 by exactly W, never moves the state from `on-track` to `slipping`, and adds no slip notification. Build a temp project with `eta_helpers.eta_spec`, copy a `POOL_IMPL` store, write the two event sequences with `eta_helpers.append_events` into separate temp `CK_PROGRESS_DIR`s, and call `claude_kiro.eta.service.estimate(project_dir, spec, now=..., seed=..., env=...)` in-process on each with the same explicit seed, comparing the views; feed the views to `decide.notify_decision` for the slip check. Domain: `events()` x W in 1..240 x insertion point, with `now` within 120 minutes of the last event so neither run is stale (a stale run has no finish to shift, 3.10). Settings `derandomize=True, max_examples=50, database=None, deadline=None`. Declare `PROPERTIES = {"P-8": ...}`.
@@ -519,13 +519,14 @@ Settings `derandomize=True, max_examples=200, database=None, deadline=None`. Eac
 **Properties:** P-8
 **Verifies:** Task 18 (`estimate` with approval waits)
 **Acceptance:**
-- [ ] The property calls `service.estimate` in-process over a real tasks.md, a store the real collector wrote and real progress files, not the CLI
-- [ ] Settings are deterministic and every call has the same explicit seed
-- [ ] Before implementation it fails at import of `claude_kiro.eta.service` (missing behaviour)
-- [ ] No mocks of project code
-- [ ] The file sets `pytestmark` with `no_network`
+- [x] The property calls `service.estimate` in-process over a real tasks.md, a store the real collector wrote and real progress files, not the CLI
+- [x] Settings are deterministic and every call has the same explicit seed
+- [x] Before implementation it fails at import of `claude_kiro.eta.service` (missing behaviour)
+- [x] No mocks of project code
+- [x] The file sets `pytestmark` with `no_network`
 **Dependencies:** Task 2 (pools, spec builder, `append_events`), Task 1 (strategies)
 **Complexity:** Medium
+**Implementation notes:** `NotifyInput`, `SentNotice` and `Notice` are now defined in design.md's Estimator types (the shape Task 15's tests proposed); `_slip_notices` builds exactly `decide.NotifyInput` and reads `Notice.kind`, with the hold read back from the view's `blocked`/`waitingOnYou`/`runnableDone`. The start event's `launch` is the design's `LaunchSummary` mapped from the launch view's `remainingMinutes` and `cost`. The start event carries `maxConcurrent: None` and no `model`/`modelDigest` (no snapshot is written, so the service fits from the store). About half the drawn cases are clean (acyclic, no park or failure), and the test asserts at least 5 of the 50 examples compared a non-null finish. Launch p90 comes from a third `estimate` over the start event alone.
 **Risk:** safety (asserts no spurious slip notification reaches the user's notify command)
 
 ---
