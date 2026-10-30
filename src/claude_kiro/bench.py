@@ -64,6 +64,8 @@ OPENCODE_PRICING.update({
     # Known paid refs (models.dev, 2026-10). Anything else stays unknown (None), never $0.
     "opencode/deepseek-v4.1-flash": {"input": 0.30, "output": 1.20},
     "opencode-go/deepseek-v4.1-flash": {"input": 0.15, "output": 0.60},
+    "opencode/deepseek-v4-pro": {"input": 1.74, "output": 3.48, "cacheRead": 0.145},
+    "opencode-go/deepseek-v4-pro": {"input": 0.66, "output": 1.98, "cacheRead": 0.022},
     "opencode-go/muse-spark-1.3-contributor": {"input": 0.10, "output": 0.20},
 })
 PRICING: Dict[str, Dict[str, Any]] = {
@@ -1047,9 +1049,22 @@ def run_arm_opencode(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[s
         if peaks:
             result["peak_context"] = max(peaks)
         if all(agent.get("cost") is not None for agent in native_agents):
-            usd = round(sum(float(agent.get("cost") or 0) for agent in native_agents), 6)
-            result["cost"] = {**result.get("cost", {}), "usd": usd, "source": "opencode sessions",
-                              "basis": "session.get().cost", "estimated": False}
+            native_usd = round(sum(float(agent.get("cost") or 0) for agent in native_agents), 6)
+            priced = _price_by_model(by_model, cfg.get("pricing") or {})
+            free = bool(by_model) and all(bool((rates(model) or {}).get("free")) for model in by_model)
+            if native_usd > 0:
+                result["cost"] = {**result.get("cost", {}), "usd": native_usd, "source": "opencode sessions",
+                                  "basis": "session.get().cost", "estimated": False}
+            elif priced is not None:
+                # A zero native cost is exact for known free models; for a known paid ref it means
+                # the provider did not bill (subscription), so report the list-price equivalent.
+                result["cost"] = {**result.get("cost", {}), "usd": priced, "source": "priced tokens",
+                                  "basis": "free model ($0.00)" if free else f"list prices ({PRICING_DATE})",
+                                  "estimated": not free}
+            else:
+                # Never turn an unpriced paid model into $0.00 just because the provider reported 0.
+                result["cost"] = {**result.get("cost", {}), "usd": None, "source": "unknown",
+                                  "basis": "native cost reported 0 for an unpriced model", "estimated": False}
 
     reasons = result.setdefault("fail_closed_reasons", [])
     if exit_code is None:

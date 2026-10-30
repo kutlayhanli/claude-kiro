@@ -53,7 +53,7 @@ record = {
         "seq": 1, "label": "task 1", "role": "implementer", "agent": "ck-worker",
         "parentSessionID": "ses-parent", "sessionID": "ses-1",
         "requested": {"model": "sonnet", "effort": "medium"},
-        "resolved": {"providerID": "opencode", "id": "fake", "variant": None},
+        "resolved": {"providerID": "opencode-go", "id": "deepseek-v4-pro", "variant": None},
         "requestedEffort": "medium", "resolvedEffort": "medium", "variant": None,
         "startedAt": now, "endedAt": now + 1000, "durationMs": 1000, "status": "ok",
         "submission": "tool", "attempts": 1, "rejections": 0,
@@ -66,7 +66,7 @@ record = {
     "result": report, "status": "done", "durationMs": 60000,
     "workflowProgress": [{
         "type": "workflow_agent", "agentId": "ses-1", "label": "task 1",
-        "model": "opencode/fake", "tokens": 123, "durationMs": 1000, "state": "ok",
+        "model": "opencode-go/deepseek-v4-pro", "tokens": 123, "durationMs": 1000, "state": "ok",
     }],
 }))
 """
@@ -130,8 +130,9 @@ def test_run_arm_opencode_imports_the_record_and_bench_output(tmp_path):
     assert result["agents"][0]["peak_context"] == 456
     assert result["agents"][0]["native_cost_usd"] == 0.0
     assert result["peak_context"] == 456
-    assert result["tokens_by_model"]["opencode/fake"]["input"] == 100
-    assert result["cost"]["usd"] == 0.0
+    assert result["tokens_by_model"]["opencode-go/deepseek-v4-pro"]["input"] == 100
+    assert result["cost"]["source"] == "priced tokens"
+    assert result["cost"]["usd"] > 0
     assert (Path(cfg["results_dir"]) / f"{arm['id']}.json").is_file()
     clone = Path(result["clone"])
     assert (clone / ".bench-args.json").is_file()
