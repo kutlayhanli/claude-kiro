@@ -769,7 +769,7 @@ Skip permission cases as root.
 ---
 
 ### Task 26: Test both Workflow scripts, the skills and the agent-mode documents writing the same events
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 3.2, 3.4, 3.7, 5.4, 8.1, 8.2, 8.7, 8.8, 13.3
 **Description:** Implement TC-25, TC-26, TC-29(b), TC-51, TC-52, TC-54 (bridge part), TC-60 (bridge part), TC-87, TC-98 and the document part of TC-78, plus property P-24.
@@ -789,12 +789,13 @@ Skip permission cases as root.
 **Properties:** P-24
 **Verifies:** Task 27 (workflow scripts, skills and agent-mode documents)
 **Acceptance:**
-- [ ] Tests exercise the real `plugin/workflows/spec-implement.js` and `spec-create.js` under the stub runtime, real `ck` subprocesses and real progress files. Agents are the only fakes, and landing results come from the fake project, not from running `land --gate`
-- [ ] Before implementation they fail because the scripts embed no `--progress-run` flags, log no ETA lines, and the skills hold no progress commands
-- [ ] No mocks of project code
-- [ ] P-24 uses the existing `SETTINGS` (deterministic), covers finish-first on and off and slots 1..6, and inspects the prompts the script builds
-- [ ] The agent-mode and skill checks read both packaged and vendored copies; the agent-mode set is cross-checked against the Workflow prompts
-- [ ] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
+- [x] Tests exercise the real `plugin/workflows/spec-implement.js` and `spec-create.js` under the stub runtime, real `ck` subprocesses and real progress files. Agents are the only fakes, and landing results come from the fake project, not from running `land --gate`
+- [x] Before implementation they fail because the scripts embed no `--progress-run` flags, log no ETA lines, and the skills hold no progress commands
+- [x] No mocks of project code
+- [x] P-24 uses the existing `SETTINGS` (deterministic), covers finish-first on and off and slots 1..6, and inspects the prompts the script builds
+- [x] The agent-mode and skill checks read both packaged and vendored copies; the agent-mode set is cross-checked against the Workflow prompts
+- [x] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
+**Implementation notes:** `tests/js/fake_project.mjs` `writtenCommands` (Task 3's helper) cut a command at its first double quote, so `progress event ... --phase "Design + Test Plan" --run K --json` lost its phase title and flags. It now tokenizes double-quoted values as one argument (a fix needed by the create-op tests; no assertion changed; `tests/test_bridge_harness.py` still passes). Until Tasks 22, 25 and 27 land the tests fail because `ck progress` does not exist and the scripts/documents carry no progress flags.
 **Dependencies:** Task 2 (helpers), Task 3 (bridge `execCk`, `create` op, virtual clock)
 **Complexity:** High
 **Risk:** safety (exercises a failing notification command during a run)

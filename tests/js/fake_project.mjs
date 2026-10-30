@@ -36,9 +36,10 @@ const eventArgv = (spec, kind, run, extra = []) => ['progress', 'event', spec, k
 // `ck ... plan ... --failed`, `ck ... progress event ...` and `ck --version` commands in a prompt, as written (minus -C DIR).
 export function writtenCommands(prompt) {
   const out = []
-  for (const m of prompt.matchAll(/\bck (?:-C \S+ )?((?:plan|progress event) [^\n"`]*|--version)/g)) {
+  // A double-quoted value (a create phase title such as "Design + Test Plan") stays one argument.
+  for (const m of prompt.matchAll(/\bck (?:-C \S+ )?((?:plan|progress event)(?: |"[^"\n]*"|[^\n"`])*|--version)/g)) {
     if (m[1].startsWith('plan') && !/--failed/.test(m[1])) continue
-    out.push(m[1].trim().split(/\s+/).filter(t => t !== '""' ))
+    out.push([...m[1].trim().matchAll(/"([^"]*)"|(\S+)/g)].map(t => (t[1] !== undefined ? t[1] : t[2])).filter(t => t !== ''))
   }
   return out
 }
