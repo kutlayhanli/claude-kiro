@@ -123,7 +123,7 @@ def test_a_megabyte_command_gives_no_output(project, session, via):
     huge = "echo hi > notes.txt # " + "A" * 1_000_000
     first = hook_input(project, session, "Bash", agent_id=AGENT, command=huge)
     pre_done = cli_hook("pre-tool-guard", first, cwd=project)
-    assert pre_done.returncode == 0 and pre_done.seconds < 30
+    assert pre_done.returncode == 0 and pre_done.seconds < 5
     subprocess.run(["bash", "-c", "echo hi > notes.txt"], cwd=project, check=True)
     payload = hook_input(project, session, "Bash", agent_id=AGENT, tool_use_id=first["tool_use_id"], event="PostToolUse",
                          tool_response={"stdout": "", "stderr": "", "interrupted": False}, command=huge)

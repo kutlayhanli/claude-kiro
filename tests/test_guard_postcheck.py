@@ -226,7 +226,9 @@ def test_tc14_a_weakened_file_is_reported_once_and_again_only_when_changed_furth
     text = post_message(second.post)
     assert text and CALC_PATH in text
     assert "removes 1 assertion" in text  # compared from the already weakened content: one more, not two
-    assert text.count(CALC_PATH) == 1
+    # One catch for this command: the "<rel>: <kinds>" part appears once. The S10 text names
+    # <rel> a second time in its restore hint, so the bare path count is not the measure.
+    assert text.count(f"{CALC_PATH}:") == 1
 
 
 # --------------------------------------------------------------------------- TC-15
