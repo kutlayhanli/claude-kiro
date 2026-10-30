@@ -255,6 +255,19 @@ ck bench run bench.json               # hours; re-run to resume (finished arms a
 ck bench score bench-results --config bench.json
 ```
 
+**OpenCode harness.** `ck bench run --harness opencode` runs the same arms through the
+`opencode-claude-kiro` plugin instead of `ck run`. Add an `opencode` object to the config with the
+package directory (or a published install) and an optional `bin`; each config needs a full
+`model` ref such as `opencode/claude-sonnet-5-5`. Roles still use ck aliases; the runner writes
+`opencode.models.<alias> = <arm model>` into the clone, so every role is pinned to the arm for the
+first pass. Cost and tokens come from the native `ck-opencode-run/1` record
+(`session.get().cost`), not a transcript, and free models are priced $0.00. See
+`notes/opencode-experiment-config.md` for a template and `opencode/README.md` for the package.
+
+```bash
+ck bench run bench-opencode.json --harness opencode
+```
+
 **Where the results come from.** `ck bench` launches `ck run <spec> --output-format json --session-id <uuid> --log <results>/logs/<arm>.json`. Knowing the session id, it reads what Claude Code persists for that session under `$CLAUDE_CONFIG_DIR` (default `~/.claude`): `projects/*/<session>/workflows/wf_*.json`, whose `result` is the `/spec:implement` report (merged, failed, notStarted, tasks with attempts, review rounds and escalations, timing, final gate), and the session and subagent transcripts (`projects/*/<session>.jsonl`, `projects/*/<session>/subagents/**/agent-*.jsonl`) for per-request token usage, `AskUserQuestion` calls and permission refusals. Each arm's `results/<arm>.json` holds that plus wall time, base and setup commits, the final integration commit, the ck version and the exact command.
 
 **Scoring.** `ck bench score` writes `score.md` and `score.json`: per arm, the hidden pass rate, tasks passing their hidden tests, USD per passing task, USD per run, merged rate, escalations and review rounds per run, wall minutes and the invariant pass rate, each with a 95% percentile bootstrap CI that resamples specs (seeded, `--seed`). Against the baseline (the first config, or `--baseline`) it pairs tasks both arms merged and reports the hidden-pass difference, resampling tasks (`--cluster spec` to resample specs instead).
