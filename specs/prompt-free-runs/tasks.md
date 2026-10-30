@@ -601,7 +601,7 @@ an existing `<spec>-run` branch), call `decide_handoff`; when it carries `run_br
 ---
 
 ### Task 13: Add the notifier, the guard-ladder CLI, park and resolve
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 6.1, 6.2, 6.4, 6.5, 7.1, 7.2, 7.3, 7.4, 7.5, 7.8, 7.9, 7.11, 7.12
 **Description:** Create `src/claude_kiro/notify.py` (S12, `NotifyOutcome`, `send` with `shell=True` in the main
@@ -627,14 +627,14 @@ log; the sandbox settings do not change.
 **Verify:** `uv run pytest -q -n auto tests/test_guard_park.py tests/test_redteam_notify.py tests/test_park_properties.py tests/test_agents.py tests/test_worktree_report.py tests/test_worktree_cli.py tests/test_run.py tests/test_handoff.py`
 **Verified by:** Task 7, Task 8
 **Acceptance:**
-- [ ] `ck agents --guard-ladder haiku --json` prints `["sonnet", "opus", "fable"]`, `opus` gives `["fable"]`,
+- [x] `ck agents --guard-ladder haiku --json` prints `["sonnet", "opus", "fable"]`, `opus` gives `["fable"]`,
       `fable` gives `[]`, whatever `implementer.escalate` says.
-- [ ] `ck worktree park` writes a 0600 note and sends exactly one notification when configured; without a command
+- [x] `ck worktree park` writes a 0600 note and sends exactly one notification when configured; without a command
       it reports `not_configured` and the hint; a failing or slow command still exits 0 with `failed` and the reason.
-- [ ] `ck worktree report --json` lists a parked, unmerged task only under `needsInput`.
-- [ ] `ck worktree resolve` stores my answer, clears the park note, and a later park records `priorDecision`.
-- [ ] Claiming the task again removes the park note and `ck plan` still treats it as unfinished.
-- [ ] A park inside `ck run` gives exactly one notification, sent by `ck run`'s own process; the sandbox settings
+- [x] `ck worktree report --json` lists a parked, unmerged task only under `needsInput`.
+- [x] `ck worktree resolve` stores my answer, clears the park note, and a later park records `priorDecision`.
+- [x] Claiming the task again removes the park note and `ck plan` still treats it as unfinished.
+- [x] A park inside `ck run` gives exactly one notification, sent by `ck run`'s own process; the sandbox settings
       are the same with or without `run.notify_command`.
 **Dependencies:** Task 7 (its tests are the oracle), Task 8 (its tests are the oracle), Task 12 (edits `cli/run.py` after it)
 **Complexity:** Medium
