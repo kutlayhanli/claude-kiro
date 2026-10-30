@@ -193,7 +193,7 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 ---
 
 ### Task 6: Make P-10 deterministic on the virtual clock
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 12.1, 12.2, 12.3, 12.4
 **Description:** Story 12 is a test-only change: the fix is this rewrite, on the virtual clock Task 3 adds to the harness. Implement TC-73 through TC-76, properties P-25 and P-26, and red-team cases for 12.3.
@@ -211,11 +211,11 @@ other model names in `tests/eta_strategies.py` (Task 1), command and environment
 **Properties:** P-25, P-26
 **Verifies:** None
 **Acceptance:**
-- [ ] Tests exercise the real `plugin/workflows/spec-implement.js` through the bridge. Only the clock and agents are test doubles, and both are test-owned
-- [ ] The rewritten P-10 is at least as strong as today's (exact equality of events and result) and has no re-run loop
-- [ ] The P-25/P-26 generators are the existing `scenarios()` with `SETTINGS` (deterministic)
-- [ ] TC-75 passes on today's scripts and fails if a clock code token leaks into them
-- [ ] TC-76's default part runs in seconds. The 50-run stress is opt-in
+- [x] Tests exercise the real `plugin/workflows/spec-implement.js` through the bridge. Only the clock and agents are test doubles, and both are test-owned
+- [x] The rewritten P-10 is at least as strong as today's (exact equality of events and result) and has no re-run loop
+- [x] The P-25/P-26 generators are the existing `scenarios()` with `SETTINGS` (deterministic)
+- [x] TC-75 passes on today's scripts and fails if a clock code token leaks into them
+- [x] TC-76's default part runs in seconds. The 50-run stress is opt-in
 **Dependencies:** Task 1 (`busy`), Task 3 (the virtual clock in the bridge)
 **Complexity:** Medium
 **Risk:** normal
@@ -564,7 +564,7 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 ---
 
 ### Task 19: Test the launch estimates (implement, size signal, create, cold start) through `ck eta`
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 4.1, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 7.1, 7.2, 7.3, 7.4, 7.5
 **Description:** Implement TC-1 through TC-20 and TC-46 through TC-50 as CLI integration tests, plus red-team cases for 6.2 and 7.2. Each test runs the real `ck eta` subprocess against an `eta_spec` repo and a copied pool, with `CK_NOW=2026-10-30T15:00:00Z`, `TZ=UTC` and `CK_AGENT_SLOTS` set.
@@ -582,12 +582,12 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 **Verify:** `uv run pytest -q -n auto tests/test_eta_implement.py tests/test_eta_size.py tests/test_eta_create.py tests/test_eta_coldstart.py tests/test_eta_redteam_records.py`
 **Verifies:** Task 22 (`ck eta` launch estimates over the service, history, size counts and bundled defaults; `ck stats eta-defaults`)
 **Acceptance:**
-- [ ] Tests exercise the real boundary: the `ck eta`, `ck progress` and `ck stats eta-defaults` subprocesses, real tasks.md, real `ck plan`, the packaged resource, and a store written by the real collector
-- [ ] Before implementation they fail because `ck eta`, the commands, the resource and the `filesCount`/`criteriaCount` fields do not exist, not because of fixture errors
-- [ ] No mocks of project code. Time is pinned only through `NOW_ENV`, randomness only through `--seed`, and slots only through `CK_AGENT_SLOTS`
-- [ ] TC-6 asserts byte-identical seeded output, and at most 1 min drift per quantile without a seed
-- [ ] TC-12 and the 6.2 red-team cases assert the size keys never reach shareable output; the defaults check reads this repository's real spec names as near-miss negatives
-- [ ] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
+- [x] Tests exercise the real boundary: the `ck eta`, `ck progress` and `ck stats eta-defaults` subprocesses, real tasks.md, real `ck plan`, the packaged resource, and a store written by the real collector
+- [x] Before implementation they fail because `ck eta`, the commands, the resource and the `filesCount`/`criteriaCount` fields do not exist, not because of fixture errors
+- [x] No mocks of project code. Time is pinned only through `NOW_ENV`, randomness only through `--seed`, and slots only through `CK_AGENT_SLOTS`
+- [x] TC-6 asserts byte-identical seeded output, and at most 1 min drift per quantile without a seed
+- [x] TC-12 and the 6.2 red-team cases assert the size keys never reach shareable output; the defaults check reads this repository's real spec names as near-miss negatives
+- [x] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
 **Dependencies:** Task 2 (helpers, pools, spec builder)
 **Complexity:** High
 **Risk:** safety (verifies a safety task, and asserts size counts and record-level data never reach exported records or the bundled defaults)
@@ -624,7 +624,7 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 ---
 
 ### Task 21: Test the status line, progress-driven notifications and the performance NFRs
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.9, 3.10, 4.4, 8.1, 8.2, 8.3, 8.4, 8.5, 8.7, 8.8, 8.10, 8.11
 **Description:** Implement the cases whose entry points are `ck progress`, `ck eta --watch`'s time-only check, `ck-status-line` and the maintainer commands: TC-53(a), TC-54 (CLI part), TC-55, TC-56, TC-57, TC-59, TC-60 (CLI part), TC-61, TC-85, TC-86, TC-89, TC-90 and TC-101, plus red-team cases for 8.3 and 8.4. P-16, P-17 and P-18 live in Task 15.
@@ -641,12 +641,12 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 **Verify:** `uv run pytest -q -n auto tests/test_eta_surfaces.py tests/test_eta_notify.py tests/test_eta_redteam_surfaces.py` `uv run pytest -q tests/test_eta_perf.py`
 **Verifies:** Task 22 (`ck progress` log lines and notifications, the status line, the backtest command)
 **Acceptance:**
-- [ ] Tests exercise the real `ck-status-line` entry point with stdin JSON, real `ck progress` and `ck eta --watch` subprocesses, a real notify subprocess and real config. TC-57(b) uses a real-time watcher with `RECHECK_ENV=1` and a test-level timeout
-- [ ] Before implementation they fail because the status line and the progress commands are missing
-- [ ] No mocks of project code. The notify command is a real script. Message counts are exact (no "at least")
-- [ ] Timing thresholds match the NFRs exactly, with the right baseline for each; the calibration figure is opt-in
-- [ ] Each red-team clause has at least two cases; a FIFO case times out at the test level rather than hanging the suite
-- [ ] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
+- [x] Tests exercise the real `ck-status-line` entry point with stdin JSON, real `ck progress` and `ck eta --watch` subprocesses, a real notify subprocess and real config. TC-57(b) uses a real-time watcher with `RECHECK_ENV=1` and a test-level timeout
+- [x] Before implementation they fail because the status line and the progress commands are missing
+- [x] No mocks of project code. The notify command is a real script. Message counts are exact (no "at least")
+- [x] Timing thresholds match the NFRs exactly, with the right baseline for each; the calibration figure is opt-in
+- [x] Each red-team clause has at least two cases; a FIFO case times out at the test level rather than hanging the suite
+- [x] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
 **Dependencies:** Task 2 (helpers, notify wrappers, pools, baselines)
 **Complexity:** High
 **Risk:** safety (exercises notifications sent through the user's `run.notify_command`)
@@ -716,7 +716,7 @@ Skip the permission cases as root (`needs_user`).
 ---
 
 ### Task 24: Test the end-to-end paths and progress spooling under `ck run`
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 2.1, 3.1, 3.5, 3.7, 3.8, 3.9, 4.2, 5.1, 5.4, 7.1, 8.3, 8.5, 8.6, 8.7, 8.8, 8.9, 8.11
 **Description:** Implement TC-92, TC-93 and TC-95 through TC-97.
@@ -731,10 +731,10 @@ Skip permission cases as root.
 **Verify:** `uv run pytest -q tests/test_eta_e2e.py tests/test_eta_run_spool.py`
 **Verifies:** Task 25 (the claim, land, park and resolve chain end to end; spool and mirror under `ck run`)
 **Acceptance:**
-- [ ] Tests exercise real CLI chains, the real `ck run` command, a real child process, real progress files and a real notify script. Only `claude` is a fake, and it is test-owned
-- [ ] Before implementation they fail because the commands are missing and `ck run` sets no spool and mirrors nothing
-- [ ] No mocks or monkeypatching of project code. Message counts are exact
-- [ ] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
+- [x] Tests exercise real CLI chains, the real `ck run` command, a real child process, real progress files and a real notify script. Only `claude` is a fake, and it is test-owned
+- [x] Before implementation they fail because the commands are missing and `ck run` sets no spool and mirrors nothing
+- [x] No mocks or monkeypatching of project code. Message counts are exact
+- [x] Every new `test_eta_*.py` file sets `pytestmark` with `no_network`
 **Dependencies:** Task 2 (helpers, spec builder, notify wrappers)
 **Complexity:** Medium
 **Risk:** safety (asserts deferred notifications sent through the user's notify command and the spool deletion)
