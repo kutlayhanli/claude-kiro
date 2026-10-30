@@ -499,7 +499,7 @@ Settings `derandomize=True, max_examples=200, database=None, deadline=None`. Eac
 - [ ] A failed task with unfinished dependents holding the rest gives `blocked`, and any dependency cycle or unknown dependency gives `blocked` even when other tasks could still run, each naming the cause; a hand landing never does
 - [ ] An open wait gives `waiting`; a run with no event for over 120 minutes gives `stale`, also while a wait, hand landing or park is open; waited minutes never count toward `slipping`
 - [ ] Slip notices fire once per new threshold level; blocked once per reason, never for a park; done once, including a `superseded` end; nothing while waiting (hand landings included) or stale; each notice carries its `NOTICE_TYPES` type
-- [ ] Notice text contains no `/`, no test or requirement text and no prompt text
+- [ ] Notice text contains no file paths (a `/` inside `<merged>/<total> merged` is required by design S8), no test or requirement text and no prompt text
 - [ ] Status and log lines match the formats in the design; the cache check reuses only on identical digests; `effective_now` is constant while a wait is open
 **Dependencies:** Task 10 (reads `RunState`, `effective_min`), Task 12 (uses `Graph`), Task 15 (its tests are the oracle)
 **Complexity:** Medium

@@ -14,6 +14,7 @@ Input contract these tests rely on (design S6/S7/S8; the exact keyword names are
 """
 
 import dataclasses
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from hypothesis import HealthCheck, given, settings, strategies as st
@@ -37,7 +38,8 @@ SCENARIOS = ("none", "park-whole", "park-partial", "fail", "cycle")
 # Seeded strings that must never reach a message (8.10).
 DIRTY = ("/a/b.py", "C:\\x", "test_x", "The system SHALL refuse a stale lock", "CONFIDENTIAL=hunter2",
          "/home/u/specs/demo/tests/test_x.py::test_x")
-FORBIDDEN = ("/", "\\", "test_", "SHALL", "CONFIDENTIAL", "hunter2", "C:", ".py")
+# A bare "/" is allowed: the done text is "<merged>/<total> merged" (design S8). Paths are caught by their forms.
+FORBIDDEN = ("\\", "test_", "SHALL", "CONFIDENTIAL", "hunter2", "C:", ".py", "/a/", "/home/", "specs/", "tests/")
 
 
 # --- builders --------------------------------------------------------------------------------------------
@@ -159,7 +161,7 @@ def entry_views(tl: Dict[str, Any], dirty: Optional[str] = None) -> List[Tuple[D
                  launch_p90_min=float(e["p90"]), hold=hold, cause=dirty or "task 1 running")
         out.extend([(e, v)] * e["repeat"])
     if tl["end"] is not None:
-        v = view(spec=tl["spec"], state="done", p50_finish_min=100.0, waited_min=0.0, launch_p90_min=90.0,
+        v = view(spec=tl["spec"], state="done", p50_finish_min=100.0, waited_min=0.0, launch_p90_min=100.0,
                  outcome=tl["end"], merged=2, total=6, wall_min=40.0, usd=3.5, cause=dirty or "task 1 running")
         out.extend([({"state": "done", "scenario": "none"}, v)] * 2)
     return out
@@ -278,3 +280,6 @@ def test_messages_hold_no_paths_tests_or_requirement_text(tl, dirty, extra):
         assert text.startswith("ck: %s" % tl["spec"]), text
         for bad in (*FORBIDDEN, dirty, extra):
             assert bad not in text, (bad, text)
+        assert not re.search(r"/[A-Za-z_.~]", text), text
+        if n.kind == "done":
+            assert re.search(r"\d+/\d+ merged", text) or "spec written" in text, text
