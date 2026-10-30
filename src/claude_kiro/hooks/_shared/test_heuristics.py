@@ -10,6 +10,7 @@ import re
 from pathlib import PurePosixPath
 from typing import Any, Dict, List, NamedTuple
 
+from claude_kiro.hooks._shared.git_utils import _CACHE_PARTS
 from claude_kiro.properties import map_ids
 
 TEST_DEF = re.compile(
@@ -102,3 +103,25 @@ def is_test_path(rel_path: str, config: Dict[str, Any]) -> bool:
     if any(part in dirs for part in path.parts[:-1]):
         return True
     return any(path.match(pattern) for pattern in tests.get("files", []))
+
+
+# Source extensions that make a file under a test *directory* a test file.
+SOURCE_EXTENSIONS = frozenset(
+    {".py", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".go", ".rb", ".rs", ".java", ".kt", ".cs",
+     ".php", ".swift", ".scala", ".c", ".cc", ".cpp", ".h", ".hpp", ".sh", ".ex", ".exs"}
+)
+
+
+def is_test_file(rel_path: str, config: Dict[str, Any]) -> bool:
+    """Like `is_test_path`, but a file reached only through a test directory must be source code.
+
+    `tests/__pycache__/x.pyc` and `tests/.pytest_cache/...` sit under a test directory without being tests.
+    """
+    if not is_test_path(rel_path, config):
+        return False
+    path = PurePosixPath(rel_path.replace("\\", "/"))
+    if path.suffix in (".pyc", ".pyo") or _CACHE_PARTS.intersection(path.parts[:-1]):
+        return False
+    if any(path.match(pattern) for pattern in config.get("tests", {}).get("files", [])):
+        return True
+    return path.suffix in SOURCE_EXTENSIONS

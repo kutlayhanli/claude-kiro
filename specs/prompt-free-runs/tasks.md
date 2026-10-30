@@ -419,7 +419,7 @@ P-28 CLI-backed): P-23, P-25, P-26, P-28, P-30. `tests/test_stats_properties_sha
 ---
 
 ### Task 10: Add the pure guard, hand-off and git helper seams
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.9, 2.10, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 4.1, 4.2, 4.3, 5.1, 5.2, 5.3, 5.4, 8.1, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9, 10.2
 **Description:** Create the pure modules and read-only helpers the hooks and CLI call (design Decision Seams S1-S11,

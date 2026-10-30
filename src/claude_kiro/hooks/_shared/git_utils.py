@@ -90,3 +90,61 @@ def worktree_fingerprint(project_dir: Path) -> str:
         except OSError:
             pass
     return digest.hexdigest()[:16]
+
+
+def toplevel(path: Path) -> Optional[Path]:
+    """Git top level of the checkout holding `path` (a file, directory or not-yet-existing path)."""
+    try:
+        directory = Path(path)
+        while not directory.is_dir():
+            if directory.parent == directory:
+                return None
+            directory = directory.parent
+    except OSError:
+        return None
+    out = _git(directory, "rev-parse", "--show-toplevel")
+    return Path(out.strip()) if out and out.strip() else None
+
+
+def status_paths(project_dir: Path) -> Optional[List[str]]:
+    """Paths with uncommitted changes, untracked files included (porcelain); None on error."""
+    out = _git(project_dir, "status", "--porcelain", "-z", "--untracked-files=all")
+    if out is None:
+        return None
+    paths: List[str] = []
+    entries = out.split("\0")
+    index = 0
+    while index < len(entries):
+        entry = entries[index]
+        index += 1
+        if len(entry) < 4:
+            continue
+        paths.append(entry[3:])
+        if entry[0] in "RC":  # the next entry is the rename or copy source
+            index += 1
+    return paths
+
+
+def head_sha(project_dir: Path) -> Optional[str]:
+    out = _git(project_dir, "rev-parse", "--verify", "--quiet", "HEAD")
+    return out.strip() if out and out.strip() else None
+
+
+def content_at(project_dir: Path, ref: str, rel: str) -> Optional[str]:
+    """File content at `ref` (`git show <ref>:<rel>`); None if absent or on error."""
+    return _git(project_dir, "show", f"{ref}:{rel}")
+
+
+def changed_since(project_dir: Path, ref: str) -> Optional[List[str]]:
+    """Files changed since `ref` (committed, uncommitted) plus untracked ones; None on error."""
+    diff = _git(project_dir, "diff", "--name-only", "--no-renames", ref, "--")
+    untracked = _git(project_dir, "ls-files", "--others", "--exclude-standard")
+    if diff is None or untracked is None:
+        return None
+    return sorted(set(diff.splitlines()) | set(untracked.splitlines()))
+
+
+def tree_files(project_dir: Path, ref: str, rel: str) -> Optional[List[str]]:
+    """Files under `rel` on `ref` (`git ls-tree -r --name-only`); None on error."""
+    out = _git(project_dir, "ls-tree", "-r", "--name-only", ref, "--", rel)
+    return None if out is None else out.splitlines()
