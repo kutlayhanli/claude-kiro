@@ -161,4 +161,4 @@ def test_tc20_kind_follows_the_spec_directory(tmp_path):
     assert view_of(env, repo, "--kind", "create")["runKind"] == "create"
     (repo / "specs" / "orbit" / "tasks.md").unlink()
     out = h.eta(env, repo, "orbit", "--kind", "implement", now=NOW)
-    assert out.exit_code != 0 and "tasks.md" in out.output
+    assert out.exit_code == 1 and "tasks.md" in out.output and "Traceback" not in out.output

@@ -139,7 +139,7 @@ def test_tc48_missing_wait_distributions_come_from_the_bundled_defaults(tmp_path
     parts = view["basis"]["bundledParts"]
     assert parts and all("wait" in p for p in parts), parts
     assert not any("duration" in p or "minutes" in p for p in parts)
-    assert view["basis"]["source"] in ("mixed", "local") and view["basis"]["tasks"] > 100
+    assert view["basis"]["source"] == "mixed" and view["basis"]["tasks"] > 100
     text = h.eta(env, repo, "demo", now=NOW).stdout
     for part in parts:
         assert part in text, part
@@ -163,7 +163,9 @@ def test_tc49_no_history_and_no_defaults_still_shows_the_graph(tmp_path, content
     assert "→".join(crit) in out.stdout.replace(" ", "") or " → ".join(crit) in out.stdout
     view = view_of(env, repo)
     assert view["confidence"] == "none" and view["basis"]["source"] == "none"
-    assert view["finish"] is None and view["criticalPath"]["tasks"] == crit and view["open"] == 4
+    assert view["finish"] is None and view["remainingMinutes"] is None
+    assert view["cost"] is None or all(v is None for v in view["cost"].values())
+    assert view["criticalPath"]["tasks"] == crit and view["open"] == 4
 
 
 # --------------------------------------------------------------------------- TC-50

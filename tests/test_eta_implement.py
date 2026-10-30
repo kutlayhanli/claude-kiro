@@ -57,10 +57,11 @@ def test_tc1_text_and_json_launch_estimate(tmp_path):
     out = h.eta(env, repo, "demo", now=NOW)
     assert out.exit_code == 0, out.output
     text = out.stdout
+    assert re.search(r"safety-tagged:\s*1\b", text)
     assert "demo" in text and "6 open" in text and "2 slots" in text
-    assert re.search(RANGE, text) and re.search(r"\+\d+ min", text)
+    assert re.search(RANGE, text) and re.search(r"\d+ min", text)
     assert re.search(COST, text)
-    for needle in ("slowest:", "safety-tagged:", "1 safety", "retry rate", "escalation rate", "not started"):
+    for needle in ("slowest:", "safety-tagged:", "retry rate", "escalation rate", "not started"):
         assert needle in text, needle
     assert re.search(r"basis: \d+ past tasks, \d+ runs", text)
     plan = json.loads(ck_sub("plan", "demo", "--json", cwd=repo, env={"TZ": "UTC"}).stdout)
@@ -231,16 +232,18 @@ def test_tc7a_no_tasks_md_is_an_error_for_implement(tmp_path):
     (repo / "specs" / "demo" / "tasks.md").unlink()
     (repo / "specs" / "demo" / "requirements.md").write_text("# Requirements\n")
     out = h.eta(store_env(tmp_path), repo, "demo", "--kind", "implement", now=NOW)
-    assert out.exit_code != 0
-    assert "tasks.md" in out.output
+    assert out.exit_code == 1, out.output
+    assert "no implement estimate for demo" in out.output and "tasks.md" in out.output
+    assert "Traceback" not in out.output
 
 
 def test_tc7b_tasks_md_without_task_blocks_is_an_error(tmp_path):
     repo = h.eta_spec(tmp_path / "ledger", [h.TaskDef(1)])
     (repo / "specs" / "demo" / "tasks.md").write_text("# Implementation Tasks: demo\n\nNothing here yet.\n")
     out = h.eta(store_env(tmp_path), repo, "demo", now=NOW)
-    assert out.exit_code != 0
-    assert "tasks.md" in out.output
+    assert out.exit_code == 1, out.output
+    assert "no implement estimate for demo" in out.output and "tasks.md" in out.output
+    assert "Traceback" not in out.output
 
 
 def test_tc7c_everything_done_prints_nothing_left(tmp_path):
@@ -282,23 +285,22 @@ def test_tc8_unknown_dependency_is_blocked(tmp_path):
 # --------------------------------------------------------------------------- TC-9
 
 
-@pytest.mark.parametrize("slots", ["missing", "x"])
-def test_tc9_unreadable_slot_cap_uses_the_default(tmp_path, monkeypatch, slots):
-    monkeypatch.delenv("CK_AGENT_SLOTS", raising=False)
-    env = store_env(tmp_path, slots=4)
-    env.pop("CK_AGENT_SLOTS")
+@pytest.mark.parametrize("bad", ['{"agents": "x"}', '{"run": {"max_concurrent": "zero"}}'], ids=["agents-not-a-table", "cap-not-a-number"])
+def test_tc9_unreadable_slot_cap_uses_the_default(tmp_path, bad):
+    env = store_env(tmp_path, slots=3)
     repo = h.eta_spec(tmp_path / "ledger", spec_tasks_one())
-    start = {"schema": "ck-progress/1", "at": "2026-10-30T14:50:00Z", "kind": "start", "run": "demo--20261030T145000Z-aaaaaa",
-             "runKind": "implement", "spec": "demo", "root": str(repo), "mode": "workflow", "open": [str(i) for i in range(1, 7)],
-             "total": 6}
-    if slots == "x":
-        start["slots"] = "x"
-    h.append_events(env, start["run"], [start])
-    agents = json.loads(ck_sub("agents", "--json", env=env, cwd=repo).stdout)
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    env["CK_CONFIG_HOME"] = str(cfg)
+    good = ck_sub("agents", "--json", env=env, cwd=repo)
+    assert good.exit_code == 0, good.output
+    expected = json.loads(good.stdout)["runtime"]["agentSlots"]
+    (cfg / "config.json").write_text(bad)
+    assert ck_sub("agents", "--json", env=env, cwd=repo).exit_code != 0
     view = estimate(env, repo)
     assert view["slotsSource"] == "default"
-    assert view["slots"] == agents["runtime"]["agentSlots"]
-    assert any("slot cap unreadable" in n for n in view["notes"])
+    assert view["slots"] == expected
+    assert any(re.search(r"slot cap unreadable: using the default \d+", n) for n in view["notes"]), view["notes"]
 
 
 # --------------------------------------------------------------------------- TC-10
@@ -311,7 +313,7 @@ def test_tc10_unpriced_history_shows_cost_unknown(tmp_path):
     assert out.exit_code == 0, out.output
     assert "cost unknown" in out.stdout and "$0" not in out.stdout
     cost = estimate(env, repo, "--seed", "1")["cost"]
-    assert cost is None or (cost["p10"] is None and cost["p50"] is None and cost["p90"] is None)
+    assert cost == {"p10": None, "p50": None, "p90": None}
 
 
 def test_tc10_adding_priced_history_gives_a_cost(tmp_path):

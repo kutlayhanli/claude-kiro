@@ -43,7 +43,6 @@ def test_tc11_bigger_tasks_take_longer(tmp_path):
     view = view_of(env_for(xdg), repo)
     by = medians(view)
     assert by["2"] > by["1"]
-    assert view["basis"]["sizeSignal"] in ("local", "bundled")
     assert view["basis"]["sizeSignal"] == "local"
 
 
