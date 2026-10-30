@@ -1,8 +1,9 @@
 # Upgrading
 
-- **From 0.10.1 to 0.10.2:** see the next section.
-- **From 0.10 to 0.10.1:** see [0.10 → 0.10.1](#010--0101), then the 0.10.2 notes.
-- **From 0.9.1 to 0.10:** see [0.9.1 → 0.10](#091--010), then the 0.10.1 and 0.10.2 notes.
+- **From 0.10.2 to 0.10.3:** see the next section.
+- **From 0.10.1 to 0.10.2:** see [0.10.1 → 0.10.2](#0101--0102), then the 0.10.3 notes.
+- **From 0.10 to 0.10.1:** see [0.10 → 0.10.1](#010--0101), then the 0.10.2 and 0.10.3 notes.
+- **From 0.9.1 to 0.10:** see [0.9.1 → 0.10](#091--010), then the 0.10.1, 0.10.2 and 0.10.3 notes.
 - **From 0.9.0 to 0.9.1:** see [0.9.0 → 0.9.1](#090--091).
 - **From 0.8 to 0.9:** see [0.8 → 0.9](#08--09), then the 0.9.1 and 0.10 notes.
 - **From 0.7 to 0.8:** see [0.7 → 0.8](#07--08), then the 0.9 notes.
@@ -12,6 +13,24 @@
 - **From 0.3 to 0.4:** see [0.3 → 0.4](#03--04).
 - **From 0.2:** apply the 0.3 notes below as well; the steps are the same.
 - **From 0.1:** skip to [Upgrading to 0.2](#upgrading-to-02), then come back for the 0.3 and 0.4 notes (same commands).
+
+## 0.10.2 → 0.10.3
+
+Prompt-free runs: unattended `/spec:implement`, `/spec:create` and `/spec:review` runs no longer stop for manual approval. On each machine:
+
+```bash
+ck update                                            # ck itself and the spec plugin
+ck agents set run.notify_command '<your command>'    # optional: ping me when a task parks as needs-input
+```
+
+Then restart Claude Code sessions, and run `ck upgrade` (or `ck update --project`) in vendored projects so their `.claude/` copies get the new workflow, skills and hooks.
+
+- **The test guard checks results, not commands.** Before a Bash command, ck only blocks deleting or moving a test file that exists on the base branch (rm, mv, git rm, git mv, truncate, unlink). Everything else runs (`sed -i`, Python rewrites, redirects, scratch files, `__pycache__`); afterwards a post-check diffs the test files the command named and runs the same weakening check as the Edit path, and tells the agent to restore a weakened test. A test change that came in from the merge target is not reported. The gate still re-checks at Done.
+- **Task agents are denied, never asked.** A hook call is a task agent's when it carries `agent_id` (subagents and Workflow agents both do) or runs headless (`ck run`, `claude -p`). My own interactive session keeps the `guard` mode from `specs/ck.json`, and my edits to a started spec's requirements.md / test-plan.md pass.
+- **Guard-escalation ladder.** A task the guard stops climbs every model above its current one (sonnet, opus, fable), separately from `implementer.escalate`. If it still can't finish without weakening a test, it is parked as needs-input (`ck worktree park`, shown under `needsInput` in `ck worktree report`), independent tasks keep running, and `run.notify_command` gets one JSON message on stdin (`notification_type: ck_needs_input`, 10 s cap). In a sandboxed `ck run`, the notification is sent by `ck run`'s own process. Interactive runs ask instead.
+- **`/spec:review` on a started spec** reports changes to existing requirements or test-plan text as decisions for me instead of applying them.
+- **Isolated sessions hand off to `ck run`.** A whole-spec `/spec:implement`, `/spec:create` or `/spec:review` started from a `.claude/worktrees/` session (background jobs, EnterWorktree) runs `ck handoff`: with a clean main checkout it creates a run branch there at the worktree's HEAD and launches `ck run` (now with `--command create|review`); otherwise it prints the commands to run.
+- **Interruptions in `ck stats`.** Run records count prompts and minutes waiting on me, guard denials, post-check catches, guard escalations, auto-mode and headless denials, my rejections and isolation refusals, by role and command family; `ck stats show` prints one `interruptions:` line. Shared records carry the counts only. The guard keeps a private local event log under ck's data dir.
 
 ## 0.10.1 → 0.10.2
 
