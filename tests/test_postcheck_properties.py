@@ -314,7 +314,8 @@ def test_p7_post_check_reports_exactly_what_the_edit_path_would_block(repo, lang
     path = str(target) if in_worktree else tpl.path
     command = template_command(tpl, name, tool, path, f"{root}/{Path(tpl.path).parent}" if in_worktree else str(Path(tpl.path).parent), new)
     if commit:
-        command += f" && git -C {shlex.quote(str(root))} commit -qam x"
+        sep = "\n" if "\n" in command else " && "  # a heredoc terminator must stay alone on its line
+        command += f"{sep}git -C {shlex.quote(str(root))} commit -qam x"
     session = f"p7-{uuid.uuid4().hex}"
 
     write_blocks = decision(pre(repo.root, session, "Write", agent_id=AGENT, file_path=str(target), content=new)) == "deny"
@@ -378,7 +379,7 @@ READ_ONLY_RUN = ["ls", "ls tests", "cat tests/test_calc.py", "grep -n assert tes
 PREFIXES = ["", "cd . && ", "cd tests && cd .. && ", "FOO=1 ", "command ", "FOO=1 BAR=2 "]
 
 
-def tests_fingerprint(root: Path):
+def _tests_fingerprint(root: Path):
     digest = hashlib.sha1()
     for path in sorted((root / "tests").rglob("*")):
         if path.is_file() and "__pycache__" not in path.parts:
@@ -400,10 +401,10 @@ def test_p9_a_command_the_pre_filter_skips_changes_no_test_file(repo, command, p
         return
     if may:
         return  # a conservative answer is allowed for a read-only command; the safety side is below
-    before = tests_fingerprint(repo.root)
+    before = _tests_fingerprint(repo.root)
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
     subprocess.run(["bash", "-c", full], cwd=repo.root, capture_output=True, text=True, env=env, timeout=60)
-    assert tests_fingerprint(repo.root) == before, full
+    assert _tests_fingerprint(repo.root) == before, full
 
 
 def test_p9_the_plain_read_only_commands_are_actually_skipped():

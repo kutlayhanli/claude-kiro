@@ -393,7 +393,7 @@ def test_tc19_ck_init_vendor_installs_the_same_set(tmp_path):
     git(root, "init", "-q", "-b", "main")
     done = ck_run_cmd(root, "init", "--vendor", "--no-allow-workflow")
     assert done.returncode == 0, done.stdout + done.stderr
-    settings = json.loads((root / ".claude" / "settings.json").read_text())
+    settings = json.loads((root / ".claude" / "settings.local.json").read_text())  # ck init writes hooks here
     found = configured_hooks(settings)
     assert "done-verify" in found.get("PostToolUse", [])
     summary = json.loads((FIXTURES / "capture-summary.json").read_text())
