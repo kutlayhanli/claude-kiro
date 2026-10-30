@@ -1,7 +1,7 @@
 # Plan: Run follow-ups (ETA, analytics hardening, flaky test, Verify-cycle lint)
 
-**Status:** Discussing
-**Updated:** 2026-10-29
+**Status:** Decided
+**Updated:** 2026-10-30
 **Evolves:** none (follows up specs/agent-mode-analytics and specs/landing-speed; builds on specs/prompt-free-runs for notifications)
 
 ## Problem
@@ -24,7 +24,7 @@ Success: every run shows a finish time and cost range at launch and keeps it cur
 - Pure code in ck: no new agents.
 - Shared analytics schema stays `ck-run-analytics/1`, additive only; nothing new is shared unless listed.
 - Works in Workflow mode and agent mode (as prompt-free-runs D12).
-- Notifications reuse `run.notify_command` from prompt-free-runs.
+- Notifications reuse `run.notify_command` from prompt-free-runs, so this spec is implemented after prompt-free-runs merges.
 
 ## Decisions
 
@@ -79,15 +79,37 @@ Success: every run shows a finish time and cost range at launch and keeps it cur
 **Rejected:** more re-runs - still flaky under heavy load.
 **Decided by:** user
 
+### D9: Verify-cycle lint rule
+**Choice:** For impl task X whose **Verify** runs test file F, `ck lint` reports an error when F is in the **Files** of a test task T that **Verifies** an impl task Y which depends on X, directly or transitively (Y ≠ X). It is an error: `ck lint` exits non-zero and `/spec:implement` refuses to start until tasks.md is fixed. The message names F, T, Y and the dependency chain, and suggests narrowing X's Verify to files that don't need Y.
+**Why:** it is the agent-mode-analytics task 8 / task 13 case: X's gate could never pass, and the run only found out after escalating to Opus.
+**Rejected:** warning only - the run would still start and waste the escalations.
+**Decided by:** user
+
+### D10: ETA for blocked and waiting states
+**Choice:** A parked needs-input task or an unresolvable cycle makes the ETA `blocked: <reason>`, with the remaining work once unblocked shown; a pending approval shows `waiting on you N min` and holds the estimate instead of letting it slip. ETA reads one run progress file, which also holds prompt-free-runs' park notes.
+**Why:** a time that keeps moving while the run waits on me is misleading; saying blocked or waiting is honest and actionable.
+**Rejected:** ignore them and let the ETA slip.
+**Decided by:** user
+
 ## Delegated to Spec
-_TBD._
+- Progress-file path, format and event list (start, merge, retry, escalation, landing, park, approval wait), and how the Workflow script and the agent-mode instructions write it.
+- How create-phase durations are derived from spec-create records (agents per phase) and how many simulations to run.
+- The fitting of the D4 size signal and the bundled cold-start defaults (D6): which aggregates, where they ship, how they are refreshed; no record-level data, no names.
+- `ck eta` output and `--json` shape; the status-line command's name and one-line format; the slip threshold's config key (default 15 min past launch p90).
+- How the deterministic clock is injected into the scheduler bridge (D8) without changing the workflow's real-time behaviour.
+- Exact refusal behaviour for the D7 overlap guard (refuse the whole backfill vs skip affected groups).
 
 ## Risks
-- _TBD._
+- ETA depends on prompt-free-runs (`run.notify_command`, park notes) -> implement after prompt-free-runs merges; the spec branches from it.
+- Thin history for review and landing waits (recorded only since 0.10.1) -> wide ranges at first, flagged by confidence; they narrow as runs accumulate.
+- Workflow and agent-mode both need to write progress events -> covered in both modes, as prompt-free-runs D12.
+- The status line runs often -> it reads the progress file only, never simulates; `ck eta` caches the last simulation.
+- Bundled defaults could drift from reality -> they are only used with no local history and are labelled low confidence.
+- The lint rule could flag legitimate Verify lines -> it fires only on the exact ownership-plus-dependency pattern; tested against this repo's existing specs (none should fail except the agent-mode-analytics original task 8).
 
 ## Open Questions
-- [ ] D9: Verify-cycle lint rule shape (proposed: for impl task X whose Verify runs test file F, flag a cycle when F is in the Files of a test task T that Verifies an impl task Y which depends, directly or transitively, on X).
-- [ ] D10: Progress-file location and format (shared with prompt-free-runs' park notes?), and how ETA treats a parked needs-input task (blocked) and time waiting for approval.
+- [x] D9: Verify-cycle lint rule shape and severity -> D9.
+- [x] D10: ETA blocked and waiting states -> D10.
 
 ## Research Notes
 ### Codebase
