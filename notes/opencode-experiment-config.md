@@ -153,7 +153,10 @@ up when the two `score.md` files are compared.
 
 Every role is pinned to the same alias, matching the OpenCode arm's all-roles-on-one-model setup.
 `run_args` stays empty so the concurrency, review rounds and gate cadence are the defaults on both
-harnesses; put any deliberate deviation in both configs, not just one.
+harnesses; put any deliberate deviation in both configs, not just one. The Claude arm requires a
+ck-initialized repo (`.claude/` and the spec plugin); `ck bench` runs `ck upgrade` in the clone and
+aborts otherwise. The OpenCode arm does not need `.claude/`, so use one base repo that is initialized
+for Claude Code and clone it for both configs.
 
 ```sh
 ck bench run bench-claude.json
