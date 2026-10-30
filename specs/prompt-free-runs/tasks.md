@@ -76,7 +76,7 @@ bodies only, so all files collect before the implementation exists.
 ---
 
 ### Task 2: Capture real Claude Code hook inputs (lands by hand)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 3.2, 3.3, 3.4, 10.1
 **Description:** I run this task myself, outside any sandbox, before the run reaches Tasks 4, 8, 11 and 14: it starts paid
@@ -88,13 +88,13 @@ bodies only, so all files collect before the implementation exists.
 ids are stable fakes, `HOME`/`PATH` are placeholders; every key Claude Code sent is kept. The summary is the
 recorded answer to 3.4: Task 11 and Task 14 build the fallback marker only when `workflowAgentHasAgentId` is false.
 **Files:**
-- `tests/fixtures/hook_inputs/*.json` - recorded real hook inputs, headless env, PostToolUse block line, capture summary
+- `tests/fixtures/hook_inputs/main-session-pretooluse.json`, `agent-tool-subagent-pretooluse.json`, `workflow-agent-pretooluse.json`, `headless-pretooluse.json`, `headless-env.json`, `postcheck-block-attachment.json`, `capture-summary.json` - recorded real hook inputs, headless env, PostToolUse block line, capture summary
 **Verify:** `uv run python -c "import json,glob; [json.load(open(f)) for f in glob.glob('tests/fixtures/hook_inputs/*.json')]; print(json.load(open('tests/fixtures/hook_inputs/capture-summary.json')))"`
 **Verifies:** None
 **Acceptance:**
-- [ ] All seven files exist, parse as JSON and come from real Claude Code, not hand-written guesses.
-- [ ] `capture-summary.json` states whether the Workflow-agent input carried `agent_id`.
-- [ ] No real name, path, session id or secret remains.
+- [x] All seven files exist, parse as JSON and come from real Claude Code, not hand-written guesses.
+- [x] `capture-summary.json` states whether the Workflow-agent input carried `agent_id`.
+- [x] No real name, path, session id or secret remains.
 **Dependencies:** Task 1 (runs its `capture.sh` and `record_hook.py`)
 **Complexity:** Low
 **Risk:** safety (runs paid claude -p sessions outside the sandbox)

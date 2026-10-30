@@ -1,0 +1,29 @@
+{
+  "attachment": {
+    "blockingError": {
+      "blockingError": "[python3 /home/user/Workspace/claude-kiro/.ck/worktrees/prompt-free-runs-task-2/tests/fixtures/hook_inputs/record_hook.py /tmp/tmp.KH2Fvo1cyf]: [ck post-check] capture block: this message exists only to record a real blocking error.\n",
+      "command": "python3 /home/user/Workspace/claude-kiro/.ck/worktrees/prompt-free-runs-task-2/tests/fixtures/hook_inputs/record_hook.py /tmp/tmp.KH2Fvo1cyf"
+    },
+    "hookEvent": "PostToolUse",
+    "hookName": "PostToolUse:Bash",
+    "toolUseID": "toolu-0004",
+    "type": "hook_blocking_error"
+  },
+  "cwd": "/work/demo",
+  "entrypoint": "sdk-cli",
+  "gitBranch": "main",
+  "isSidechain": false,
+  "parentUuid": "8d47eb0b-6179-4b77-8613-4b9bbd50b3d3",
+  "rendered": [
+    {
+      "content": "<system-reminder>\nPostToolUse:Bash hook blocking error from command: \"python3 /home/user/Workspace/claude-kiro/.ck/worktrees/prompt-free-runs-task-2/tests/fixtures/hook_inputs/record_hook.py /tmp/tmp.KH2Fvo1cyf\": [python3 /home/user/Workspace/claude-kiro/.ck/worktrees/prompt-free-runs-task-2/tests/fixtures/hook_inputs/record_hook.py /tmp/tmp.KH2Fvo1cyf]: [ck post-check] capture block: this message exists only to record a real blocking error.\n\n</system-reminder>"
+    }
+  ],
+  "renderedRole": "system",
+  "sessionId": "session-0001",
+  "timestamp": "2026-10-30T13:08:58.475Z",
+  "type": "attachment",
+  "userType": "external",
+  "uuid": "671b0c9b-2560-4dae-9db5-1d43e1951bf9",
+  "version": "2.1.311"
+}

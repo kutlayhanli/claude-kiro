@@ -1,0 +1,19 @@
+{
+  "agent_id": "agent-0001",
+  "agent_type": "workflow-subagent",
+  "cwd": "/work/demo",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PreToolUse",
+  "permission_mode": "bypassPermissions",
+  "prompt_id": "3a04a559-5fb4-4c7e-90db-2c341c409d4d",
+  "session_id": "session-0001",
+  "tool_input": {
+    "command": "echo CAPTURE_WORKFLOW",
+    "description": "Print a marker string"
+  },
+  "tool_name": "Bash",
+  "tool_use_id": "toolu-0002",
+  "transcript_path": "/home/user/.claude/projects/demo/transcript.jsonl"
+}
