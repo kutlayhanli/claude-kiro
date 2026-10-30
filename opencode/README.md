@@ -131,6 +131,37 @@ runs the real `ck --hook`, and maps the answer:
 
 `CK_GUARD_DEBUG=/path/to/log` traces the event translation, hook outputs and latches.
 
+## Benchmarking
+
+`ck bench` can run the same arms through OpenCode:
+
+```sh
+ck bench run bench-opencode.json --harness opencode
+ck bench score /path/to/bench-results
+```
+
+The bench config adds an `opencode` object:
+
+```jsonc
+{
+  "opencode": {
+    "plugin": "/absolute/path/to/opencode", // or a published package directory
+    "bin": "opencode"
+  },
+  "configs": [
+    { "name": "deepseek-free", "model": "opencode/deepseek-v4.1-flash-free",
+      "agents": { "implementer.model": "sonnet", "reviewer.model": "sonnet" } }
+  ]
+}
+```
+
+Each role uses a ck alias; the runner writes `opencode.models.<alias> = <arm model>` into the clone,
+so all roles are pinned to the arm for the first pass. It launches the workflow through a probe with
+`CK_RUN_HEADLESS=1`, uses a private state directory outside the clone, imports
+`bench-output.json` and overlays the native tokens/cost. A guard denial, a non-`done` record, a
+timeout or a nonzero exit is fail-closed. See `notes/opencode-experiment-config.md` for the E0/E1/E2
+template.
+
 ## Development
 
 ```sh
