@@ -315,3 +315,25 @@ __all__ = ['BashOutcome',
     'set_notify',
     'sleeping_fake_claude',
     'worktree_of']
+
+
+# --------------------------------------------------------------------------- shared park helpers
+
+QUOTED_TEST = "test_zebra_quartz_invariant must hold across the ledger boundary"
+QUOTED_REQ = "The ledger SHALL reject negative balances within one transaction"
+NOTE = {"file": "tests/test_ledger.py", "kind": "test", "test": QUOTED_TEST, "requirement": QUOTED_REQ,
+        "decision": "The test contradicts the requirement; which one wins?"}
+
+
+def clean_env(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    env = os.environ.copy()
+    env.pop("CK_RUN_NOTIFY", None)
+    env.pop("CK_NOTIFY_MESSAGE", None)
+    env.update(extra or {})
+    return env
+
+
+def park(repo: Path, task: str, note: object = NOTE, *flags: str, spec: str = "demo", env: Optional[dict] = None,
+         raw: Optional[str] = None) -> subprocess.CompletedProcess:
+    stdin = raw if raw is not None else json.dumps(note)
+    return ck_run_cmd(repo, "worktree", "park", spec, str(task), *flags, "--json", env=env or clean_env(), stdin=stdin)

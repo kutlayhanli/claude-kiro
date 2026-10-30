@@ -220,8 +220,8 @@ def test_tc55_implement_line_has_merged_count_eta_and_cached_cost(world):
 def test_tc55_create_blocked_and_waiting_lines(world):
     lines = _lines(h.status_line(world.env(), world.stdin()))
     assert any(re.fullmatch(rf"ck orbit create {re.escape(DESIGN_PHASE)} ETA {HHMM}", ln) for ln in lines), lines
-    assert sum(1 for ln in lines if re.fullmatch(r"ck blk .*blocked", ln)) == 1, lines
-    assert sum(1 for ln in lines if re.fullmatch(r"ck wait .*waiting on you 7 min", ln)) == 1, lines
+    assert sum(1 for ln in lines if re.fullmatch(r"ck blk .*blocked( ~\$\d+)?", ln)) == 1, lines
+    assert sum(1 for ln in lines if re.fullmatch(r"ck wait .*waiting on you 7 min( ~\$\d+)?", ln)) == 1, lines
 
 
 def test_tc55_ignores_project_b_ended_and_stale_runs(world):

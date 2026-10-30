@@ -9,6 +9,7 @@ test-level timeout bound the watcher.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import signal
@@ -23,9 +24,8 @@ import pytest
 
 import eta_helpers as h
 from eta_strategies import NO_NETWORK, progress_lines
-from guard_helpers import notify_script, set_notify
+from guard_helpers import NOTE, QUOTED_REQ, QUOTED_TEST, clean_env, notify_script, park, set_notify
 from stats_helpers import CONFIDENTIAL, CK, spec_repo
-from test_guard_park import NOTE, QUOTED_REQ, QUOTED_TEST, clean_env, park
 
 pytestmark = NO_NETWORK
 
@@ -132,13 +132,31 @@ def start_running(run: Run) -> None:
 # --------------------------------------------------------------------------- TC-57(a)
 
 
+def slip_level(run: Run, minute: float, waited: float = 0.0, threshold: int = 15) -> Tuple[float, int]:
+    """(slip minutes, level) at `minute`, read from the real `ck eta --json` and S7: slip = p50 finish - waited - launch p90,
+    level = the largest whole k with slip > k x threshold (0 when there is none)."""
+    view = h.eta_json(base_env(), run.repo, "demo", now=stamp(minute))
+    finish = datetime.fromisoformat(view["finish"]["p50"])
+    launch = datetime.fromisoformat(view["launchAt"].replace("Z", "+00:00"))
+    slip = (finish - launch).total_seconds() / 60 - waited - run.p90
+    return slip, (max(0, math.ceil(slip / threshold) - 1) if slip > 0 else 0)
+
+
 def test_tc57a_slips_arrive_at_p16_p31_and_p47_only(tmp_path):
-    run = Run(tmp_path)
+    """One message per new 15-minute level of slip (P+16 is the first time a slip can exceed 15, since the p50 finish is
+    never before now). The expected levels come from the real `ck eta --json` and S7, with the one-task spec leaving no
+    pending tail to hide in."""
+    run = Run(tmp_path, tasks=1)
     start_running(run)
-    expected = [(10, 0), (16, 1), (20, 1), (31, 2), (47, 3)]
-    for offset, count in expected:
-        run.ev("unpark", run.p90 + offset, task=1)
-        assert len(run.messages()) == count, (offset, run.messages())
+    sent_level = expected = 0
+    for offset in range(0, 76, 3):
+        minute = run.p90 + offset
+        run.ev("unpark", minute, task=1)
+        slip, level = slip_level(run, minute)
+        if level > sent_level:  # a new level sends exactly one message, however many levels it jumped
+            sent_level, expected = level, expected + 1
+        assert len(run.messages()) == expected, (offset, slip, level, run.messages())
+    assert sent_level >= 3, sent_level  # the estimate cannot finish before `now`, so P+75 is at least 60 minutes of slip
     for msg in run.messages():
         assert SLIP_RE.match(msg), msg
 
@@ -165,14 +183,22 @@ def test_tc57a_a_smaller_threshold_sends_the_first_slip_at_p6(tmp_path):
 
 
 def test_tc57a_approval_minutes_never_count_as_a_slip(tmp_path):
-    run = Run(tmp_path)
+    run = Run(tmp_path, tasks=1)
     start_running(run)
     run.ev("approval-start", 3, reason="question")
     run.ev("unpark", 20, task=1)
-    run.ev("approval-end", 33)
+    assert run.messages() == []  # nothing while the approval is open
+    run.ev("approval-end", 33)  # 30 waited minutes
+    sent_level = expected = 0
     for minute in (max(run.p90 + 16, 40), max(run.p90 + 30, 50)):
         run.ev("unpark", minute, task=1)
-    assert run.messages() == []
+        naive, naive_level = slip_level(run, minute)
+        slip, level = slip_level(run, minute, waited=30)
+        assert naive_level >= 1, naive  # without the subtraction this would have sent a slip (p50 is never before now)
+        assert slip == pytest.approx(naive - 30, abs=0.01)
+        if level > sent_level:
+            sent_level, expected = level, expected + 1
+        assert len(run.messages()) == expected, (minute, slip, level, run.messages())
 
 
 # --------------------------------------------------------------------------- TC-57(b)
@@ -402,13 +428,17 @@ def test_tc60_a_slow_command_returns_within_13_seconds(tmp_path):
 # --------------------------------------------------------------------------- TC-61
 
 
+def _seeded(text: str) -> None:
+    for value in (*CONFIDENTIAL, QUOTED_TEST, QUOTED_REQ, "tests/test_ledger.py"):
+        assert value not in text, (value, text)
+
+
 def _scan(text: str) -> None:
     flat = re.sub(r"\b\d+/\d+\b", "", text)  # the `3/6` merged count is the one slash a message may hold
     assert "/" not in flat, text
     assert "\\" not in text, text
     assert "test_" not in text, text
-    for value in (*CONFIDENTIAL, QUOTED_TEST, QUOTED_REQ, "tests/test_ledger.py"):
-        assert value not in text, (value, text)
+    _seeded(text)
 
 
 def test_tc61_no_message_carries_a_path_a_test_name_or_a_seeded_value(tmp_path):
@@ -426,5 +456,6 @@ def test_tc61_no_message_carries_a_path_a_test_name_or_a_seeded_value(tmp_path):
     assert park(repo, "3", NOTE, env=clean_env()).returncode == 0
     messages = run.messages() + [m for m, _ in h.typed_notices(parked)]
     assert len(messages) == 5, messages  # slip, blocked, superseded, done, park
-    for text in (*messages, done.output):
+    for text in messages:  # 8.10 covers notification messages; the CLI output may hold paths, but never a seeded value
         _scan(text)
+    _seeded(done.output)

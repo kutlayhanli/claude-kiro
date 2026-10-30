@@ -138,9 +138,11 @@ def test_84_non_utf8_bytes_on_stdin_are_harmless(world):
     clean(run_status(env_for(), b"\xff\xfe\x00\x01\x02", cwd=world.a))
 
 
-def test_84_a_current_dir_that_is_a_file_prints_nothing_for_it(world):
-    target = world.a / "specs" / "demo" / "tasks.md"
-    assert clean(run_status(env_for(), stdin_for(target))) == []
+def test_84_a_current_dir_that_is_a_file_prints_nothing_for_it(tmp_path, world):
+    stray = tmp_path / "stray.txt"  # outside every project root, so no run matches its path
+    stray.write_text("not a directory\n")
+    assert clean(run_status(env_for(), stdin_for(stray))) == []
+    clean(run_status(env_for(), stdin_for(world.a / "specs" / "demo" / "tasks.md")))  # inside A: only clean behaviour
 
 
 def test_84_a_current_dir_in_a_symlink_loop_is_harmless(tmp_path, world):
