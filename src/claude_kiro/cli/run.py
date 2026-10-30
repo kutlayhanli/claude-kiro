@@ -541,6 +541,12 @@ def run(spec: str, extra: tuple, model: str, effort: str, budget: float, max_tur
     child_env["CK_RUN_NOTIFY"] = "parent"  # `ck worktree park` defers; the watcher below sends the notification
     if settings is not None:
         child_env["CK_RUN_SANDBOXED"] = "1"
+    spool = None
+    if command in ("implement", "create"):
+        child_env.pop("CK_PROGRESS_DIR", None)
+        spool = _prepare_spool(cwd, name)
+        if spool is not None:
+            child_env["CK_PROGRESS_DIR"] = str(spool)
     with log.open("w") as out, (err.open("w") if err else open(os.devnull, "w")) as errf:
         header = errf if err else out  # keep a JSON log pure; the header goes with stderr then
         header.write(f"ck run {name}: isolation: {isolation}, {guard}, permission mode: {PERMISSION_MODE}, "
@@ -550,7 +556,7 @@ def run(spec: str, extra: tuple, model: str, effort: str, budget: float, max_tur
         header.write(f"argv: {json.dumps(argv)}\n\n")
         header.flush()
         started = time.time()
-        watcher = NotifyWatcher(cwd, name, wt_dir, run_role.get("notify_command"), header)
+        watcher = NotifyWatcher(cwd, name, wt_dir, run_role.get("notify_command"), header, spool=spool)
         watcher.start()
         try:
             code = subprocess.call(argv, cwd=cwd, env=child_env, stdout=out, stderr=errf if err else subprocess.STDOUT)
@@ -569,6 +575,17 @@ def run(spec: str, extra: tuple, model: str, effort: str, budget: float, max_tur
     sys.exit(code)
 
 
+def _prepare_spool(cwd: Path, name: str) -> Optional[Path]:
+    """The git-ignored spool the child writes progress to, or None (progress is then written straight to the data dir)."""
+    try:
+        from ..eta import service
+
+        env = {k: v for k, v in os.environ.items() if k not in ("CK_PROGRESS_DIR", "CK_RUN_NOTIFY")}
+        return service.prepare_spool(cwd, name, env)
+    except Exception:  # noqa: BLE001 - progress never changes the run
+        return None
+
+
 class NotifyWatcher:
     """Sends one notification per new park note while the child runs (7.12).
 
@@ -579,10 +596,21 @@ class NotifyWatcher:
 
     INTERVAL = 2.0
 
-    def __init__(self, cwd: Path, spec: str, wt_dir: Optional[Path], command: Optional[str], log) -> None:
+    def __init__(self, cwd: Path, spec: str, wt_dir: Optional[Path], command: Optional[str], log,
+                 spool: Optional[Path] = None) -> None:
         import threading
 
         self.cwd, self.spec, self.command, self.log = cwd, spec, command, log
+        self.spool = spool
+        self._unreadable: set = set()
+        self._recheck_at = float("-inf")  # the first tick checks too, so a short run has a cache
+        self._recheck_s = 60.0
+        try:
+            override = os.environ.get("CK_ETA_RECHECK_S")
+            if override:
+                self._recheck_s = max(0.1, float(override))
+        except ValueError:
+            pass
         self.dir = wt_dir
         self.counts = {"sent": 0, "failed": 0, "not_configured": 0}
         self._lock = threading.Lock()
@@ -623,6 +651,76 @@ class NotifyWatcher:
                 line = f"ck run: notification failed for {self.spec} task {task}: {outcome.detail}"
             self._write(line)
 
+    def _data_env(self) -> Dict[str, str]:
+        return {k: v for k, v in os.environ.items() if k not in ("CK_PROGRESS_DIR", "CK_RUN_NOTIFY")}
+
+    def _send_typed(self, message: str, notification_type: str):
+        from .. import notify
+
+        return notify.send(self.command, message, self.cwd, timeout=10, notification_type=notification_type)
+
+    def _mirror(self) -> None:
+        """Copy the spool into the data-dir progress file and send what the child queued. Never raises."""
+        if self.spool is None:
+            return
+        try:
+            from .. import progress
+
+            target = progress.progress_dir(self._data_env())
+            progress.mirror(self.spool, target, send=self._send_typed)
+            for errors in self.spool.glob("*.errors"):  # failures the child recorded while writing
+                progress._copy_if_changed(errors, target / errors.name)
+            for src in self.spool.glob("*.jsonl"):  # a spool file that cannot be read is recorded, not retried loudly
+                try:
+                    src.read_bytes()
+                except OSError as exc:
+                    if src.stem not in self._unreadable:
+                        self._unreadable.add(src.stem)
+                        progress._record_error(src.stem, "mirror", exc, {"CK_PROGRESS_DIR": str(target)})
+        except Exception as e:  # noqa: BLE001
+            self._write(f"ck run: progress mirror error: {e}")
+
+    def _slip_check(self) -> None:
+        """Time-only recheck of each unfinished spool run: a slip that comes from time alone is sent here."""
+        if self.spool is None or time.monotonic() - self._recheck_at < self._recheck_s:
+            return
+        self._recheck_at = time.monotonic()
+        try:
+            from .. import progress
+            from ..eta import service
+
+            env = {**self._data_env(), "CK_PROGRESS_DIR": str(self.spool)}
+            now = progress.clock_now(env)
+            for src in sorted(self.spool.glob("*.jsonl")):
+                events, _ = progress.read_events(src)
+                if not any(e.get("kind") == "start" for e in events) or any(e.get("kind") == "end" for e in events):
+                    continue
+                service.after_event(src.stem, now=now, env=env, root=self.cwd, notify_command=self.command)
+        except Exception as e:  # noqa: BLE001
+            self._write(f"ck run: progress recheck error: {e}")
+        self._mirror()
+
+    def _remove_spool(self) -> None:
+        if self.spool is None:
+            return
+        try:
+            from .. import progress
+
+            target = progress.progress_dir(self._data_env())
+            for src in self.spool.glob("*.jsonl"):
+                if not (target / src.name).exists():
+                    continue  # never mirrored: keep it
+                try:
+                    src.read_bytes()
+                except OSError:
+                    continue  # the child's file could not be read: keep it for whoever looks
+                for path in self.spool.glob(f"{src.stem}*"):
+                    path.unlink(missing_ok=True)
+            for path in self.spool.glob("*.prepared-model.json"):
+                path.unlink(missing_ok=True)
+        except Exception as e:  # noqa: BLE001
+            self._write(f"ck run: progress spool clean-up error: {e}")
+
     def _write(self, line: str) -> None:
         with self._lock:
             try:
@@ -637,6 +735,8 @@ class NotifyWatcher:
                 self._sweep()
             except Exception as e:  # a watcher must never fail the run
                 self._write(f"ck run: notification watcher error: {e}")
+            self._mirror()
+            self._slip_check()
 
     def start(self) -> None:
         self._thread.start()
@@ -648,6 +748,8 @@ class NotifyWatcher:
             self._sweep()
         except Exception as e:
             self._write(f"ck run: notification watcher error: {e}")
+        self._mirror()
+        self._remove_spool()
         total = sum(self.counts.values())
         if total:
             self._write(f"ck run: notifications for needs-input tasks: {self.counts['sent']} sent, "

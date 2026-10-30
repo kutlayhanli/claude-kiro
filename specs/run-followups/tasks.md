@@ -745,7 +745,7 @@ Skip permission cases as root.
 ---
 
 ### Task 25: Record progress events from the worktree commands and spool them under `ck run`
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 3.2, 3.3, 3.5, 3.7, 3.8, 3.9, 5.3, 5.4, 5.6, 8.1, 8.2, 8.5, 8.6, 8.7, 8.8, 8.9, 8.11
 **Description:** Wire the existing worktree commands and `ck run` to the progress file. This task owns Harness Contract H-5 (park integration). A progress failure never changes a command's output (apart from an optional `"progress": "failed: ..."` key) or exit code. "Now" comes from `progress.clock_now(env)`.
@@ -758,16 +758,18 @@ Skip permission cases as root.
 **Verify:** `uv run pytest -q -n auto tests/test_eta_progress.py tests/test_eta_writers.py tests/test_eta_redteam_writers.py` `uv run pytest -q tests/test_eta_e2e.py tests/test_eta_run_spool.py tests/test_run.py` `uv run pytest -q -n auto tests/test_worktree_cli.py tests/test_worktree_land.py tests/test_landing_worktree_cli.py`
 **Verified by:** Task 23 (TC-21..TC-31, TC-53(b), TC-58, TC-88, TC-103, red-team 3.5, 3.8, 8.6, 8.9, 8.10), Task 24 (TC-92, TC-93, TC-95..TC-97)
 **Acceptance:**
-- [ ] Claim with progress flags appends task-start / retry / escalation (with model) / revision / landfix / resolve events only on CLAIMED; BUSY, ERROR and MISSING append nothing
-- [ ] Land appends a landing event with merged/red/conflict/protected and per-task merge or hand-landing events, and its JSON carries `eta` (a log line, or null past the budget); while a hand landing is open later landings show `waiting on you N min`
-- [ ] `plan --failed` records each failed task once
-- [ ] Park and resolve append park/unpark to the active run; `ck worktree report` still shows the park as needs-input; no blocked notice is sent for a park
-- [ ] Under `ck run` the child writes to a git-ignored spool, every line reaches the data-dir progress file once within 5 s, the model and cache sidecars are copied, each pending notice is sent once with its type, and the spool is removed after the final mirror
-- [ ] Under `ck run` a slip that comes from time alone is sent once by the watcher within one recheck interval, and a run superseded by `prepare_spool` gets one done notice
-- [ ] With an unwritable progress directory or a failing notify command, every command's output, exit code and `ck run`'s outcome match a run without progress
+- [x] Claim with progress flags appends task-start / retry / escalation (with model) / revision / landfix / resolve events only on CLAIMED; BUSY, ERROR and MISSING append nothing
+- [x] Land appends a landing event with merged/red/conflict/protected and per-task merge or hand-landing events, and its JSON carries `eta` (a log line, or null past the budget); while a hand landing is open later landings show `waiting on you N min`
+- [x] `plan --failed` records each failed task once
+- [x] Park and resolve append park/unpark to the active run; `ck worktree report` still shows the park as needs-input; no blocked notice is sent for a park
+- [x] Under `ck run` the child writes to a git-ignored spool, every line reaches the data-dir progress file once within 5 s, the model and cache sidecars are copied, each pending notice is sent once with its type, and the spool is removed after the final mirror
+- [x] Under `ck run` a slip that comes from time alone is sent once by the watcher within one recheck interval, and a run superseded by `prepare_spool` gets one done notice
+- [x] With an unwritable progress directory or a failing notify command, every command's output, exit code and `ck run`'s outcome match a run without progress
 **Dependencies:** Task 5 (edits `cli/worktree.py` after it), Task 10 (calls `mirror`, `append`), Task 18 (calls `after_event`, `prepare_spool`), Task 22 (its tests drive `ck progress begin|event|end` beside the worktree flags), Task 23 (its tests are the oracle), Task 24 (its tests are the oracle)
 **Complexity:** High
 **Risk:** safety (land and park trigger blocked/slip notifications, and `ck run` sends deferred notifications and deletes spool files)
+
+**Implementation notes:** Deviations outside the listed files: `eta/service.py` (a landing and its merge events read as one `landed ...` line; the first recompute compares with the launch estimate; merged counts include tasks tasks.md already ticks; an implement view with no bundled implement parts reports basis `local`), `cli/eta.py` (`task-failed` accepts only the run's own tasks; `phase-start` closes every started phase that has no `phase-end`).
 
 ---
 
