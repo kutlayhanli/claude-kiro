@@ -669,14 +669,14 @@ This task's CLI-visible criteria are also verified through `ck eta` in Tasks 19-
 **Verify:** `uv run pytest -q -n auto tests/test_eta_implement.py tests/test_eta_size.py tests/test_eta_create.py tests/test_eta_coldstart.py tests/test_eta_redteam_records.py tests/test_eta_live.py tests/test_eta_blocked.py tests/test_eta_redteam_estimate.py tests/test_eta_surfaces.py tests/test_eta_notify.py tests/test_eta_redteam_surfaces.py` `uv run pytest -q tests/test_eta_perf.py`
 **Verified by:** Task 19 (TC-1..TC-20, TC-46..TC-50, red-team 6.2, 7.2), Task 20 (TC-32..TC-45, TC-94, TC-102, red-team 1.9, 2.5, 5.2, 5.5), Task 21 (TC-53(a), TC-54, TC-55..TC-57, TC-59..TC-61, TC-85, TC-86, TC-89, TC-90, TC-101, red-team 8.3, 8.4)
 **Acceptance:**
-- [ ] `ck eta <spec>` with no progress file prints the launch estimate and `not started`; during a run it prints the live block; for a stale run it prints `stale: no progress since HH:MM` (also while a wait or park is open); after the end it prints outcome, finish, wall minutes, merged, cost, position vs the launch range, and the remaining launch estimate or `nothing left to run`
-- [ ] `--json` prints one `ck-eta/1` object with every field in the design
-- [ ] `--watch` redraws on change and exits 0 at the end or on interrupt; while open it sends a time-only slip once, within one recheck interval, for a run that is not spooled
-- [ ] Unknown spec exits 2 naming it; missing or unparsable tasks.md exits 1; every task Done prints `nothing left to run` and exits 0
-- [ ] `ck progress begin` starts a new file per run, closes an unfinished earlier run as `superseded` and sends its done notice once, keeps the old file, and uses a prepared snapshot when one is in `CK_PROGRESS_DIR`
-- [ ] Progress commands always exit 0 and `ck progress end` names write and notification failures once
-- [ ] The status-line command prints one line per active, non-stale run of the project, nothing when there is none, skips unreadable files, always exits 0, imports no click, and finishes in under 100 ms with 3 runs × 1000 events
-- [ ] `ck stats eta-defaults` refuses below the minimum run count and writes aggregates only; `ck stats eta-backtest --json` prints `{runs, inside, rate}` with 0 <= rate <= 1
+- [x] `ck eta <spec>` with no progress file prints the launch estimate and `not started`; during a run it prints the live block; for a stale run it prints `stale: no progress since HH:MM` (also while a wait or park is open); after the end it prints outcome, finish, wall minutes, merged, cost, position vs the launch range, and the remaining launch estimate or `nothing left to run`
+- [x] `--json` prints one `ck-eta/1` object with every field in the design
+- [x] `--watch` redraws on change and exits 0 at the end or on interrupt; while open it sends a time-only slip once, within one recheck interval, for a run that is not spooled
+- [x] Unknown spec exits 2 naming it; missing or unparsable tasks.md exits 1; every task Done prints `nothing left to run` and exits 0
+- [x] `ck progress begin` starts a new file per run, closes an unfinished earlier run as `superseded` and sends its done notice once, keeps the old file, and uses a prepared snapshot when one is in `CK_PROGRESS_DIR`
+- [x] Progress commands always exit 0 and `ck progress end` names write and notification failures once
+- [x] The status-line command prints one line per active, non-stale run of the project, nothing when there is none, skips unreadable files, always exits 0, imports no click, and finishes in under 100 ms with 3 runs × 1000 events
+- [x] `ck stats eta-defaults` refuses below the minimum run count and writes aggregates only; `ck stats eta-backtest --json` prints `{runs, inside, rate}` with 0 <= rate <= 1
 **Dependencies:** Task 18 (calls `estimate`, `after_event`, `render`), Task 19 (its tests are the oracle), Task 20 (its tests are the oracle), Task 21 (its tests are the oracle)
 **Complexity:** High
 **Risk:** safety (`ck progress end` and `event` send notifications through the user's notify command)
