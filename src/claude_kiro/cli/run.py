@@ -614,6 +614,7 @@ class NotifyWatcher:
         self.dir = wt_dir
         self.counts = {"sent": 0, "failed": 0, "not_configured": 0}
         self._lock = threading.Lock()
+        self._mirror_lock = threading.RLock()  # one mirror/slip check at a time: no line is appended twice
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._seen = {key for key, _ in self._scan()}
@@ -663,13 +664,25 @@ class NotifyWatcher:
         """Copy the spool into the data-dir progress file and send what the child queued. Never raises."""
         if self.spool is None:
             return
+        with self._mirror_lock:
+            self._mirror_locked()
+
+    def _mirror_locked(self) -> None:
         try:
             from .. import progress
 
             target = progress.progress_dir(self._data_env())
             progress.mirror(self.spool, target, send=self._send_typed)
-            for errors in self.spool.glob("*.errors"):  # failures the child recorded while writing
-                progress._copy_if_changed(errors, target / errors.name)
+            for errors in self.spool.glob("*.jsonl"):  # failures the child recorded while writing
+                err = errors.with_suffix(".errors")
+                if not self._regular(err):
+                    continue  # a symlink or other planted entry is not copied out of the sandbox's spool
+                try:
+                    data = err.read_bytes()
+                except OSError:
+                    continue
+                if data:
+                    self._append_unique(target / err.name, data)
             for src in self.spool.glob("*.jsonl"):  # a spool file that cannot be read is recorded, not retried loudly
                 try:
                     src.read_bytes()
@@ -680,7 +693,39 @@ class NotifyWatcher:
         except Exception as e:  # noqa: BLE001
             self._write(f"ck run: progress mirror error: {e}")
 
+    @staticmethod
+    def _regular(path: Path) -> bool:
+        import stat
+
+        try:
+            return stat.S_ISREG(path.lstat().st_mode)
+        except OSError:
+            return False
+
+    @staticmethod
+    def _lines(data: bytes) -> List[str]:
+        return [ln for ln in data.decode("utf-8", "surrogateescape").split("\n") if ln]
+
+    def _append_unique(self, dst: Path, data: bytes) -> None:
+        """Append the lines of `data` that `dst` does not hold yet; never replaces what is there."""
+        try:
+            have = set(self._lines(dst.read_bytes())) if dst.exists() else set()
+            fresh = [ln for ln in self._lines(data) if ln not in have]
+            if not fresh:
+                return
+            fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            try:
+                os.write(fd, "".join(ln + "\n" for ln in fresh).encode("utf-8", "surrogateescape"))
+            finally:
+                os.close(fd)
+        except OSError:
+            pass
+
     def _slip_check(self) -> None:
+        with self._mirror_lock:
+            self._slip_check_locked()
+
+    def _slip_check_locked(self) -> None:
         """Time-only recheck of each unfinished spool run: a slip that comes from time alone is sent here."""
         if self.spool is None or time.monotonic() - self._recheck_at < self._recheck_s:
             return
@@ -708,12 +753,17 @@ class NotifyWatcher:
 
             target = progress.progress_dir(self._data_env())
             for src in self.spool.glob("*.jsonl"):
-                if not (target / src.name).exists():
+                dst = target / src.name
+                if not dst.exists():
                     continue  # never mirrored: keep it
                 try:
-                    src.read_bytes()
+                    want = set(self._lines(src.read_bytes()))
+                    have = set(self._lines(dst.read_bytes()))
                 except OSError:
                     continue  # the child's file could not be read: keep it for whoever looks
+                if not want <= have:
+                    self._write(f"ck run: progress spool {src.name} kept: {len(want - have)} line(s) not in the data dir")
+                    continue
                 for path in self.spool.glob(f"{src.stem}*"):
                     path.unlink(missing_ok=True)
             for path in self.spool.glob("*.prepared-model.json"):
@@ -744,6 +794,9 @@ class NotifyWatcher:
     def finish(self) -> None:
         self._stop.set()
         self._thread.join(timeout=30)
+        if self._thread.is_alive():
+            self._write("ck run: progress watcher still busy after 30 s: final mirror and spool clean-up skipped")
+            return
         try:
             self._sweep()
         except Exception as e:

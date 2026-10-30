@@ -162,7 +162,9 @@ def _record_failed(spec: str, key: str, ids) -> None:
 
         events, _ = prog.read_events(prog.run_file(key, os.environ))
         state = prog.fold(events)
-        todo = [t for t in dict.fromkeys(ids) if not (t in state.tasks and state.tasks[t].status == "failed")]
+        start = next((e for e in events if e.get("kind") == "start"), {})
+        known = {str(t) for t in (start.get("open") or [])}
+        todo = [t for t in dict.fromkeys(ids) if t in known and not (t in state.tasks and state.tasks[t].status == "failed")]
     except Exception:  # noqa: BLE001
         return
     if todo:
@@ -280,8 +282,13 @@ def _record_progress(spec: str, key, builds, *, eta: bool = False):
             if not key:
                 return None, None
         events, _ = prog.read_events(prog.run_file(key, env))
-        for kind, opts in builds:
-            ev = ce._build_event(spec, kind, events, now, opts, True)
+        failure = None
+        for kind, opts in builds:  # one bad event does not drop the others
+            try:
+                ev = ce._build_event(spec, kind, events, now, opts, True)
+            except Exception as exc:  # noqa: BLE001
+                failure = failure or f"failed: {type(exc).__name__}: {exc}"
+                continue
             err = prog.append(key, ev, env)
             if err is not None:
                 return None, f"failed: {err}"
@@ -289,7 +296,7 @@ def _record_progress(spec: str, key, builds, *, eta: bool = False):
         from ..eta import service
 
         line = service.after_event(key, now=prog.clock_now(env), env=env)
-        return (line if eta else None), None
+        return (line if eta else None), failure
     except Exception as exc:  # noqa: BLE001 - progress never changes a command
         return None, f"failed: {type(exc).__name__}: {exc}"
 
