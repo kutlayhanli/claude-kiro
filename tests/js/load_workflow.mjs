@@ -20,8 +20,9 @@ function hookDump() {
 
 // With a positive integer `slots`, at most `slots` agent calls run at once and the rest wait FIFO,
 // like the runtime queue. `trace` records request/start/end per call (performance.now()).
-export async function runWorkflow(scriptPath, { agent, args, slots }) {
+export async function runWorkflow(scriptPath, { agent, args, slots, clock }) {
   hookDump()
+  const nowT = clock ? () => clock.now() : () => performance.now()  // a clock replaces the trace's real time
   const workflow = path.basename(scriptPath).replace(/\.js$/, '')
   const trace = []
   const capped = Number.isInteger(slots) && slots > 0
@@ -29,13 +30,13 @@ export async function runWorkflow(scriptPath, { agent, args, slots }) {
   const waiting = []
   const run = async (prompt, opts) => {
     const label = opts && typeof opts.label === 'string' ? opts.label : ''
-    trace.push({ t: performance.now(), ev: 'request', label })
+    trace.push({ t: nowT(), ev: 'request', label })
     if (capped && active >= slots) await new Promise(resolve => waiting.push(resolve))
     active++
-    trace.push({ t: performance.now(), ev: 'start', label })
+    trace.push({ t: nowT(), ev: 'start', label })
     try { return await agent(prompt, opts) } finally {
       active--
-      trace.push({ t: performance.now(), ev: 'end', label })
+      trace.push({ t: nowT(), ev: 'end', label })
       if (waiting.length) waiting.shift()()
     }
   }
@@ -55,7 +56,8 @@ export async function runWorkflow(scriptPath, { agent, args, slots }) {
       return r
     }))
   const fn = new Function('agent', 'pipeline', 'parallel', 'phase', 'log', 'args', `return (async () => {${src}})()`)
-  const result = await fn(recordingAgent, pipeline, parallel, () => {}, m => logs.push(m), args)
+  const running = fn(recordingAgent, pipeline, parallel, () => {}, m => logs.push(m), args)
+  const result = await (clock ? clock.drive(running) : running)
   return { result, logs, trace }
 }
 
