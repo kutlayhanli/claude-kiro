@@ -18,8 +18,9 @@ def _fail(e: Exception) -> None:
 @click.group(invoke_without_command=True)
 @click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
 @click.option("--override", "overrides", multiple=True, metavar="ROLE.KEY=VALUE", help="Override a setting for this call only")
+@click.option("--guard-ladder", "guard_ladder", metavar="MODEL", default=None, help="Print the models to try after a guard stop on MODEL")
 @click.pass_context
-def agents(ctx: click.Context, as_json: bool, overrides: tuple):
+def agents(ctx: click.Context, as_json: bool, overrides: tuple, guard_ladder):
     """Show the model and effort each spec-workflow role uses.
 
     \b
@@ -28,6 +29,10 @@ def agents(ctx: click.Context, as_json: bool, overrides: tuple):
     --override for one call. Change them with `ck agents set`.
     """
     if ctx.invoked_subcommand:
+        return
+    if guard_ladder is not None:
+        ladder = ag.guard_ladder(guard_ladder)
+        click.echo(json.dumps(ladder) if as_json else (" ".join(ladder) or "(none)"))
         return
     try:
         resolved = ag.resolve(Path.cwd(), list(overrides))
@@ -42,7 +47,7 @@ def agents(ctx: click.Context, as_json: bool, overrides: tuple):
         def shown(key, value):
             if key in ("analytics", "finish_first"):
                 return "on" if value else "off"
-            if key == "machine_label":
+            if key in ("machine_label", "notify_command"):
                 return value or "(none)"
             if isinstance(value, list):
                 if key == "allowed_domains":

@@ -568,7 +568,7 @@ Run note (2026-10-30): P-24 (`test_p24_family_names_are_the_documented_set`) rea
 ---
 
 ### Task 12: Teach `ck run` create and review runs, and add `ck handoff`
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 3.2, 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9
 **Description:** In `src/claude_kiro/cli/run.py` add `--command implement|create|review` (default `implement`; prompts
@@ -592,17 +592,17 @@ an existing `<spec>-run` branch), call `decide_handoff`; when it carries `run_br
 **Verify:** `uv run pytest -q -n auto tests/test_handoff.py tests/test_handoff_properties.py tests/test_run.py`
 **Verified by:** Task 6
 **Acceptance:**
-- [ ] `ck run myspec --command create --dry-run --json` builds `/spec:create myspec` with the same sandbox, budget
+- [x] `ck run myspec --command create --dry-run --json` builds `/spec:create myspec` with the same sandbox, budget
       and turn cap as implement; `--command review` without `tasks.md` refuses with exit 2.
-- [ ] From a linked worktree under `.claude/worktrees/`, `ck handoff implement myspec --json` launches `ck run` from
+- [x] From a linked worktree under `.claude/worktrees/`, `ck handoff implement myspec --json` launches `ck run` from
       the main checkout with `--log` before `--`; the printed log is the file `ck run` writes.
-- [ ] From the main checkout, a worktree outside `.claude/worktrees/`, or with a single task number, it prints
+- [x] From the main checkout, a worktree outside `.claude/worktrees/`, or with a single task number, it prints
       `handoff: false` and launches nothing.
-- [ ] Missing sandbox tools, missing spec, or a child that exits within 3 s gives exit 3 with `error` and
+- [x] Missing sandbox tools, missing spec, or a child that exits within 3 s gives exit 3 with `error` and
       `manualCommand`; nothing runs in the isolated session.
-- [ ] A spec present only on the worktree's branch, with a clean main checkout, runs on a new `<spec>-run` branch at
+- [x] A spec present only on the worktree's branch, with a clean main checkout, runs on a new `<spec>-run` branch at
       the worktree's HEAD; a dirty main checkout or a taken branch gives exit 3 with the recovery commands.
-- [ ] Existing implement-mode `ck run` tests still pass.
+- [x] Existing implement-mode `ck run` tests still pass.
 **Dependencies:** Task 10 (calls `decide_handoff`, `is_headless`), Task 6 (its tests are the oracle)
 **Complexity:** Medium
 **Risk:** safety (launches a detached paid headless run)
@@ -610,7 +610,7 @@ an existing `<spec>-run` branch), call `decide_handoff`; when it carries `run_br
 ---
 
 ### Task 13: Add the notifier, the guard-ladder CLI, park and resolve
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 6.1, 6.2, 6.4, 6.5, 7.1, 7.2, 7.3, 7.4, 7.5, 7.8, 7.9, 7.11, 7.12
 **Description:** Create `src/claude_kiro/notify.py` (S12, `NotifyOutcome`, `send` with `shell=True` in the main
@@ -636,14 +636,14 @@ log; the sandbox settings do not change.
 **Verify:** `uv run pytest -q -n auto tests/test_guard_park.py tests/test_redteam_notify.py tests/test_park_properties.py tests/test_agents.py tests/test_worktree_report.py tests/test_worktree_cli.py tests/test_run.py tests/test_handoff.py`
 **Verified by:** Task 7, Task 8
 **Acceptance:**
-- [ ] `ck agents --guard-ladder haiku --json` prints `["sonnet", "opus", "fable"]`, `opus` gives `["fable"]`,
+- [x] `ck agents --guard-ladder haiku --json` prints `["sonnet", "opus", "fable"]`, `opus` gives `["fable"]`,
       `fable` gives `[]`, whatever `implementer.escalate` says.
-- [ ] `ck worktree park` writes a 0600 note and sends exactly one notification when configured; without a command
+- [x] `ck worktree park` writes a 0600 note and sends exactly one notification when configured; without a command
       it reports `not_configured` and the hint; a failing or slow command still exits 0 with `failed` and the reason.
-- [ ] `ck worktree report --json` lists a parked, unmerged task only under `needsInput`.
-- [ ] `ck worktree resolve` stores my answer, clears the park note, and a later park records `priorDecision`.
-- [ ] Claiming the task again removes the park note and `ck plan` still treats it as unfinished.
-- [ ] A park inside `ck run` gives exactly one notification, sent by `ck run`'s own process; the sandbox settings
+- [x] `ck worktree report --json` lists a parked, unmerged task only under `needsInput`.
+- [x] `ck worktree resolve` stores my answer, clears the park note, and a later park records `priorDecision`.
+- [x] Claiming the task again removes the park note and `ck plan` still treats it as unfinished.
+- [x] A park inside `ck run` gives exactly one notification, sent by `ck run`'s own process; the sandbox settings
       are the same with or without `run.notify_command`.
 **Dependencies:** Task 7 (its tests are the oracle), Task 8 (its tests are the oracle), Task 12 (edits `cli/run.py` after it)
 **Complexity:** Medium
