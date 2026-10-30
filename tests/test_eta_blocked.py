@@ -145,11 +145,12 @@ SPEC_NAME = "demo"
 def test_tc43_approval_end_shifts_finish_by_the_wait(tmp_path):
     a = Scenario(tmp_path, CHAIN3, name="with-wait")
     a.begin()
-    a.add(start_task(0, 1), approval_start(20), approval_end(40), merge(41, 1))
+    # Task 1's own work is short (3 min), so only the 20-minute wait can push p50 past the launch p90 (5.5 vs 5.7).
+    a.add(start_task(0, 1), approval_start(2), approval_end(22), merge(23, 1))
     b = Scenario(tmp_path, CHAIN3, name="without-wait")
     b.begin()
-    b.add(start_task(0, 1), merge(21, 1))
-    va, vb = a.view(45, *SEED), b.view(25, *SEED)
+    b.add(start_task(0, 1), merge(3, 1))
+    va, vb = a.view(27, *SEED), b.view(7, *SEED)
     assert va["state"] != "slipping"
     for p in ("p10", "p50", "p90"):
         assert parse(va["finish"][p]) == parse(vb["finish"][p]) + (when(20) - when(0))
