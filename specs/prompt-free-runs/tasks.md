@@ -153,7 +153,7 @@ test files, so this task makes them while In Progress.
 ---
 
 ### Task 4: Test caller classification, task-agent denials and main-session spec edits
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 4.1, 4.2, 4.3, 5.1, 5.2, 5.3, 5.4
 **Properties:** P-11, P-32
