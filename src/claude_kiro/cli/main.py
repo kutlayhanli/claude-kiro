@@ -9,6 +9,7 @@ import sys
 import json
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -24,6 +25,7 @@ from .run import run
 from .handoff import handoff
 from .bench import bench, cost
 from .stats import stats
+from .eta import eta, eta_backtest, eta_defaults, progress_group, status_line
 from .worktree import lint, plan, waves, worktree
 from .runner import HOOK_SETTINGS, configured_hooks, execute_hook, install_hook_settings
 
@@ -862,7 +864,7 @@ def doctor(unattended: bool):
         except _ag.AgentConfigError:
             auto_on = True
         for finding in _health.doctor_findings(_bench.claude_home(), auto_on, _store.load_records(),
-                                           now_ms=int(__import__("time").time() * 1000)):
+                                           now_ms=int(time.time() * 1000)):
             if finding.level == "warning":
                 warnings.append(finding.message)
             else:
@@ -1166,6 +1168,11 @@ cli.add_command(run)
 cli.add_command(bench)
 cli.add_command(cost)
 cli.add_command(stats)
+stats.add_command(eta_defaults)
+stats.add_command(eta_backtest)
+cli.add_command(eta)
+cli.add_command(progress_group)
+cli.add_command(status_line)
 
 
 if __name__ == "__main__":

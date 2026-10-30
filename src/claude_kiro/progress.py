@@ -451,11 +451,19 @@ def active_run(spec: str, root: Optional[Path] = None, env: Optional[Mapping[str
     return None
 
 
+def _under(path: str, root: Any) -> bool:
+    """True when `path` is `root` or inside it (compared by path components, no filesystem access)."""
+    if not isinstance(root, str) or not root:
+        return False
+    root = root.rstrip("/") or "/"
+    return path == root or path.startswith(root if root == "/" else root + "/")
+
+
 def runs_for_project(root: Path, env: Optional[Mapping[str, str]] = None, *, now: datetime) -> List[Path]:
     out = []
     for path, evs in _newest_first(_runs(env)):
         st = _start(evs)
-        if st is None or st.get("root") != str(root):
+        if st is None or not _under(str(root), st.get("root")):
             continue
         if any(e.get("kind") == "end" for e in evs):
             continue
