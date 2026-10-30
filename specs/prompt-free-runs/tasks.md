@@ -373,7 +373,7 @@ agents --guard-ladder` agree), P-15 (with `guardStopIn`), P-16; bridge `max_exam
       the files, in Workflow and agent mode.
 - [x] Tests run the real workflow script and real files; only agents and the Claude runtime are stubbed.
 **Implementation notes:**
-- `spec_review_frozen.test.mjs` cannot make the frozen-spec rule absent for an all-Not-Started spec: the Workflow stub
+- The review-frozen Workflow test cannot make the frozen-spec rule absent for an all-Not-Started spec: the Workflow stub
   has no file access and the revise prompt is static, so the test asserts the rule is in the prompt and conditional
   on a task that is not `Not Started`. Task 14 may refine this.
 - TC-79's `'always'` revise-call park is not asserted: `fake_project` stops only calls whose label contains ` revise `
