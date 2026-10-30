@@ -106,7 +106,8 @@ def test_execck_surfaces_a_failing_command():
     out = real_run("Run `ck plan no-such-spec --failed 1` now")
     assert out["log"] == [["plan", "no-such-spec", "--failed", "1"]]
     (res,) = out["results"]
-    assert res["code"] != 0 and res["error"] and res["stderr"].strip(), res
+    # ck prints this error on stdout (as released ck always has), so check the message itself is surfaced there
+    assert res["code"] != 0 and res["error"] and "No tasks.md found for 'no-such-spec'" in res["stdout"], res
 
 
 def test_execck_runs_commands_written_in_land_prompts_and_ignores_a_closing_backtick():
