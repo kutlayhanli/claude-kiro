@@ -502,8 +502,70 @@ export async function createGuard(
   registrations.push(await ctx.tool.hook("execute.before", before));
   registrations.push(await ctx.tool.hook("execute.after", after));
 
+  const abort = new AbortController();
+  const lastStopWarning = new Map<string, string>();
+  let stopVerifyLoop: Promise<void> | null = null;
+
+  const stopVerify = async (sessionID: string, cwd: string): Promise<void> => {
+    try {
+      const result = await runCkHook(
+        "stop-verify",
+        {
+          cwd,
+          tool_name: "",
+          tool_input: {},
+          session_id: sessionID,
+          tool_use_id: `stop-${sessionID}-${Date.now()}`,
+        },
+        cwd,
+        config.guard.timeouts.stopVerify * 1000,
+      );
+      if (result.timedOut || result.code !== 0) {
+        debug(`stop-verify failed session=${sessionID}`);
+        return;
+      }
+      const output = parseHookOutput(result.stdout, "stop-verify");
+      const warning = output?.systemMessage;
+      if (!warning || lastStopWarning.get(sessionID) === warning) return;
+      lastStopWarning.set(sessionID, warning);
+      await postContext(sessionID, warning);
+    } catch (error) {
+      debug(`stop-verify error session=${sessionID}: ${message(error)}`);
+    }
+  };
+
+  if (config.guard.hooks.stopVerify) {
+    const events = (
+      ctx as unknown as {
+        event?: { subscribe?: (options: unknown) => AsyncIterable<unknown> };
+      }
+    ).event;
+    const subscribe = events?.subscribe;
+    if (events && typeof subscribe === "function") {
+      stopVerifyLoop = (async () => {
+        try {
+          for await (const raw of subscribe.call(events, {
+            types: ["session.idle"],
+            signal: abort.signal,
+          })) {
+            const event = raw as { type?: string; data?: { sessionID?: string } };
+            if (event.type !== "session.idle" || !event.data?.sessionID) continue;
+            const meta = await sessionMeta(event.data.sessionID);
+            // Child sessions are handled by the workflow's own gate; stop-verify is a main-turn warning.
+            if (meta.parentID) continue;
+            void stopVerify(event.data.sessionID, meta.directory);
+          }
+        } catch (error) {
+          if (!abort.signal.aborted) debug(`session.idle subscription ended: ${message(error)}`);
+        }
+      })();
+    }
+  }
+
   return {
     dispose: async () => {
+      abort.abort();
+      if (stopVerifyLoop) await stopVerifyLoop.catch(() => {});
       for (const registration of registrations) await registration.dispose().catch(() => {});
     },
   };

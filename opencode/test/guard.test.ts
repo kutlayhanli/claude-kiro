@@ -42,6 +42,9 @@ case "$hook" in
       *) exit 0 ;;
     esac
     ;;
+  stop-verify)
+    echo '{"systemMessage":"stop warning"}'
+    ;;
 esac
 `;
 
@@ -60,9 +63,15 @@ function fakeContext(projectDir: string) {
   const hooks = new Map<string, (input: unknown) => Promise<void>>();
   const synthetic: Array<{ sessionID: string; text: string }> = [];
   const asserts: Array<{ sessionID: string; action: string; resources: string[] }> = [];
+  const idleEvents: Array<{ type: "session.idle"; data: { sessionID: string } }> = [];
   let assertOutcome: "allow" | "deny" = "allow";
 
   const ctx = {
+    event: {
+      subscribe: async function* () {
+        for (const event of idleEvents) yield event;
+      },
+    },
     tool: {
       hook: async (name: string, callback: (input: unknown) => Promise<void>) => {
         hooks.set(name, callback);
@@ -98,6 +107,9 @@ function fakeContext(projectDir: string) {
     asserts,
     denyAsks() {
       assertOutcome = "deny";
+    },
+    idle(sessionID: string) {
+      idleEvents.push({ type: "session.idle", data: { sessionID } });
     },
   };
 }
@@ -338,6 +350,25 @@ test("post-file-ops context is posted as a synthetic message", async () => {
       status: "completed",
     });
     assert.ok(fake.synthetic.some((entry) => entry.text === "spec context note"));
+    await guard.dispose();
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("stop-verify warnings are posted as context for the main session", async () => {
+  const fixture = setup();
+  process.env.CK_RUN_HEADLESS = "1";
+  const fake = fakeContext(fixture.dir);
+  fake.idle("main");
+  fake.idle("child"); // a child warning must not be posted by the main-loop hook
+  try {
+    const guard = await createGuard(fake.ctx as never, defaultConfig(), fixture.dir);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.deepEqual(
+      fake.synthetic.filter((entry) => entry.text === "stop warning").map((entry) => entry.sessionID),
+      ["main"],
+    );
     await guard.dispose();
   } finally {
     fixture.cleanup();
