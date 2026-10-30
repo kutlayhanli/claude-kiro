@@ -11,7 +11,7 @@ Success: every run shows a finish time and cost range at launch and keeps it cur
 
 ## Scope
 **In:**
-- Run ETA as in the mockup (`/home/kutlay/.agent/diagrams/ck-run-eta-mockup.html`).
+- Run ETA as in the mockup (`~/.agent/diagrams/ck-run-eta-mockup.html`).
 - Agent-mode analytics follow-ups (four groups below).
 - Deterministic-clock fix for the flaky scheduler property test.
 - Verify-cycle lint check for test files owned by test tasks that verify a dependent impl task.
@@ -91,6 +91,54 @@ Success: every run shows a finish time and cost range at launch and keeps it cur
 **Rejected:** ignore them and let the ETA slip.
 **Decided by:** user
 
+### D11: Task count (review R1, T2)
+**Choice:** Keep the full decided scope and the task breakdown as it stands. No task is merged or deferred only to reach the ~15-task target, and that cap no longer applies to this spec. (The review had already merged 35 tasks into 27 where the merges also fixed ownership or Verify-cycle problems; those 27 stay.)
+**Why:** the user prefers the whole scope and smaller, clearly owned tasks over a lower count.
+**Rejected:** consolidating to about 15-18 tasks; deferring the `ck run` spool/mirror, `ck stats eta-backtest` or the status line.
+**Decided by:** user
+
+### D12: Verify-cycle lint exemptions (review D1; amends D9)
+**Choice:** Keep D9's rule and add two exemptions: skip when the owning test task T also verifies X (T in X's Verified by, or X in T's Verifies), since F is then X's own oracle (13.9); skip when every place X's Verify names F narrows it with a `::` selector or a `-k` option (13.10). The agent-mode-analytics task 8 shape (Verified by: None, bare F) still fails. TC-84 lints copies of every repository tasks.md with statuses reset to Not Started: only the pre-fix agent-mode-analytics task 8 fails, and landing-speed tasks 9 and 17 pass. The prompt-free-runs Task 11 / Task 3 / Task 15 import-plus-ownership cycle (Task 3's tests import `share.py`, which Task 15 owns; 15 depends on 11; 11 is verified by 3) is recorded as a known real-world cycle: the new rule does not report it (Task 3 verifies Task 11 itself), and the existing import check reports it only once Task 3's test files exist, not at launch. TC-100 pins both halves.
+**Why:** without the exemptions the rule would have blocked landing-speed tasks 9 and 17, whose gates passed.
+**Rejected:** the pure ownership-plus-dependency rule.
+**Decided by:** user
+
+### D13: Notification type (review D3)
+**Choice:** Add an optional `notification_type` keyword to `notify.send` (default `ck_needs_input`, so prompt-free-runs' behaviour is unchanged), set as `CK_NOTIFY_TYPE` in the command's environment. ETA uses `ck_eta_slip`, `ck_eta_blocked` and `ck_run_done`. A quieter route for done or slip notices needs the user's notify command to branch on `CK_NOTIFY_TYPE`; ck sends every type the same way (8.11).
+**Why:** done and slip notices should not have to ring like a needs-input page, and one optional keyword keeps the existing contract.
+**Rejected:** a separate quiet command setting (`run.notify_done_command`); leaving every notice at needs-input priority.
+**Decided by:** user
+
+### D14: Slip while nothing lands (review V5)
+**Choice:** `ck run`'s watcher re-checks for a slip about once a minute (calling the after-event / notify decision with no new event), and so does `ck eta --watch` while it is open. Otherwise a slip that comes from time alone is noticed at the next event (8.5, 4.4).
+**Why:** a task that overruns while nothing lands is the common slip, and both processes already exist and poll.
+**Rejected:** event-only detection; a new background process.
+**Decided by:** user
+
+### D15: Park notifications (review V6)
+**Choice:** A park sends only prompt-free-runs' park message, never an extra "blocked" notification, whether it blocks the whole run or one branch (8.9).
+**Why:** the park message already says the run needs me; a second message for the same cause is noise.
+**Rejected:** park message plus a blocked message for a whole-run park.
+**Decided by:** user
+
+### D16: Stale versus waiting or blocked (consistency C1.1)
+**Choice:** Follow 3.10 as written: after 120 minutes with no event a run is `stale`, even while an approval wait, a hand landing or a park is open. 5.1 and 5.4 apply only to a run that is not stale.
+**Why:** after two silent hours the honest statement is that nothing is known; one rule is simpler than per-state limits.
+**Rejected:** waiting and blocked win over stale; a longer stale limit for open waits and parks.
+**Decided by:** user
+
+### D17: Hand landings freeze the estimate (consistency C1.2)
+**Choice:** Follow 5.4 as written: any open hand landing freezes the whole run's estimate and stops slip notices until the task merges or the run ends, even while other tasks keep merging. 4.2, 8.1 and 8.5 state this exception: landing log lines show `waiting on you N min` instead of a new median.
+**Why:** a protected-path task waits on me, and the run cannot finish until I land it.
+**Rejected:** counting a hand landing as waiting only when it holds every remaining task; per-task hand landings that never freeze the estimate.
+**Decided by:** user
+
+### D18: Done notice for a superseded run (consistency C2.7)
+**Choice:** Follow 8.7 as written: when a new run closes an unfinished earlier run with outcome `superseded` (from `ck progress begin` or `ck run`'s `prepare_spool`), that run's done notice is sent, naming the outcome `superseded`. This holds for a stale earlier run too.
+**Why:** every run end gets one notice, so the phone record matches the progress files.
+**Rejected:** superseded ends send nothing; send only when the earlier run was not stale.
+**Decided by:** user
+
 ## Delegated to Spec
 - Progress-file path, format and event list (start, merge, retry, escalation, landing, park, approval wait), and how the Workflow script and the agent-mode instructions write it.
 - How create-phase durations are derived from spec-create records (agents per phase) and how many simulations to run.
@@ -110,6 +158,7 @@ Success: every run shows a finish time and cost range at launch and keeps it cur
 ## Open Questions
 - [x] D9: Verify-cycle lint rule shape and severity -> D9.
 - [x] D10: ETA blocked and waiting states -> D10.
+- [x] Review open questions (R1/T2, D1, D3, V5, V6, C1.1, C1.2, C2.7) -> D11-D18.
 
 ## Research Notes
 ### Codebase
@@ -117,4 +166,4 @@ Success: every run shows a finish time and cost range at launch and keeps it cur
 - `src/claude_kiro/lint.py:144` - `verify_order_cycles` checks only Python imports of existing test files ("checked Python imports of existing test files"); missed agent-mode-analytics task 8, whose Verify ran `tests/test_stats_perf.py` (TC-56/57 need task 13's `ck stats begin` / `--agents-backfill`).
 - `tests/test_landing_scheduler_properties.py:337` - P-10 runs on real timers and already re-runs up to six times per configuration; still fails under `-n auto` load.
 - Local history: 504 merged tasks (agent-minutes p10 0.8 / median 5.0 / p90 16.7), 10 spec-create runs (58-96 min, median 63) in `$XDG_DATA_HOME/claude-kiro/runs/`.
-- ETA mockup: `/home/kutlay/.agent/diagrams/ck-run-eta-mockup.html`.
+- ETA mockup: `~/.agent/diagrams/ck-run-eta-mockup.html`.
