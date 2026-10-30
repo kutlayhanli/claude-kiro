@@ -1,7 +1,8 @@
 # Upgrading
 
-- **From 0.10 to 0.10.1:** see the next section.
-- **From 0.9.1 to 0.10:** see [0.9.1 → 0.10](#091--010), then the 0.10.1 notes.
+- **From 0.10.1 to 0.10.2:** see the next section.
+- **From 0.10 to 0.10.1:** see [0.10 → 0.10.1](#010--0101), then the 0.10.2 notes.
+- **From 0.9.1 to 0.10:** see [0.9.1 → 0.10](#091--010), then the 0.10.1 and 0.10.2 notes.
 - **From 0.9.0 to 0.9.1:** see [0.9.0 → 0.9.1](#090--091).
 - **From 0.8 to 0.9:** see [0.8 → 0.9](#08--09), then the 0.9.1 and 0.10 notes.
 - **From 0.7 to 0.8:** see [0.7 → 0.8](#07--08), then the 0.9 notes.
@@ -11,6 +12,25 @@
 - **From 0.3 to 0.4:** see [0.3 → 0.4](#03--04).
 - **From 0.2:** apply the 0.3 notes below as well; the steps are the same.
 - **From 0.1:** skip to [Upgrading to 0.2](#upgrading-to-02), then come back for the 0.3 and 0.4 notes (same commands).
+
+## 0.10.1 → 0.10.2
+
+Run analytics now covers agent mode: runs where the Workflow tool is unavailable and `/spec:implement`, `/spec:create`, `/spec:review` or `/spec:spawn-worktree` fall back to the Agent tool. On each machine:
+
+```bash
+ck update                                  # ck itself and the spec plugin
+ck stats collect --agents-backfill --dry-run   # optional: list older agent-mode implement runs backfill would record
+ck stats collect --agents-backfill             # optional: record them (partial records)
+```
+
+Then restart Claude Code sessions, and run `ck upgrade` (or `ck update --project`) in vendored projects so their `.claude/commands/` and `.claude/workflows/without-workflow-tool.md` copies get the new instructions.
+
+- **`ck stats begin`.** Agent-mode runs start with `ck stats begin --kind implement|create|review --spec NAME [--into BRANCH] --json`, which prints a run id (`ag_<8 hex>`) and keeps a private manifest in `$XDG_DATA_HOME/claude-kiro/runs-open/`. The skills run it; it is best-effort and never blocks a run. If it fails, the run's report ends with `⚠ ck stats begin failed: this run is not recorded in ck stats`.
+- **No content in agent descriptions.** Agent calls are described only as `[ck:<run_id>]` plus a fixed verb and task number (`implement task 3`, `review task 3 round 1`, `fix 1`, `create design`, ...). Anything else counts as role `other`.
+- **`ck stats collect --agents <run_id>`** writes the run's record from its marked agent transcripts (`source: "agents"`, cost source `agent_transcripts`), with the outcome from `ck worktree report` for the run's own tasks. The skills run it at the end of the run.
+- **Open runs.** `ck doctor` warns about manifests open for more than 6 hours, and `ck stats collect --all` collects them.
+- **Backfill.** `ck stats collect --agents-backfill [--dry-run] [--gap MINUTES]` records implement runs from before this release, grouped by session, spec and time gap. Create and review runs from before this release can't be recovered.
+- **Shared records** stay `ck-run-analytics/1` with an optional `source` field. The leak check now also blocks agent worktree paths and branches, the manifest's spec, root and target branch, and the run id.
 
 ## 0.10 → 0.10.1
 
