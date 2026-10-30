@@ -307,8 +307,10 @@ informational. Runs automatically at the start of `/spec/implement`.
 - [x] A post-check block surfaces on the next call as `[ck post-check] …`. Live: the latch fired on
       the child's next shell call; `runChild` waits for the background gate and refuses a result that
       did not report `guardStop`.
-- [x] `interruptions.guard_denials` > 0 in `ck stats` for a run with a deny. Unit-tested through
-      `native_block`; the live guard deny is not yet carried through a whole workflow record.
+- [x] `interruptions.guard_denials` > 0 in `ck stats` for a run with a deny. **Live:** an inline
+      workflow's task agent was denied by the real `ck` guard, reported `guardStop`, the record
+      carried `guard.denials=1`, and `ck stats show` printed "1 guard denials". `byRole` is empty
+      because the native record has per-agent guard events, not role-level totals.
 - [x] `ck cost --run <runId>` prices a free-tier run at $0.00, not "unknown". Live-ingested record.
 - [x] A missing agent file, a bad model ref and a dead hook each abort the preflight with a message
       that names the fix. Preflight tests cover each.
