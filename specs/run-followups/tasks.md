@@ -436,7 +436,7 @@ Seams: `match_pool` (S1); `size_factor` (S2); `fit_size` (S3); `start_model` (S1
 ---
 
 ### Task 14: Implement the seeded Monte Carlo simulator
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.1, 1.2, 1.5, 1.9, 2.1, 2.2, 2.4, 4.3, 5.1, 5.5
 **Description:** Create pure `src/claude_kiro/eta/simulate.py` with `SimResult` (fields as in the design), `conditional_sample(values, elapsed, u)` (S4: uniform among values > elapsed, else elapsed + the pool's p10, never below elapsed), `simulate_implement(graph, model, state, *, now_min, n, seed, exclude=frozenset())` and `simulate_create(model, state, *, now_min, n, seed)`. Use one `random.Random(seed)` per call and no clock. The simulation runs in effective minutes (design Simulation): `now_min` is the caller's effective now, and every start time in `state` is converted with `progress.effective_min(state.waits, t)`, so waits shift nothing in effective time. For implement, each pass draws one joint tuple per open task not in `exclude` through `history.match_pool` (start model from `history.start_model`); parked and held tasks are simulated too, so the caller gets the remaining work once unblocked, and passes `exclude=held` for the runnable-only pass (5.1, 5.2). The slot time is agentMin × `size_factor`; review and landing waits follow and hold no slot. A tuple with no wait draws from the pool's own waits, else the bundled waits. Running tasks (from `RunState`) draw through S4 with `elapsed = now_eff - first_start_eff`; merged tasks are skipped. An event heap of plain tuples starts ready tasks in `ck plan` order (chain desc, then id) while running < `min(slots, maxConcurrent)`. Cost is tuple `usd × factor`, or minutes × a `usdPerAgentMinute` draw for bundled tuples. `usd` in the result is None when any open task's pool is unpriced and there is no bundled rate (1.9); the result carries cost p10/p50/p90. Return the finish p10/p50/p90 (effective minutes from launch), remaining p10/p50/p90, per-task median, critical-path median and the widest match step. For create, sum S4 draws for the running phase and plain draws for the pending phases, each included with probability `presence`, and fill `phase_median_min`. Equal inputs and seed give an identical `SimResult`. Meet the speed target: 1000 passes over 50 tasks in about 0.4 s, 4000 create passes in under 0.1 s.
@@ -445,13 +445,13 @@ Seams: `match_pool` (S1); `size_factor` (S2); `fit_size` (S3); `start_model` (S1
 **Verify:** `uv run pytest -q -n auto tests/test_eta_estimate_properties.py`
 **Verified by:** Task 13 (P-1, P-2, P-3, P-4, P-10, P-12, P-13)
 **Acceptance:**
-- [ ] The same graph, model, state and seed give an identical result
-- [ ] Fewer slots never give an earlier quantile than more slots for the same graph and seed
-- [ ] No simulated finish of a running task or phase is earlier than now
-- [ ] Cost is None (not 0) when the matched pools have no priced sample and no bundled rate exists
-- [ ] A phase with presence p appears in about a fraction p of create passes
-- [ ] Inserting a closed wait before every start leaves the effective-minute result unchanged
-- [ ] A 50-task graph with 14 slots and 500 history tasks simulates in under 1 s; a create estimate in under 0.5 s
+- [x] The same graph, model, state and seed give an identical result
+- [x] Fewer slots never give an earlier quantile than more slots for the same graph and seed
+- [x] No simulated finish of a running task or phase is earlier than now
+- [x] Cost is None (not 0) when the matched pools have no priced sample and no bundled rate exists
+- [x] A phase with presence p appears in about a fraction p of create passes
+- [x] Inserting a closed wait before every start leaves the effective-minute result unchanged
+- [x] A 50-task graph with 14 slots and 500 history tasks simulates in under 1 s; a create estimate in under 0.5 s
 **Dependencies:** Task 10 (reads `RunState`, `effective_min`), Task 12 (calls `match_pool`, `size_factor`, `start_model`, uses `Model`/`Graph`), Task 13 (its tests are the oracle)
 **Complexity:** High
 **Risk:** normal
