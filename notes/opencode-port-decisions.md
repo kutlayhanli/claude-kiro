@@ -458,6 +458,16 @@ read or append to them — see finding 12). Each probe is a throwaway plugin aga
     preflight checks `node --version >= 20`. (The workflow scripts use only the stdlib, so node 22 is
     sufficient; `vm.SourceTextModule` is avoided in favour of `vm.runInThisContext` + dynamic import.)
 
+22. **The bench probe needs a warmup and a visible plugin directory.** A real
+    `ck bench run --harness opencode` arm initially failed because the model started before the async
+    plugin setup registered `bench_run`, and because `.git/info/exclude` containing `.opencode/`
+    also hid the probe from OpenCode's loader. It also exposed two lifecycle facts:
+    `subprocess(cwd=...)` leaves `PWD` stale (OpenCode can use it for the project location), and a
+    model can keep the CLI alive after the record closed. → **Amends D13:** warm up with a shell
+    `sleep`, exclude only the generated `.opencode/agents/`, `.opencode/ck/` and `AGENTS.md`, set
+    `PWD`, execute a bare `opencode` through a shell shim, and poll the record then terminate the
+    CLI's whole process group.
+
 ### Still open (not blocking the plan)
 
 - Whether a *custom* `reasoningEffort` can be declared as a variant on `deepseek-v4.1-flash-free`

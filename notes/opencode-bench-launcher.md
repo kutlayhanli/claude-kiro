@@ -1,7 +1,8 @@
-# OpenCode bench launcher: design for `ck bench run --harness opencode`
+# OpenCode bench launcher: `ck bench run --harness opencode`
 
-Status: design only. Phase 4.1 (`bench-output.json` + `ck bench import`) already works; this is the
-controllable launcher/collector for Phase 4.2.
+Status: implemented and **live-verified end to end** (demo spec, `opencode-go/beam-free`). The
+launcher is `run_arm_opencode` in `src/claude_kiro/bench.py`; the args/probe assembly is
+`src/claude_kiro/bench_opencode.py`; the final record imported as `merged 1, failed 0, $0.00`.
 
 ## Why not `opencode run` with a slash command
 
@@ -10,76 +11,70 @@ controllable launcher/collector for Phase 4.2.
 
 ## Two launch paths
 
-**A. `session.command` on a dedicated server.** The original design: start `opencode serve`, create a
-session in the clone, dispatch `spec/implement` with `session.command`, wait for the record. OpenCode
-requires a password for the serve API; `Service.discover()` gives `{url, basic auth}` for the
-background service, and a dedicated server prints its password. **Open problem:** a server started
-with `opencode serve` did not activate the clone's `.opencode/plugins` (a session created with
-`location.directory` still listed no commands). The TUI/`opencode run` path activates the project, so
-this needs either a location-activation call or a session started by the CLI. Do not rely on it
-until that is proven.
+**A. `session.command` on a dedicated server.** Start `opencode serve`, create a session in the
+clone, dispatch `spec/implement` with `session.command`, wait for the record. OpenCode requires a
+password for the serve API; `Service.discover()` gives `{url, basic auth}` for the background
+service, and a dedicated server prints its password. **Rejected for bench:** a server started with
+`opencode serve` did not activate the clone's `.opencode/plugins` (a session created with
+`location.directory` still listed no commands). `scripts/arm.mjs` keeps this path for diagnostics,
+but the benchmark does not depend on it.
 
-**B. A harness probe tool (recommended, proven).** Copy a small `bench-probe.js` into the clone's
-`.opencode/plugins/` (and add it to `.git/info/exclude`). Its tool reads `.bench-args.json`, calls the
-`workflow` tool with the recorded args, polls `<state>/runs/*/record.json` until it closes, and returns
-the record path. Run `opencode run --standalone --model <arm> "Call bench_run now, exactly once."`.
-The tool keeps the parent turn alive, so `--standalone` cannot exit and kill the workflow. This is the
-same path the Phase 1/2 live tests used. The slash-command surface is tested separately
-(`session.command` with `/spec/plan 7` in spike 2 and the live command list).
+**B. A harness probe tool (implemented).** Write a small `bench-probe.js` into the clone's
+`.opencode/plugins/`. Its `bench_run` tool reads `.bench-args.json`, calls the `workflow` tool with
+the recorded args, polls `<state>/runs/*/record.json` until it closes, and returns the record path.
+Run `opencode run --standalone --model <arm> "First use the shell tool to run sleep 2. Then call
+bench_run exactly once."`. The tool keeps the parent turn alive, so `--standalone` cannot exit and
+kill the workflow.
 
-Whichever path is used, the launcher still has to assemble the workflow args. That is the skill's
-setup: `ck plan <spec> --json`, `ck agents --json`, the worktree/integration choices, the brief path,
-risk/complexity and the run limits. Assemble them in Python once, write `.bench-args.json`, and pass
-exactly the object the skill would have passed.
-
-## Shape
+## What the launcher does
 
 ```
 ck bench run --harness opencode ...
-  1. existing bench clone (same base commit, same spec layout as the Claude arms)
-  2. write <clone>/opencode.json:
-       {"plugins": ["<absolute path to opencode/>"]}
-     (OpenCode installs a bare package name from npm; an unpublished package is a path)
-  3. add .opencode/ and AGENTS.md to <clone>/.git/info/exclude, so setup-generated files do not
-     dirty the tree or leak into the gate
-  4. start: opencode serve --standalone --port <free port>
-       cwd=<clone>
-       env: CK_RUN_HEADLESS=1
-            XDG_STATE_HOME=<bench state>/opencode   (records outside the clone)
-            PATH=...                                 (node, ck)
-  5. wait for the server's /server/info
-  6. node opencode/scripts/arm.mjs --url ... --dir <clone> --model <provider/model#variant>
-       --command spec/implement --text <spec> --state <bench state>/opencode
-  7. read the new <state>/runs/<runId>/record.json (native ingest) and/or bench-output.json
-  8. ck stats record <record.json>  (or ck bench import <bench-output.json>)
-  9. kill the server; keep the clone until scoring, then remove it
+  1. clone the repo at the arm's base, on bench/<config>-<rep> (same as the Claude arms)
+  2. ck agents set <role.key> <value> --project for the arm's agents, commit the setup
+  3. write specs/ck.json opencode.models[alias] = <arm model> for haiku/sonnet/opus/fable,
+     so every role uses the arm's model
+  4. create a private state root outside the clone:
+       XDG_STATE_HOME=<bench>/opencode-state/<arm>
+       CK_BENCH_STATE=<state>/claude-kiro/opencode
+       CK_RUN_HEADLESS=1
+       PWD=<clone>
+     and a shell exec shim for a bare `opencode` command
+  5. workflow_args: ck plan <spec> --json, ck agents --json, ck worktree integration <spec>,
+     the brief path and the skill defaults
+  6. prepare_probe: .bench-args.json, .bench-state.json,
+     .opencode/plugins/claude-kiro.js (re-export the package), .opencode/plugins/bench-probe.js
+  7. warmup: `opencode run --standalone ... "run sleep 30, then reply READY"`; require
+     .opencode/agents/ck-worker.md before the real prompt
+  8. real prompt: run sleep 2, then call bench_run once
+  9. poll runs/*/record.json; when it reaches done/failed/partial, terminate the CLI's
+     process group, then import bench-output.json
+ 10. overlay native tokens/cost, write results/<arm>.json, leave the clone for scoring
 ```
 
-## `arm.mjs`
+## Startup traps (each one cost a live run)
 
-Use `@opencode/client` from the package's dependency:
+- **Async plugin setup races the first model turn.** OpenCode can start the model before setup has
+  materialized the agents and registered the `workflow`/`bench_run` tools. The warmup prompt plus a
+  shell `sleep` gives setup time; the `ck-worker.md` check is the authority, not a fixed delay.
+- **Do not exclude the whole `.opencode/` directory.** `.git/info/exclude` also hides files from
+  OpenCode's loader, so the probe plugin never loaded. Exclude only `.opencode/agents/`,
+  `.opencode/ck/`, `AGENTS.md`, `.bench-args.json`, `.bench-state.json` and `.ck/`; the plugin files
+  stay untracked but visible.
+- **`subprocess(cwd=...)` does not update `PWD`.** OpenCode can use `PWD` for the project location;
+  set it to the clone or setup writes nothing.
+- **The CLI can outlive the record.** A model can keep talking after the probe returned. The record
+  is authoritative: poll it, then terminate the session. Start the CLI in a new process group
+  (`start_new_session=True`) and signal the group, or its `opencode serve --stdio` child survives.
 
-```js
-const client = OpenCode.make({ baseUrl: url })
-const session = await client.session.create({
-  title: `ck bench ${spec} ${arm}`,
-  model: parseRef(model),             // {providerID, id, variant?}
-  location: { directory: dir },
-})
-await client.session.command({ sessionID: session.id, name: "spec/implement", text: spec })
-```
+## Why the record is authoritative
 
-Then poll:
-- `client.session.get({sessionID})` for the parent's `outcome`/`time.busy`/`time.idle`;
-- `<state>/runs/*/record.json` for the workflow run. The record is authoritative: wait until its
-  `status` is `done` or `failed` (or the wall-clock cap). Print
-  `{sessionID, runId, recordPath, benchPath, status}` as one JSON object.
+The command handler returns after it posts the rendered skill; the workflow runs in the background,
+so the parent session can go idle before the record is closed. The probe blocks inside `bench_run`,
+and the launcher additionally polls `runs/*/record.json` for `done`/`failed`/`partial`. Never stop at
+the first idle and never trust the model's final prose as the result.
 
-The command handler returns after it posts the rendered skill to the session; the workflow runs in
-the background, so the parent session can go idle before the record is closed. Never stop at the
-first idle: wait for the record (D1's busy→idle trap in a different form).
-
-## Model ref
+## Model refs
 
 `parseRef` is the same splitter as `opencode/src/models.ts`: `provider/model#variant`. The launcher
 passes the arm's full ref; the plugin's role agents resolve their own per-call refs. If the arm is
@@ -89,11 +84,13 @@ model.
 ## Guard and headless
 
 `CK_RUN_HEADLESS=1` makes the plugin's guard treat `ask` as `deny` (a benchmark has no human), and
-the `ck` hook classifies the run as a task agent. A run that loses the guard must be marked failed,
-not scored as a model result.
+the `ck` hook classifies the run as a task agent. A guard denial, a post-check catch, a non-`done`
+record, a failure label, a timeout or a nonzero exit marks the arm fail-closed; it is not scored as a
+model result.
 
 ## Artefacts
 
 Keep the clone, the record, the bench output and the log under the bench run directory, outside the
-clone. The benchmark's result record should use the native `ck-opencode-run/1` path (the telemetry
-track) or `bench import` for the first pass; both share `ck bench score`.
+clone. `bench-output.json` is the `ck bench import` input; `record.json` is the native
+`ck-opencode-run/1` telemetry and the source of the exact tokens/cost. Both feed the same
+`ck bench score`.
