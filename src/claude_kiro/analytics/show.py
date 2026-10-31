@@ -9,6 +9,8 @@ from statistics import median
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 from datetime import datetime, timezone
 
+from .. import bench
+
 COVERAGE: Dict[str, str] = {
     "task_minutes": (
         "task started to finished (elapsed); includes waits between its agents; "
@@ -583,6 +585,29 @@ def _bucket_lines(title: str, buckets: Mapping[str, Mapping[str, Any]]) -> List[
     return lines
 
 
+def _cost_basis(buckets: Mapping[str, Mapping[str, Any]]) -> str:
+    """Show the exact model id and the in/out token arithmetic behind each model's cost."""
+    parts = []
+    for model, b in buckets.items():
+        rate = bench.rates(model)
+        if rate is None or rate.get("free") is True:
+            continue
+        input_tokens = b.get("input") or 0
+        output_tokens = b.get("output") or 0
+        cache_read = b.get("cacheRead") or 0
+        cache_write = b.get("cacheCreation") or 0
+        input_usd = input_tokens * rate.get("input", 0.0) / 1e6
+        output_usd = output_tokens * rate.get("output", 0.0) / 1e6
+        cache_usd = (cache_read * rate.get("cacheRead", 0.0) + cache_write * rate.get("cacheCreation", 0.0)) / 1e6
+        parts.append(
+            f"{model}: in {input_tokens / 1e6:.2f}M×${rate.get('input', 0.0):.2f}/M"
+            f" + out {output_tokens / 1e6:.2f}M×${rate.get('output', 0.0):.2f}/M"
+            f" = ${input_usd + output_usd:.2f}; cache {cache_read / 1e6:.1f}M×${rate.get('cacheRead', 0.0):.3f}/M"
+            f" = ${cache_usd:.2f}"
+        )
+    return "; ".join(parts)
+
+
 def _missing_text(m: Any) -> str:
     if isinstance(m, Mapping):
         return f"{m.get('what')} ({m.get('agentId')})" if m.get("agentId") else str(m.get("what"))
@@ -626,6 +651,11 @@ def render_run(view: Mapping[str, Any]) -> List[str]:
         f"wall: {_min(run.get('wall_minutes'))}  [{COVERAGE['wall']}]",
         f"task span: {_min(run.get('task_span_minutes'))}  [{COVERAGE['task_span']}]",
         f"cost: {_usd(run.get('cost_usd'))}" + (f" ({src})" if src else f" ({UNKNOWN} source)"),
+    ]
+    basis = _cost_basis(view.get("by_model") or {})
+    if basis:
+        lines.append(f"cost basis: {basis}")
+    lines += [
         f"tasks: {_fmt(run.get('tasks_merged'))} merged, {_fmt(run.get('tasks_failed'))} failed, "
         f"{_fmt(run.get('tasks_total'))} total",
         interruptions_line(view.get("interruptions")),

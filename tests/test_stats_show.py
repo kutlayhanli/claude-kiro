@@ -157,6 +157,8 @@ def test_tc36_breakdown_text_names_every_section(env):
     for word in ("implementer", "reviewer", "wave 1", "sonnet", "opus", "slowest", "idle", "landing"):
         assert word in low, f"{word!r} missing:\n{out.stdout}"
     assert re.search(r"costliest|most expensive", low)
+    assert "cost basis" in low
+    assert re.search(r"in .*\$.*/M.*out .*\$.*/M", out.stdout), f"cost basis arithmetic missing:\n{out.stdout}"
     for word in ("retry", "escalation", "review round|review-round|reviewround", "conflict", "fix"):
         assert re.search(word, low), f"rate {word!r} missing:\n{out.stdout}"
 
