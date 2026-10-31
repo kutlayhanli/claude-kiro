@@ -123,6 +123,12 @@ return { structured, plain }
     assert.equal(record.agents[1].label, "review 1");
     assert.ok(record.agents[0].tokens.input > 0);
     assert.ok(record.agents[0].peakContext >= 0);
+    const status = JSON.parse(readFileSync(join(dir, ".opencode", "ck", "status", `${record.runId}.json`), "utf8"));
+    assert.equal(status.schema, "ck-opencode-status/1");
+    assert.equal(status.status, "done");
+    assert.equal(status.phase, "P");
+    assert.equal(status.agents, 2);
+    assert.deepEqual(status.running, []);
     const bench = JSON.parse(readFileSync(join(runDir, "bench-output.json"), "utf8"));
     assert.equal(bench.workflowProgress.length, 2);
     assert.equal(bench.workflowProgress[0].type, "workflow_agent");

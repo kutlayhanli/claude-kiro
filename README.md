@@ -28,8 +28,9 @@ harness).
 { "plugins": ["opencode-claude-kiro@0.11.0"] }
 ```
 
-See [`opencode/README.md`](opencode/README.md) for configuration, the native `ck-opencode-run/1`
-telemetry, `ck doctor --harness opencode`, and the benchmark arm tooling.
+See [`opencode/README.md`](opencode/README.md) for configuration, the live TUI workflow status line,
+the native `ck-opencode-run/1` telemetry, `ck doctor --harness opencode`, and the benchmark arm
+tooling.
 
 ## Repository Structure
 

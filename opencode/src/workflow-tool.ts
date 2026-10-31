@@ -26,6 +26,7 @@ import {
   workflowNameOf,
 } from "./record.ts";
 import { ChildError, runChild } from "./run-child.ts";
+import { RunStatusWriter } from "./status.ts";
 
 export interface WorkflowRuntime {
   ctx: Plugin.Context;
@@ -232,6 +233,14 @@ async function startWorkflow(
     startedAt: Date.now(),
   });
   record.start();
+  const status = new RunStatusWriter(runtime.projectDir, runId, {
+    workflow: workflowNameOf(target.name),
+    spec: stringArg(args.spec ?? args.feature),
+    startedAt: runStartedAt,
+    total: Array.isArray(args.remaining) ? args.remaining.length : 0,
+    log: logger.path,
+  });
+  status.start();
 
   const workflowPath = target.kind === "inline" ? join(runDir, "inline.mjs") : target.path;
   if (target.kind === "inline") writeFileSync(workflowPath, target.source);
@@ -272,6 +281,7 @@ async function startWorkflow(
     finished = true;
     logger.write(text);
     record.finish({ status: "failed", endedAt: Date.now(), failureLabel: "port" });
+    status.finish("failed", record.agents());
     await post(runtime, sessionID, runId, logger, text, true);
   };
 
@@ -284,6 +294,7 @@ async function startWorkflow(
     }
     if (message.t === "phase") {
       logger.write(`phase: ${String(message.name ?? "")}`);
+      status.phase(String(message.name ?? ""));
       // Progress is a synthetic transcript entry. With no delivery it does not start a model turn
       // (verified live: two phases produced zero extra turns). Only the final result or an error
       // wakes the parent, once.
@@ -299,12 +310,17 @@ async function startWorkflow(
       if (!id) return;
       seq += 1;
       const number = seq;
+      const opts = isPlainObject(message.opts) ? message.opts : {};
+      const label = typeof opts.label === "string" && opts.label ? opts.label : `agent ${number}`;
+      status.agentStart(label);
       void handleAgent(runtime, sessionID, logger, message, number, record)
         .then((result) => {
+          status.agentEnd(label, record.agents());
           if (result.ok) send({ t: "result", id, value: result.value });
           else send({ t: "result", id, error: result.error });
         })
         .catch((error: unknown) => {
+          status.agentEnd(label, record.agents());
           logger.write(`agent ${number} failed outside runChild: ${messageOf(error)}`);
           send({ t: "result", id, error: messageOf(error) });
         });
@@ -314,6 +330,7 @@ async function startWorkflow(
       const result = message.result ?? null;
       finished = true;
       record.finish({ status: "done", result, endedAt: Date.now() });
+      status.finish("done", record.agents());
       try {
         writeFileSync(join(runDir, "result.json"), `${JSON.stringify({ runId, workflow: target.name, result }, null, 2)}\n`);
         writeFileSync(
@@ -330,6 +347,7 @@ async function startWorkflow(
     if (message.t === "error") {
       finished = true;
       record.finish({ status: "failed", endedAt: Date.now() });
+      status.finish("failed", record.agents());
       logger.write(`workflow error: ${String(message.message ?? "unknown")}`);
       if (message.stack) logger.write(String(message.stack));
       void post(

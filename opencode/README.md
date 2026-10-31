@@ -59,6 +59,7 @@ two rewritten resources under `.opencode/ck/`, and installs an `AGENTS.md` block
 | `.opencode/ck/without-workflow-tool.md` | the no-workflow fallback |
 | `.opencode/ck/spec-implement-brief.md` | the task agents' operating brief |
 | `AGENTS.md` | the spec-driven instructions, between markers |
+| `.opencode/ck/status/<runId>.json` | live workflow status for the TUI footer |
 | `<state>/runs/<runId>/record.json` | native telemetry (`ck-opencode-run/1`) |
 | `<state>/runs/<runId>/bench-output.json` | `ck bench import` input |
 | `<state>/runs/<runId>/run.log` | the run log |
@@ -73,6 +74,20 @@ ck stats record <state>/runs/<runId>/record.json
 ck stats show <runId>
 ck cost --run <runId>
 ```
+
+## Live workflow status
+
+The package also exports a TUI part (`./tui`). In an interactive OpenCode session it appends a live
+line to the prompt footer while a workflow runs:
+
+```text
+▶ ck store-release · 12/210 · task 5 · 1 failed · 8m · 14 agents
+```
+
+It shows the newest running workflow, or a finished one for five minutes. The server writes
+`.opencode/ck/status/<runId>.json` on every phase and agent transition; the TUI part polls that
+directory, so no RPC or extra key is needed. Headless `opencode run` has no TUI header, and a
+workflow that was already running before the package update has no status file until it restarts.
 
 ## Configuration
 
