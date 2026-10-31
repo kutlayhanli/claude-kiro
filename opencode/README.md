@@ -89,6 +89,19 @@ It shows the newest running workflow, or a finished one for five minutes. The se
 directory, so no RPC or extra key is needed. Headless `opencode run` has no TUI header, and a
 workflow that was already running before the package update has no status file until it restarts.
 
+For a terminal (including the headless case), the package ships `scripts/progress.mjs`:
+
+```sh
+node /path/to/opencode/scripts/progress.mjs --project . --watch
+node /path/to/opencode/scripts/progress.mjs --project . --compact
+node /path/to/opencode/scripts/progress.mjs --project . --all
+```
+
+`--watch` refreshes every two seconds, `--compact` is one line for a tmux status bar, and `--all`
+lists every run including finished ones. If the project has no status files, it falls back to the
+native `record.json` for runs started by an older plugin or the headless probe. A globally installed
+package also exposes the same script as `ck-progress`.
+
 ## Configuration
 
 Settings are read from the `opencode` key of `~/.config/claude-kiro/config.json` and

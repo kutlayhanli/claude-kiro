@@ -31,7 +31,8 @@
     "vendor",
     "scripts/arm.mjs",
     "scripts/bench-probe.mjs",
-    "scripts/preflight.mjs"
+    "scripts/preflight.mjs",
+    "scripts/progress.mjs"
   ],
   "engines": {
     "node": ">=20"
@@ -42,7 +43,8 @@
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "prepack": "node scripts/sync-vendor.ts",
-    "prepublishOnly": "npm run typecheck && npm test"
+    "prepublishOnly": "npm run typecheck && npm test",
+    "progress": "node scripts/progress.mjs"
   },
   "dependencies": {
     "@opencode/plugin": "2.2.3"
@@ -59,5 +61,8 @@
     "@opentui/core": ">=0.8.0",
     "@opentui/solid": ">=0.8.0",
     "solid-js": ">=1.9.0"
+  },
+  "bin": {
+    "ck-progress": "./scripts/progress.mjs"
   }
 }
