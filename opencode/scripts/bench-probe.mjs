@@ -18,7 +18,9 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 const POLL_MS = 1000;
-const RUN_CAP_MS = 2 * 60 * 60 * 1000;
+const RUN_CAP_MS = Number(process.env.CK_BENCH_RUN_CAP_MS) > 0
+  ? Number(process.env.CK_BENCH_RUN_CAP_MS)
+  : 2 * 60 * 60 * 1000;
 const TERMINAL = new Set(["done", "failed", "partial"]);
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
