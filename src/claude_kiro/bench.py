@@ -66,7 +66,7 @@ OPENCODE_PRICING.update({
     "opencode-go/deepseek-v4.1-flash": {"input": 0.15, "output": 0.60},
     "opencode/deepseek-v4-pro": {"input": 1.74, "output": 3.48, "cacheRead": 0.145},
     "opencode-go/deepseek-v4-pro": {"input": 0.66, "output": 1.98, "cacheRead": 0.022},
-    "opencode-go/muse-spark-1.3-contributor": {"input": 0.10, "output": 0.20},
+    "opencode-go/muse-spark-1.3-contributor": {"input": 0.10, "output": 0.20, "cacheRead": 0.002},
 })
 PRICING: Dict[str, Dict[str, Any]] = {
     "haiku": {"input": 0.10, "output": 0.50, "cacheRead": 0.01},
