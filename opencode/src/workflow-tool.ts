@@ -330,7 +330,7 @@ async function startWorkflow(
       const result = message.result ?? null;
       finished = true;
       record.finish({ status: "done", result, endedAt: Date.now() });
-      status.finish("done", record.agents());
+      status.finish("done", record.agents(), result);
       try {
         writeFileSync(join(runDir, "result.json"), `${JSON.stringify({ runId, workflow: target.name, result }, null, 2)}\n`);
         writeFileSync(

@@ -81,8 +81,11 @@ export class RunStatusWriter {
     this.write();
   }
 
-  finish(status: "done" | "failed", rows?: readonly StatusAgentRow[]): void {
+  finish(status: "done" | "failed", rows?: readonly StatusAgentRow[], result?: unknown): void {
     if (rows) this.recompute(rows);
+    const report = result && typeof result === "object" ? (result as { merged?: unknown; failed?: unknown }) : null;
+    if (report && Array.isArray(report.merged)) this.data.merged = report.merged.length;
+    if (report && Array.isArray(report.failed)) this.data.failed = report.failed.length;
     this.running.clear();
     this.data.status = status;
     this.data.endedAt = Date.now();

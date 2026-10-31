@@ -87,9 +87,11 @@ test("the status writer tracks phases, running agents, merges and failures", () 
       { label: "land 1", status: "ok", cost: 0.02 },
       { label: "task 2 [test]", status: "ok", cost: 0.03 },
       { label: "land 2", status: "ok", cost: 0.04 },
-    ]);
+    ], { merged: ["1"], failed: [{ task: "2" }] });
     data = read(statusPath(dir, "wf-1"));
     assert.equal(data.status, "done");
+    assert.equal(data.merged, 1);
+    assert.equal(data.failed, 1);
     assert.equal(data.endedAt !== null, true);
     assert.deepEqual(data.running, []);
   } finally {
