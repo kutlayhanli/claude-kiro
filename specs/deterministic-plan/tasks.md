@@ -28,7 +28,7 @@
 **Risk:** normal
 ---
 ### Task 2: Contract property for fallback readiness vs ck plan
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.2, 2.4
 **Description:** Covers P-4 (requirements 1.2, 2.4, NFR-3; seam `fallbackReady`/`readyTasks` vs real `ck plan --json`). For any acyclic graph, Done set and exclude set, deterministic ready equals `ck plan` `ready`: same set, same order (longest chain first, then numeric id). Metamorphic: reordering keys/dep lists/done/exclude never changes the list. Generator `dags()`: 1–25 tasks, non-contiguous multi-digit ids (1,2,9,10,11,100), empty dep lists, diamonds, long chains, duplicate deps, deps on Done/excluded, dangling deps; Done/exclude any subsets incl. Done ids and absent ids. CLI-driven per example (table-driven ≥60 draws + Hypothesis seam-side). Also hosts TC-8/TC-29 bodies.
@@ -39,10 +39,10 @@
 **Properties:** P-4
 **Verifies:** Task 9 (calls the `fallbackReady` seam directly plus the real `ck plan` CLI; needs no runner code)
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the row (multi-digit ids, diamonds, chains, duplicates, dangling deps, Done/excluded subsets)
-- [ ] Settings are deterministic (`@settings(derandomize=True, max_examples=200, database=None)`; CLI table ≥60 draws)
-- [ ] The tests call the decision seam, not a server (seam vs real `ck plan` CLI binary, no mocked ck module)
-- [ ] File declares `PROPERTIES = {"P-4": ...}` (merged map with sibling property tasks in same file)
+- [x] The generators cover every surface form and negative listed in the row (multi-digit ids, diamonds, chains, duplicates, dangling deps, Done/excluded subsets)
+- [x] Settings are deterministic (`@settings(derandomize=True, max_examples=200, database=None)`; CLI table ≥60 draws)
+- [x] The tests call the decision seam, not a server (seam vs real `ck plan` CLI binary, no mocked ck module)
+- [x] File declares `PROPERTIES = {"P-4": ...}` (merged map with sibling property tasks in same file)
 **Dependencies:** Task 1 (needs `dags()` strategies + readiness writer pattern)
 **Complexity:** High
 **Risk:** normal
