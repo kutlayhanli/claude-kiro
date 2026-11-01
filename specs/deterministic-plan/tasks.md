@@ -279,7 +279,7 @@
 **Risk:** normal
 ---
 ### Task 16: Property tests for wave-review batching bound
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 4.1, 4.2, 4.3, 4.4, 4.5, 4.6
 **Description:** Covers P-9, P-10 (Story 4 group; seam `reviewGroups`). P-9: any run with W merged waves (≥1 non-risky) and R risky → review count ≤ W + R, every risky task has individual label, zero-merged waves get no review. P-10: any batched review with per-task verdicts → flagged tasks get own revise + re-review, unflagged record approval without extra agents; all-approve batch approves all covered. Generators `scenarios()` × `risk` maps (0–100% safety incl. all-risky/no-risky waves) × verdict sequences incl. `changes`; wave sizes 1–6 × flagged subsets (none/some/all). Also hosts TC-30 body. Needs the Task 18 review batching to pass.
