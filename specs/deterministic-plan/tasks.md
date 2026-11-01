@@ -477,9 +477,9 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_stats.py -k "plan_fallbacks_counts or planning_fallback_code"` `uv run pytest -q tests/test_bench.py -k degraded_passthrough`
 **Verifies:** Task 28, Task 34, Task 35 (collect/pure-function level; needs none of the show or workflow code)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real `ck stats collect` subprocesses over FakeClaudeHome stores; real `derive_issue_codes`/`summarize_report` calls)
-- [ ] Tests fail before the implementation exists for the right reason (no `plan_fallbacks` key, no `planning_fallback` code, bench summary drops the fields)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real `ck stats collect` subprocesses over FakeClaudeHome stores; real `derive_issue_codes`/`summarize_report` calls)
+- [x] Tests fail before the implementation exists for the right reason (no `plan_fallbacks` key, no `planning_fallback` code, bench summary drops the fields)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs `implement_result()` kwargs + pre-change fixture record)
 **Complexity:** Medium
 **Risk:** normal
