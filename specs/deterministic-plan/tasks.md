@@ -270,9 +270,10 @@
 **Verify:** `node tests/js/deterministic_plan.test.mjs TC-17 TC-18 TC-19 TC-20 TC-21 TC-22`
 **Verifies:** Task 18 (exercises wave-review scheduling; fails until that code exists)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real script review scheduling, coverage from `state.reviewTasks`/prompts not label text)
-- [ ] Tests fail before the implementation exists for the right reason (reviews are one-per-task; no batch label)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real script review scheduling, coverage from `state.reviewTasks`/prompts not label text)
+- [x] Tests fail before the implementation exists for the right reason (reviews are one-per-task; no batch label)
+- [x] No mocks of the project's own code in integration tests
+**Deviation:** `tests/js/fake_project.mjs` (owned by Task 1) extended additively: a `reviews` entry may now be `{ verdict, findings }` so a batched verdict can flag individual tasks with design.md-shaped per-task findings `{ task, severity, file, issue, fix }` (needed by TC-20). String entries behave exactly as before; no existing suite changed behavior.
 **Dependencies:** Task 1 (needs `risk` passthrough + review-task ledger)
 **Complexity:** Medium
 **Risk:** normal
