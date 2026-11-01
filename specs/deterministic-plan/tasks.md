@@ -467,7 +467,7 @@
 **Risk:** normal
 ---
 ### Task 27: Stats plumbing tests for counts, issue code, and bench passthrough
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 5.1, 5.2, 5.6, 6.3
 **Description:** Collect-level (no `ck stats show` rendering) tests for the three analytics plumbing tasks, all over records synthesized via the Task 1 `implement_result()` kwargs so they run without the workflow or show code. Shareable counts: collected runs from post-change results carry `counts.plan_fallbacks` equal to `stats.planFallbacks`; pre-change records produce no key and every existing figure is unchanged (5.2, 5.3, 5.6). Issue code: `derive_issue_codes` on a record with `stats.planFallbacks > 0` emits `planning_fallback` (and not otherwise), with existing `planning_failed` behaviour unchanged; collected shareable `issues` include it (5.1, 5.2). Bench: `summarize_report` output includes the run's degraded flag, fallback counts, and overhead share when present and omits them when absent, so the TC-33 equity comparison can read them (5.1, 6.3).
