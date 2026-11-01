@@ -104,7 +104,7 @@
 **Risk:** normal
 ---
 ### Task 6: Workflow examples for fallback ready sources
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.1, 2.2, 2.3, 2.5, 2.6
 **Description:** Implements TC-5, TC-6, TC-7, TC-9, TC-10 in `tests/js/deterministic_plan.test.mjs` (TC-8 is the contract property, covered in Task 2). TC-5 (2.1): `args.deps` present + always-inconsistent → every `task N` request is head of `readyTasks` over `args.deps` + Done/running/merged, run completes. TC-6 (2.2): no `args.deps`, `planSeq` [good ready=[1,2], bad, bad] → third failure schedules from last-good-ready minus finished, degraded. TC-7 (2.3): no deps, [bad, bad], no good plan ever → no `task` label requested, running tasks still land, stop reason is planning failure. TC-9 (2.5): `deps={1:[],2:['99']}` unknown dep → `task 2` never requested, rest proceed. TC-10 (2.6): fallback-scheduled task reports BUSY then ERROR/blocked → `ok:false` with same `worktree busy:` reason as plan-scheduled, exactly one agent, run continues. Passes on seam plus `runPlan` alone (Tasks 9–10); asserts nothing about plan-agent counts.
@@ -113,9 +113,9 @@
 **Verify:** `node tests/js/deterministic_plan.test.mjs TC-5 TC-6 TC-7 TC-9 TC-10`
 **Verifies:** Task 10 (exercises `runPlan` fallback sources; passes without later gating code)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real script + fake runtime; per-request readiness checks)
-- [ ] Tests fail before the implementation exists for the right reason (halt on second failure; unknown-dep or last-good behavior absent)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real script + fake runtime; per-request readiness checks)
+- [x] Tests fail before the implementation exists for the right reason (halt on second failure; unknown-dep or last-good behavior absent)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs `planSeq`/`badReady` injector and bridge scenario draws)
 **Complexity:** Medium
 **Risk:** normal
@@ -364,7 +364,7 @@
 **Risk:** normal
 ---
 ### Task 21: Fixture-spec e2e gate and manual headline record
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.1, 6.2, 6.3
 **Description:** Implements TC-31, TC-32, TC-33 against the fixture scaffold from Task 1 (`specs/deterministic-plan/fixtures/fallback-spec/`). Owns the Harness Contract fixture-run contract test-side: the shim exposes a forced-inconsistent plan mode and a healthy mode. TC-31 (6.1, NFR-1): fixture spec with planning agent forced inconsistent → run retries once, falls back deterministically, completes, report shows degraded with fallback count ≥ 1. TC-32 (6.2): healthy mode → zero fallbacks, no degraded. TC-33 (6.3, NFR-2, manual not CI): equity re-run vs baseline `ck stats show --json` comparison recorded in the run report (lower plan/review/land share, no planning halt). This task runs real paid agents and mutates fixture branches, unlike every other test task.
@@ -374,9 +374,9 @@
 **Verify:** `uv run pytest -q -n auto`
 **Verifies:** Task 22 (e2e proves fallback completion plus degraded marking; fails until that code exists)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real workflow script + real `ck plan` data path on fixture repo; TC-33 manual `ck stats` comparison)
-- [ ] Tests fail before the implementation exists for the right reason (fixture halts with planning failure instead of completing degraded)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real workflow script + real `ck plan` data path on fixture repo; TC-33 manual `ck stats` comparison)
+- [x] Tests fail before the implementation exists for the right reason (fixture halts with planning failure instead of completing degraded)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs fixture scaffold + shim contract)
 **Complexity:** High
 **Risk:** safety (runs real paid agents and mutates fixture branches, including the manual equity re-run)
