@@ -467,7 +467,7 @@
 **Risk:** normal
 ---
 ### Task 27: Stats plumbing tests for counts, issue code, and bench passthrough
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.1, 5.2, 5.6, 6.3
 **Description:** Collect-level (no `ck stats show` rendering) tests for the three analytics plumbing tasks, all over records synthesized via the Task 1 `implement_result()` kwargs so they run without the workflow or show code. Shareable counts: collected runs from post-change results carry `counts.plan_fallbacks` equal to `stats.planFallbacks`; pre-change records produce no key and every existing figure is unchanged (5.2, 5.3, 5.6). Issue code: `derive_issue_codes` on a record with `stats.planFallbacks > 0` emits `planning_fallback` (and not otherwise), with existing `planning_failed` behaviour unchanged; collected shareable `issues` include it (5.1, 5.2). Bench: `summarize_report` output includes the run's degraded flag, fallback counts, and overhead share when present and omits them when absent, so the TC-33 equity comparison can read them (5.1, 6.3).
@@ -477,9 +477,9 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_stats.py -k "plan_fallbacks_counts or planning_fallback_code"` `uv run pytest -q tests/test_bench.py -k degraded_passthrough`
 **Verifies:** Task 28, Task 34, Task 35 (collect/pure-function level; needs none of the show or workflow code)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real `ck stats collect` subprocesses over FakeClaudeHome stores; real `derive_issue_codes`/`summarize_report` calls)
-- [ ] Tests fail before the implementation exists for the right reason (no `plan_fallbacks` key, no `planning_fallback` code, bench summary drops the fields)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real `ck stats collect` subprocesses over FakeClaudeHome stores; real `derive_issue_codes`/`summarize_report` calls)
+- [x] Tests fail before the implementation exists for the right reason (no `plan_fallbacks` key, no `planning_fallback` code, bench summary drops the fields)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs `implement_result()` kwargs + pre-change fixture record)
 **Complexity:** Medium
 **Risk:** normal
