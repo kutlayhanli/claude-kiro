@@ -397,7 +397,7 @@
 **Risk:** normal
 ---
 ### Task 23: Skill-docs content check
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 4.1
 **Description:** Asserts the Task 24 documentation actually says what the criteria require: Step 6 still passes `deps`/`remaining`, Step 7 documents the start / after-each-landing / idle-only triggers with no re-read after every freed slot (3.1, 3.2), and wave-batched review with the risky-always-individual rule (4.1, 4.2). Grep-level pytest over the skill and vendored command docs; no behavior exercised.
@@ -406,8 +406,8 @@
 **Verify:** `uv run pytest -q tests/test_plugin.py -k deterministic_docs`
 **Verifies:** Task 24 (checks the documented content; fails until that docs edit exists)
 **Acceptance:**
-- [ ] Test reads the real docs files (no mocks, no copies of the content under test)
-- [ ] Test fails before the docs edit for the right reason (trigger/review-batch wording absent)
+- [x] Test reads the real docs files (no mocks, no copies of the content under test)
+- [x] Test fails before the docs edit for the right reason (trigger/review-batch wording absent)
 **Dependencies:** Task 1 (uses the repo pytest harness conventions)
 **Complexity:** Low
 **Risk:** normal
