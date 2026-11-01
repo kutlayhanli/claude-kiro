@@ -223,7 +223,6 @@ def test_fallback_matches_ck_plan_exclude():
 
 
 PLAN_LABEL = re.compile(r"^plan (\d+)( retry)?$")
-BRIDGE_SETTINGS = settings(derandomize=True, max_examples=60, database=None, deadline=None)
 PLAN_MS_ALL = {str(k): 1 for k in range(1, 400)}  # every plan call takes 1 ms of virtual time
 
 CONSISTENT_CALLER = (
@@ -455,21 +454,34 @@ def test_degraded_marking(bridge, data):  # noqa: F811
     sc["project"]["checkRed"] = data.draw(subsets(ids), label="checkRed")
     sc["project"]["conflicts"] = data.draw(subsets(ids[:2]), label="conflicts")
 
-    # The always-bad answers really are inconsistent (unknown id "999" is never ready).
-    assert seam_consistent(plan_view(deps, ["999"]), []) is False
+    # The always-bad answers really are inconsistent: ready holds an id absent
+    # from the graph (dynamic max id + 1, never a task), omitting the real list.
+    absent = str(max(int(t) for t in ids) + 1)
+    assert seam_consistent(plan_view(deps, [absent]), []) is False
 
     out = bridge.run(sc["project"], sc["args"], slots=sc["slots"])
     result = out["result"]
     requests = [e["label"] for e in out["trace"] if e["ev"] == "request"]
     plan_labels = set(plan_requests(out["trace"]))
 
+    # Every plan answer is inconsistent, so every plan step fails twice: each
+    # `plan k retry` label in the trace is a triggering attempt that must have
+    # exactly one recorded fallback. The expected count comes from the trace,
+    # never from the result accessor, so an implementation that under-counts
+    # (e.g. one entry for N triggering pairs) cannot pass.
+    triggering = [label for label in plan_requests(out["trace"]) if label.endswith(" retry")]
+    retry_steps = {PLAN_LABEL.match(label).group(1) for label in triggering}
+    assert len(triggering) >= 1, (requests[:5], sorted(plan_labels))
     assert result.get("degraded") is True, (result.get("degraded"), result.get("reason"))
     entries = fallback_entries(result)
-    assert fallback_count(result) == len(entries) >= 1, (fallback_count(result), entries)
+    assert len(entries) == len(triggering), (len(entries), triggering)
+    assert fallback_count(result) == len(triggering), (fallback_count(result), triggering)
     for entry in entries:
         trigger = entry.get("trigger")
         step = entry.get("planStep")
         label = trigger if (isinstance(trigger, str) and PLAN_LABEL.match(trigger)) else f"plan {step}"
         assert label in plan_labels, (entry, sorted(plan_labels))  # trigger names a real trace label
+        matched = PLAN_LABEL.match(label)
+        assert matched is not None and matched.group(1) in retry_steps, (entry, triggering)
         if "ready" in entry:
             assert entry["ready"], entry  # a fallback that scheduled nothing is not a fallback
