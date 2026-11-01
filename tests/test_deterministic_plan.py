@@ -886,3 +886,172 @@ def test_unknown_dep_never_ready(bridge, data):  # noqa: F811
     assert bridge.ready(small, done=["3"]) == ["7"]
     fb_small = seam_fallback(True, ["7"], [], [], ["3"])
     assert fb_small["ready"] == ["7"] and fb_small["source"] == "deps"
+
+
+# ------------------------------------------------- red-team: unknown deps (2.5)
+#
+# Requirement 2.5: a task whose dependency is unknown to the deterministic data
+# is never started on a guess. Each test below is an adversarial shape where a
+# naive readiness computation would guess: numeric-vs-string coercion (`2` vs
+# `'2'` vs `'02'`), a dangling id that matches a done-only entry, a dep id
+# present only in `exclude`, case/whitespace-mutated dep keys, and the plan's
+# own bad `ready` fed back as `done`. Every test runs the real `readyTasks`
+# seam plus the `fallbackReady` seam on the same inputs, then the real script
+# through the bridge with always-inconsistent plans (Task 10's `runPlan`
+# scriptReady path; needs no gating). Before Tasks 9-10 they fail for the
+# right reason: the loader raises "decision function missing in the decisions
+# block: fallbackReady" and the script halts with "planning step failed"
+# instead of scheduling from the deterministic list.
+
+
+def test_redteam_unknown_dep_numeric_string_confusion(bridge):  # noqa: F811
+    """2.5 red-team: numeric-vs-string id confusion (`2` vs `'2'` vs `'02'`).
+
+    `decisionIds` stringifies, so an int dep `2` IS the task `'2'` (met when
+    Done: schedulable, never wrongly blocked), while `'02'` is a different key
+    (never met, even when done lists it: a Number()-coercing guess would start
+    task 2 on the `'02'` entry). Both directions are pinned: the int form
+    merges end-to-end, the zero-padded form never starts.
+    """
+    int_deps = {"1": [], "2": [1], "3": ["1"]}
+    # Int form is the same task after stringification: met once Done.
+    assert bridge.ready(int_deps, done=[]) == ["1"]
+    assert set(bridge.ready(int_deps, done=["1"])) == {"2", "3"}
+    fb_int = seam_fallback(True, bridge.ready(int_deps, done=["1"]), [], [], ["1"])
+    assert set(fb_int["ready"]) == {"2", "3"} and fb_int["source"] == "deps"
+
+    padded = {"1": [], "2": ["02"], "3": ["1"]}
+    # Zero-padded form is unknown: never ready, even with '02' in done.
+    assert bridge.ready(padded, done=["1"]) == ["1"]
+    assert "2" not in bridge.ready(padded, done=["1", "02"])
+    fb_pad = seam_fallback(True, bridge.ready(padded, done=["1", "02"]), [], [], ["1", "02"])
+    assert "2" not in fb_pad["ready"]
+
+    # End-to-end: the int form completes, the padded form stays unready.
+    cfg = redteam_project(int_deps, [{"ready": ["999"]}] * 12)
+    out = bridge.run(cfg["project"], cfg["args"], slots=2)
+    assert out["result"].get("outcome") == "complete", out["result"].get("reason")
+    assert set(out["result"]["merged"]) == set(int_deps)
+
+    cfg = redteam_project(padded, [{"ready": ["999"]}] * 12)
+    out = bridge.run(cfg["project"], cfg["args"], slots=2)
+    result = out["result"]
+    requested = task_requests(out["trace"])
+    assert "2" not in requested, ("02-guess", requested)
+    assert "2" not in result["merged"], result["merged"]
+    assert set(result["merged"]) == {"1", "3"}, result["merged"]
+    assert "planning step failed" not in (result.get("reason") or ""), result.get("reason")
+    assert result.get("outcome") == "blocked", (result.get("outcome"), result.get("reason"))
+
+
+def test_redteam_unknown_dep_done_only_match(bridge):  # noqa: F811
+    """2.5 red-team: dangling id that matches a done-only entry.
+
+    Dep `99` is absent from the map, but `done` lists `99` (a done-only id,
+    never a task). A met-check that looks only at `done` would start task 2
+    on that match; the script requires key-of-deps AND Done, so 2 stays
+    unready while the rest of the run proceeds.
+    """
+    deps = {"1": [], "2": ["99"], "3": ["1"]}
+    assert bridge.ready(deps, done=["99"]) == ["1"]
+    fb = seam_fallback(True, bridge.ready(deps, done=["99"]), [], [], ["99"])
+    assert "2" not in fb["ready"] and fb["ready"] == ["1"] and fb["source"] == "deps"
+
+    cfg = redteam_project(deps, [{"ready": ["999"]}] * 12)
+    cfg["project"]["done"] = ["99"]
+    cfg["args"]["deps"] = {t: list(ds) for t, ds in deps.items()}
+    cfg["args"]["remaining"] = list(deps)
+    out = bridge.run(cfg["project"], cfg["args"], slots=2)
+    result = out["result"]
+    requested = task_requests(out["trace"])
+    assert "2" not in requested, ("done-only-guess", requested)
+    assert "2" not in result["merged"], result["merged"]
+    assert set(result["merged"]) == {"1", "3"}, result["merged"]
+    assert "planning step failed" not in (result.get("reason") or ""), result.get("reason")
+    assert result.get("outcome") == "blocked", (result.get("outcome"), result.get("reason"))
+
+
+def test_redteam_unknown_dep_exclude_only(bridge):  # noqa: F811
+    """2.5 red-team: dep id present only in `exclude`.
+
+    Dep `7` is absent from the map and appears only in the exclude list. An
+    implementation that treats "excluded dep = satisfied dep" would start task
+    2; exclusion only removes tasks from scheduling, it never satisfies a
+    dependency, so 2 stays unready with any exclude combination.
+    """
+    deps = {"1": [], "2": ["7"], "3": ["1"]}
+    script_ready = bridge.ready(deps)
+    assert script_ready == ["1"], script_ready
+    assert "2" not in bridge.ready(deps, exclude=["7"])
+    for exclude, done in [(["7"], []), (["7"], ["1"]), (["7", "1"], []), ([], ["7"])]:
+        fb = seam_fallback(True, bridge.ready(deps, done=done), [], exclude, done)
+        assert "2" not in fb["ready"], (exclude, done, fb)
+
+    cfg = redteam_project(deps, [{"ready": ["999"]}] * 12)
+    out = bridge.run(cfg["project"], cfg["args"], slots=2)
+    result = out["result"]
+    requested = task_requests(out["trace"])
+    assert "2" not in requested, ("exclude-only-guess", requested)
+    assert "2" not in result["merged"], result["merged"]
+    assert set(result["merged"]) == {"1", "3"}, result["merged"]
+    assert "planning step failed" not in (result.get("reason") or ""), result.get("reason")
+    assert result.get("outcome") == "blocked", (result.get("outcome"), result.get("reason"))
+
+
+def test_redteam_unknown_dep_key_mutation(bridge):  # noqa: F811
+    """2.5 red-team: case/whitespace-mutated dep keys.
+
+    `decisionIds`/`hasKey` are exact: dep `" 1"` (or `"1 "`) is not the task
+    `"1"`, and done entries with the same mutations never satisfy the exact
+    dep. A trimming/case-folding guess would start tasks 2/3; only the exact
+    dep (task 4) is schedulable.
+    """
+    deps = {"1": [], "2": [" 1"], "3": ["1 "], "4": ["1"], "5": ["A"], "a": []}
+    assert set(bridge.ready(deps, done=["1"])) == {"a", "4"}
+    # The mutations in done do not help either: ' 1' is not a key, so task 2
+    # stays unready even when done names the mutated string; 'A' vs 'a' likewise.
+    assert "2" not in bridge.ready(deps, done=["1", " 1", "1 "])
+    assert "3" not in bridge.ready(deps, done=["1", " 1", "1 "])
+    assert "5" not in bridge.ready(deps, done=["1", "a", "A", " 1", "1 "])
+    fb = seam_fallback(
+        True, bridge.ready(deps, done=["1", " 1", "1 ", "a"]), [], [], ["1", " 1", "1 ", "a"])
+    assert set(fb["ready"]) == {"a", "4"} and fb["source"] == "deps", fb
+    assert "2" not in fb["ready"] and "3" not in fb["ready"] and "5" not in fb["ready"]
+
+    run_deps = {"1": [], "2": [" 1"], "3": ["1"]}
+    cfg = redteam_project(run_deps, [{"ready": ["999"]}] * 12)
+    out = bridge.run(cfg["project"], cfg["args"], slots=2)
+    result = out["result"]
+    requested = task_requests(out["trace"])
+    assert "2" not in requested, ("whitespace-guess", requested)
+    assert set(result["merged"]) == {"1", "3"}, result["merged"]
+    assert "planning step failed" not in (result.get("reason") or ""), result.get("reason")
+    assert result.get("outcome") == "blocked", (result.get("outcome"), result.get("reason"))
+
+
+def test_redteam_unknown_dep_bad_ready_as_done(bridge):  # noqa: F811
+    """2.5 red-team: fallback fed the plan's own bad `ready` as `done`.
+
+    The system's own output fed back as input: the lying plan answered ready
+    `["99"]`, and `99` now appears in `done`. Task 2 depends on `99`, which
+    is still absent from the map, so it must stay unready -- the fallback
+    must not launder the plan's guess into a satisfied dependency.
+    """
+    deps = {"1": [], "2": ["99"], "3": ["1"]}
+    bad = ["99"]
+    assert seam_consistent(plan_view(deps, bad), []) is False
+    script_ready = bridge.ready(deps, done=list(bad))
+    assert "2" not in script_ready, (bad, script_ready)
+    fb = seam_fallback(True, script_ready, [], [], list(bad))
+    assert "2" not in fb["ready"] and fb["ready"] == ["1"], fb
+
+    cfg = redteam_project(deps, [{"ready": list(bad)}] * 12)
+    cfg["project"]["done"] = list(bad)
+    out = bridge.run(cfg["project"], cfg["args"], slots=2)
+    result = out["result"]
+    requested = task_requests(out["trace"])
+    assert "2" not in requested, ("bad-ready-laundered", requested)
+    assert "2" not in result["merged"], result["merged"]
+    assert set(result["merged"]) == {"1", "3"}, result["merged"]
+    assert "planning step failed" not in (result.get("reason") or ""), result.get("reason")
+    assert result.get("outcome") == "blocked", (result.get("outcome"), result.get("reason"))
