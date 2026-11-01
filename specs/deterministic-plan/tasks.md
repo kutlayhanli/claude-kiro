@@ -58,10 +58,11 @@
 **Properties:** P-1, P-2, P-3
 **Verifies:** Task 10 (exercises the `runPlan` retry/fallback path; passes without later gating code)
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the row (non-ready id, omitted ready id, unknown id; healthy-second-answer complement; red landings/conflicts)
-- [ ] Settings are deterministic (`@settings(derandomize=True, max_examples=60, database=None)` for bridge-driven properties)
-- [ ] The tests call the decision seam, not a server (`planConsistent`/`fallbackReady` directly + script behavior via bridge)
-- [ ] File declares `PROPERTIES = {"P-1": ..., "P-2": ..., "P-3": ...}` for `ck gate`
+- [x] The generators cover every surface form and negative listed in the row (non-ready id, omitted ready id, unknown id; healthy-second-answer complement; red landings/conflicts)
+- [x] Settings are deterministic (`@settings(derandomize=True, max_examples=60, database=None)` for bridge-driven properties)
+- [x] The tests call the decision seam, not a server (`planConsistent`/`fallbackReady` directly + script behavior via bridge)
+- [x] File declares `PROPERTIES = {"P-1": ..., "P-2": ..., "P-3": ...}` for `ck gate`
+**Note (generator domain):** corruptions are inconsistent *after* the script's `normalizePlan` (unknown ids are filtered there, so `runPlan` never sees them): the "unknown" form replaces the list with `[max-id+1]` instead of extending it. A redundant unknown id next to the full correct list normalizes to the oracle and is adopted without retry by the existing check that Task 10 keeps.
 **Dependencies:** Task 1 (needs `planSeq` scenario draws + bridge harness)
 **Complexity:** High
 **Risk:** normal
