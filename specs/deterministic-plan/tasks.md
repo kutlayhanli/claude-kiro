@@ -39,10 +39,10 @@
 **Properties:** P-4
 **Verifies:** Task 9 (calls the `fallbackReady` seam directly plus the real `ck plan` CLI; needs no runner code)
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the row (multi-digit ids, diamonds, chains, duplicates, dangling deps, Done/excluded subsets)
-- [ ] Settings are deterministic (`@settings(derandomize=True, max_examples=200, database=None)`; CLI table ≥60 draws)
-- [ ] The tests call the decision seam, not a server (seam vs real `ck plan` CLI binary, no mocked ck module)
-- [ ] File declares `PROPERTIES = {"P-4": ...}` (merged map with sibling property tasks in same file)
+- [x] The generators cover every surface form and negative listed in the row (multi-digit ids, diamonds, chains, duplicates, dangling deps, Done/excluded subsets)
+- [x] Settings are deterministic (`@settings(derandomize=True, max_examples=200, database=None)`; CLI table ≥60 draws)
+- [x] The tests call the decision seam, not a server (seam vs real `ck plan` CLI binary, no mocked ck module)
+- [x] File declares `PROPERTIES = {"P-4": ...}` (merged map with sibling property tasks in same file)
 **Dependencies:** Task 1 (needs `dags()` strategies + readiness writer pattern)
 **Complexity:** High
 **Risk:** normal
