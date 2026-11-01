@@ -126,12 +126,22 @@ def subsets(draw, ids: Iterable[str]) -> List[str]:
 
 
 @st.composite
-def scenarios(draw) -> Dict[str, Any]:
-    """{'project': fake_project options, 'args': workflow args, 'slots': int | None} for `bridge.run`."""
+def scenarios(draw, plan_seq: str = "consistent") -> Dict[str, Any]:
+    """{'project': fake_project options, 'args': workflow args, 'slots': int | None} for `bridge.run`.
+
+    `plan_seq` selects the plan-agent shape (deterministic-plan harness): "consistent" (default;
+    every plan answer uses the default `ck plan` semantics, so the landing-speed properties keep
+    passing unmodified), "first-bad-then-good" (first answer contradicts deps, the retry is healthy),
+    or "always-bad" (every answer contradicts deps while keeping them truthful). `risk` maps every
+    task to 'safety' (10-20%) or 'normal' and is carried both as the plan answer's risk data
+    (`project["risk"]`) and in the workflow args (as `deps` are).
+    """
     deps = draw(dags(max_tasks=8, dangling=False))
     ids = list(deps)
     dur = st.integers(1, 40)
     per_task = lambda strat: {t: draw(strat) for t in draw(subsets(ids))}  # noqa: E731
+    safety_cutoff = draw(st.integers(1, 2))  # safety marks 10% (0 of 0..9) or 20% (0..1 of 0..9) of tasks
+    risk = {t: ("safety" if draw(st.integers(0, 9)) < safety_cutoff else "normal") for t in ids}
     project: Dict[str, Any] = {
         "deps": deps,
         "durations": {t: draw(dur) for t in ids},
@@ -140,7 +150,14 @@ def scenarios(draw) -> Dict[str, Any]:
         "reviews": {t: draw(st.lists(st.sampled_from(["changes", "approve"]), min_size=1, max_size=2)) for t in draw(subsets(ids))},
         "checkRed": draw(subsets(ids)),
         "failUntil": per_task(st.integers(1, 2)),
+        "risk": risk,
     }
+    if plan_seq == "first-bad-then-good":
+        project["planSeq"] = [{"ready": ["999"]}, {}]
+    elif plan_seq == "always-bad":
+        project["badReady"] = ["999"]
+    elif plan_seq != "consistent":
+        raise ValueError(f"unknown plan_seq shape: {plan_seq!r}")
     if len(ids) > 2 and draw(st.booleans()):
         later = draw(st.sampled_from(ids[1:]))
         earlier = [i for i in ids if int(i) < int(later)]
@@ -150,6 +167,7 @@ def scenarios(draw) -> Dict[str, Any]:
         "mergeBatch": draw(st.integers(1, 4)),
         "fullGateEvery": draw(st.integers(1, 3)),
         "wave": {t: 1 for t in ids},
+        "risk": risk,
     }
     if max_concurrent is not None:
         args["maxConcurrent"] = max_concurrent

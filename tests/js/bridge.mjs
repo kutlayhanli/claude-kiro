@@ -28,7 +28,7 @@ async function handle(req) {
     const slots = req.slots ?? undefined
     const args = { ...baseArgs, ...req.args, ...(slots ? { agentSlots: slots } : {}) }
     const { result, logs, trace } = await runWorkflow(SCRIPT, { agent: p.agent, args, slots })
-    return { result, logs, trace, prompts: p.state.prompts, opts: p.state.opts, events: p.state.events }
+    return { result, logs, trace, prompts: p.state.prompts, opts: p.state.opts, events: p.state.events, reviewTasks: p.state.reviewTasks }
   }
   throw new Error(`unknown op: ${req.op}`)
 }
