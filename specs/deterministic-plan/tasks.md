@@ -28,7 +28,7 @@
 **Risk:** normal
 ---
 ### Task 2: Contract property for fallback readiness vs ck plan
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.2, 2.4
 **Description:** Covers P-4 (requirements 1.2, 2.4, NFR-3; seam `fallbackReady`/`readyTasks` vs real `ck plan --json`). For any acyclic graph, Done set and exclude set, deterministic ready equals `ck plan` `ready`: same set, same order (longest chain first, then numeric id). Metamorphic: reordering keys/dep lists/done/exclude never changes the list. Generator `dags()`: 1–25 tasks, non-contiguous multi-digit ids (1,2,9,10,11,100), empty dep lists, diamonds, long chains, duplicate deps, deps on Done/excluded, dangling deps; Done/exclude any subsets incl. Done ids and absent ids. CLI-driven per example (table-driven ≥60 draws + Hypothesis seam-side). Also hosts TC-8/TC-29 bodies.
@@ -39,10 +39,10 @@
 **Properties:** P-4
 **Verifies:** Task 9 (calls the `fallbackReady` seam directly plus the real `ck plan` CLI; needs no runner code)
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the row (multi-digit ids, diamonds, chains, duplicates, dangling deps, Done/excluded subsets)
-- [ ] Settings are deterministic (`@settings(derandomize=True, max_examples=200, database=None)`; CLI table ≥60 draws)
-- [ ] The tests call the decision seam, not a server (seam vs real `ck plan` CLI binary, no mocked ck module)
-- [ ] File declares `PROPERTIES = {"P-4": ...}` (merged map with sibling property tasks in same file)
+- [x] The generators cover every surface form and negative listed in the row (multi-digit ids, diamonds, chains, duplicates, dangling deps, Done/excluded subsets)
+- [x] Settings are deterministic (`@settings(derandomize=True, max_examples=200, database=None)`; CLI table ≥60 draws)
+- [x] The tests call the decision seam, not a server (seam vs real `ck plan` CLI binary, no mocked ck module)
+- [x] File declares `PROPERTIES = {"P-4": ...}` (merged map with sibling property tasks in same file)
 **Dependencies:** Task 1 (needs `dags()` strategies + readiness writer pattern)
 **Complexity:** High
 **Risk:** normal
@@ -397,7 +397,7 @@
 **Risk:** normal
 ---
 ### Task 23: Skill-docs content check
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 4.1
 **Description:** Asserts the Task 24 documentation actually says what the criteria require: Step 6 still passes `deps`/`remaining`, Step 7 documents the start / after-each-landing / idle-only triggers with no re-read after every freed slot (3.1, 3.2), and wave-batched review with the risky-always-individual rule (4.1, 4.2). Grep-level pytest over the skill and vendored command docs; no behavior exercised.
@@ -406,8 +406,8 @@
 **Verify:** `uv run pytest -q tests/test_plugin.py -k deterministic_docs`
 **Verifies:** Task 24 (checks the documented content; fails until that docs edit exists)
 **Acceptance:**
-- [ ] Test reads the real docs files (no mocks, no copies of the content under test)
-- [ ] Test fails before the docs edit for the right reason (trigger/review-batch wording absent)
+- [x] Test reads the real docs files (no mocks, no copies of the content under test)
+- [x] Test fails before the docs edit for the right reason (trigger/review-batch wording absent)
 **Dependencies:** Task 1 (uses the repo pytest harness conventions)
 **Complexity:** Low
 **Risk:** normal
@@ -467,7 +467,7 @@
 **Risk:** normal
 ---
 ### Task 27: Stats plumbing tests for counts, issue code, and bench passthrough
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.1, 5.2, 5.6, 6.3
 **Description:** Collect-level (no `ck stats show` rendering) tests for the three analytics plumbing tasks, all over records synthesized via the Task 1 `implement_result()` kwargs so they run without the workflow or show code. Shareable counts: collected runs from post-change results carry `counts.plan_fallbacks` equal to `stats.planFallbacks`; pre-change records produce no key and every existing figure is unchanged (5.2, 5.3, 5.6). Issue code: `derive_issue_codes` on a record with `stats.planFallbacks > 0` emits `planning_fallback` (and not otherwise), with existing `planning_failed` behaviour unchanged; collected shareable `issues` include it (5.1, 5.2). Bench: `summarize_report` output includes the run's degraded flag, fallback counts, and overhead share when present and omits them when absent, so the TC-33 equity comparison can read them (5.1, 6.3).
@@ -477,9 +477,9 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_stats.py -k "plan_fallbacks_counts or planning_fallback_code"` `uv run pytest -q tests/test_bench.py -k degraded_passthrough`
 **Verifies:** Task 28, Task 34, Task 35 (collect/pure-function level; needs none of the show or workflow code)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real `ck stats collect` subprocesses over FakeClaudeHome stores; real `derive_issue_codes`/`summarize_report` calls)
-- [ ] Tests fail before the implementation exists for the right reason (no `plan_fallbacks` key, no `planning_fallback` code, bench summary drops the fields)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real `ck stats collect` subprocesses over FakeClaudeHome stores; real `derive_issue_codes`/`summarize_report` calls)
+- [x] Tests fail before the implementation exists for the right reason (no `plan_fallbacks` key, no `planning_fallback` code, bench summary drops the fields)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs `implement_result()` kwargs + pre-change fixture record)
 **Complexity:** Medium
 **Risk:** normal
