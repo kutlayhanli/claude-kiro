@@ -1,5 +1,5 @@
 // Deterministic-plan example cases (Stories 1-4). Covered here: TC-0 smoke, TC-1,
-// TC-3..TC-7, TC-9..TC-16. TC-2, TC-17..TC-22 and TC-26 arrive with the tasks that own them.
+// TC-3..TC-7, TC-9..TC-22. TC-2 and TC-26 arrive with the tasks that own them.
 // Run: node tests/js/deterministic_plan.test.mjs [TC-id ...]  (no ids: run every case)
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
@@ -401,6 +401,140 @@ await test('TC-16 dep-less mode: a plan agent runs before the next task after fr
     const between = p.state.events.slice(prevEnd + 1, start)
     assert.ok(between.some(e => /^plan \d+$/.test(e)), `a plan agent ran between task ${n - 1} end and task ${n} (saw: ${between})`)
   }
+})
+
+// Story-4 helpers (TC-17..TC-22): wave batching is judged from the review ledger
+// (state.reviewTasks: label -> covered tasks) and the event trace, never label text.
+const REVIEWER = { model: 'sonnet', effort: 'low', risky_model: 'opus', risky_effort: 'high' }
+const reviewArgs = (deps, { risk = {}, ...extra } = {}) =>
+  withGraph(deps, { maxConcurrent: 4, agents: { reviewer: REVIEWER }, risk, ...extra })
+// Timing that lands task 1 alone first, then tasks 2+ together in one later batch:
+// task 1 ends at ~10ms and its landing takes 300ms, so tasks 2..4 (ending ~50ms)
+// queue behind it and merge as one wave. Deterministic by a ~250ms margin.
+const waveTiming = { durations: { 1: 10, 2: 50, 3: 50, 4: 50 }, mergeDurations: { 1: 300 } }
+const reviewLabels = events => events.filter(e => e.startsWith('review') && !e.endsWith(' end'))
+const individualLabels = events => events.filter(e => /^review \d/.test(e) && !e.endsWith(' end'))
+const batchLabels = events => events.filter(e => e.startsWith('review-wave') && !e.endsWith(' end'))
+const covers = (p, l) => [...(p.state.reviewTasks[l] || [])].sort()
+const sameSet = (a, b) => a.length === b.length && a.every(x => b.includes(x))
+const batchesCovering = (p, ids) => batchLabels(p.state.events).filter(l => sameSet(covers(p, l), [...ids].sort()))
+const landEndOf = (p, n) => p.state.events.find(e => e.startsWith('land ') && e.endsWith(' end') && e.slice(5, -4).split(' ').includes(n))
+const rowsByTask = result => Object.fromEntries((result.tasks || []).map(t => [t.task, t]))
+
+await test('TC-17 batched review for a non-risky wave: one review-wave covering tasks 2-4, all approved (4.1)', async () => {
+  const deps = { 1: [], 2: [], 3: [], 4: [] }
+  const p = project({ deps, ...waveTiming })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: reviewArgs(deps) })
+  assert.equal(result.halted, false)
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3', '4'], 'every task merged')
+  assert.ok(landEndOf(p, '1'), 'task 1 landed in its own earlier batch')
+  assert.equal(landEndOf(p, '2'), landEndOf(p, '3'), 'tasks 2 and 3 merged in the same wave batch')
+  assert.equal(landEndOf(p, '3'), landEndOf(p, '4'), 'tasks 3 and 4 merged in the same wave batch')
+  const wave = batchesCovering(p, ['2', '3', '4'])
+  assert.equal(wave.length, 1, `exactly one batched review covers the wave (saw: ${batchLabels(p.state.events)})`)
+  assert.equal(batchLabels(p.state.events).length, 2, 'one batched review per merged wave: [1] and [2,3,4]')
+  assert.deepEqual(individualLabels(p.state.events), [], 'no per-task review labels for a non-risky run')
+  const rows = rowsByTask(result)
+  for (const n of ['2', '3', '4']) {
+    assert.equal(rows[n].review.verdict, 'approve', `task ${n} is approved`)
+  }
+})
+
+await test('TC-18 risky task reviewed individually sharing a wave with batched normals (4.2)', async () => {
+  const deps = { 1: [], 2: [], 3: [], 4: [] }
+  const risk = { 4: 'safety' }
+  const p = project({ deps, ...waveTiming, risk })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: reviewArgs(deps, { risk }) })
+  assert.equal(result.halted, false)
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3', '4'], 'every task merged')
+  const wave = batchesCovering(p, ['2', '3'])
+  assert.equal(wave.length, 1, `the two normal tasks share one batched review (saw: ${batchLabels(p.state.events)})`)
+  assert.ok(!batchLabels(p.state.events).some(l => covers(p, l).includes('4')), 'no batched review covers the risky task')
+  assert.deepEqual(individualLabels(p.state.events), ['review 4'], 'the risky task gets its own individual review')
+  assert.equal(p.state.opts['review 4'].model, 'opus', 'the risky review runs at the risky reviewer model')
+  assert.equal(p.state.opts['review 4'].effort, 'high', 'the risky review runs at the risky reviewer effort')
+  assert.equal(p.state.opts[wave[0]].model, 'sonnet', 'the batched review runs at the normal reviewer model')
+  assert.equal(p.state.opts[wave[0]].effort, 'low', 'the batched review runs at the normal reviewer effort')
+  const rows = rowsByTask(result)
+  for (const n of ['2', '3', '4']) {
+    assert.equal(rows[n].review.verdict, 'approve', `task ${n} is approved`)
+  }
+})
+
+await test('TC-19 risky-only wave: each risky task reviewed individually, no combined review (4.3)', async () => {
+  const deps = { 1: [], 2: [], 3: [] }
+  const risk = { 2: 'safety', 3: 'safety' }
+  // Task 1 lands first alone; tasks 2-3 (both risky) merge as one wave behind it.
+  const p = project({ deps, durations: { 1: 10, 2: 50, 3: 50 }, mergeDurations: { 1: 300 }, risk })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: reviewArgs(deps, { risk }) })
+  assert.equal(result.halted, false)
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3'], 'every task merged')
+  assert.equal(landEndOf(p, '2'), landEndOf(p, '3'), 'tasks 2 and 3 merged in the same wave batch')
+  for (const n of ['2', '3']) {
+    assert.equal(individualLabels(p.state.events).filter(l => l === `review ${n}`).length, 1, `risky task ${n} gets exactly one individual review`)
+  }
+  assert.ok(!batchLabels(p.state.events).some(l => covers(p, l).some(n => n === '2' || n === '3')), 'no combined review covers the risky-only wave')
+  // Reviews happen after the wave merges, not per task before landing.
+  for (const n of ['2', '3']) {
+    assert.ok(idx(p.state, `review ${n}`) > idx(p.state, landEndOf(p, n)), `review ${n} runs after its wave merged`)
+  }
+})
+
+await test('TC-20 batched changes flags one task: only task 3 revises, 2/4 approved untouched (4.4)', async () => {
+  const deps = { 1: [], 2: [], 3: [], 4: [] }
+  // The batched verdict (looked up by the wave's first covered task, whichever it
+  // is, so every wave task carries the same first answer) flags only task 3.
+  const flagged = { verdict: 'changes', findings: [{ task: '3', severity: 'blocking', file: 'x.py', issue: 'wave finding on 3', fix: 'fix 3' }] }
+  const reviews = { 2: [flagged, 'approve'], 3: [flagged, 'approve'], 4: [flagged, 'approve'] }
+  const p = project({ deps, ...waveTiming, reviews })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: reviewArgs(deps) })
+  assert.equal(result.halted, false)
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3', '4'], 'every task merged after revision')
+  const wave = batchesCovering(p, ['2', '3', '4'])
+  assert.equal(wave.length, 1, `exactly one batched review covers the wave (saw: ${batchLabels(p.state.events)})`)
+  assert.ok(p.state.events.includes('task 3 revise 1'), 'the flagged task goes to revision')
+  for (const n of ['2', '4']) {
+    assert.ok(!p.state.events.some(e => new RegExp(`^task ${n}( \\[test\\])? revise`).test(e)), `unflagged task ${n} is never revised`)
+  }
+  const covering = n => reviewLabels(p.state.events).filter(l => (p.state.reviewTasks[l] || []).includes(n))
+  assert.equal(covering('3').length, 2, 'only the flagged task is re-reviewed (batch + re-review)')
+  for (const n of ['2', '4']) {
+    assert.equal(covering(n).length, 1, `unflagged task ${n} is reviewed once (the batch only)`)
+  }
+  const rows = rowsByTask(result)
+  for (const n of ['2', '3', '4']) {
+    assert.equal(rows[n].review.verdict, 'approve', `task ${n} ends approved`)
+  }
+})
+
+await test('TC-21 batched approve records approval for every covered task (4.5)', async () => {
+  const deps = { 1: [], 2: [], 3: [], 4: [] }
+  const p = project({ deps, ...waveTiming })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: reviewArgs(deps) })
+  assert.equal(result.halted, false)
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3', '4'], 'every task merged')
+  const wave = batchesCovering(p, ['2', '3', '4'])
+  assert.equal(wave.length, 1, `exactly one batched review covers the wave (saw: ${batchLabels(p.state.events)})`)
+  assert.deepEqual(individualLabels(p.state.events), [], 'no per-task review labels for a non-risky run')
+  const rows = rowsByTask(result)
+  for (const n of ['2', '3', '4']) {
+    assert.equal(rows[n].review.verdict, 'approve', `task ${n} records approval`)
+    assert.equal(rows[n].review.model, 'sonnet', `task ${n} carries the reviewer attribution`)
+    assert.equal(rows[n].review.riskTag, 'normal', `task ${n} carries its risk tag`)
+  }
+})
+
+await test('TC-22 no wave merged: an unmerged task gets no review (4.6)', async () => {
+  const deps = { 1: [], 2: [] }
+  // Task 2 is protected: its landing never merges, so no wave containing it merges.
+  const p = project({ deps, durations: { 1: 10, 2: 50 }, mergeDurations: { 1: 300 }, protectedTasks: ['2'] })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: reviewArgs(deps) })
+  assert.deepEqual(result.merged.sort(), ['1'], 'only the unprotected task merged')
+  assert.ok(!result.merged.includes('2'), 'the protected task never merged')
+  const covering2 = reviewLabels(p.state.events).filter(l => (p.state.reviewTasks[l] || []).includes('2'))
+  assert.deepEqual(covering2, [], 'no review agent is requested for the unmerged task (no empty batched review)')
+  // The reviews are on: the merged wave was reviewed.
+  assert.equal(batchesCovering(p, ['1']).length, 1, 'the merged wave still gets its batched review')
 })
 
 const unknown = [...only].filter(id => !seen.has(id))

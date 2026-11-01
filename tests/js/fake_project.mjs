@@ -186,15 +186,22 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
     }
     if (l.startsWith('review')) {
       const covered = reviewTasksOf(l, prompt)
-      state.reviewTasks[l] = covered
       const n = covered[0]
       const key = n ?? l
+      state.reviewTasks[l] = covered
       state.reviewCount[key] = (state.reviewCount[key] || 0) + 1
       const startedAt = stamp()
       await sleep(n != null ? reviewDurations[n] ?? 0 : 0)
       state.events.push(`${l} end`)
-      const verdict = (n != null ? (reviews[n] || [])[state.reviewCount[key] - 1] : null) || 'approve'
-      return { verdict, findings: verdict === 'changes' ? [{ severity: 'blocking', issue: reviewIssue || 'contradicts design.md' }] : [], summary: verdict, startedAt, finishedAt: stamp() }
+      // A reviews entry is a verdict string (as before) or { verdict, findings } for a
+      // batched verdict flagging individual tasks (design.md per-task findings shape
+      // { task, severity, file, issue, fix }); object entries pass findings through verbatim.
+      const spec = (n != null ? (reviews[n] || [])[state.reviewCount[key] - 1] : null) || 'approve'
+      const verdict = typeof spec === 'string' ? spec : (spec.verdict || 'approve')
+      const findings = typeof spec === 'string'
+        ? (verdict === 'changes' ? [{ severity: 'blocking', issue: reviewIssue || 'contradicts design.md' }] : [])
+        : (spec.findings || [])
+      return { verdict, findings, summary: typeof spec === 'string' ? verdict : (spec.summary || verdict), startedAt, finishedAt: stamp() }
     }
     if (l.startsWith('cross-test')) return { verdict: 'changes', findings: [{ severity: 'blocking', file: 'tests/test_b.py', issue: 'reads "state" where tests/test_a.py and design.md say "status"' }], summary: 'one drift' }
     if (l === 'report') {
