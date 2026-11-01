@@ -78,10 +78,10 @@
 **Properties:** P-5, P-6, P-7
 **Verifies:** Task 10 (exercises `runPlan` layering/exclusion; passes without later gating code)
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the row (all exclusion sets; [good,bad,bad]/[bad,bad]/[good] shapes; max-id+1 / removed / done-only unknown deps + complement)
-- [ ] Settings are deterministic (`@settings(derandomize=True, max_examples=60, database=None)`)
-- [ ] The tests call the decision seam, not a server (`fallbackReady` + bridge-run behavior)
-- [ ] File declares `PROPERTIES = {"P-5": ..., "P-6": ..., "P-7": ...}` (merged map)
+- [x] The generators cover every surface form and negative listed in the row (all exclusion sets; [good,bad,bad]/[bad,bad]/[good] shapes; max-id+1 / removed / done-only unknown deps + complement)
+- [x] Settings are deterministic (`@settings(derandomize=True, max_examples=60, database=None)`)
+- [x] The tests call the decision seam, not a server (`fallbackReady` + bridge-run behavior)
+- [x] File declares `PROPERTIES = {"P-5": ..., "P-6": ..., "P-7": ...}` (merged map)
 **Dependencies:** Task 1 (needs `scenarios()` × always-inconsistent plans + exclude seeding)
 **Complexity:** High
 **Risk:** normal
