@@ -105,6 +105,14 @@ Terms used below:
   timestamps) whose missing parts include the run file and the result. WHEN no name can be recovered or the
   name is not allowlisted, it SHALL treat the run as not found (1.10), write nothing, and never print the
   name.
+- 1.16 WHEN `ck stats collect --agents <run id> --from-json <file>` names a run whose agent transcripts
+  cannot be read (an orchestrating harness with no transcript home), THE SYSTEM SHALL read the file's JSON
+  list of agent rows and write a partial record from them: roles and phases from the row labels (the same
+  label grammar as transcript collection), per-agent timing from the supplied `startedMs`/`ms` where
+  present (run wall time stays unknown), and per-agent cost estimates where `model` and `tokens` are
+  known and priced (unknown otherwise, never $0; cost source `estimate`). Rows whose label does not
+  carry the run's marker, and files that are not a non-empty list of such rows, SHALL be refused with an
+  error and write nothing (fail-closed, 1.12). The record's missing parts SHALL include the transcripts.
 
 ### Story 2: Collect only ck workflows
 

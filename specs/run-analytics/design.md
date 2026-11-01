@@ -121,7 +121,13 @@ CLI layer (`cli/stats.py`) does I/O and calls those functions. It never re-imple
 - `src/claude_kiro/analytics/collect.py` (new): build a `LocalRecord` from a run file, its transcripts
   and its result, including per-agent/model/role/phase/task tokens and cost, spec-implement and
   spec-create metrics, the pseudonym and the stack hint, and the transcripts-only partial record of 1.15.
-  Covers 1.2-1.9, 1.12, 1.15 and 4.1-4.4.
+  Supplied rows (`AgentRunContext.supplied`) reuse the same builder with transcript timing and transcript
+  cost switched off; per-agent estimates come from the row's `model`/`tokens`. Covers 1.2-1.9, 1.12,
+  1.15, 1.16 and 4.1-4.4.
+- `src/claude_kiro/analytics/agentcollect.py`: `collect_supplied_run` validates the `--from-json` rows
+  file (non-empty JSON list; every label carries the run's marker; fail-closed) and builds transcript-less
+  `_Agent` rows from it, plus the `AgentRunContext.supplied` flag that selects supplied timing and the
+  `supplied_rows` cost source. Covers 1.16.
 - `src/claude_kiro/analytics/show.py` (new): breakdowns, trends, filters and duration coverage notes,
   with text and JSON renderers. Covers 6.1-6.8.
 - `src/claude_kiro/analytics/share.py` (new): `SHAREABLE_SCHEMA`, enum mapping, model aliasing,
@@ -165,6 +171,7 @@ works as for every other command.
 ck stats [show] [RUN_ID] [--kind spec-implement|spec-create] [--since YYYY-MM[-DD]] [--until YYYY-MM[-DD]]
                          [--project PSEUDONYM] [--json]
 ck stats collect (--run RUN_ID | --all) [--auto] [--json]
+ck stats collect --agents RUN_ID [--from-json FILE] [--auto] [--json]
 ck stats export [--to CHECKOUT] [--re-export RUN_ID ...] [--note] [--yes]     # --reexport / --notes accepted as aliases
 ck stats submit [--to CHECKOUT] [--note] [--yes]
 ck stats label [SLUG | --clear]                                                # alias of ck agents set run.machine_label
@@ -196,6 +203,14 @@ ck stats label [SLUG | --clear]                                                #
   `⚠ could not collect <run_id>: <reason>; retry: ck stats collect --run <run_id>`. Inside a `ck run`
   sandbox (`CK_RUN_SANDBOXED=1` and the home unreadable) it prints that `ck run` collects the run after
   the session exits.
+- `collect --agents RUN_ID --from-json FILE`: collects an agent-mode run from orchestrator-supplied
+  agent rows instead of transcripts (1.16). `FILE` holds a JSON list of row objects: `label` (required,
+  carries the `[ck:<run_id>]` marker), `model`, `tokens`, `startedMs`, `ms`, `state`, `agentType`
+  (optional; unknown figures are omitted, never zero-filled). Rows are matched, phased and priced by the
+  same label grammar and pricing table as transcript collection; rows without the marker, and files that
+  are not a non-empty list of such rows, are refused with an error and write nothing. The record is
+  partial, `missing` holds `transcripts-supplied`, and cost source is `estimate`. With `--auto`, failures
+  print the `⚠` warning and exit 0 like other auto collects.
 - `export`: `--to` defaults to the current directory. Exports every local record not yet exported, every
   record exported to this checkout but unsubmitted whose files are missing from it (10.10, new record id),
   plus each `--re-export RUN_ID` (7.1, 7.8). A re-export of a record whose earlier export to this checkout
@@ -328,6 +343,10 @@ def auto_collect_after_run(cwd: Path, session_id: Optional[str], started: float,
 - Salt and machine label: no file of their own. The salt is the top-level key `stats_salt` in
   `agents.global_config_path()` (`config.json`, mode 0600, tightened with `os.chmod` when it already
   exists). The machine label is the `run.machine_label` agent setting. The salt never leaves that file.
+- Supplied rows file: a JSON list of agent-row objects, passed to `ck stats collect --agents` as
+  `--from-json FILE`. Each object: `label` (required string, carries the `[ck:<run_id>]` marker),
+  `model`, `tokens`, `startedMs`, `ms`, `state`, `agentType` (optional; omitted means unknown, never
+  zero). The file is read, never stored; only its validated rows enter the record.
 - Shareable record: `<checkout>/analytics/runs/<yyyy-mm>/<record_id>.json`, schema `ck-run-analytics/1`
   (`ShareableRecord`). JSON with `indent=2, sort_keys=True` and a trailing newline. It is byte-deterministic
   apart from `record_id` (NFR "Determinism").
@@ -853,6 +872,7 @@ per such file. The exit code is the `claude` exit code, whatever happens.
 | 1.12 | readable allowlisted run file that passes S2 (so `workflowProgress` is a list) whose `result` is missing or not a dict, whose list holds non-dict entries or dict entries with missing or malformed fields, some `agent-*.jsonl` or `.meta.json` absent, unparseable lines, truncated transcript JSON | record written with the parts that could be read. A non-dict entry is skipped and listed in `missing` (`agent_entry:<index>`). `missing` lists what is absent. Agents without transcripts get `cost.source="estimate"` (context tokens at the input rate, as `bench.collect_agents` does), and the run cost becomes `estimate` (S7). Fields that cannot be computed are `None`, never 0. `scan_transcript` already skips undecodable lines; an `OSError` on a file marks it `unparseable` |
 | 1.13 | S2 not ok (including a missing or non-list `workflowProgress`), or the run file is not valid JSON | With `--run`: `❌ wf_x: run-file format not recognised (<problems>)`, where `wf_x` is the id I typed. The workflow name appears only when S1 is true. Nothing written, exit 1. During `--all` and `ck doctor`: an allowlisted run that fails S2 is `failed` with its id; a run file whose name cannot be read is counted in `skipped_non_ck`, never named (2.2). A run file that is missing while its transcripts remain is 1.15 |
 | 1.15 | `find_run_file` is None, `find_orphan_run` finds `subagents/workflows/<run_id>/` | S28 over `workflow_launches(<sid>.jsonl)`. Allowlisted name: a partial record from `agent-*.jsonl` (usage, models, cost, per-agent `duration_ms` = last minus first transcript `timestamp`) and `agent-*.meta.json` (`description` = label -> role, `workflowPhase` -> phase); `start_ms` = earliest timestamp, `wall_ms` = latest minus earliest; `status` and `outcome` None; S27 with that start; `missing` holds `runfile` and `result` (Harness Contract `{agentId: null, what: "runfile"}` and `what: "result"`); `✓ wf_x: wrote <path> (partial: run file missing)`, exit 0. No tied launch, no session transcript, or a name S1 rejects: the 1.10 message and exit 1, nothing written, the name never printed or kept |
+| 1.16 | `collect --agents RUN_ID --from-json FILE` where FILE is unreadable, not a JSON list, empty, or holds a row whose label misses the run's marker | `❌` with the reason (and with `--auto`, the `⚠` warning), nothing written, exit 1 (exit 0 under `--auto`). Rows with unknown model/tokens are not an error: their figures stay `None`, never `$0` |
 | 1.14 | S4 = `sandboxed` | `❌ ck stats collect must run outside the sandbox: <home> is not readable here`, exit 1, nothing written. With `--auto` under `ck run`: an info line, exit 0 |
 | 2.2 | non-allowlisted (or unreadable-name) run met during `--all`, `doctor`, `ck run` or leak-term gathering | only a counter goes up. The name and id never reach records, logs or console. `CollectOutcome.reason` and `FormatCheck.problems` are built without the name. Under `ck run` an unreadable-name run file in the session is a collection failure (3.3) reported by count only: `stats: <n> run file(s) in this session could not be read; retry: ck stats collect --all` on stdout and in the `ck run` log, and `<utc iso> - unrecognised` in the collect log |
 | 2.3 | `--run` names a non-allowlisted run | `❌ wf_x is not a ck spec workflow run; not collected` (the id was typed by me, the name is never printed), exit 1 |
@@ -962,6 +982,7 @@ per such file. The exit code is the `claude` exit code, whatever happens.
 | 1.13 | S2 `runfile.check_format`, `peek_workflow_name` returning None for invalid JSON. Error Handling 1.13 |
 | 1.14 | S4 `classify_home`. `CK_RUN_SANDBOXED` in `cli/run.py` |
 | 1.15 | `runfile.find_orphan_run`, `workflow_launches`, S28 `recover_workflow_name`, the transcripts-only path of `collect_run`. Error Handling 1.15 |
+| 1.16 | `agentcollect.collect_supplied_run`, `_validate_supplied_rows` (fail-closed), `AgentRunContext.supplied`, transcript-less `_Agent` rows (`model`/`tokens` -> `usdEstimate`, supplied `ms`/`startedMs` kept). CLI `--from-json`. Error Handling 1.16 |
 | 2.1 | S1 `runfile.is_allowlisted`, `peek_workflow_name`, `ALLOWLISTED_WORKFLOWS` |
 | 2.2 | S1 + counters only in `CollectCounts.skipped_non_ck` (also unreadable-name run files). `CollectOutcome.reason` built without names; only an id I typed in `--run` is echoed |
 | 2.3 | S1 in `collect --run`. Error Handling 2.3 |

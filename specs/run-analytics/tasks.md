@@ -1997,6 +1997,66 @@ role with task None). The same check over the corpus plus one unknown label fail
 
 ---
 
+### Task 55: Supplied-rows collection (`--from-json`)
+**Status:** Done
+**Track:** impl
+**Requirements:** 1.16
+**Description:** In `src/claude_kiro/analytics/agentcollect.py`: `collect_supplied_run` validates the
+`--from-json` rows file (`_validate_supplied_rows`: non-empty JSON list, every label carries the run's
+`[ck:<run_id>]` marker, optional `model`/`state`/`agentType` strings and non-negative integer
+`tokens`/`startedMs`/`ms`; anything else fails closed with `rows_invalid` and writes nothing) and builds
+transcript-less `collect._Agent` rows from it (phase via the create-step map, model/tokens as estimate
+inputs, supplied `ms`/`startedMs` kept). Manifest handling mirrors `collect_agent_run` (kind/spec/root
+from the manifest, create-vs-implement inference when absent). Add `AgentRunContext.supplied`, which
+switches `_transcript_source` to supplied timing and the `supplied_rows` cost source. In
+`src/claude_kiro/cli/stats.py`: `--from-json FILE` on `collect --agents` (exit 2 without `--agents`;
+`--auto` keeps exit 0 with the `⚠` warning). Owns the Harness Contract point "`collect --agents
+RUN_ID --from-json FILE`".
+**Files:**
+- `src/claude_kiro/analytics/agentcollect.py` - validation + supplied collection
+- `src/claude_kiro/analytics/collect.py` - supplied timing/cost source
+- `src/claude_kiro/cli/stats.py` - `--from-json` flag
+**Verify:** `uv run pytest -q tests/test_stats_agents_supplied.py`
+**Verified by:** Task 56
+
+**Acceptance:**
+- [x] Supplied create/implement rows collect into a partial record with label-grammar roles/phases
+- [x] Known model + tokens price estimates; unknown model/tokens stay unknown, never $0
+- [x] Marker-less rows, empty/non-list files and bad figures fail closed with nothing written
+- [x] `--from-json` without `--agents` exits 2; `--auto` failures warn and exit 0
+
+**Dependencies:** Task 56 (its tests are the oracle)
+**Complexity:** Medium
+**Risk:** normal
+
+---
+
+### Task 56: Supplied-rows tests (TC-83, TC-84, TC-85)
+**Status:** Done
+**Track:** test
+**Requirements:** 1.16
+**Description:** `tests/test_stats_agents_supplied.py`: real-CLI, fake-store tests for the `--from-json`
+path. TC-83: begun create run, marker-carrying rows with mixed known/unknown figures -> partial record,
+roles/phases, `usdEstimate`, `transcripts-supplied` in missing, cost source `estimate`. TC-84:
+marker-less row, empty list, non-list, negative/string figures, missing file -> exit 1, no record.
+TC-85: no manifest + all create steps -> partial spec-create record with `manifest` missing; unknown
+model implement rows match roles and stay cost-unknown.
+**Files:**
+- `tests/test_stats_agents_supplied.py` - TC-83, TC-84, TC-85
+**Verify:** `uv run pytest -q tests/test_stats_agents_supplied.py`
+**Properties:** none (no universally quantified criterion; fail-closed cases are example-driven)
+
+**Acceptance:**
+- [x] TC-83, TC-84, TC-85 pass; no network use; no mocks of the project's own code
+
+**Dependencies:** Task 1 (isolation fixtures)
+**Complexity:** Low
+**Risk:** normal
+
+**Verifies:** Task 55
+
+---
+
 ## Dependency Graph
 
 ```mermaid
@@ -2108,6 +2168,8 @@ graph TD
     T53[53: spec-implement resolves] --> T52
     T54[54: label corpus TC]:::test --> T1
     T54 --> T2
+    T55[55: supplied collect] --> T56
+    T56[56: supplied TCs]:::test --> T1
     classDef test fill:#e8f4ea,stroke:#2e7d32,stroke-dasharray: 4 2
 ```
 
@@ -2117,5 +2179,5 @@ Arrows point from a task to the task it depends on.
 
 There are no waves: each task starts as soon as its own Dependencies are merged, so the plan is the dependency graph
 above.
-- **Ready at start:** Tasks 1, 2, 14
-- **Critical path:** Task 1 -> Task 3 -> Task 4 -> Task 13 -> Task 15 -> Task 17 -> Task 18 -> Task 24 -> Task 31 -> Task 42 -> Task 45 (11 of 54 tasks; the floor on wall-clock time however many agents run)
+- **Ready at start:** (none; all 56 tasks Done)
+- **Critical path:** (none open; 56 of 56 tasks Done)

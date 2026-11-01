@@ -1,6 +1,6 @@
 # Implementation Tasks: Landing Speed
 
-**Status:** Not Started
+**Status:** EVOLVED - See: deterministic-plan
 **Spec:** [requirements.md](requirements.md) · [design.md](design.md) · [test-plan.md](test-plan.md) · [PLAN.md](PLAN.md)
 
 Test tasks follow design.md where it renames a test-plan Harness Contract name. The renames used below:
