@@ -6,7 +6,7 @@
 ## Task Breakdown
 
 ### Task 1: Build deterministic-plan test infrastructure
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 1.1, 2.1, 4.1, 5.2
 **Description:** Build the shared test-only infrastructure all other test tasks depend on. 1) Extend `tests/js/fake_project.mjs` additively (same module, no fork): `planSeq` canned plan answers consumed in order, `badReady` shorthand, `risk` passthrough, `state.reviewTasks` ledger parsed from review prompts, `timestamps` on plan/review/land calls via existing `stamp()` pattern. The Node suite created below accepts TC ids as argv (`node tests/js/deterministic_plan.test.mjs TC-1 TC-3`) and runs only those cases, so later impl gates can run subsets. 2) Create skeleton `tests/js/deterministic_plan.test.mjs` wired into the `tests/test_workflow_scripts.py` parametrize glob. 3) Extend `tests/landing_bridge.py` `scenarios()` with `risk` (10–20% safety) and `planSeq` draws (consistent / first-bad-then-good / always-bad); `bridge.run` forwards unknown keys unchanged. 4) Extend `tests/stats_helpers.py` `implement_result()` with optional `degraded`/`planFallbacks` kwargs (default absent so pre-change records stay byte-identical). 5) Generate and commit `tests/fixtures/stats/pre-deterministic-record.json` from today's collector over a FakeClaudeHome run. 6) Scaffold fixture-spec directory at `specs/deterministic-plan/fixtures/fallback-spec/` (3-task spec with forced-inconsistent plan shim modes). Owns the Harness Contract items 5–7 test-side: bridge/fake-project options, label grammar helpers, and the fixture-run contract. No TCs asserted here; this task only builds harnesses.
