@@ -86,7 +86,7 @@
 **Risk:** normal
 ---
 ### Task 5: Workflow examples for plan retry and clean adoption
-**Status:** Done
+**Status:** In Progress
 **Track:** test
 **Requirements:** 1.1, 1.4, 1.5
 **Description:** Implements TC-1, TC-3, TC-4 in `tests/js/deterministic_plan.test.mjs` (real script `plugin/workflows/spec-implement.js` via `load_workflow.mjs`, fake runtime + extended fake project). TC-1: `planSeq` [inconsistent, consistent] → `plan 1` then `plan 1 retry`, retry adopted, no degraded, fallback 0. TC-3: healthy plan agent → no degraded, fallback 0. TC-4: always-inconsistent with tasks 1–2 merged/running at fallback (seeded via `done`/in-flight `planDurations`) → fallback ready excludes merged/running/failed, their records unchanged (labels appear exactly once). (TC-2 lives in Task 19: it asserts no third plan attempt, which needs the Task 14 gating.) Assert only on `events`/`prompts`/`result`/`logs`, never script internals.
