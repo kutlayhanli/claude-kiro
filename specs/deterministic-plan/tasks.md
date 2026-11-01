@@ -138,7 +138,7 @@
 **Risk:** normal
 ---
 ### Task 8: Red-team fallback guessing
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 2.5
 **Description:** Try to break each SHALL NOT clause of Story 2 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test named `test_redteam_unknown_dep_*`. Targets 2.5 (unknown-dep task SHALL NOT start on a guess): numeric-vs-string id confusion (`'2'` vs `2`, `'02'`), dangling id that matches a `done`-only entry, dep id present only in `exclude`, case/whitespace-mutated dep keys, fallback fed the plan's own bad `ready` as `done`. Runs against seam plus `runPlan` scriptReady computation (Tasks 9–10); needs no gating.
@@ -147,9 +147,9 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_plan.py -k redteam_unknown_dep`
 **Verifies:** Task 10 (exercises `runPlan` scriptReady path; passes without later code)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real script scheduling + `fallbackReady` seam on adversarial maps)
-- [ ] Tests fail before the implementation exists for the right reason (task starts on guessed dep instead of staying unready)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real script scheduling + `fallbackReady` seam on adversarial maps)
+- [x] Tests fail before the implementation exists for the right reason (task starts on guessed dep instead of staying unready)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs `dags()` + adversarial deps harness)
 **Complexity:** Medium
 **Risk:** normal
