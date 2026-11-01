@@ -48,7 +48,7 @@
 **Risk:** normal
 ---
 ### Task 3: Property tests for retry-once, fallback-continue, degraded marking
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.2, 1.3
 **Description:** Covers P-1, P-2, P-3 (Story 1 group; decision seams `planConsistent` + `fallbackReady`). P-1: any inconsistent first answer (ready has non-ready id, omits ready id, lists unknown id) → exactly one retry with same inputs; consistent never retried; count `plan k`/`plan k retry` labels. P-2: retry also inconsistent/unusable → continues from deterministic list, never `planning step failed`, running tasks land; merged set equals deterministic-oracle set. P-3: every fallback run → `result.degraded is True`, count equals triggering attempts, triggers ⊆ trace labels. Bridge-driven via `scenarios()` × `planSeq` shapes, maxConcurrent 1–4, red landings, conflicts. Complements TC-1/TC-2 example cases. Runs green on the seam plus `runPlan` alone (Tasks 9–10); needs no schedule gating.
@@ -58,10 +58,11 @@
 **Properties:** P-1, P-2, P-3
 **Verifies:** Task 10 (exercises the `runPlan` retry/fallback path; passes without later gating code)
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the row (non-ready id, omitted ready id, unknown id; healthy-second-answer complement; red landings/conflicts)
-- [ ] Settings are deterministic (`@settings(derandomize=True, max_examples=60, database=None)` for bridge-driven properties)
-- [ ] The tests call the decision seam, not a server (`planConsistent`/`fallbackReady` directly + script behavior via bridge)
-- [ ] File declares `PROPERTIES = {"P-1": ..., "P-2": ..., "P-3": ...}` for `ck gate`
+- [x] The generators cover every surface form and negative listed in the row (non-ready id, omitted ready id, unknown id; healthy-second-answer complement; red landings/conflicts)
+- [x] Settings are deterministic (`@settings(derandomize=True, max_examples=60, database=None)` for bridge-driven properties)
+- [x] The tests call the decision seam, not a server (`planConsistent`/`fallbackReady` directly + script behavior via bridge)
+- [x] File declares `PROPERTIES = {"P-1": ..., "P-2": ..., "P-3": ...}` for `ck gate`
+**Note (generator domain):** corruptions are inconsistent *after* the script's `normalizePlan` (unknown ids are filtered there, so `runPlan` never sees them): the "unknown" form replaces the list with `[max-id+1]` instead of extending it. A redundant unknown id next to the full correct list normalizes to the oracle and is adopted without retry by the existing check that Task 10 keeps.
 **Dependencies:** Task 1 (needs `planSeq` scenario draws + bridge harness)
 **Complexity:** High
 **Risk:** normal
