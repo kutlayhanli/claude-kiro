@@ -39,6 +39,8 @@ PROPERTIES = {
     "P-5": "test_fallback_exclusions",
     "P-6": "test_last_good_layering",
     "P-7": "test_unknown_dep_never_ready",
+    "P-9": "test_review_bound",
+    "P-10": "test_batch_verdict_fanout",
 }
 
 BRIDGE_SETTINGS = settings(derandomize=True, max_examples=60, database=None, deadline=None)
@@ -1055,3 +1057,321 @@ def test_redteam_unknown_dep_bad_ready_as_done(bridge):  # noqa: F811
     assert set(result["merged"]) == {"1", "3"}, result["merged"]
     assert "planning step failed" not in (result.get("reason") or ""), result.get("reason")
     assert result.get("outcome") == "blocked", (result.get("outcome"), result.get("reason"))
+
+
+# ------------------------------------------------- P-9 / P-10 (Story 4 group)
+#
+# Wave-review batching bound + verdict fan-out over the `reviewGroups`
+# decision seam (design.md: reviewGroups({ merged, risk }) -> { batched,
+# individual }; individual = merged tasks whose risk tag is `safety`
+# case-insensitive; batched = the rest; empty merged -> both empty) plus the
+# real script's review labels through the bridge (TC-17..TC-22 pattern:
+# coverage from the review ledger `reviewTasks`, never label text alone).
+# Before Task 18 the seam is absent (the loader raises "decision function
+# missing in the decisions block: reviewGroups") and the script runs one
+# `review N` per task with no `review-wave` label, so every test below fails
+# for the right reason (seam missing, then one-review-per-task shape).
+
+REVIEW_GROUPS_CALLER = (
+    f"import {{ loadDecisions }} from {LOAD_DECISIONS_URL!r};"
+    "const input = JSON.parse(process.argv[1]);"
+    "const { reviewGroups } = loadDecisions({ extra: ['reviewGroups'] });"
+    "const out = reviewGroups({ merged: input.merged, risk: input.risk });"
+    "console.log(JSON.stringify({ batched: out.batched, individual: out.individual }));"
+)
+
+REVIEWER = {"model": "sonnet", "effort": "low", "risky_model": "opus", "risky_effort": "high"}
+
+# Proven wave-forcing timing (TC-17 pattern): task 1 ends fast and its landing
+# is slow, so tasks 2..N finish while it lands and merge as one later wave.
+WAVE_TIMING = {"durations": {1: 10}, "mergeDurations": {1: 300}}
+WAVE_REST_DURATION = 50
+
+
+def seam_review_groups(merged, risk: Dict) -> Dict:
+    """Call the `reviewGroups` decision seam (added by Task 9; missing until then)."""
+    payload = json.dumps({"merged": [str(t) for t in merged], "risk": {str(k): v for k, v in risk.items()}})
+    proc = subprocess.run(
+        ["node", "--input-type=module", "-e", REVIEW_GROUPS_CALLER, payload],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, f"reviewGroups seam call failed: {proc.stderr.strip()}"
+    return json.loads(proc.stdout)
+
+
+def review_events(events) -> List[str]:
+    """Review request labels in event order (the `... end` completions excluded)."""
+    return [e for e in events if e.startswith("review") and not e.endswith(" end")]
+
+
+def batch_review_labels(events) -> List[str]:
+    return [e for e in review_events(events) if e.startswith("review-wave")]
+
+
+def individual_review_labels(events) -> List[str]:
+    return [e for e in review_events(events) if re.match(r"^review \d", e)]
+
+
+def covers_of(out: Dict, label: str) -> List[str]:
+    return sorted(out.get("reviewTasks", {}).get(label, []))
+
+
+def batches_covering(out: Dict, ids) -> List[str]:
+    wanted = sorted(str(t) for t in ids)
+    return [label for label in batch_review_labels(out["events"]) if covers_of(out, label) == wanted]
+
+
+def merged_waves(events, merged) -> List[List[str]]:
+    """One entry per `land ... end` batch that merged something (the W of NFR-4)."""
+    merged_set = {str(t) for t in merged}
+    waves = []
+    for e in events:
+        if e.startswith("land ") and e.endswith(" end"):
+            hit = sorted((set(e[5:-4].split()) & merged_set), key=lambda x: (len(x), x))
+            if hit:
+                waves.append(hit)
+    return waves
+
+
+def wave_project(ids, risk: Dict, reviews: Dict, extra_project: Dict = None) -> Dict:
+    """A forced-two-wave bridge project/args pair: task 1 lands alone, the rest
+    merge as one later wave (TC-17 timing, deterministic by a ~250ms margin)."""
+    first, rest = ids[0], ids[1:]
+    project = {
+        "deps": {t: [] for t in ids},
+        "durations": {first: WAVE_TIMING["durations"][1], **{t: WAVE_REST_DURATION for t in rest}},
+        "mergeDurations": {first: WAVE_TIMING["mergeDurations"][1]},
+        "planDurations": dict(PLAN_MS_ALL),
+        "risk": {t: risk.get(t, "normal") for t in ids},
+        "reviews": {t: list(v) for t, v in reviews.items()},
+        **(extra_project or {}),
+    }
+    args = {
+        "deps": {t: [] for t in ids},
+        "remaining": list(ids),
+        "maxConcurrent": max(4, len(ids)),
+        "agents": {"reviewer": dict(REVIEWER)},
+        "risk": {t: risk.get(t, "normal") for t in ids},
+    }
+    return {"project": project, "args": args}
+
+
+@st.composite
+def risk_maps(draw, ids) -> Dict[str, str]:
+    """A risk map over `ids` covering the P-9 row's 0-100% safety sweep:
+    no-risky, all-risky, single-risky, and random subsets in between."""
+    mode = draw(st.sampled_from(["none", "all", "one", "half", "random"]))
+    if mode == "none":
+        return {t: "normal" for t in ids}
+    if mode == "all":
+        return {t: "safety" for t in ids}
+    if mode == "one":
+        risky = [draw(st.sampled_from(ids))]
+        return {t: ("safety" if t in risky else "normal") for t in ids}
+    if mode == "half":
+        return {t: ("safety" if (int(t) % 2 == 0) else "normal") for t in ids}
+    risky = set(draw(subsets(ids)))
+    return {t: ("safety" if t in risky else "normal") for t in ids}
+
+
+# --------------------------------------------------------------------------- P-9
+
+
+@BRIDGE_SETTINGS
+@given(st.data())
+def test_review_bound(bridge, data):  # noqa: F811
+    """P-9 (4.1, 4.2, 4.3, 4.6, NFR-4; hosts the TC-30 body): for any run with
+    W merged waves containing >=1 non-risky task and R risky tasks, the review
+    count is <= W + R; every risky task has its own individual review; waves
+    with zero merged tasks get no review.
+
+    Generators: scenarios() (healthy plans) x risk maps (0-100% safety incl.
+    all-risky/no-risky waves) x verdict sequences incl. changes; wave sizes
+    1-6. The count bound is asserted on approve runs (a `changes` verdict
+    adds a flagged-task re-review on top of the bound by design, 4.4); the
+    risky-individual and no-empty-review relations hold under both verdicts.
+    """
+    sc = data.draw(scenarios(plan_seq="consistent"), label="scenario")
+    wave_size = data.draw(st.integers(1, 6), label="wave-size")
+    ids = [str(i) for i in range(1, wave_size + 2)]  # task 1 lands alone; the rest form the wave
+    risk = data.draw(risk_maps(ids), label="risk")
+    verdict_mode = data.draw(st.sampled_from(["approve", "changes"]), label="verdicts")
+    slots = sc["slots"] or 4
+
+    # Seam first: the split is exact on every draw (fails pre-Task-9 with the
+    # missing-seam message, the right reason).
+    wave = ids[1:]
+    out = seam_review_groups(wave, risk)
+    assert set(out["batched"]) | set(out["individual"]) == set(wave), out
+    assert set(out["batched"]) & set(out["individual"]) == set(), out
+    assert set(out["individual"]) == {t for t in wave if str(risk.get(t, "")).lower() == "safety"}, out
+    # Empty merged yields no review groups (4.6 at the seam).
+    empty = seam_review_groups([], risk)
+    assert empty["batched"] == [] and empty["individual"] == [], empty
+    # Case-insensitive by design (via the existing isSafety): one fixed check.
+    folded = seam_review_groups(["9"], {"9": "Safety"})
+    assert folded["individual"] == ["9"] and folded["batched"] == [], folded
+
+    reviews = {}
+    if verdict_mode == "changes":
+        reviews = {t: ["changes", "approve"] for t in ids}
+    cfg = wave_project(ids, risk, reviews)
+    out = bridge.run(cfg["project"], cfg["args"], slots=max(slots, len(ids)))
+    result = out["result"]
+    assert result.get("outcome") == "complete", (result.get("outcome"), result.get("reason"))
+    merged = [str(t) for t in result["merged"]]
+    assert set(merged) == set(ids), (merged, ids)
+    waves = merged_waves(out["events"], merged)
+    assert len(waves) >= 1, out["events"]
+    risky = {t for t in merged if str(risk.get(t, "normal")).lower() == "safety"}
+    labels = review_events(out["events"])
+
+    # No wave with zero merged tasks gets a review (4.6): every review covers
+    # merged tasks only, and unmerged tasks are never covered.
+    for label in labels:
+        covered = covers_of(out, label)
+        assert covered, (label, "an empty review ran")
+        assert set(covered) <= set(merged), (label, covered, merged)
+
+    # Every risky task has its own individual review (4.2, 4.3).
+    individuals = individual_review_labels(out["events"])
+    for r in sorted(risky):
+        assert any(l == f"review {r}" or l.startswith(f"review {r} ") for l in individuals), (r, individuals)
+
+    if verdict_mode == "approve":
+        # The NFR-4 bound (TC-30): review-agent count <= W + R, counted from labels.
+        assert len(labels) <= len(waves) + len(risky), (labels, waves, sorted(risky))
+        # Every non-risky merged wave is covered by exactly one batched review (4.1).
+        for w in waves:
+            plain = [t for t in w if t not in risky]
+            touched = [l for l in batch_review_labels(out["events"]) if set(covers_of(out, l)) & set(w)]
+            if plain:
+                assert len(touched) == 1, (w, touched)
+                assert sorted(covers_of(out, touched[0])) == sorted(plain), (w, covers_of(out, touched[0]))
+            else:
+                # A risky-only wave runs no combined review (4.3).
+                assert touched == [], (w, touched)
+
+
+def test_review_bound_tc30(bridge):  # noqa: F811
+    """TC-30 (NFR-4) table body, hosted by Task 16: runs with W merged waves
+    (with >=1 non-risky task) and R risky tasks keep review-agent count <= W+R."""
+    # Case A (4.1): one non-risky wave of 3 behind task 1 -> W=2, R=0, bound 2.
+    ids = ["1", "2", "3", "4"]
+    cfg = wave_project(ids, {}, {})
+    out = bridge.run(cfg["project"], cfg["args"], slots=4)
+    assert set(out["result"]["merged"]) == set(ids), out["result"]
+    waves = merged_waves(out["events"], ids)
+    assert sorted(map(sorted, waves)) == [["1"], ["2", "3", "4"]], waves
+    labels = review_events(out["events"])
+    assert len(labels) <= len(waves), (labels, waves)  # pre-Task-18: 4 one-per-task reviews > 2
+    assert len(batches_covering(out, ["2", "3", "4"])) == 1, batch_review_labels(out["events"])
+    assert individual_review_labels(out["events"]) == [], individual_review_labels(out["events"])
+
+    # Case B (4.2): 2 normal + 1 risky share the later wave -> W=2, R=1, bound 3.
+    risk = {"4": "safety"}
+    cfg = wave_project(ids, risk, {})
+    out = bridge.run(cfg["project"], cfg["args"], slots=4)
+    assert set(out["result"]["merged"]) == set(ids), out["result"]
+    labels = review_events(out["events"])
+    assert len(labels) <= 2 + 1, (labels, out["events"])
+    assert len(batches_covering(out, ["2", "3"])) == 1, batch_review_labels(out["events"])
+    assert not [l for l in batch_review_labels(out["events"]) if "4" in covers_of(out, l)], batch_review_labels(out["events"])
+    assert any(l == "review 4" for l in individual_review_labels(out["events"])), out["events"]
+
+    # Case C (4.3): risky-only later wave -> each risky individual, no combined.
+    risk = {"2": "safety", "3": "safety"}
+    ids3 = ["1", "2", "3"]
+    cfg = wave_project(ids3, risk, {})
+    out = bridge.run(cfg["project"], cfg["args"], slots=4)
+    assert set(out["result"]["merged"]) == set(ids3), out["result"]
+    assert len(batches_covering(out, ["1"])) == 1, batch_review_labels(out["events"])  # the non-risky wave is still batched
+    assert not [l for l in batch_review_labels(out["events"]) if set(covers_of(out, l)) & {"2", "3"}], batch_review_labels(out["events"])
+    for n in ("2", "3"):
+        assert any(l == f"review {n}" for l in individual_review_labels(out["events"])), out["events"]
+
+    # Case D (4.6): an unmerged task gets no review; the merged wave is batched.
+    deps = {"1": [], "2": []}
+    project = {
+        "deps": dict(deps),
+        "durations": {"1": 10, "2": 50},
+        "mergeDurations": {"1": 300},
+        "planDurations": dict(PLAN_MS_ALL),
+        "protectedTasks": ["2"],  # task 2 never merges
+    }
+    args = {
+        "deps": dict(deps),
+        "remaining": ["1", "2"],
+        "maxConcurrent": 4,
+        "agents": {"reviewer": dict(REVIEWER)},
+    }
+    out = bridge.run(project, args, slots=4)
+    assert out["result"]["merged"] == ["1"], out["result"]
+    covering2 = [l for l in review_events(out["events"]) if "2" in covers_of(out, l)]
+    assert covering2 == [], (covering2, "an empty batched review ran for the unmerged task")
+    assert len(batches_covering(out, ["1"])) == 1, batch_review_labels(out["events"])
+
+
+# --------------------------------------------------------------------------- P-10
+
+
+@BRIDGE_SETTINGS
+@given(st.data())
+def test_batch_verdict_fanout(bridge, data):  # noqa: F811
+    """P-10 (4.4, 4.5): for any batched review with per-task verdicts, each
+    flagged task gets its own revise + re-review cycle while unflagged
+    wave-mates record approval without extra agents; an all-approve batch
+    records approval for every covered task.
+
+    Generators: scenarios() (healthy plans) x wave sizes 1-6 x flagged
+    subsets (none/some/all) via per-task findings on a shared batched verdict
+    (the TC-20 shape: every wave task carries the same first answer, looked
+    up by the wave's first covered task).
+    """
+    sc = data.draw(scenarios(plan_seq="consistent"), label="scenario")
+    wave_size = data.draw(st.integers(1, 6), label="wave-size")
+    ids = [str(i) for i in range(1, wave_size + 2)]  # task 1 lands alone; tasks 2.. form the wave
+    wave = ids[1:]
+    flagged = sorted(data.draw(subsets(wave), label="flagged"))  # none/some/all
+    slots = sc["slots"] or 4
+
+    # The seam agrees the all-normal wave batches together (fails pre-Task-9).
+    grouped = seam_review_groups(wave, {})
+    assert sorted(grouped["batched"]) == sorted(wave) and grouped["individual"] == [], grouped
+
+    flagged_verdict = {
+        "verdict": "changes",
+        "findings": [
+            {"task": f, "severity": "blocking", "file": "x.py", "issue": f"wave finding on {f}", "fix": f"fix {f}"}
+            for f in flagged
+        ],
+    }
+    first_answer = flagged_verdict if flagged else "approve"
+    reviews = {t: [first_answer, "approve"] for t in wave}
+    cfg = wave_project(ids, {}, reviews)
+    out = bridge.run(cfg["project"], cfg["args"], slots=max(slots, len(ids)))
+    result = out["result"]
+    assert result.get("halted") is False, result.get("reason")
+    assert set(result["merged"]) == set(ids), (result["merged"], ids)
+
+    # The wave merged together and gets exactly one batched review (fails
+    # pre-Task-18: reviews are one-per-task, no review-wave label exists).
+    assert merged_waves(out["events"], ids)[-1] == sorted(wave), merged_waves(out["events"], ids)
+    assert len(batches_covering(out, wave)) == 1, batch_review_labels(out["events"])
+
+    covering = {n: [l for l in review_events(out["events"]) if n in covers_of(out, l)] for n in wave}
+    for n in wave:
+        if n in flagged:
+            assert any(re.match(rf"^task {n}( \[test\])? revise", e) for e in out["events"]), (n, "the flagged task never revised")
+            assert len(covering[n]) == 2, (n, covering[n], "only the flagged task is re-reviewed")
+        else:
+            assert not any(re.match(rf"^task {n}( \[test\])? revise", e) for e in out["events"]), (n, "an unflagged task was revised")
+            assert len(covering[n]) == 1, (n, covering[n], "an unflagged task got an extra review agent")
+
+    rows = {t["task"]: t for t in result.get("tasks", [])}
+    assert set(rows) >= set(wave), rows.keys()
+    for n in wave:
+        assert rows[n].get("review", {}).get("verdict") == "approve", (n, rows[n].get("review"))
+

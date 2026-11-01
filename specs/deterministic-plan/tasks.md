@@ -289,10 +289,10 @@
 **Properties:** P-9, P-10
 **Verifies:** Task 18 (exercises `reviewGroups` plus script review labels; fails until that code exists); Task 36 (counts each `review-wave` label as one review agent via the role mapping)
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the row (all-risky / no-risky waves; changes/approve verdicts; none/some/all flagged subsets)
-- [ ] Settings are deterministic (`@settings(derandomize=True, max_examples=60, database=None)`)
-- [ ] The tests call the decision seam, not a server (`reviewGroups` directly + script review labels via bridge)
-- [ ] File declares `PROPERTIES = {"P-9": ..., "P-10": ...}` (merged map)
+- [x] The generators cover every surface form and negative listed in the row (all-risky / no-risky waves; changes/approve verdicts; none/some/all flagged subsets)
+- [x] Settings are deterministic (`@settings(derandomize=True, max_examples=60, database=None)`)
+- [x] The tests call the decision seam, not a server (`reviewGroups` directly + script review labels via bridge)
+- [x] File declares `PROPERTIES = {"P-9": ..., "P-10": ...}` (merged map)
 **Dependencies:** Task 1 (needs `risk` scenario draws + review ledger)
 **Complexity:** High
 **Risk:** normal
