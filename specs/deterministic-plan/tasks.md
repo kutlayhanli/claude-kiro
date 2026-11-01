@@ -104,7 +104,7 @@
 **Risk:** normal
 ---
 ### Task 6: Workflow examples for fallback ready sources
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.1, 2.2, 2.3, 2.5, 2.6
 **Description:** Implements TC-5, TC-6, TC-7, TC-9, TC-10 in `tests/js/deterministic_plan.test.mjs` (TC-8 is the contract property, covered in Task 2). TC-5 (2.1): `args.deps` present + always-inconsistent → every `task N` request is head of `readyTasks` over `args.deps` + Done/running/merged, run completes. TC-6 (2.2): no `args.deps`, `planSeq` [good ready=[1,2], bad, bad] → third failure schedules from last-good-ready minus finished, degraded. TC-7 (2.3): no deps, [bad, bad], no good plan ever → no `task` label requested, running tasks still land, stop reason is planning failure. TC-9 (2.5): `deps={1:[],2:['99']}` unknown dep → `task 2` never requested, rest proceed. TC-10 (2.6): fallback-scheduled task reports BUSY then ERROR/blocked → `ok:false` with same `worktree busy:` reason as plan-scheduled, exactly one agent, run continues. Passes on seam plus `runPlan` alone (Tasks 9–10); asserts nothing about plan-agent counts.
@@ -113,9 +113,9 @@
 **Verify:** `node tests/js/deterministic_plan.test.mjs TC-5 TC-6 TC-7 TC-9 TC-10`
 **Verifies:** Task 10 (exercises `runPlan` fallback sources; passes without later gating code)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real script + fake runtime; per-request readiness checks)
-- [ ] Tests fail before the implementation exists for the right reason (halt on second failure; unknown-dep or last-good behavior absent)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real script + fake runtime; per-request readiness checks)
+- [x] Tests fail before the implementation exists for the right reason (halt on second failure; unknown-dep or last-good behavior absent)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs `planSeq`/`badReady` injector and bridge scenario draws)
 **Complexity:** Medium
 **Risk:** normal
