@@ -261,7 +261,7 @@
 **Risk:** normal
 ---
 ### Task 15: Workflow examples for wave-batched reviews
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 4.1, 4.2, 4.3, 4.4, 4.5, 4.6
 **Description:** Implements TC-17, TC-18, TC-19, TC-20, TC-21, TC-22 in `tests/js/deterministic_plan.test.mjs` using `risk` maps and `state.reviewTasks` ledger. (The TC-26 workflow half lives in Task 20: it needs Task 22's overhead fields.) TC-17 (4.1): 3 non-risky merged wave → exactly one batched review covering the wave, all approved. TC-18 (4.2): 2 normal + 1 safety → risky gets individual `review N`, normals share one batch. TC-19 (4.3): only-risky wave → each individual, no combined review. TC-20 (4.4): batched `changes` for task 2 only → task 2 revises alone, 1/3 approved untouched. TC-21 (4.5): batched `approve` → every covered task records approval. TC-22 (4.6): no wave merged since last review → no review requested. Needs the Task 18 review batching to pass.
