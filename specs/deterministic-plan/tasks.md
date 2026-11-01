@@ -112,9 +112,9 @@
 **Verify:** `node tests/js/deterministic_plan.test.mjs TC-5 TC-6 TC-7 TC-9 TC-10`
 **Verifies:** Task 10 (exercises `runPlan` fallback sources; passes without later gating code)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real script + fake runtime; per-request readiness checks)
-- [ ] Tests fail before the implementation exists for the right reason (halt on second failure; unknown-dep or last-good behavior absent)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real script + fake runtime; per-request readiness checks)
+- [x] Tests fail before the implementation exists for the right reason (halt on second failure; unknown-dep or last-good behavior absent)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs `planSeq`/`badReady` injector and bridge scenario draws)
 **Complexity:** Medium
 **Risk:** normal

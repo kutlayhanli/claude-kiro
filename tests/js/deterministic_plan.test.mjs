@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { runWorkflow } from './load_workflow.mjs'
+import { loadDecisions } from './load_decisions.mjs'
 import { project } from './fake_project.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -101,6 +102,132 @@ await test('TC-4 fallback excludes done/running tasks: always-inconsistent plan 
     assert.ok(!e.ready.includes('1'), 'no fallback list names the Done task')
   }
   assert.ok(logs.some(l => /plan 1/.test(l) && /inconsistent/.test(l)), 'the log names the triggering plan attempt')
+})
+
+await test('TC-5 fallback from deps: always-inconsistent plan schedules every task as head of readyTasks over args.deps (2.1)', async () => {
+  const deps = { 1: [], 2: [], 3: [] }
+  // Every plan answer lists the same tasks in an order contradicting the
+  // dependency graph (chain-then-numeric is ['1','2','3']); truthful deps stay.
+  const p = project({ deps, badReady: ['3', '2', '1'] })
+  const args = withGraph(deps, { maxConcurrent: 1 })
+  const { result, trace } = await runWorkflow(SCRIPT, { agent: p.agent, args })
+  assert.ok(idx(p.state, 'plan 1') >= 0, 'the start plan ran')
+  assert.ok(idx(p.state, 'plan 1 retry') > idx(p.state, 'plan 1'), 'the inconsistent plan was retried once')
+  assert.equal(result.halted, false, 'the run continued from the deterministic list instead of halting')
+  assert.notEqual(result.reason, 'planning step failed')
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3'], 'every task merged')
+  // Per-request check (landing-speed TC-55(b) pattern): each first task request is
+  // the head of readyTasks over args.deps plus the run's Done/running sets.
+  const { readyTasks } = loadDecisions(SCRIPT)
+  const d = strDeps(deps)
+  const order = Object.keys(d)
+  const requested = []
+  const done = new Set()
+  const firstTask = l => (String(l).match(/^task (\d+)(?: \[test\])?$/) || [])[1]
+  for (const e of trace) {
+    if (e.ev === 'end' && String(e.label).startsWith('land ')) for (const n of String(e.label).slice(5).split(' ')) done.add(n)
+    if (e.ev !== 'request') continue
+    const n = firstTask(e.label)
+    if (!n) continue
+    const head = readyTasks({ order, deps: d, done: [...done], exclude: [...requested], blocked: [] })[0]
+    assert.equal(n, head, `request #${requested.length + 1} (task ${n}) vs readyTasks head ${head}`)
+    requested.push(n)
+  }
+  assert.deepEqual(requested, ['1', '2', '3'], 'all three tasks were requested in deterministic order')
+  assert.equal(result.degraded, true, 'a fallback run is marked degraded')
+  const fallbacks = result.planFallbacks || []
+  assert.ok(fallbacks.length >= 1, 'at least one fallback was recorded')
+  for (const e of fallbacks) {
+    assert.equal(e.source, 'deps', 'every fallback came from the supplied deps layer (2.1)')
+  }
+})
+
+await test('TC-6 fallback from last-good: no deps, third plan failure schedules last-good-ready minus finished (2.2)', async () => {
+  const deps = { 1: [], 2: [], 3: ['1'] }
+  // Healthy ready is ['1','2'] (1 has the longer chain); the first plan is adopted
+  // as last-good, the landing-triggered plan 2 fails twice on unknown ids.
+  const p = project({ deps, planSeq: [{}, { ready: ['9'] }, { ready: ['8'] }] })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxConcurrent: 1 } })
+  assert.ok(idx(p.state, 'plan 2') >= 0, 'a landing-triggered plan ran after the good start plan')
+  assert.ok(idx(p.state, 'plan 2 retry') > idx(p.state, 'plan 2'), 'the inconsistent plan was retried once')
+  assert.equal(result.halted, false, 'the run continued from the last-good list instead of halting')
+  assert.notEqual(result.reason, 'planning step failed')
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3'], 'every task merged')
+  assert.equal(result.degraded, true, 'a fallback run is marked degraded')
+  const fallbacks = result.planFallbacks || []
+  assert.ok(fallbacks.length >= 1, 'at least one fallback was recorded')
+  const lg = fallbacks.find(e => e.source === 'last-good')
+  assert.ok(lg, 'a fallback came from the last-good layer (2.2)')
+  assert.ok(!lg.ready.includes('1') || result.merged.includes('1'), 'finished tasks are subtracted from the last-good list')
+  for (const n of lg.ready) assert.ok(['1', '2'].includes(n), `last-good fallback schedules only last-good tasks, got ${n}`)
+})
+
+await test('TC-7 halt with no data: no deps and no good plan ever means no task starts, running tasks land, planning failure reported (2.3)', async () => {
+  const deps = { 1: [], 2: [] }
+  const p = project({ deps, planSeq: [{ ready: ['9'] }, { ready: ['8'] }] })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs } })
+  assert.ok(idx(p.state, 'plan 1') >= 0, 'the start plan ran')
+  assert.ok(idx(p.state, 'plan 1 retry') > idx(p.state, 'plan 1'), 'the inconsistent plan was retried once')
+  assert.ok(!p.state.events.some(e => e.startsWith('task ')), 'no task label was ever requested')
+  assert.equal(result.halted, true, 'the run halted: neither deps nor last-good data exists')
+  assert.equal(result.reason, 'planning step failed', 'the stop reason is the planning failure')
+  assert.equal(result.degraded, false, 'a halted run with no fallback carries no degraded mark')
+  assert.ok(Array.isArray(result.planFallbacks), 'the result carries the fallback list')
+  assert.equal(result.planFallbacks.length, 0, 'no fallback was recorded')
+})
+
+await test('TC-9 unknown dep never scheduled: deps {1:[],2:[99]} with always-inconsistent plans (2.5)', async () => {
+  const deps = { 1: [], 2: ['99'] }
+  const p = project({ deps, badReady: ['2'] })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: withGraph(deps, { maxConcurrent: 1 }) })
+  assert.ok(idx(p.state, 'plan 1 retry') > idx(p.state, 'plan 1'), 'the inconsistent plan was retried once')
+  assert.ok(!p.state.events.includes('task 2'), 'task 2 (unknown dep 99) was never requested')
+  assert.ok(p.state.events.includes('task 1'), 'task 1 proceeded')
+  assert.deepEqual(result.merged.sort(), ['1'], 'task 1 merged and the run did not halt')
+  assert.equal(result.halted, false)
+  assert.equal(result.degraded, true, 'a fallback run is marked degraded')
+  const fallbacks = result.planFallbacks || []
+  assert.ok(fallbacks.length >= 1, 'at least one fallback was recorded')
+  for (const e of fallbacks) {
+    assert.equal(e.source, 'deps', 'every fallback came from the supplied deps layer')
+    assert.ok(!e.ready.includes('2'), 'no fallback list names the unknown-dep task')
+  }
+  // The seam agrees on the same inputs: task 2 is never ready, even when 99 is Done.
+  const { readyTasks } = loadDecisions(SCRIPT)
+  const d = strDeps(deps)
+  for (const done of [[], ['1'], ['1', '99']]) {
+    const ready = readyTasks({ order: ['1', '2'], deps: d, done, exclude: [], blocked: [] })
+    assert.ok(!ready.includes('2'), `readyTasks(done=${done}) = ${ready}`)
+  }
+})
+
+await test('TC-10 fallback BUSY/ERROR handled like plan-scheduled: same reason, one agent, run continues (2.6)', async () => {
+  const deps = { 1: [], 2: [] }
+  const wt = { 2: { state: 'BUSY', detail: 'claimed: someone' } }
+  // Fallback run: every plan answer contradicts the graph, so task 2 is fallback-scheduled.
+  const p = project({ deps, badReady: ['2', '1'], worktree: wt })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: withGraph(deps, { maxConcurrent: 2 }) })
+  // Control run: healthy plans, so task 2 is plan-scheduled with the same BUSY report.
+  const c = project({ deps, worktree: wt })
+  const { result: control } = await runWorkflow(SCRIPT, { agent: c.agent, args: withGraph(deps, { maxConcurrent: 2 }) })
+  assert.ok(idx(p.state, 'plan 1 retry') > idx(p.state, 'plan 1'), 'the inconsistent plan was retried once')
+  assert.equal(p.state.events.filter(e => e === 'task 2').length, 1, 'exactly one agent ran for the fallback-scheduled task')
+  const rows = Object.fromEntries((result.tasks || []).map(t => [t.task, t]))
+  assert.ok(rows['2'], 'task 2 has a record')
+  assert.equal(rows['2'].ok, false)
+  const controlRows = Object.fromEntries((control.tasks || []).map(t => [t.task, t]))
+  assert.equal(rows['2'].reason, controlRows['2'].reason, 'fallback BUSY reason matches the plan-scheduled BUSY reason')
+  assert.ok(String(rows['2'].reason).startsWith('worktree busy:'), `reason names the busy worktree: ${rows['2'].reason}`)
+  assert.ok(result.merged.includes('1'), 'the run continues: task 1 merged')
+  assert.equal(result.halted, false)
+  assert.equal(result.degraded, true, 'a fallback run is marked degraded')
+  // ERROR variant: a fallback-scheduled task whose worktree creation fails is reported the same way.
+  const q = project({ deps, badReady: ['2', '1'], worktree: { 2: { state: 'ERROR', detail: 'gone' } } })
+  const { result: r2 } = await runWorkflow(SCRIPT, { agent: q.agent, args: withGraph(deps, { maxConcurrent: 2 }) })
+  const rows2 = Object.fromEntries((r2.tasks || []).map(t => [t.task, t]))
+  assert.ok(rows2['2'] && !rows2['2'].ok, 'the ERROR task has a failing record')
+  assert.ok(String(rows2['2'].reason).startsWith('worktree create failed:'), `reason names the failed creation: ${rows2['2'].reason}`)
+  assert.ok(r2.merged.includes('1'), 'the run continues after the ERROR report')
 })
 
 const unknown = [...only].filter(id => !seen.has(id))
