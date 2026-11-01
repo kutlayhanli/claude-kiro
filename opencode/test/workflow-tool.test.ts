@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { defaultConfig, type CkConfig } from "../src/config.ts";
-import { registerWorkflowTool, parseWorkflowInput, resolveWorkflowTarget } from "../src/workflow-tool.ts";
+import { registerWorkflowTool, parseWorkflowInput, resolveWorkflowTarget, validateWorkflowArgs } from "../src/workflow-tool.ts";
 
 test("parseWorkflowInput requires exactly one target and an object args", () => {
   assert.deepEqual(parseWorkflowInput({ name: "spec:spec-create", args: { a: 1 } }), {
@@ -49,6 +49,19 @@ test("resolveWorkflowTarget honours scriptPath and inline scripts", () => {
     () => resolveWorkflowTarget({ scriptPath: "does-not-exist.js" }, root, root),
     /not found/,
   );
+});
+
+test("validateWorkflowArgs rejects a spec-implement call with only spec", () => {
+  assert.throws(
+    () => validateWorkflowArgs("spec:spec-implement", { spec: "demo" }),
+    /needs args\.spec, args\.root.*missing: args\.root/,
+  );
+  validateWorkflowArgs("spec:spec-implement", { spec: "demo", root: "/repo" });
+  assert.throws(
+    () => validateWorkflowArgs("spec:spec-create", { feature: "demo" }),
+    /missing: args\.projectRoot, args\.specDir/,
+  );
+  validateWorkflowArgs("inline", {});
 });
 
 test("a bad submission is rejected, a refusal retries once, then the workflow sees the error", async () => {

@@ -100,6 +100,7 @@ export async function registerWorkflowTool(runtime: WorkflowRuntime): Promise<()
       execute: async (input: unknown, context) => {
         const parsed = parseWorkflowInput(input);
         const target = resolveWorkflowTarget(parsed, runtime.packageRoot, runtime.projectDir);
+        validateWorkflowArgs(target.name, parsed.args ?? {});
         const started = await startWorkflow(runtime, target, parsed.args ?? {}, context.sessionID, children);
         const detail = target.kind === "file" ? target.name : `${target.name} (inline)`;
         return {
@@ -197,6 +198,28 @@ export function resolveWorkflowTarget(
     );
   }
   return { kind: "file", path, name: `spec:${stem}` };
+}
+
+/** Required `args` keys per shipped workflow. Checked before the runner starts so a
+ *  missing key fails the tool call at once instead of leaving a failed run record. */
+const REQUIRED_ARGS: Record<string, readonly string[]> = {
+  "spec:spec-implement": ["spec", "root"],
+  "spec:spec-create": ["projectRoot", "specDir", "feature"],
+};
+
+export function validateWorkflowArgs(targetName: string, args: Record<string, unknown>): void {
+  const required = REQUIRED_ARGS[targetName];
+  if (!required) return;
+  const missing = required.filter(
+    (key) => typeof args[key] !== "string" || !(args[key] as string).trim(),
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      `${targetName} needs ${required.map((key) => `args.${key}`).join(", ")} ` +
+        `(missing: ${missing.map((key) => `args.${key}`).join(", ")}). ` +
+        `Pass the full args object from the slash command skill and retry.`,
+    );
+  }
 }
 
 interface StartedRun {

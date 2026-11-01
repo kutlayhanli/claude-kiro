@@ -116,19 +116,29 @@ def rates(model: Optional[str], pricing: Optional[dict] = None) -> Optional[Dict
     if "input" not in r:
         return None
     r.setdefault("output", 0.0)
-    r.setdefault("cacheRead", 0.0)
+    # A missing cacheRead rate means unknown, never $0: price_usage returns None
+    # (cost unknown) when the model actually used cache reads.
+    r.setdefault("cacheRead", None)
     r.setdefault("cacheCreation", r["input"] * CACHE_WRITE_FACTOR)
     return r
 
 
 def price_usage(model: Optional[str], usage: Dict[str, int], pricing: Optional[dict] = None) -> Optional[float]:
-    """USD for a usage dict {input, output, cacheRead, cacheCreation}; None for an unknown model."""
+    """USD for a usage dict {input, output, cacheRead, cacheCreation}; None for an unknown model
+    or when a used key's rate is unknown."""
     r = rates(model, pricing)
     if r is None:
         return None
     if r.get("free") is True:
         return 0.0
-    return sum((usage.get(k) or 0) * r[k] for k in USAGE_KEYS) / 1e6
+    total = 0.0
+    for k in USAGE_KEYS:
+        used = usage.get(k) or 0
+        rate = r.get(k)
+        if used and rate is None:
+            return None
+        total += used * (rate or 0.0)
+    return total / 1e6
 
 
 # ---------------------------------------------------------------- config

@@ -244,6 +244,18 @@ def test_merge_refuses_claimed_or_dirty_task_and_dirty_target(repo):
     assert target.exit_code == 3 and "refusing to merge into main" in target.output
 
 
+def test_merge_ignores_generated_artifacts_only(repo):
+    # Issue #7: __pycache__/ and *.pyc must not block a merge.
+    ck(repo, "worktree", "create", "demo", "1")
+    commit_in(wt(repo, "1"), "one.txt", "1\n", "task 1")
+    pycache = wt(repo, "1") / "__pycache__"
+    pycache.mkdir(exist_ok=True)
+    (pycache / "one.cpython-312.pyc").write_bytes(b"\x00" * 16)
+    (wt(repo, "1") / ".pytest_cache" / "v").mkdir(parents=True, exist_ok=True)
+    merged = ck(repo, "worktree", "merge", "demo", "1")
+    assert merged.exit_code == 0, merged.output
+
+
 def test_merge_into_integration_branch_leaves_main_untouched(repo):
     assert "CREATED integration" in ck(repo, "worktree", "integration", "demo").output
     ck(repo, "worktree", "create", "demo", "1", "--base", "integrate/demo")

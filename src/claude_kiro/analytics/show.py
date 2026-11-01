@@ -598,11 +598,17 @@ def _cost_basis(buckets: Mapping[str, Mapping[str, Any]]) -> str:
         cache_write = b.get("cacheCreation") or 0
         input_usd = input_tokens * rate.get("input", 0.0) / 1e6
         output_usd = output_tokens * rate.get("output", 0.0) / 1e6
-        cache_usd = (cache_read * rate.get("cacheRead", 0.0) + cache_write * rate.get("cacheCreation", 0.0)) / 1e6
+        cache_read_rate = rate.get("cacheRead")
+        cache_usd = (cache_read * (cache_read_rate or 0.0) + cache_write * (rate.get("cacheCreation") or 0.0)) / 1e6
+        cache_part = (
+            f"{cache_read / 1e6:.1f}M×${cache_read_rate:.3f}/M"
+            if cache_read_rate is not None
+            else f"{cache_read / 1e6:.1f}M×unknown rate"
+        )
         parts.append(
             f"{model}: in {input_tokens / 1e6:.2f}M×${rate.get('input', 0.0):.2f}/M"
             f" + out {output_tokens / 1e6:.2f}M×${rate.get('output', 0.0):.2f}/M"
-            f" = ${input_usd + output_usd:.2f}; cache {cache_read / 1e6:.1f}M×${rate.get('cacheRead', 0.0):.3f}/M"
+            f" = ${input_usd + output_usd:.2f}; cache {cache_part}"
             f" = ${cache_usd:.2f}"
         )
     return "; ".join(parts)
