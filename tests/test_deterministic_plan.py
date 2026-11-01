@@ -516,7 +516,16 @@ def test_fallback_exclusions(bridge, data):  # noqa: F811
     """P-5 (1.5, 2.1): no merged, running, failed, or excluded task is ever in
     the fallback ready list, and scheduling one fallback task never alters
     another task's record (excluded tasks get no agent, land in neither merged
-    nor failed). Complement of P-4's order check: same oracle, minus excluded."""
+    nor failed). Complement of P-4's order check: same oracle, minus excluded.
+
+    The drawn exclusions are seeded into the bridge run: done/merged draws are
+    already-finished at fallback time (project done: never requested, records
+    untouched), running draws are slow tasks overlapping a slow
+    landing-triggered plan (TC-4 pattern: a later fallback fires while they
+    run and must not re-schedule them), failed draws are seeded BUSY failures
+    (requested once, never merged, run continues; their dependents stay
+    blocked). Absent-id exclusions are never requestable.
+    """
     sc = prepare_retry_sc(data.draw(scenarios(plan_seq="always-bad"), label="scenario"))
     sc["args"]["maxConcurrent"] = data.draw(st.sampled_from([1, 2, 3, 4]), label="maxConcurrent")
     sc["slots"] = data.draw(st.sampled_from([1, 2, 3, 4]), label="slots")
@@ -530,33 +539,57 @@ def test_fallback_exclusions(bridge, data):  # noqa: F811
     merged = data.draw(subsets([t for t in rest if t not in running]), label="merged")
     extra = data.draw(subsets(absent_ids(deps)), label="extra-exclude")[:3]
     exclude = sorted(set(running) | set(failed) | set(merged) | set(extra), key=lambda x: (len(x), x))
-    sc["project"]["done"] = list(done)  # already-merged tasks at fallback time
+    finished = sorted(set(done) | set(merged), key=lambda x: (len(x), x))  # already-finished at fallback time
+    sc["project"]["done"] = list(finished)
+    # In-flight running: slow tasks overlap a slow landing-triggered plan, so a
+    # later fallback fires while they run (no in-flight overlap with 1 ms plans).
+    for r in running:
+        sc["project"]["durations"][r] = 200
+    sc["project"]["planDurations"] = {**PLAN_MS_ALL, 2: 100}
+    # Seeded failures: BUSY on the first attempt ends the task there (2.6 path).
+    sc["project"]["worktree"] = {f: {"state": "BUSY", "detail": "seeded failure"} for f in failed}
 
-    # Seam: the deps layer minus excluded/done; nothing excluded is ever ready.
-    oracle = bridge.ready(deps, done=done)
-    fb = seam_fallback(True, oracle, [], exclude, done)
+    # Seam: the deps layer minus excluded/finished; nothing excluded is ever ready.
+    oracle = bridge.ready(deps, done=finished)
+    fb = seam_fallback(True, oracle, [], exclude, finished)
     assert set(fb["ready"]).isdisjoint(exclude)
-    assert set(fb["ready"]).isdisjoint(done)
+    assert set(fb["ready"]).isdisjoint(finished)
     assert set(fb["ready"]) <= set(oracle)
-    if set(oracle) - set(exclude) - set(done):
-        assert fb["ready"] == [t for t in oracle if t not in exclude and t not in done]
+    if set(oracle) - set(exclude) - set(finished):
+        assert fb["ready"] == [t for t in oracle if t not in exclude and t not in finished]
         assert fb["source"] == "deps"
     else:
         assert fb["ready"] == [] and fb["source"] is None
 
     # Bridge: fallback scheduling never touches an excluded task's record.
+    # Tasks transitively blocked by a seeded failure never merge either.
+    never = set(failed)
+    while True:
+        newly = {t for t in ids if t not in finished and t not in never and any(d in never for d in deps[t])}
+        if not newly:
+            break
+        never |= newly
     out = bridge.run(sc["project"], sc["args"], slots=sc["slots"])
     result = out["result"]
     requested = task_requests(out["trace"])
-    for x in exclude + done:
+    for x in list(finished) + extra:
         assert x not in requested, (x, requested)
-    assert result.get("outcome") == "complete", (result.get("outcome"), result.get("reason"))
-    assert set(result["merged"]).isdisjoint(exclude), result["merged"]
-    assert set(result["merged"]).isdisjoint(done), result["merged"]
+    rows = {t["task"] for t in result.get("tasks", [])}
+    assert rows.isdisjoint(finished), rows
+    assert rows.isdisjoint(extra), rows
+    for r in running:
+        assert requested.count(r) <= 1, (r, requested)  # never re-scheduled while in flight
     failed_ids = {f["task"] for f in result.get("failed", [])}
-    assert failed_ids.isdisjoint(exclude), failed_ids
-    assert failed_ids.isdisjoint(done), failed_ids
-    assert set(result["merged"]) == set(ids) - set(done), (result["merged"], done)
+    assert failed_ids <= set(failed), (failed_ids, failed)
+    assert failed_ids.isdisjoint(finished), failed_ids
+    assert set(result["merged"]).isdisjoint(finished), result["merged"]
+    assert set(result["merged"]).isdisjoint(set(failed) | set(extra)), result["merged"]
+    assert set(result["merged"]) == set(ids) - set(finished) - never, (result["merged"], finished, never)
+    if failed:
+        assert result.get("outcome") == "blocked", (result.get("outcome"), result.get("reason"))
+    else:
+        assert result.get("outcome") == "complete", (result.get("outcome"), result.get("reason"))
+    assert "planning step failed" not in (result.get("reason") or ""), result.get("reason")
 
 
 # --------------------------------------------------------------------------- P-6
@@ -661,17 +694,19 @@ def test_unknown_dep_never_ready(bridge, data):  # noqa: F811
         done = list(done) + [unknown]  # unknown id appears in done: still never ready
     done = sorted(set(done) | set(done_extra), key=lambda x: (len(x), x))
 
-    # Seam input: `readyTasks` never meets an unknown dep, so t is not ready.
-    script_ready = bridge.ready(deps2, done=[d for d in done if d in deps2])
+    # Seam input keeps the unknown-done negative: the unknown id stays in done,
+    # so the "even when that id appears in done" case reaches the seam.
+    script_ready = bridge.ready(deps2, done=done)
     assert t not in script_ready, (form, t, unknown, script_ready)
-    fb = seam_fallback(True, script_ready, [], [], [d for d in done if d in deps2])
+    fb = seam_fallback(True, script_ready, [], [], done)
     assert t not in fb["ready"], (form, t, unknown, fb)
 
-    # Bridge: the fallback run never requests t, proceeds with the rest.
+    # Bridge: the full done set (unknown ids included) reaches the run; relink
+    # stays off so the unknown dep is never rewritten into a known one.
     sc = prepare_retry_sc(data.draw(scenarios(plan_seq="always-bad"), label="scenario"))
     sc["project"].pop("relink", None)  # relink rewrites deps mid-run; the unknown dep must stay unknown
     sc["project"]["deps"] = {k: list(v) for k, v in deps2.items()}
-    sc["project"]["done"] = [d for d in done if d in deps2]
+    sc["project"]["done"] = list(done)
     sc["project"]["badReady"] = [str(present_max + 9)]  # inconsistent, keeps deps truthful
     sc["args"]["deps"] = {k: list(v) for k, v in deps2.items()}
     sc["args"]["remaining"] = list(deps2)
@@ -679,10 +714,26 @@ def test_unknown_dep_never_ready(bridge, data):  # noqa: F811
     result = out["result"]
     requested = task_requests(out["trace"])
     assert t not in requested, (form, t, unknown, requested)
-    assert result.get("outcome") == "complete", (result.get("outcome"), result.get("reason"))
     assert t not in result["merged"], (form, t, result["merged"])
-    assert set(result["merged"]) == set(deps2) - {t} - {d for d in done if d in deps2}, (
-        form, result["merged"], done)
+    # The run proceeds with the rest instead of halting on the plan; t stays
+    # unstarted, so the outcome is blocked on t — never a planning halt.
+    assert "planning step failed" not in (result.get("reason") or ""), result.get("reason")
+    assert result.get("outcome") == "blocked", (result.get("outcome"), result.get("reason"))
+    knownDone = {d for d in done if d in deps2}
+    if not any(t in v for v in deps2.values()):
+        # t blocks nothing: everything else merges.
+        assert set(result["merged"]) == set(deps2) - {t} - knownDone, (
+            form, result["merged"], done)
+    else:
+        # Per-task readiness with t treated as never-Done: every merged task
+        # had all deps satisfied, and every other open task still waits on an
+        # unmerged dep (no exact merged set: t's dependents stay blocked too).
+        mergedSet = set(result["merged"])
+        assert mergedSet.isdisjoint(knownDone), (form, mergedSet)
+        for u in mergedSet:
+            assert set(deps2[u]) <= knownDone | mergedSet, (form, u, deps2[u])
+        for u in set(deps2) - mergedSet - knownDone - {t}:
+            assert not set(deps2[u]) <= knownDone | mergedSet, (form, u, deps2[u])
 
     # Complement: known-and-Done deps + not excluded + sole open task IS schedulable.
     small = {"3": [], "7": ["3"]}
