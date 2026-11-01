@@ -833,13 +833,15 @@ def _transcript_source(*, run_id: str, workflow_name: str, run_data: Optional[Ma
                        fresh: bool, partial: bool, agent_run: Any = None) -> _RecordSource:
     """Build agent rows and run metadata from Claude transcripts; the shared assembler does the rest."""
     ctx = agent_run
+    supplied = bool(getattr(ctx, "supplied", False))
     versions: Counter = Counter()
     rows: List[dict] = []
     infos: List[dict] = []
     matcher = ctx.matcher if ctx is not None else None
+    timing_from_transcript = (True if ctx is not None else partial) and not supplied
     for a in agents:
         row, info = _build_agent(a, workflow_name, pricing, missing, versions,
-                                 True if ctx is not None else partial, matcher)
+                                 timing_from_transcript, matcher)
         rows.append(row)
         infos.append(info)
 
@@ -906,7 +908,7 @@ def _transcript_source(*, run_id: str, workflow_name: str, run_data: Optional[Ma
         session_id=session_id, session_usd=session_usd, session_jsonl=session_jsonl, root=root, spec=spec,
         branch=branch, ck_version=ck_version, collector_version=installed,
         claude_code_version=versions.most_common(1)[0][0] if versions else None,
-        cost_source="agent_transcripts" if ctx is not None else "priced_from_transcripts",
+        cost_source=("supplied_rows" if supplied else "agent_transcripts") if ctx is not None else "priced_from_transcripts",
         interruption_agents=agents, partial=partial, agent_run=ctx,
     )
 
