@@ -536,7 +536,7 @@ def test_fallback_exclusions(bridge, data):  # noqa: F811
     rest = [t for t in ids if t not in done]
     running = data.draw(subsets(rest), label="running")
     failed = data.draw(subsets([t for t in rest if t not in running]), label="failed")
-    merged = data.draw(subsets([t for t in rest if t not in running]), label="merged")
+    merged = data.draw(subsets([t for t in rest if t not in running and t not in failed]), label="merged")
     extra = data.draw(subsets(absent_ids(deps)), label="extra-exclude")[:3]
     exclude = sorted(set(running) | set(failed) | set(merged) | set(extra), key=lambda x: (len(x), x))
     finished = sorted(set(done) | set(merged), key=lambda x: (len(x), x))  # already-finished at fallback time
