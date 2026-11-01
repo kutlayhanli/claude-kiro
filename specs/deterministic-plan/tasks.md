@@ -364,7 +364,7 @@
 **Risk:** normal
 ---
 ### Task 21: Fixture-spec e2e gate and manual headline record
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 6.1, 6.2, 6.3
 **Description:** Implements TC-31, TC-32, TC-33 against the fixture scaffold from Task 1 (`specs/deterministic-plan/fixtures/fallback-spec/`). Owns the Harness Contract fixture-run contract test-side: the shim exposes a forced-inconsistent plan mode and a healthy mode. TC-31 (6.1, NFR-1): fixture spec with planning agent forced inconsistent → run retries once, falls back deterministically, completes, report shows degraded with fallback count ≥ 1. TC-32 (6.2): healthy mode → zero fallbacks, no degraded. TC-33 (6.3, NFR-2, manual not CI): equity re-run vs baseline `ck stats show --json` comparison recorded in the run report (lower plan/review/land share, no planning halt). This task runs real paid agents and mutates fixture branches, unlike every other test task.
