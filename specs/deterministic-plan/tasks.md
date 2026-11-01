@@ -87,7 +87,7 @@
 **Risk:** normal
 ---
 ### Task 5: Workflow examples for plan retry and clean adoption
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.4, 1.5
 **Description:** Implements TC-1, TC-3, TC-4 in `tests/js/deterministic_plan.test.mjs` (real script `plugin/workflows/spec-implement.js` via `load_workflow.mjs`, fake runtime + extended fake project). TC-1: `planSeq` [inconsistent, consistent] → `plan 1` then `plan 1 retry`, retry adopted, no degraded, fallback 0. TC-3: healthy plan agent → no degraded, fallback 0. TC-4: always-inconsistent with tasks 1–2 merged/running at fallback (seeded via `done`/in-flight `planDurations`) → fallback ready excludes merged/running/failed, their records unchanged (labels appear exactly once). (TC-2 lives in Task 19: it asserts no third plan attempt, which needs the Task 14 gating.) Assert only on `events`/`prompts`/`result`/`logs`, never script internals.
@@ -96,9 +96,9 @@
 **Verify:** `node tests/js/deterministic_plan.test.mjs TC-1 TC-3 TC-4`
 **Verifies:** Task 10 (exercises `runPlan` retry/adopt/exclude; passes without later gating code)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real workflow script under fake runtime, labels + result + logs)
-- [ ] Tests fail before the implementation exists for the right reason (script halts `planning step failed` on twice-inconsistent plan; no `degraded`/`plan_fallbacks` fields)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real workflow script under fake runtime, labels + result + logs)
+- [x] Tests fail before the implementation exists for the right reason (script halts `planning step failed` on twice-inconsistent plan; no `degraded`/`plan_fallbacks` fields)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs extended fake_project + Node suite skeleton)
 **Complexity:** Medium
 **Risk:** normal
