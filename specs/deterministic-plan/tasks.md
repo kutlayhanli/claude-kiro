@@ -209,7 +209,7 @@
 **Risk:** normal
 ---
 ### Task 12: Workflow examples for plan-agent schedule
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 3.2, 3.3, 3.4, 3.5, 3.6
 **Description:** Implements TC-11, TC-12, TC-13, TC-14, TC-15, TC-16 in `tests/js/deterministic_plan.test.mjs`. TC-11 (3.1): 12-task graph, healthy plans → non-retry plans only at start / first-after-landing / idle. TC-12 (3.2): maxConcurrent 2, task 1 long → task 2/3 requested with no intervening plan. TC-13 (3.3): freed slots with non-empty deterministic ready → no plan between finish and next `task N` (plan count ≤ 1 + landings + idle). TC-14 (3.4): idle re-read empty with landing in flight → at most one idle plan per arming. TC-15 (3.5): plan with externalDone + relink at plan 2 → view replaced, Done = plan Done ∪ merged-in-run. TC-16 (3.6): no `args.deps`, healthy plans → plan agent runs before next `task N` after freed slots. Needs the Task 14 gating and view replacement to pass.
