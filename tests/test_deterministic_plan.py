@@ -490,6 +490,152 @@ def test_degraded_marking(bridge, data):  # noqa: F811
             assert entry["ready"], entry  # a fallback that scheduled nothing is not a fallback
 
 
+# ------------------------------------------------- red-team: fallback counting (1.4)
+#
+# Requirement 1.4: a consistent first/retry plan is adopted with NO fallback
+# counted. Each test below is an adversarial shape where a naive counting
+# implementation over-counts (any retry, any echoed list, any first-failure,
+# empty ready, or repeated retries counted as a fallback). All run the real
+# script through the bridge with adversarial `planSeq` answers (Task 10's
+# `runPlan` counting; no gating needed). Before Task 10 they fail for the
+# right reason: the result carries no explicit fallback counting
+# (`degraded`/`planFallbacks`/`stats.planFallbacks` absent).
+
+
+def assert_no_fallback_counted(out: Dict) -> Dict:
+    """1.4 counting contract: consistent adoptions record an explicit zero.
+
+    Requires the fields present (not merely falsy/absent) so the tests fail
+    before Task 10 for the right reason (counting absent) and catch
+    over-counting after it.
+    """
+    result = out["result"]
+    assert result.get("degraded") is False, (
+        f"consistent plan must leave degraded False, got {result.get('degraded')!r}")
+    assert "planFallbacks" in result, "result must carry an explicit planFallbacks list (absent pre-Task-10)"
+    assert result.get("planFallbacks") == [], result.get("planFallbacks")
+    stats = result.get("stats") or {}
+    assert stats.get("planFallbacks") == 0, stats.get("planFallbacks")
+    return result
+
+
+def redteam_project(deps: Dict[str, List[str]], plan_seq, max_concurrent: int = 2) -> Dict:
+    """A deterministic bridge project/args pair with script-side readiness on."""
+    project = {
+        "deps": {t: list(ds) for t, ds in deps.items()},
+        "durations": {t: 2 for t in deps},
+        "planDurations": dict(PLAN_MS_ALL),
+        "planSeq": plan_seq,
+    }
+    args = {
+        "deps": {t: list(ds) for t, ds in deps.items()},
+        "remaining": list(deps),
+        "maxConcurrent": max_concurrent,
+    }
+    return {"project": project, "args": args}
+
+
+def test_redteam_fallback_counting_retry_success_transient_error(bridge):  # noqa: F811
+    """1.4 red-team: first attempt unusable (transient error), retry consistent.
+
+    A counter that increments on any retry/any failed attempt would record a
+    fallback here; the retry success must adopt with zero fallbacks.
+    """
+    deps = {"1": [], "2": ["1"], "3": ["2"]}
+    cfg = redteam_project(deps, [{"error": "transient boom"}, {}])
+    out = bridge.run(cfg["project"], cfg["args"], slots=2)
+    plans = plan_requests(out["trace"])
+    assert [l for l in plans if l in ("plan 1", "plan 1 retry")] == ["plan 1", "plan 1 retry"], plans
+    assert_no_fallback_counted(out)
+    assert set(out["result"]["merged"]) == set(deps)
+
+
+def test_redteam_fallback_counting_echoed_ready_not_fallback(bridge):  # noqa: F811
+    """1.4 red-team: plan echoes the deterministic ready list back verbatim.
+
+    The system's own output fed back as input: ready equals exactly what
+    `fallbackReady` would compute, so a counter keyed on "matches fallback
+    list" must still record zero (it was adopted, not fallen back to).
+    """
+    deps = {"1": [], "2": ["1"], "3": ["1"], "4": ["2", "3"]}
+    oracle = bridge.ready(deps)
+    assert oracle, oracle
+    cfg = redteam_project(deps, [{"ready": list(oracle)}])
+    out = bridge.run(cfg["project"], cfg["args"], slots=2)
+    plans = plan_requests(out["trace"])
+    assert plans.count("plan 1") == 1, plans
+    assert not [l for l in plans if l.endswith(" retry")], plans
+    assert_no_fallback_counted(out)
+    assert set(out["result"]["merged"]) == set(deps)
+
+
+def test_redteam_fallback_counting_ordering_only_difference(bridge):  # noqa: F811
+    """1.4 red-team: first answer has the right ready set in the wrong order.
+
+    Order-only mismatch is inconsistent (chain-then-numeric is significant),
+    so exactly one retry fires; the consistent retry must still count zero
+    fallbacks (a first-failure counter would over-count).
+    """
+    deps = {"1": [], "2": [], "3": ["1", "2"]}
+    oracle = bridge.ready(deps)
+    assert len(oracle) >= 2, oracle
+    assert seam_consistent(plan_view(deps, oracle), []) is True
+    shuffled = list(reversed(oracle))
+    assert shuffled != oracle
+    assert seam_consistent(plan_view(deps, shuffled), []) is False
+    cfg = redteam_project(deps, [{"ready": shuffled}, {}])
+    out = bridge.run(cfg["project"], cfg["args"], slots=2)
+    plans = plan_requests(out["trace"])
+    assert [l for l in plans if l in ("plan 1", "plan 1 retry")] == ["plan 1", "plan 1 retry"], plans
+    assert_no_fallback_counted(out)
+    assert set(out["result"]["merged"]) == set(deps)
+
+
+def test_redteam_fallback_counting_empty_ready_consistent(bridge):  # noqa: F811
+    """1.4 red-team: consistent plan with an empty ready list and all Done.
+
+    Boundary shape: nothing left to schedule is still a consistent adoption,
+    not a fallback trigger (an empty-ready counter would over-count).
+    """
+    deps = {"1": [], "2": ["1"]}
+    plan_seq = [{"remaining": [], "done": ["1", "2"], "ready": [], "deps": dict(deps)}]
+    assert seam_consistent(
+        {"remaining": [], "done": ["1", "2"], "ready": [], "deps": dict(deps)}, []) is True
+    cfg = redteam_project(deps, plan_seq)
+    out = bridge.run(cfg["project"], cfg["args"], slots=2)
+    plans = plan_requests(out["trace"])
+    assert plans.count("plan 1") == 1, plans
+    assert not [l for l in plans if l.endswith(" retry")], plans
+    assert_no_fallback_counted(out)
+
+
+def test_redteam_fallback_counting_double_retry_success(bridge):  # noqa: F811
+    """1.4 red-team: two separate plan steps each fail transiently then succeed.
+
+    Repeated retry-success episodes must still total zero fallbacks (a
+    cumulative retry counter would over-count); and no step ever attempts a
+    third plan call.
+    """
+    deps = {"1": [], "2": ["1"], "3": ["2"], "4": ["3"]}
+    cfg = redteam_project(
+        deps, [{"error": "boom-1"}, {}, {"error": "boom-2"}, {}], max_concurrent=1)
+    cfg["args"]["mergeBatch"] = 1
+    out = bridge.run(cfg["project"], cfg["args"], slots=1)
+    plans = plan_requests(out["trace"])
+    retries = [l for l in plans if l.endswith(" retry")]
+    assert len(retries) >= 2, (plans, retries)  # start + at least one landing step retried
+    for label in plans:  # never a third attempt for any step
+        assert not label.endswith(" retry retry"), plans
+        assert label.count("retry") <= 1, plans
+    by_step: Dict[str, int] = {}
+    for label in plans:
+        m = PLAN_LABEL.match(label)
+        assert m is not None, label
+        by_step[m.group(1)] = by_step.get(m.group(1), 0) + 1
+    assert all(n <= 2 for n in by_step.values()), (plans, by_step)
+    assert_no_fallback_counted(out)
+    assert set(out["result"]["merged"]) == set(deps)
+
 # ------------------------------------------------- P-5 / P-6 / P-7 (Story 2 group)
 #
 # Fallback layering and unknown-dep properties over the `fallbackReady` decision

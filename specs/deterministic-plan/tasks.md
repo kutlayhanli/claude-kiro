@@ -121,7 +121,7 @@
 **Risk:** normal
 ---
 ### Task 7: Red-team fallback counting
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.4
 **Description:** Try to break each SHALL NOT clause of Story 1 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test named `test_redteam_fallback_counting_*`. Targets 1.4 (consistent first/retry plan SHALL NOT count a fallback): retry-success-after-transient-error counted, plan echoing fallback `ready` back counted as fallback, `ready` ordering-only difference counted, empty-ready consistent plan counted, double-retry attempts counted. Runs against `runPlan` counting (Task 10); needs no gating.
@@ -130,9 +130,9 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_plan.py -k redteam_fallback_counting`
 **Verifies:** Task 10 (exercises `runPlan` fallback-counting; passes without later code)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real script via bridge; adversarial plan answers through `planSeq`)
-- [ ] Tests fail before the implementation exists for the right reason (fallback counting absent or over-counts consistent adoptions)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real script via bridge; adversarial plan answers through `planSeq`)
+- [x] Tests fail before the implementation exists for the right reason (fallback counting absent or over-counts consistent adoptions)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs bad-ready injector harness)
 **Complexity:** Medium
 **Risk:** normal
