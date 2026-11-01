@@ -1,0 +1,10 @@
+{
+  "spec": "fallback-spec",
+  "tasks": 3,
+  "verify": "uv run pytest -q -n auto",
+  "planShim": {
+    "shim": "./plan_shim.mjs",
+    "selectEnv": "FALLBACK_SPEC_PLAN_MODE",
+    "modes": ["healthy", "forced-inconsistent"]
+  }
+}
