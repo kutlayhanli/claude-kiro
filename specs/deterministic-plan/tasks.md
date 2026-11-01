@@ -121,7 +121,7 @@
 **Risk:** normal
 ---
 ### Task 7: Red-team fallback counting
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 1.4
 **Description:** Try to break each SHALL NOT clause of Story 1 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test named `test_redteam_fallback_counting_*`. Targets 1.4 (consistent first/retry plan SHALL NOT count a fallback): retry-success-after-transient-error counted, plan echoing fallback `ready` back counted as fallback, `ready` ordering-only difference counted, empty-ready consistent plan counted, double-retry attempts counted. Runs against `runPlan` counting (Task 10); needs no gating.
