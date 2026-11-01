@@ -130,9 +130,9 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_plan.py -k redteam_fallback_counting`
 **Verifies:** Task 10 (exercises `runPlan` fallback-counting; passes without later code)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real script via bridge; adversarial plan answers through `planSeq`)
-- [ ] Tests fail before the implementation exists for the right reason (fallback counting absent or over-counts consistent adoptions)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real script via bridge; adversarial plan answers through `planSeq`)
+- [x] Tests fail before the implementation exists for the right reason (fallback counting absent or over-counts consistent adoptions)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs bad-ready injector harness)
 **Complexity:** Medium
 **Risk:** normal
