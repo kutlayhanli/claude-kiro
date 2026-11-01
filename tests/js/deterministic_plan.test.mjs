@@ -46,7 +46,8 @@ await test('TC-1 retry once then adopt: inconsistent first plan retries with the
   const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: withGraph(deps) })
   assert.ok(idx(p.state, 'plan 1') >= 0, 'the start plan ran')
   assert.ok(idx(p.state, 'plan 1 retry') > idx(p.state, 'plan 1'), 'exactly one retry followed the inconsistent plan')
-  assert.ok(!p.state.events.some(e => /^plan 1 retry /.test(e)), 'no third plan attempt after the retry')
+  assert.deepEqual(p.state.events.filter(e => e === 'plan 1' || e === 'plan 1 retry'), ['plan 1', 'plan 1 retry'], 'no third plan attempt after the retry')
+  assert.equal(p.state.prompts['plan 1 retry'], p.state.prompts['plan 1'], 'the retry ran with the same inputs (same per-attempt exclude capture)')
   assert.deepEqual(result.merged.sort(), ['1', '2'], 'the retry plan was adopted and the run completed')
   assert.equal(result.halted, false)
   assert.ok(logs.some(l => l.includes('plan 1: the plan is inconsistent')), 'the log names the failed plan attempt')
@@ -67,24 +68,38 @@ await test('TC-3 healthy plan: no degraded mark and no fallback (1.4)', async ()
   assert.equal(result.planFallbacks.length, 0, 'a healthy run records no fallback')
 })
 
-await test('TC-4 fallback excludes done tasks: always-inconsistent plan still completes without touching done records (1.5)', async () => {
+await test('TC-4 fallback excludes done/running tasks: always-inconsistent plan still completes without touching done/running records (1.5)', async () => {
   const deps = { 1: [], 2: [], 3: [] }
   // Every plan answer lists ready tasks in an order contradicting the dependency
   // graph (chain-then-numeric order is ['2', '3']): inconsistent against truthful deps.
-  const p = project({ deps, done: ['1'], badReady: ['3', '2'] })
+  // Task 1 is already merged (done seed); task 2 is slow so it is still running
+  // when the landing-triggered plan 2 runs and falls back (planDurations widens
+  // the overlap so the running exclusion is deterministic, not timing luck).
+  const p = project({ deps, done: ['1'], badReady: ['3', '2'], durations: { 2: 200 }, planDurations: { 2: 100 } })
   const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: withGraph(deps) })
   assert.ok(idx(p.state, 'plan 1') >= 0, 'the start plan ran')
   assert.ok(idx(p.state, 'plan 1 retry') > idx(p.state, 'plan 1'), 'the inconsistent plan was retried once')
   assert.equal(result.halted, false, 'the run continued from the deterministic list instead of halting')
   assert.notEqual(result.reason, 'planning step failed')
   assert.deepEqual(result.merged.sort(), ['2', '3'], 'the remaining tasks merged')
+  assert.ok(idx(p.state, 'plan 2') >= 0, 'a landing-triggered plan ran while task 2 was still in flight')
   assert.ok(!p.state.events.includes('task 1'), 'the Done task was never requested')
   for (const n of ['2', '3']) {
     assert.equal(p.state.events.filter(e => e === `task ${n}`).length, 1, `task ${n} started exactly once`)
   }
+  const rows = Object.fromEntries((result.tasks || []).map(t => [t.task, t]))
+  assert.deepEqual(Object.keys(rows).sort(), ['2', '3'], 'only scheduled tasks have records; the Done task record is untouched')
+  assert.ok(rows['2'].ok && rows['3'].ok, 'scheduled tasks merged without their records changing')
   assert.equal(result.degraded, true, 'a fallback run is marked degraded')
-  assert.ok(result.planFallbacks.length >= 1, 'at least one fallback was recorded')
-  assert.ok(result.planFallbacks.every(e => !e.ready.includes('1')), 'no fallback list names the Done task')
+  const fallbacks = result.planFallbacks || []
+  assert.ok(fallbacks.length >= 1, 'at least one fallback was recorded')
+  assert.deepEqual(fallbacks[0].ready, ['2', '3'], 'the start fallback scheduled the deterministic ready list')
+  assert.equal(fallbacks[0].planStep, 1, 'the fallback names the triggering plan step (1.3)')
+  assert.equal(fallbacks[0].trigger, 'start', 'the fallback names its trigger (1.3)')
+  for (const e of fallbacks) {
+    assert.equal(e.source, 'deps', 'every fallback came from the supplied deps layer (2.1)')
+    assert.ok(!e.ready.includes('1'), 'no fallback list names the Done task')
+  }
   assert.ok(logs.some(l => /plan 1/.test(l) && /inconsistent/.test(l)), 'the log names the triggering plan attempt')
 })
 
