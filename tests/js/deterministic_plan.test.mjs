@@ -167,24 +167,28 @@ await test('TC-6 fallback from last-good: no deps, third plan failure schedules 
 })
 
 await test('TC-7 halt with no data: no deps and an emptied last-good list means no new task starts, running tasks still land, planning failure reported (2.3)', async () => {
-  const deps = { 1: [], 2: [] }
-  // No args.deps (dep-less). The start plan is good with ready ['1','2'], so it
-  // is stored as last-good and both tasks start; task 1 is fast, task 2 is slow
-  // (durations/planDurations overlap as in TC-4 so the in-flight halt is
-  // deterministic, not timing luck). Task 1 lands, triggering plan 2, which
-  // fails twice on unknown ids. The last-good fallback subtracts finished task
-  // 1 and still-running task 2, leaving nothing — so the run halts while task 2
-  // is still in flight, and task 2 still lands afterwards.
-  const p = project({ deps, planSeq: [{ ready: ['1', '2'] }, { ready: ['9'] }, { ready: ['8'] }], durations: { 2: 200 }, planDurations: { 2: 100 } })
+  const deps = { 1: [], 2: [], 3: ['1', '2'] }
+  // No args.deps (dep-less). The start plan is good with ready ['1','2'] (task 3
+  // waits on 1 and 2), so it is stored as last-good and tasks 1 and 2 start;
+  // task 1 is fast, task 2 is slow (durations/planDurations overlap as in TC-4
+  // so the in-flight halt is deterministic, not timing luck). Task 1 lands,
+  // triggering plan 2, whose ready names finished task 1 (inconsistent:
+  // nothing is schedulable while the open tasks are excluded); the retry names
+  // still-running task 2 (also inconsistent). The last-good fallback subtracts
+  // finished task 1 and still-running task 2, leaving nothing — so the run
+  // halts with task 3 unstarted while task 2 is still in flight, and task 2
+  // still lands afterwards.
+  const p = project({ deps, planSeq: [{ ready: ['1', '2'] }, { ready: ['1'] }, { ready: ['2'] }], durations: { 2: 400 }, planDurations: { 2: 100 } })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxConcurrent: 2 } })
   assert.ok(idx(p.state, 'plan 1') >= 0, 'the start plan ran')
   assert.ok(!p.state.events.includes('plan 1 retry'), 'the good start plan needed no retry')
   assert.ok(idx(p.state, 'plan 2') >= 0, 'a landing-triggered plan ran while task 2 was still in flight')
   assert.ok(idx(p.state, 'plan 2 retry') > idx(p.state, 'plan 2'), 'the inconsistent plan was retried once')
   assert.equal(p.state.events.filter(e => e === 'task 2').length, 1, 'task 2 started exactly once, before the halt')
+  assert.ok(!p.state.events.includes('task 3'), 'task 3 (deps unmet at halt) was never requested')
   assert.ok(idx(p.state, 'task 2') < idx(p.state, 'plan 2 retry'), 'task 2 was already in flight when the retry failed')
   const afterHalt = p.state.events.slice(idx(p.state, 'plan 2 retry') + 1)
-  assert.ok(!afterHalt.some(e => e.startsWith('task ')), 'no new task label was requested after the failed retry')
+  assert.ok(!afterHalt.some(e => /^task \d+$/.test(e)), 'no new task label was requested after the failed retry')
   const rows = Object.fromEntries((result.tasks || []).map(t => [t.task, t]))
   assert.ok(rows['2'] && rows['2'].ok, 'the in-flight task still landed and has a passing record')
   assert.deepEqual(result.merged.sort(), ['1', '2'], 'both tasks merged')
