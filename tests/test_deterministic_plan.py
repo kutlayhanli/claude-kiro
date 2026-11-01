@@ -18,18 +18,27 @@ Imports of project code stay inside test bodies/helpers so the module always
 collects.
 """
 
+import copy
 import json
 import random
+import re
 import subprocess
 from pathlib import Path
 from typing import Dict, List
 
-from hypothesis import given, settings
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
-from landing_bridge import ck_plan, dags, git_repo, subsets, write_spec  # noqa: F401
+from landing_bridge import bridge, ck_plan, dags, git_repo, scenarios, subsets, write_spec  # noqa: F401
 
-PROPERTIES = {"P-4": "test_fallback_matches_ck_plan"}
+PROPERTIES = {
+    "P-1": "test_retry_once",
+    "P-2": "test_fallback_continues",
+    "P-3": "test_degraded_marking",
+    "P-4": "test_fallback_matches_ck_plan",
+}
+
+BRIDGE_SETTINGS = settings(derandomize=True, max_examples=60, database=None, deadline=None)
 
 SETTINGS = settings(derandomize=True, max_examples=200, database=None, deadline=None)
 
@@ -199,3 +208,280 @@ def test_fallback_matches_ck_plan_exclude():
         # Excluding nothing recovers the full ready list.
         full = fallback_via_seam(bare["remaining"], bare["deps"], bare["done"], [])
         assert full["ready"] == bare["ready"]
+
+
+# ------------------------------------------------- P-1 / P-2 / P-3 (Story 1 group)
+#
+# Bridge-driven properties over scenarios() x planSeq shapes (complements of the
+# TC-1/TC-2 example cases). Decision seams called directly: `planConsistent`
+# (P-1, P-3) and `fallbackReady` (P-2, design.md D5 shape). Before Tasks 9-10 the
+# fallback tests fail for the right reason: the loader raises "decision function
+# missing in the decisions block: fallbackReady", and the script halts an
+# always-inconsistent run with "planning step failed" instead of continuing
+# degraded. Imports stay at module level (landing_bridge exists); project-code
+# seams are reached only through the Node loader / bridge subprocess calls.
+
+
+PLAN_LABEL = re.compile(r"^plan (\d+)( retry)?$")
+PLAN_MS_ALL = {str(k): 1 for k in range(1, 400)}  # every plan call takes 1 ms of virtual time
+
+CONSISTENT_CALLER = (
+    f"import {{ loadDecisions }} from {LOAD_DECISIONS_URL!r};"
+    "const input = JSON.parse(process.argv[1]);"
+    "const { planConsistent } = loadDecisions();"
+    "console.log(JSON.stringify({ consistent: planConsistent(input.plan, input.exclude) }));"
+)
+
+# Design.md D5 shape: fallbackReady({ hasDeps, scriptReady, lastGoodReady, exclude, done }).
+FALLBACK_CALLER = (
+    f"import {{ loadDecisions }} from {LOAD_DECISIONS_URL!r};"
+    "const input = JSON.parse(process.argv[1]);"
+    "const { fallbackReady } = loadDecisions({ extra: ['fallbackReady'] });"
+    "const out = fallbackReady({ hasDeps: input.hasDeps, scriptReady: input.scriptReady,"
+    " lastGoodReady: input.lastGoodReady, exclude: input.exclude, done: input.done });"
+    "console.log(JSON.stringify({ ready: out.ready, source: out.source }));"
+)
+
+
+def seam_consistent(plan: Dict, exclude) -> bool:
+    """Call the `planConsistent` decision seam on one plan answer (exists today)."""
+    payload = json.dumps({"plan": plan, "exclude": list(exclude)})
+    proc = subprocess.run(
+        ["node", "--input-type=module", "-e", CONSISTENT_CALLER, payload],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, f"planConsistent seam call failed: {proc.stderr.strip()}"
+    return json.loads(proc.stdout)["consistent"]
+
+
+def seam_fallback(has_deps: bool, script_ready, last_good_ready, exclude, done) -> Dict:
+    """Call the `fallbackReady` decision seam (added by Task 9; missing until then)."""
+    payload = json.dumps(
+        {
+            "hasDeps": has_deps,
+            "scriptReady": list(script_ready),
+            "lastGoodReady": list(last_good_ready),
+            "exclude": list(exclude),
+            "done": list(done),
+        }
+    )
+    proc = subprocess.run(
+        ["node", "--input-type=module", "-e", FALLBACK_CALLER, payload],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, f"fallbackReady seam call failed: {proc.stderr.strip()}"
+    return json.loads(proc.stdout)
+
+
+def plan_view(deps: Dict[str, List[str]], ready, done=()) -> Dict:
+    """A plan-agent answer shape for the `planConsistent` seam: truthful deps, given ready."""
+    return {
+        "remaining": list(deps),
+        "done": list(done),
+        "ready": list(ready),
+        "deps": {k: list(v) for k, v in deps.items()},
+    }
+
+
+def prepare_retry_sc(sc: Dict) -> Dict:
+    """A scenarios() draw with script-side readiness on (args.deps/remaining from the graph)."""
+    sc = copy.deepcopy(sc)
+    sc["project"]["planDurations"] = dict(PLAN_MS_ALL)
+    deps = sc["project"]["deps"]
+    sc["args"]["deps"] = {t: list(ds) for t, ds in deps.items()}
+    sc["args"]["remaining"] = list(deps)
+    return sc
+
+
+def plan_requests(trace) -> List[str]:
+    return [e["label"] for e in trace if e["ev"] == "request" and PLAN_LABEL.match(e["label"])]
+
+
+def fallback_entries(result: Dict) -> List[Dict]:
+    """The run's fallback records via one accessor (exact field names are Task 22's choice).
+
+    Design shape: result["planFallbacks"] = [{planStep, trigger, source, ready}, ...].
+    Harness-contract shape: {"count": int, "triggers": [label, ...]}.
+    """
+    fb = result.get("planFallbacks", [])
+    if isinstance(fb, dict):
+        return [{"trigger": t} for t in fb.get("triggers", [])]
+    return list(fb or [])
+
+
+def fallback_count(result: Dict) -> int:
+    entries = fallback_entries(result)
+    stats = result.get("stats") or {}
+    return stats.get("planFallbacks", len(entries))
+
+
+CORRUPTIONS = ["omitted", "unknown", "extra-nonready"]  # drawn via corruption_kinds()
+
+
+def corrupt_ready(oracle: List[str], deps: Dict[str, List[str]], kind: str, rng: random.Random) -> List[str]:
+    """An inconsistent first answer covering every surface form the P-1 row names.
+
+    Every form stays inconsistent *after* the script's `normalizePlan` (unknown ids
+    are filtered there, so the check in `runPlan` never sees them): that is the
+    input domain `planConsistent` actually decides on (design.md D2, error case
+    2.5). A redundant unknown id next to the full correct list would normalize to
+    the oracle and be adopted without retry, so the "unknown" form replaces the
+    list instead of extending it.
+    """
+    ids = list(deps)
+    absent = str(max(int(t) for t in ids) + 1)  # near-miss: max id + 1, never a task
+    if kind == "extra-nonready":
+        # Ready holds a non-ready id (a known task, so it survives normalization).
+        # Only drawn when such a task exists (caller checks).
+        non_ready = [t for t in ids if t not in oracle]
+        return list(oracle) + [rng.choice(non_ready)]
+    if kind == "omitted":
+        # Ready omits a ready id (caller guarantees a non-empty oracle).
+        return list(oracle[1:])
+    return [absent]  # ready lists an unknown id (and omits the real ready list)
+
+
+def corruption_kinds(oracle: List[str], deps: Dict[str, List[str]]) -> List[str]:
+    """Drawable P-1 corruptions for one graph: the extra-nonready form needs a
+    non-ready task (impossible when every task is independent)."""
+    kinds = ["omitted", "unknown"]
+    if any(t not in oracle for t in deps):
+        kinds.append("extra-nonready")
+    return kinds
+
+
+# --------------------------------------------------------------------------- P-1
+
+
+@BRIDGE_SETTINGS
+@given(st.data())
+def test_retry_once(bridge, data):  # noqa: F811
+    """P-1 (1.1): an inconsistent first answer is retried exactly once with the same
+    inputs; a consistent answer is never retried. Complement of P-2's fallback arm
+    (healthy second answers here). Metamorphic: the same scenario with a healthy
+    first answer shows no retry and merges the same set."""
+    sc = prepare_retry_sc(data.draw(scenarios(plan_seq="consistent"), label="scenario"))
+    sc["args"]["maxConcurrent"] = data.draw(st.sampled_from([1, 2, 3, 4]), label="maxConcurrent")
+    sc["slots"] = data.draw(st.sampled_from([1, 2, 3, 4]), label="slots")
+    deps = sc["project"]["deps"]
+    oracle = bridge.ready(deps)  # the healthy ready list over empty done/exclude
+    assume(oracle)  # every draw has a root task, so the oracle is non-empty
+    # Drawn after the oracle: extra-nonready needs a non-ready task in this graph.
+    kind = data.draw(st.sampled_from(corruption_kinds(oracle, deps)), label="corruption")
+    bad = corrupt_ready(oracle, deps, kind, random.Random(repr((sorted(deps.items()), oracle, kind))))
+
+    # The seams agree with the corruption: bad is inconsistent, the oracle is not.
+    assert seam_consistent(plan_view(deps, bad), []) is False, kind
+    assert seam_consistent(plan_view(deps, oracle), []) is True
+
+    sc["project"]["planSeq"] = [{"ready": bad}, {}]  # TC-1 shape: inconsistent, then consistent
+    out = bridge.run(sc["project"], sc["args"], slots=sc["slots"])
+    plans = plan_requests(out["trace"])
+    start_attempts = [label for label in plans if label in ("plan 1", "plan 1 retry")]
+    assert start_attempts == ["plan 1", "plan 1 retry"], (kind, plans)  # exactly one retry, no third attempt
+    assert all(label not in ("plan 1", "plan 1 retry") for label in plans[2:]), (kind, plans)
+
+    # The consistent retry is adopted with no fallback counted (1.4).
+    result = out["result"]
+    assert not result.get("degraded"), (kind, result.get("degraded"))
+    assert fallback_entries(result) == [], (kind, result.get("planFallbacks"))
+
+    # Metamorphic complement: a healthy first answer is never retried, same merged set.
+    healthy = prepare_retry_sc(copy.deepcopy(sc))
+    healthy["project"]["planSeq"] = [{}, {}]
+    healthy_out = bridge.run(healthy["project"], healthy["args"], slots=healthy["slots"])
+    healthy_plans = plan_requests(healthy_out["trace"])
+    assert [label for label in healthy_plans if label == "plan 1"] == ["plan 1"], (kind, healthy_plans)
+    merged = set(result["merged"])
+    healthy_merged = set(healthy_out["result"]["merged"])
+    assert merged == healthy_merged, (kind, merged, healthy_merged)
+
+
+# --------------------------------------------------------------------------- P-2
+
+
+@BRIDGE_SETTINGS
+@given(st.data())
+def test_fallback_continues(bridge, data):  # noqa: F811
+    """P-2 (1.2): when the retry is also inconsistent, the run continues from the
+    deterministic ready list and never halts with a planning stop; running tasks
+    still land. Complement of P-1's retry arm. The script's scheduling agrees with
+    the `fallbackReady` seam on the same inputs (TC-35 half)."""
+    sc = prepare_retry_sc(data.draw(scenarios(plan_seq="always-bad"), label="scenario"))
+    sc["args"]["maxConcurrent"] = data.draw(st.sampled_from([1, 2, 3, 4]), label="maxConcurrent")
+    sc["slots"] = data.draw(st.sampled_from([1, 2, 3, 4]), label="slots")
+    deps = sc["project"]["deps"]
+    ids = list(deps)
+    # Red landings and conflicts from the P-2 domain (small conflict draws stay resolvable).
+    sc["project"]["checkRed"] = data.draw(subsets(ids), label="checkRed")
+    sc["project"]["conflicts"] = data.draw(subsets(ids[:2]), label="conflicts")
+
+    # Seam agreement on the same inputs the script will use: deps layer, ck-plan order.
+    oracle = bridge.ready(deps)
+    fb = seam_fallback(True, oracle, [], [], [])
+    assert fb["ready"] == oracle, (oracle, fb)
+    assert (fb["source"] == "deps") if oracle else (fb["ready"] == [] and fb["source"] is None)
+
+    out = bridge.run(sc["project"], sc["args"], slots=sc["slots"])
+    result = out["result"]
+    requests = [e["label"] for e in out["trace"] if e["ev"] == "request"]
+    assert "plan 1 retry" in requests, requests[:5]  # the retry happened before any fallback
+    assert result.get("reason") != "planning step failed", result.get("reason")
+    assert "planning step failed" not in (result.get("reason") or ""), result.get("reason")
+    assert result.get("outcome") == "complete", (result.get("outcome"), result.get("reason"))
+    merged = set(result["merged"])
+    assert merged == set(ids), (merged, set(ids))  # the deterministic-oracle merged set
+
+
+# --------------------------------------------------------------------------- P-3
+
+
+@BRIDGE_SETTINGS
+@given(st.data())
+def test_degraded_marking(bridge, data):  # noqa: F811
+    """P-3 (1.3): every fallback run is marked degraded, the fallback count equals
+    the number of triggering plan attempts, and each recorded trigger names a real
+    `plan k` / `plan k retry` label from the trace. Same draws as P-2."""
+    sc = prepare_retry_sc(data.draw(scenarios(plan_seq="always-bad"), label="scenario"))
+    sc["args"]["maxConcurrent"] = data.draw(st.sampled_from([1, 2, 3, 4]), label="maxConcurrent")
+    sc["slots"] = data.draw(st.sampled_from([1, 2, 3, 4]), label="slots")
+    deps = sc["project"]["deps"]
+    ids = list(deps)
+    sc["project"]["checkRed"] = data.draw(subsets(ids), label="checkRed")
+    sc["project"]["conflicts"] = data.draw(subsets(ids[:2]), label="conflicts")
+
+    # The always-bad answers really are inconsistent: ready holds an id absent
+    # from the graph (dynamic max id + 1, never a task), omitting the real list.
+    absent = str(max(int(t) for t in ids) + 1)
+    assert seam_consistent(plan_view(deps, [absent]), []) is False
+
+    out = bridge.run(sc["project"], sc["args"], slots=sc["slots"])
+    result = out["result"]
+    requests = [e["label"] for e in out["trace"] if e["ev"] == "request"]
+    plan_labels = set(plan_requests(out["trace"]))
+
+    # Every plan answer is inconsistent, so every plan step fails twice: each
+    # `plan k retry` label in the trace is a triggering attempt that must have
+    # exactly one recorded fallback. The expected count comes from the trace,
+    # never from the result accessor, so an implementation that under-counts
+    # (e.g. one entry for N triggering pairs) cannot pass.
+    triggering = [label for label in plan_requests(out["trace"]) if label.endswith(" retry")]
+    retry_steps = {PLAN_LABEL.match(label).group(1) for label in triggering}
+    assert len(triggering) >= 1, (requests[:5], sorted(plan_labels))
+    assert result.get("degraded") is True, (result.get("degraded"), result.get("reason"))
+    entries = fallback_entries(result)
+    assert len(entries) == len(triggering), (len(entries), triggering)
+    assert fallback_count(result) == len(triggering), (fallback_count(result), triggering)
+    for entry in entries:
+        trigger = entry.get("trigger")
+        step = entry.get("planStep")
+        label = trigger if (isinstance(trigger, str) and PLAN_LABEL.match(trigger)) else f"plan {step}"
+        assert label in plan_labels, (entry, sorted(plan_labels))  # trigger names a real trace label
+        matched = PLAN_LABEL.match(label)
+        assert matched is not None and matched.group(1) in retry_steps, (entry, triggering)
+        if "ready" in entry:
+            assert entry["ready"], entry  # a fallback that scheduled nothing is not a fallback
