@@ -138,7 +138,7 @@
 **Risk:** normal
 ---
 ### Task 8: Red-team fallback guessing
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 2.5
 **Description:** Try to break each SHALL NOT clause of Story 2 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test named `test_redteam_unknown_dep_*`. Targets 2.5 (unknown-dep task SHALL NOT start on a guess): numeric-vs-string id confusion (`'2'` vs `2`, `'02'`), dangling id that matches a `done`-only entry, dep id present only in `exclude`, case/whitespace-mutated dep keys, fallback fed the plan's own bad `ready` as `done`. Runs against seam plus `runPlan` scriptReady computation (Tasks 9–10); needs no gating.
