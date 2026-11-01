@@ -279,7 +279,7 @@
 **Risk:** normal
 ---
 ### Task 16: Property tests for wave-review batching bound
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 4.1, 4.2, 4.3, 4.4, 4.5, 4.6
 **Description:** Covers P-9, P-10 (Story 4 group; seam `reviewGroups`). P-9: any run with W merged waves (≥1 non-risky) and R risky → review count ≤ W + R, every risky task has individual label, zero-merged waves get no review. P-10: any batched review with per-task verdicts → flagged tasks get own revise + re-review, unflagged record approval without extra agents; all-approve batch approves all covered. Generators `scenarios()` × `risk` maps (0–100% safety incl. all-risky/no-risky waves) × verdict sequences incl. `changes`; wave sizes 1–6 × flagged subsets (none/some/all). Also hosts TC-30 body. Needs the Task 18 review batching to pass.
@@ -289,10 +289,10 @@
 **Properties:** P-9, P-10
 **Verifies:** Task 18 (exercises `reviewGroups` plus script review labels; fails until that code exists); Task 36 (counts each `review-wave` label as one review agent via the role mapping)
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the row (all-risky / no-risky waves; changes/approve verdicts; none/some/all flagged subsets)
-- [ ] Settings are deterministic (`@settings(derandomize=True, max_examples=60, database=None)`)
-- [ ] The tests call the decision seam, not a server (`reviewGroups` directly + script review labels via bridge)
-- [ ] File declares `PROPERTIES = {"P-9": ..., "P-10": ...}` (merged map)
+- [x] The generators cover every surface form and negative listed in the row (all-risky / no-risky waves; changes/approve verdicts; none/some/all flagged subsets)
+- [x] Settings are deterministic (`@settings(derandomize=True, max_examples=60, database=None)`)
+- [x] The tests call the decision seam, not a server (`reviewGroups` directly + script review labels via bridge)
+- [x] File declares `PROPERTIES = {"P-9": ..., "P-10": ...}` (merged map)
 **Dependencies:** Task 1 (needs `risk` scenario draws + review ledger)
 **Complexity:** High
 **Risk:** normal
