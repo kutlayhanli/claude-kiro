@@ -374,9 +374,9 @@
 **Verify:** `uv run pytest -q -n auto`
 **Verifies:** Task 22 (e2e proves fallback completion plus degraded marking; fails until that code exists)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real workflow script + real `ck plan` data path on fixture repo; TC-33 manual `ck stats` comparison)
-- [ ] Tests fail before the implementation exists for the right reason (fixture halts with planning failure instead of completing degraded)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real workflow script + real `ck plan` data path on fixture repo; TC-33 manual `ck stats` comparison)
+- [x] Tests fail before the implementation exists for the right reason (fixture halts with planning failure instead of completing degraded)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs fixture scaffold + shim contract)
 **Complexity:** High
 **Risk:** safety (runs real paid agents and mutates fixture branches, including the manual equity re-run)
