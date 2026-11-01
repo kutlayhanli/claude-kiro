@@ -68,7 +68,7 @@
 **Risk:** normal
 ---
 ### Task 4: Property tests for fallback layering and unknown deps
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.5, 2.1, 2.2, 2.5
 **Description:** Covers P-5, P-6, P-7 (Story 2 group; seam `fallbackReady`). P-5: no merged/running/failed/excluded task ever in fallback ready; scheduling one never alters another record (exclude = running ∪ failed ∪ merged; running via `planDurations`). P-6: no-`args.deps` runs use exactly last-good-ready minus finished/excluded, never script readiness/guess; [bad,bad] with no good plan schedules nothing. P-7: task with dep absent from map never scheduled even when id appears in `done` (unknown = max-id+1, removed id, done-only id — near-miss negatives); complement: deps all known-and-Done + not excluded + sole open task IS schedulable. Runs green on the seam plus `runPlan` last-good store (Tasks 9–10); needs no schedule gating.
@@ -78,10 +78,10 @@
 **Properties:** P-5, P-6, P-7
 **Verifies:** Task 10 (exercises `runPlan` layering/exclusion; passes without later gating code)
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the row (all exclusion sets; [good,bad,bad]/[bad,bad]/[good] shapes; max-id+1 / removed / done-only unknown deps + complement)
-- [ ] Settings are deterministic (`@settings(derandomize=True, max_examples=60, database=None)`)
-- [ ] The tests call the decision seam, not a server (`fallbackReady` + bridge-run behavior)
-- [ ] File declares `PROPERTIES = {"P-5": ..., "P-6": ..., "P-7": ...}` (merged map)
+- [x] The generators cover every surface form and negative listed in the row (all exclusion sets; [good,bad,bad]/[bad,bad]/[good] shapes; max-id+1 / removed / done-only unknown deps + complement)
+- [x] Settings are deterministic (`@settings(derandomize=True, max_examples=60, database=None)`)
+- [x] The tests call the decision seam, not a server (`fallbackReady` + bridge-run behavior)
+- [x] File declares `PROPERTIES = {"P-5": ..., "P-6": ..., "P-7": ...}` (merged map)
 **Dependencies:** Task 1 (needs `scenarios()` × always-inconsistent plans + exclude seeding)
 **Complexity:** High
 **Risk:** normal
@@ -121,7 +121,7 @@
 **Risk:** normal
 ---
 ### Task 7: Red-team fallback counting
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.4
 **Description:** Try to break each SHALL NOT clause of Story 1 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test named `test_redteam_fallback_counting_*`. Targets 1.4 (consistent first/retry plan SHALL NOT count a fallback): retry-success-after-transient-error counted, plan echoing fallback `ready` back counted as fallback, `ready` ordering-only difference counted, empty-ready consistent plan counted, double-retry attempts counted. Runs against `runPlan` counting (Task 10); needs no gating.
@@ -130,9 +130,9 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_plan.py -k redteam_fallback_counting`
 **Verifies:** Task 10 (exercises `runPlan` fallback-counting; passes without later code)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real script via bridge; adversarial plan answers through `planSeq`)
-- [ ] Tests fail before the implementation exists for the right reason (fallback counting absent or over-counts consistent adoptions)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real script via bridge; adversarial plan answers through `planSeq`)
+- [x] Tests fail before the implementation exists for the right reason (fallback counting absent or over-counts consistent adoptions)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs bad-ready injector harness)
 **Complexity:** Medium
 **Risk:** normal
