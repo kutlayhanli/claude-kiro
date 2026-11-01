@@ -20,9 +20,9 @@
 **Verify:** `uv run pytest -q tests/test_workflow_scripts.py` `node tests/js/deterministic_plan.test.mjs`
 **Verifies:** Task 9 (skeleton suite loads the decisions block that task extends; proven when Task 2 runs)
 **Acceptance:**
-- [ ] Harness extensions are additive; existing Node suites and landing-speed properties still pass unmodified
-- [ ] Tests exercise the real boundary named in the test plan (real script via `load_workflow.mjs`/`bridge.mjs`, real CLI via subprocess)
-- [ ] No mocks of the project's own code in integration paths (only fake runtime/agents, FakeClaudeHome, fixture shim)
+- [x] Harness extensions are additive; existing Node suites and landing-speed properties still pass unmodified
+- [x] Tests exercise the real boundary named in the test plan (real script via `load_workflow.mjs`/`bridge.mjs`, real CLI via subprocess)
+- [x] No mocks of the project's own code in integration paths (only fake runtime/agents, FakeClaudeHome, fixture shim)
 **Dependencies:** None
 **Complexity:** Medium
 **Risk:** normal
