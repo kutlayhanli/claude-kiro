@@ -406,8 +406,8 @@
 **Verify:** `uv run pytest -q tests/test_plugin.py -k deterministic_docs`
 **Verifies:** Task 24 (checks the documented content; fails until that docs edit exists)
 **Acceptance:**
-- [ ] Test reads the real docs files (no mocks, no copies of the content under test)
-- [ ] Test fails before the docs edit for the right reason (trigger/review-batch wording absent)
+- [x] Test reads the real docs files (no mocks, no copies of the content under test)
+- [x] Test fails before the docs edit for the right reason (trigger/review-batch wording absent)
 **Dependencies:** Task 1 (uses the repo pytest harness conventions)
 **Complexity:** Low
 **Risk:** normal

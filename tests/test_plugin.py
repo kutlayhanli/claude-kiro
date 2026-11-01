@@ -219,3 +219,53 @@ def test_shim_falls_back_to_uv_tool_bin(tmp_path):
     _fake_ck(tmp_path / ".local/bin")
     out = _shim(["--version"], [PLUGIN / "bin", "/usr/bin", "/bin"], tmp_path)
     assert out.stdout.strip() == "real ck --version"
+
+
+# --- deterministic-plan skill docs (Task 23; verifies Task 24) ------------------
+#
+# Grep-level checks that the implement skill (and its vendored command copy)
+# actually say what criteria 3.1/3.2 and 4.1/4.2 require. They read the real
+# docs files: no mocks, no copies of the content under test. They fail until
+# the Task 24 docs edit adds the trigger and review-batch wording.
+
+DETERMINISTIC_DOC_PATHS = [
+    PLUGIN / "skills/implement/SKILL.md",
+    REPO / ".claude/commands/spec/implement.md",
+]
+
+
+def _deterministic_step7(path: Path, text: str) -> str:
+    start = text.find("7. **Tell me it's running:**")
+    assert start != -1, f"{path}: Step 7 section missing"
+    end = text.find("8. **Questions", start)
+    return text[start:end if end != -1 else len(text)]
+
+
+def test_deterministic_docs_step6_passes_deps_and_remaining():
+    """Step 6 still passes `deps`/`remaining` (3.1, 3.2)."""
+    for path in DETERMINISTIC_DOC_PATHS:
+        text = path.read_text()
+        assert '"deps"' in text, f"{path}: Step 6 launch args must pass `deps`"
+        assert '"remaining"' in text, f"{path}: Step 6 launch args must pass `remaining`"
+
+
+def test_deterministic_docs_plan_triggers():
+    """Step 7 documents start / after-each-landing / idle-only triggers with
+    no re-read after every freed slot (3.1, 3.2)."""
+    for path in DETERMINISTIC_DOC_PATHS:
+        step7 = _deterministic_step7(path, path.read_text()).lower()
+        assert "after each landing" in step7, f"{path}: Step 7 must document the after-each-landing trigger"
+        assert "idle" in step7, f"{path}: Step 7 must document the idle-only trigger"
+        assert "freed slot" in step7, f"{path}: Step 7 must say no re-read runs after every freed slot"
+
+
+def test_deterministic_docs_review_batching():
+    """Step 7 documents wave-batched review with the risky-always-individual
+    rule (4.1, 4.2)."""
+    for path in DETERMINISTIC_DOC_PATHS:
+        text = path.read_text()
+        low = text.lower()
+        assert "review-wave" in low, f"{path}: docs must describe the wave-batched `review-wave` review"
+        assert ("risky" in low or "safety" in low) and "individual" in low, (
+            f"{path}: docs must state the risky/safety-always-individual rule"
+        )
