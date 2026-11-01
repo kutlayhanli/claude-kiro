@@ -218,9 +218,10 @@
 **Verify:** `node tests/js/deterministic_plan.test.mjs TC-11 TC-12 TC-13 TC-14 TC-15 TC-16`
 **Verifies:** Task 14 (exercises scheduling/trigger code; fails until that code exists)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real script trace label ordering vs queue trace)
-- [ ] Tests fail before the implementation exists for the right reason (plan re-runs after every freed slot)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real workflow script trace label ordering vs queue trace)
+- [x] Tests fail before the implementation exists for the right reason (plan re-runs after every freed slot)
+- [x] No mocks of the project's own code in integration tests
+**Note:** TC-11..16 pass pre-Task-14 because the landing-speed base already gates freed/finished triggers and replaces the view; mutation check (freed/finished forced to `run` in a scratch copy) makes TC-12 spans and the TC-13 bound fail with plans after every freed slot, so the tests are non-vacuous oracles for Task 14.
 **Dependencies:** Task 1 (needs fake_project timing controls + bridge scenarios)
 **Complexity:** Medium
 **Risk:** normal

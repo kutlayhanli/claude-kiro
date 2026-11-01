@@ -1,5 +1,5 @@
-// Deterministic-plan example cases (Stories 1-4: TC-0 smoke here; TC-1/TC-2/TC-4..TC-7,
-// TC-9..TC-22 and TC-26 arrive with the tasks that own them).
+// Deterministic-plan example cases (Stories 1-4). Covered here: TC-0 smoke, TC-1,
+// TC-3..TC-7, TC-9..TC-16. TC-2, TC-17..TC-22 and TC-26 arrive with the tasks that own them.
 // Run: node tests/js/deterministic_plan.test.mjs [TC-id ...]  (no ids: run every case)
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
@@ -13,6 +13,30 @@ const SCRIPT = path.join(here, '../../plugin/workflows/spec-implement.js')
 
 export const baseArgs = { spec: 'demo', root: '/repo', into: 'integrate/demo', targetDir: '/repo/.ck/worktrees/demo-integration' }
 export const idx = (s, l) => s.events.indexOf(l)
+
+// Story-3 schedule helpers (TC-11..TC-16): classify plan requests from the real
+// trace without reading script internals. A non-retry plan is expected to be the
+// start plan, the first plan after a landing completed, or an idle re-read (the
+// script logs `plan N (idle):` when the idle trigger fires).
+const planReqs = events => events.filter(e => /^plan \d+$/.test(e))
+const planRetries = events => events.filter(e => /^plan \d+ retry$/.test(e))
+const landReqs = events => events.filter(e => /^land /.test(e) && !e.endsWith(' end'))
+const landEnds = events => events.filter(e => /^land .* end$/.test(e))
+const idlePlans = logs => [...new Set([...logs.join('\n').matchAll(/plan (\d+) \(idle\)/g)].map(m => `plan ${m[1]}`))]
+const checkPlanTriggers = (events, logs, label) => {
+  const idle = new Set(idlePlans(logs))
+  const plans = planReqs(events)
+  assert.ok(plans.length > 0, `${label}: at least one plan agent ran`)
+  assert.equal(plans[0], 'plan 1', `${label}: the first plan agent is the start plan`)
+  let prev = events.indexOf(plans[0])
+  for (const p of plans.slice(1)) {
+    const at = events.indexOf(p, prev + 1)
+    if (idle.has(p)) { prev = at; continue }
+    const between = events.slice(prev + 1, at)
+    assert.ok(between.some(e => /^land .* end$/.test(e)), `${label}: ${p} is the first plan after a landing (saw between: ${between})`)
+    prev = at
+  }
+}
 
 // Args as the skill builds them: deps and remaining copied from `ck plan --json`.
 const strDeps = deps => Object.fromEntries(Object.entries(deps).map(([k, v]) => [String(k), v.map(String)]))
@@ -255,6 +279,128 @@ await test('TC-10 fallback BUSY/ERROR handled like plan-scheduled: same reason, 
   const controlRows2 = Object.fromEntries((control2.tasks || []).map(t => [t.task, t]))
   assert.equal(rows2['2'].reason, controlRows2['2'].reason, 'fallback ERROR reason matches the plan-scheduled ERROR reason')
   assert.ok(r2.merged.includes('1'), 'the run continues after the ERROR report')
+})
+
+await test('TC-11 plan triggers: healthy 12-task run plans only at start, after landings, or idle (3.1)', async () => {
+  const deps = { 1: [], 2: ['1'], 3: ['1'], 4: ['2'], 5: ['2'], 6: ['3'], 7: ['4', '5'], 8: ['6'], 9: ['7', '8'], 10: ['9'], 11: ['9'], 12: ['10', '11'] }
+  const p = project({ deps })
+  const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: withGraph(deps, { maxConcurrent: 3 }) })
+  assert.equal(result.halted, false)
+  assert.deepEqual(result.merged.sort(), Object.keys(deps).sort(), 'every task merged')
+  assert.deepEqual(planRetries(p.state.events), [], 'healthy plans need no retry')
+  checkPlanTriggers(p.state.events, logs, 'TC-11')
+  // The post-landing re-read exists ...
+  const plans = planReqs(p.state.events)
+  assert.ok(plans.length >= 2, 'at least one post-landing re-read ran')
+  // ... and the per-freed-slot re-read does not: plans stay within 1 start + landings + idle.
+  const lands = landReqs(p.state.events).length
+  const idle = idlePlans(logs).length
+  assert.ok(plans.length <= 1 + lands + idle, `plan count ${plans.length} stays within 1 start + ${lands} landings + ${idle} idle`)
+})
+
+await test('TC-12 freed slot starts ready tasks: task 2/task 3 requested with no intervening plan (3.2)', async () => {
+  const deps = { 1: [], 2: [], 3: [] }
+  // Task 1 is slow, so tasks 2 and 3 cycle through the other slot while it runs.
+  const p = project({ deps, durations: { 1: 300 } })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: withGraph(deps, { maxConcurrent: 2 }) })
+  assert.equal(result.halted, false)
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3'])
+  assert.deepEqual(planRetries(p.state.events), [], 'healthy plans need no retry')
+  for (const n of ['1', '2', '3']) {
+    assert.equal(p.state.events.filter(e => e === `task ${n}`).length, 1, `task ${n} requested exactly once`)
+  }
+  // Task 3 started from a freed slot while task 1 was still running.
+  assert.ok(idx(p.state, 'task 3') < idx(p.state, 'task 1 end'), 'task 3 started from a freed slot while task 1 was still running')
+  // A freed slot schedules directly: no plan agent runs between an implementer
+  // finish and its land request (a landing plan only ever follows a land end).
+  for (const n of ['1', '2', '3']) {
+    const end = idx(p.state, `task ${n} end`)
+    const land = p.state.events.findIndex((e, i) => i > end && /^land /.test(e) && !e.endsWith(' end'))
+    assert.ok(land > end, `task ${n} went to landing after its implementer finished`)
+    const between = p.state.events.slice(end + 1, land)
+    assert.ok(!between.some(e => /^plan /.test(e)), `no plan between task ${n} end and its land request (saw: ${between})`)
+  }
+})
+
+await test('TC-13 no plan after every freed slot: plan count stays within 1 + landings + idle (3.3)', async () => {
+  const deps = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] }
+  // Staggered durations so every finish, landing and next start is separated in
+  // time: any plan smuggled in between a finish and the next task start would show.
+  const p = project({ deps, durations: { 1: 50, 2: 100, 3: 150, 4: 200, 5: 250, 6: 300 } })
+  const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: withGraph(deps, { maxConcurrent: 2 }) })
+  assert.equal(result.halted, false)
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3', '4', '5', '6'])
+  assert.deepEqual(planRetries(p.state.events), [], 'healthy plans need no retry')
+  for (const n of ['1', '2', '3', '4', '5', '6']) {
+    assert.equal(p.state.events.filter(e => e === `task ${n}`).length, 1, `task ${n} requested exactly once`)
+  }
+  checkPlanTriggers(p.state.events, logs, 'TC-13')
+  const plans = planReqs(p.state.events)
+  const lands = landReqs(p.state.events).length
+  const idle = idlePlans(logs).length
+  assert.ok(plans.length <= 1 + lands + idle, `plan count ${plans.length} stays within 1 start + ${lands} landings + ${idle} idle`)
+  // Freed slots recurred with ready tasks outstanding, yet no plan appears between
+  // a finish and the next task request the deterministic list already determined.
+  for (const e of p.state.events.filter(e => e.endsWith(' end') && /^task \d+ end$/.test(e))) {
+    const end = p.state.events.indexOf(e)
+    const next = p.state.events.findIndex((x, i) => i > end && /^task \d+$/.test(x))
+    if (next < 0) continue // last finishes have no next task start
+    const between = p.state.events.slice(end + 1, next)
+    assert.ok(!between.some(x => /^plan /.test(x)), `no plan between ${e} and the next task request (saw: ${between})`)
+  }
+})
+
+await test('TC-14 idle re-read disarms: at most one idle plan per arming, none until landing/record (3.4)', async () => {
+  const deps = { 1: [], 2: ['1'] }
+  const p = project({ deps })
+  const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: withGraph(deps, { maxConcurrent: 1 }) })
+  assert.equal(result.halted, false)
+  assert.deepEqual(result.merged.sort(), ['1', '2'])
+  assert.deepEqual(planRetries(p.state.events), [], 'healthy plans need no retry')
+  // Nothing is ready and nothing is running while task 1 lands, so exactly one
+  // idle re-read fires; the empty answer disarms it until the landing completes.
+  const idle = idlePlans(logs)
+  assert.deepEqual(idle, ['plan 2'], `exactly one idle plan fired (saw: ${idle})`)
+  assert.ok(idx(p.state, 'plan 2') < idx(p.state, 'land 1 end'), 'the idle re-read ran while the landing was still in flight')
+  checkPlanTriggers(p.state.events, logs, 'TC-14')
+})
+
+await test('TC-15 view replacement: consistent plan with externalDone plus relink at plan 2 replaces view, Done keeps merged-in-run (3.5)', async () => {
+  const deps = { 1: [], 2: ['1'] }
+  // From the second plan call on, task 7 is Done on the target and the plan data
+  // relearns task 3 (relink). Both later answers omit merged task 1 from Done;
+  // the view must still keep it Done via the merged-in-run union.
+  const p = project({ deps, externalDone: { atPlan: 2, tasks: ['7'] }, relink: { atPlan: 2, deps: { 3: [] } }, planSeq: [{}, { done: ['7'], ready: ['3'] }, { done: ['7'], ready: [] }] })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: withGraph(deps, { maxConcurrent: 1 }) })
+  assert.equal(result.halted, false, 'the run completes on the replaced view')
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3'], 'the relinked task 3 merged with the rest')
+  assert.ok(p.state.events.includes('task 3'), 'the relinked task was scheduled from the replaced view')
+  for (const n of ['1', '2', '3']) {
+    assert.equal(p.state.events.filter(e => e === `task ${n}`).length, 1, `task ${n} started exactly once (merged task 1 stayed Done even though the plans omitted it)`)
+  }
+  assert.ok(!p.state.events.includes('task 7'), 'externally-Done task 7 was never requested')
+})
+
+await test('TC-16 dep-less mode: a plan agent runs before the next task after freed slots (3.6)', async () => {
+  const deps = { 1: [], 2: [], 3: [] }
+  const p = project({ deps })
+  // No args.deps: the script cannot use its own readiness and must re-plan per freed slot.
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxConcurrent: 1 } })
+  assert.equal(result.halted, false)
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3'])
+  assert.deepEqual(planRetries(p.state.events), [], 'healthy plans need no retry')
+  for (const n of ['1', '2', '3']) {
+    assert.equal(p.state.events.filter(e => e === `task ${n}`).length, 1, `task ${n} requested exactly once`)
+  }
+  // Every task after the first was preceded by a plan that ran after the
+  // previous task finished: without dep data the freed slot always re-plans.
+  for (const n of [2, 3]) {
+    const prevEnd = idx(p.state, `task ${n - 1} end`)
+    const start = idx(p.state, `task ${n}`)
+    assert.ok(prevEnd >= 0 && start > prevEnd, `task ${n} started after task ${n - 1} finished`)
+    const between = p.state.events.slice(prevEnd + 1, start)
+    assert.ok(between.some(e => /^plan \d+$/.test(e)), `a plan agent ran between task ${n - 1} end and task ${n} (saw: ${between})`)
+  }
 })
 
 const unknown = [...only].filter(id => !seen.has(id))
