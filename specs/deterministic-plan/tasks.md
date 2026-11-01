@@ -209,7 +209,7 @@
 **Risk:** normal
 ---
 ### Task 12: Workflow examples for plan-agent schedule
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 3.2, 3.3, 3.4, 3.5, 3.6
 **Description:** Implements TC-11, TC-12, TC-13, TC-14, TC-15, TC-16 in `tests/js/deterministic_plan.test.mjs`. TC-11 (3.1): 12-task graph, healthy plans → non-retry plans only at start / first-after-landing / idle. TC-12 (3.2): maxConcurrent 2, task 1 long → task 2/3 requested with no intervening plan. TC-13 (3.3): freed slots with non-empty deterministic ready → no plan between finish and next `task N` (plan count ≤ 1 + landings + idle). TC-14 (3.4): idle re-read empty with landing in flight → at most one idle plan per arming. TC-15 (3.5): plan with externalDone + relink at plan 2 → view replaced, Done = plan Done ∪ merged-in-run. TC-16 (3.6): no `args.deps`, healthy plans → plan agent runs before next `task N` after freed slots. Needs the Task 14 gating and view replacement to pass.
@@ -218,9 +218,10 @@
 **Verify:** `node tests/js/deterministic_plan.test.mjs TC-11 TC-12 TC-13 TC-14 TC-15 TC-16`
 **Verifies:** Task 14 (exercises scheduling/trigger code; fails until that code exists)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real script trace label ordering vs queue trace)
-- [ ] Tests fail before the implementation exists for the right reason (plan re-runs after every freed slot)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real workflow script trace label ordering vs queue trace)
+- [x] Tests fail before the implementation exists for the right reason (plan re-runs after every freed slot)
+- [x] No mocks of the project's own code in integration tests
+**Note:** TC-11..16 pass pre-Task-14 because the landing-speed base already gates freed/finished triggers and replaces the view; mutation check (freed/finished forced to `run` in a scratch copy) makes TC-12 spans and the TC-13 bound fail with plans after every freed slot, so the tests are non-vacuous oracles for Task 14.
 **Dependencies:** Task 1 (needs fake_project timing controls + bridge scenarios)
 **Complexity:** Medium
 **Risk:** normal
