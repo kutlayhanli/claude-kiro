@@ -397,7 +397,7 @@
 **Risk:** normal
 ---
 ### Task 23: Skill-docs content check
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 4.1
 **Description:** Asserts the Task 24 documentation actually says what the criteria require: Step 6 still passes `deps`/`remaining`, Step 7 documents the start / after-each-landing / idle-only triggers with no re-read after every freed slot (3.1, 3.2), and wave-batched review with the risky-always-individual rule (4.1, 4.2). Grep-level pytest over the skill and vendored command docs; no behavior exercised.
