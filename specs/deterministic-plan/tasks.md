@@ -155,7 +155,7 @@
 **Risk:** normal
 ---
 ### Task 9: Add pure scheduler seams fallbackReady and reviewGroups
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.2, 2.1, 2.2, 2.3, 2.4, 2.5, 4.1, 4.2, 4.3, 4.6
 **Description:** In the decisions block of `plugin/workflows/spec-implement.js` (next to `readyTasks`/`planConsistent`/`planDecision`, before the `--- end decisions ---` marker so `tests/js/load_decisions.mjs` can load them via the `extra` option), add two pure functions with no script globals, no I/O, no clock. Owns Harness Contract seam 1 (`fallbackReady`; the implementation reuses `readyTasks` ordering for the `scriptReady` input rather than re-implementing it) and seam 3 (`reviewGroups`, the `batchGroups` role under its final name): `fallbackReady({ hasDeps, scriptReady, lastGoodReady, exclude, done }) -> { ready, source }` implementing the D5 layering (scriptReady minus excluded/done when hasDeps and non-empty yields source `deps`; else lastGoodReady minus excluded/done yields source `last-good`; else empty/`null` for the halt path), and `reviewGroups({ merged, risk }) -> { batched, individual }` (individual = merged tasks whose risk tag is `safety` case-insensitive via existing `isSafety`; batched = the rest; empty merged yields both empty). Add `OVERHEAD_WARN_THRESHOLD = 0.5` script-local constant. Ordering is inherited from the inputs (already ck-plan order); do not re-sort inside the seams. Keep `readyTasks`/`planConsistent`/`planDecision` signatures unchanged in this task.
@@ -164,9 +164,9 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_plan.py -k fallback_matches_ck_plan` `node -e "import('./tests/js/load_decisions.mjs').then(m => m.loadDecisions({extra: ['fallbackReady', 'reviewGroups']}))"`
 **Verified by:** Task 2 (its tests are the oracle; calls the seam directly plus the real `ck plan` CLI)
 **Acceptance:**
-- [ ] `fallbackReady` with `hasDeps` and non-empty scriptReady returns the deps layer minus excluded/done with source `deps` (1.2, 2.1)
-- [ ] `fallbackReady` without deps data falls back to lastGoodReady minus excluded/done with source `last-good`, and returns empty/null when both layers are empty (2.2, 2.3)
-- [ ] `reviewGroups` splits safety tasks to individual and the rest to batched; empty merged yields no review groups (4.1, 4.2, 4.3, 4.6)
+- [x] `fallbackReady` with `hasDeps` and non-empty scriptReady returns the deps layer minus excluded/done with source `deps` (1.2, 2.1)
+- [x] `fallbackReady` without deps data falls back to lastGoodReady minus excluded/done with source `last-good`, and returns empty/null when both layers are empty (2.2, 2.3)
+- [x] `reviewGroups` splits safety tasks to individual and the rest to batched; empty merged yields no review groups (4.1, 4.2, 4.3, 4.6)
 **Dependencies:** Task 1 (built against the harness extended there); Task 2 (its tests are the oracle)
 **Complexity:** Medium
 **Risk:** normal
