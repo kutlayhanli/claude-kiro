@@ -787,7 +787,7 @@ function call(kind, prompt, opts) {
 // The scheduler's view of the plan (applyPlanView) and what runs now.
 let view = { order: [], deps: {}, done: new Set(), cycles: [], verifyCycles: [] }
 let current = null          // the last plan applied
-let fallbackReady = []      // without args.deps: the ready list of the plan that just returned, used once
+let lastPlanReady = []      // without args.deps: the ready list of the plan that just returned, used once
 let planRun = null          // the plan agent in flight, if any
 let queuedTrigger = null    // a trigger that arrived while one was in flight: one follow-up
 let idleArmed = true
@@ -830,7 +830,7 @@ async function runPlan(trigger) {
           }
         }
         if (trigger !== 'start') applyLint(n)  // the start plan's cycle refusal is explicit, below
-        fallbackReady = n.ready
+        lastPlanReady = n.ready
         if (trigger === 'landing' && recordSeq === seqAtPrompt) idleArmed = false  // this plan just re-read tasks.md after a landing
         return n
       }
@@ -905,8 +905,8 @@ function schedule() {
   let ready = ctx.ready
   if (!SCRIPT_READINESS) {
     // Without args.deps only the plan agent's ready list counts, and only once.
-    ready = fallbackReady.map(String).filter(n => !ctx.exclude.has(n) && !view.done.has(n))
-    fallbackReady = []
+    ready = lastPlanReady.map(String).filter(n => !ctx.exclude.has(n) && !view.done.has(n))
+    lastPlanReady = []
   }
   const d = startDecision({ finishFirst: FINISH_FIRST, inFlight, slots: AGENT_SLOTS, ready, working: working.size, maxConcurrent: MAX_CONCURRENT, stopLaunching })
   for (const n of d.start) if (!running.has(n)) startTask(n)
