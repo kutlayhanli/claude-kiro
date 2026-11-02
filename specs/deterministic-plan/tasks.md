@@ -531,10 +531,10 @@
 **Properties:** P-11, P-12, P-13
 **Verifies:** Task 33 (exercises show rendering plus `overheadShare`/`overheadWarning`; fails until that code exists)
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the row (agent mixes, zero-duration, missing timestamps, failed/revise/red-landing/unfinished runs, all threshold levels)
-- [ ] Settings are deterministic (`@settings(derandomize=True, max_examples=200, database=None)`; table-driven where CLI-bound)
-- [ ] The tests call the decision seam, not a server (`overheadShare`/`overheadWarning` directly + real `ck stats` CLI for text/JSON)
-- [ ] File declares `PROPERTIES = {"P-11": ..., "P-12": ..., "P-13": ...}` for `ck gate`
+- [x] The generators cover every surface form and negative listed in the row (agent mixes, zero-duration, missing timestamps, failed/revise/red-landing/unfinished runs, all threshold levels)
+- [x] Settings are deterministic (`@settings(derandomize=True, max_examples=200, database=None)`; table-driven where CLI-bound)
+- [x] The tests call the decision seam, not a server (`overheadShare`/`overheadWarning` directly + real `ck stats` CLI for text/JSON)
+- [x] File declares `PROPERTIES = {"P-11": ..., "P-12": ..., "P-13": ...}` for `ck gate`
 **Dependencies:** Task 1 (needs FakeClaudeHome table harness + pre-change record)
 **Complexity:** High
 **Risk:** normal
