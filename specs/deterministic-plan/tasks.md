@@ -434,7 +434,7 @@
 **Risk:** normal
 ---
 ### Task 25: Vendored parity and seam-usage proofs
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 1.2, 2.1, 2.2
 **Description:** Implements the TC-34 parity half of the draft test track (TC-35 seam-usage lives in Task 32): any workflow script change keeps the OpenCode vendored copy byte-identical to the plugin source (extended `tests/test_plugin.py` dogfood test), and `validateWorkflowArgs` still requires `spec`+`root` for spec-implement while `deps` stays optional by design (`opencode/test/workflow-tool.test.ts`). This protects the deps/last-good/halt layering (2.1, 2.2) on both harnesses. OpenCode path verified with `node --test test/*.test.ts` from `opencode/`.
@@ -444,10 +444,10 @@
 **Verify:** `uv run pytest -q tests/test_plugin.py` `node --test test/*.test.ts`
 **Verifies:** Task 26 (checks both vendored copies plus validation; fails until that refresh exists)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real files for parity; real CLI/validation for args)
-- [ ] Tests fail before the implementation exists for the right reason (stale vendored copy or relaxed validation)
-- [ ] No mocks of the project's own code in integration tests
-- [ ] OpenCode path verified with `node --test test/*.test.ts` from `opencode/`
+- [x] Tests exercise the real boundary named in the test plan (real files for parity; real CLI/validation for args)
+- [x] Tests fail before the implementation exists for the right reason (stale vendored copy or relaxed validation)
+- [x] No mocks of the project's own code in integration tests
+- [x] OpenCode path verified with `node --test test/*.test.ts` from `opencode/`
 **Dependencies:** Task 1 (needs harness contract seams + bridge)
 **Complexity:** Low
 **Risk:** normal
