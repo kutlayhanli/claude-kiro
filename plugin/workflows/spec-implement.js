@@ -876,15 +876,8 @@ async function runPlan(trigger) {
     if (!current) current = s
     return s
   }
-  // Halting abandons future launches — meaningful only when unstarted tasks exist
-  // to abandon (TC-7); with nothing unstarted the halt is vacuous, so record
-  // truthfully and finish via in-flight landings (P-6 singleton).
-  const universe = (lastGood && lastGood.order && lastGood.order.length) ? lastGood.order : effOrder
-  const runningSet = new Set([...running.keys()])
-  const failedSet = new Set([...failed.keys()])
-  const unstarted = universe.filter(t => !doneArr.includes(t) && !runningSet.has(t) && !failedSet.has(t) && !exclArr.includes(t))
-  if (!fb.ready.length && !SCRIPT_READINESS && (unstarted.length || !universe.length)) {
-    return null  // Halt: dep-less with nothing schedulable and (unstarted tasks remain OR no task universe known at all) (2.3, TC-7). No entry, degraded untouched.
+  if (!fb.ready.length && !SCRIPT_READINESS && (!lastGood || !lastGood.ready.length)) {
+    return null  // Halt: no deterministic data ever (no deps arg, no adopted plan with usable ready): the existing PLAN_FAILED halt path (2.3). No entry, degraded untouched.
   }
   // Every double-failure trigger with deterministic data records a fallback entry,
   // even when the resulting ready list is empty (an empty entry records a fallback

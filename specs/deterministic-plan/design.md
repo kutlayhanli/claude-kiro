@@ -366,7 +366,7 @@ existing dogfood byte-identity test.
 | 1.5 | `fallbackReady` subtracts running/failed/parked/merged/done; records untouched |
 | 2.1 | `fallbackReady` `deps` layer: script-side `readyTasks(deps arg, done ∪ running/failed/merged)` |
 | 2.2 | `fallbackReady` `last-good` layer from `lastGood.ready` minus excluded/done |
-| 2.3 | No deterministic data (!hasDeps, no usable lastGood) → runPlan null ⟺ dep-less AND (unstarted tasks remain OR no task universe exists) → PLAN_FAILED halt; running tasks finish/land. Otherwise → empty synthetic view, waits for landings (entry recorded with ready []) |
+| 2.3 | No deterministic data (!hasDeps, no adopted plan with usable ready) → runPlan null ⟺ dep-less AND (no adopted plan with usable ready) → PLAN_FAILED halt; running tasks finish/land. Contentful lastGood with an empty window → empty synthetic view + entry {ready: [], source: null} + degraded, waits for landings/future plans. |
 | 2.4 | Both layers already in ck-plan order (`readyTasks` chain-then-numeric; stored `lastGood.ready`) |
 | 2.5 | `readyTasks` met = key-of-`deps` AND in `done`; `planConsistent` filters dangling-dep tasks |
 | 2.6 | `worktreeOutcome`/guard/park/fail paths shared for fallback- and plan-scheduled tasks |
