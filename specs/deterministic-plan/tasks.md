@@ -251,7 +251,7 @@
 **Note (2026-11-02):** Prior blocker resolved by Task 20 merge (scheduler-local `fallbackReady` renamed to `lastPlanReady`): `bridge.run` now executes; 3 of 4 red-team tests fail for the right reason (extra plan agents between finish and ready start, pending Task 14), 1 passes.
 ---
 ### Task 14: Idle-gated plan triggers and deterministic freed-slot scheduling
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 2.6
 **Description:** Modify `planDecision`, `planContext`/`schedule()`, `releaseSlot`/`finishTask`, and `applyPlanView` in `plugin/workflows/spec-implement.js`. Owns the modified Harness Contract seam `planDecision`: returns `run` only for `start`, `landing`, and `idle` (gated on `freeSlot && readyCount===0 && openCount>0 && idleArmed`); `freed`/`finished` return `none` when `SCRIPT_READINESS` is true and `run` when false (dep-less mode keeps landing-speed behaviour per 3.6). `schedule()` starts from script-side `readyTasks` directly on freed slots without a plan agent (3.2, 3.3). Keep `idleArmed` gating: disarm after an idle re-read (3.4), re-arm on landing completion or task record arrival (existing `idleArmed = true` sites); landing trigger stays. `applyPlanView` on a consistent plan replaces remaining/deps/lint and sets `done = plan.done ∪ mergedInRun` (3.5). Fallback-scheduled task BUSY/blocked reports flow through the unchanged `worktreeOutcome`/guard/park/fail paths (2.6, no new handling).
