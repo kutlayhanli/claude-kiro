@@ -537,5 +537,34 @@ await test('TC-22 no wave merged: an unmerged task gets no review (4.6)', async 
   assert.equal(batchesCovering(p, ['1']).length, 1, 'the merged wave still gets its batched review')
 })
 
+await test('TC-26 overhead above threshold warns without halting/failing/retrying (5.4)', async () => {
+  // Forced overhead: tiny task work (1ms each) against many plan/review/land
+  // agents (6 independent tasks at maxConcurrent 1: a plan plus a review plus
+  // a landing per wave; plan/review/merge calls slowed so the plan/review/land
+  // share dominates under any agent-time measure). Needs the Task 22 warn-only
+  // wiring: the run still completes, nothing names overhead as a stop reason,
+  // and the report flags the overhead warning.
+  const deps = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] }
+  const slow = { 1: 50, 2: 50, 3: 50, 4: 50, 5: 50, 6: 50, 7: 50, 8: 50, 9: 50, 10: 50, 11: 50, 12: 50 }
+  const p = project({ deps, durations: { 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1 }, planDurations: slow, reviewDurations: slow, mergeDurations: slow })
+  const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: reviewArgs(deps, { maxConcurrent: 1 }) })
+  assert.equal(result.halted, false, 'the run still completes under forced overhead')
+  assert.equal(result.outcome, 'complete', 'the outcome is complete, not halted or blocked')
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3', '4', '5', '6'], 'every task merged')
+  assert.ok(!result.reason || !/overhead/i.test(String(result.reason)), `no stop reason names overhead (saw: ${result.reason})`)
+  assert.deepEqual(planRetries(p.state.events), [], 'healthy plans need no retry: overhead triggers no retry')
+  checkPlanTriggers(p.state.events, logs, 'TC-26')
+  assert.equal(result.degraded, false, 'a healthy run carries no degraded mark even under forced overhead')
+  assert.ok(Array.isArray(result.planFallbacks), 'the result carries the fallback list')
+  assert.equal(result.planFallbacks.length, 0, 'no fallback was recorded')
+  const overhead = result.overhead
+  assert.ok(overhead && typeof overhead === 'object', 'the result carries the overhead field (Task 22 warn-only wiring)')
+  assert.equal(overhead.threshold, 0.5, 'the published threshold is 0.5')
+  assert.ok(typeof overhead.share === 'number' && overhead.share > overhead.threshold, `the forced run exceeds the threshold (share=${overhead && overhead.share})`)
+  assert.equal(overhead.warned, true, 'the over-threshold run flags the warning')
+  const warnLine = logs.find(l => /overhead/i.test(l) && /warn/i.test(l))
+  assert.ok(warnLine, 'the report flags the overhead warning')
+})
+
 const unknown = [...only].filter(id => !seen.has(id))
 if (unknown.length) { console.log('FAIL unknown TC id(s):', unknown.join(' ')); process.exitCode = 1 }
