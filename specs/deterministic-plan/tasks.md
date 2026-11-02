@@ -598,7 +598,7 @@
 **Risk:** normal
 ---
 ### Task 33: Stats show renders fallback counts and overhead share
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 5.2, 5.3, 5.4, 5.5, 5.6
 **Description:** In `src/claude_kiro/analytics/show.py`, add pure `overheadShare(byRoleMs) -> float | None` (plan/review/landing share of agent time: `(ms_plan + ms_reviewer + ms_land) / ms_total` over `byRole` ms cells; `None` when no ms recorded) and `overheadWarning(share) -> bool` (`share is not None and share > 0.5`, mirroring `OVERHEAD_WARN_THRESHOLD`; pure threshold compare, never halts). Owns Harness Contract seams 4 (`overheadShare`/`overheadWarning`, the `overhead_share`/`overhead_warning` role under final names): first task needing them, no server/HTTP dependency. Extend `run_breakdown` with `plan_fallbacks: { recorded, count, entries }` (from `counts`) and `overhead: { recorded, share, threshold: 0.5, warned }`; `render_run` prints a `plan fallbacks:` line (with steps/sources, or `not recorded` when absent) and an `overhead (plan/review/land share):` line (percent plus warn suffix only when over threshold, or `not recorded`); `run_json` adds `planFallbacks` and `overhead` with identical values to the text view. All reads use `.get` so pre-change records render `unknown`/`null` without re-collection.
