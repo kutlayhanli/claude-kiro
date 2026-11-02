@@ -439,7 +439,7 @@
 **Risk:** normal
 ---
 ### Task 24: Skill docs and vendored workflow copies
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 3.1, 3.2, 4.1, 4.2
 **Description:** Update `plugin/skills/implement/SKILL.md` (and vendored `.claude/commands/spec/implement.md`): Step 6 keeps passing `deps`/`remaining`; Step 7 documents the new plan triggers (start / after each landing / idle-only, no re-read after every freed slot when deterministic ready exists) and wave-batched review (one review-wave per merged wave for non-risky tasks, risky/safety tasks always individual). Regenerate `.claude/workflows/spec-implement.js` via `uv run ck vendor` so it is byte-identical to the plugin source. No semantics decided here beyond documenting Tasks 9–22.
