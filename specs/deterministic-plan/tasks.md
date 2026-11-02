@@ -591,7 +591,7 @@
 **Risk:** normal
 ---
 ### Task 34: planning_fallback issue code
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 5.1, 5.2
 **Description:** In `src/claude_kiro/analytics/issues.py`, add `planning_fallback` to `ISSUE_CODES` and extend `derive_issue_codes` to emit it when `stats.planFallbacks > 0` (alongside the existing `planning_failed` on `planFailures`); no halt/fail semantics change. Pure function of the local record's result fields.
@@ -600,8 +600,8 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_stats.py -k planning_fallback_code`
 **Verified by:** Task 27 (its tests are the oracle)
 **Acceptance:**
-- [ ] Runs with at least one fallback carry the `planning_fallback` issue code; runs without fallbacks do not
-- [ ] Existing `planning_failed` behaviour on `planFailures` is unchanged
+- [x] Runs with at least one fallback carry the `planning_fallback` issue code; runs without fallbacks do not
+- [x] Existing `planning_failed` behaviour on `planFailures` is unchanged
 **Dependencies:** Task 27 (its tests are the oracle)
 **Complexity:** Low
 **Risk:** normal
