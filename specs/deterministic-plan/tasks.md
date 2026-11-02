@@ -476,18 +476,9 @@
 **Risk:** normal
 ---
 ### Task 26: OpenCode harness parity for the fallback script
-**Status:** Not Started
-**Track:** impl
-**Requirements:** 1.2, 2.1, 2.2
-**Description:** Refresh `opencode/vendor/workflows/spec-implement.js` from the plugin source so the fallback code ships on the OpenCode path, and confirm `opencode/src/workflow-tool.ts:validateWorkflowArgs` still requires only `spec`+`root` for spec-implement (`deps` stays optional by design so dep-less runs take the last-good/halt path on both harnesses). `args` pass-through is unchanged. A stale vendored copy is the only allowed divergence, caught by the byte-identity test.
-**Files:**
-- `opencode/vendor/workflows/spec-implement.js` - refreshed byte-identical copy
-- `opencode/src/workflow-tool.ts` - confirm `validateWorkflowArgs` stays `spec`+`root` only
-**Verify:** `uv run pytest -q tests/test_plugin.py` `node --test test/*.test.ts`
-**Verified by:** Task 25 (its tests are the oracle)
-**Acceptance:**
-- [ ] Vendored OpenCode workflow copy is byte-identical to `plugin/workflows/spec-implement.js`
-- [ ] `validateWorkflowArgs` requires `spec`+`root` and leaves `deps` optional so both harnesses share the deps/last-good/halt layering (2.1, 2.2)
+**Status:** Done
+- [x] Vendored OpenCode workflow copy is byte-identical to `plugin/workflows/spec-implement.js`
+- [x] `validateWorkflowArgs` requires `spec`+`root` and leaves `deps` optional so both harnesses share the deps/last-good/halt layering (2.1, 2.2)
 **Dependencies:** Task 22 (vendors the finished fallback script); Task 24 (test: oracle compares both vendored copies); Task 25 (its tests are the oracle)
 **Complexity:** Low
 **Risk:** normal
