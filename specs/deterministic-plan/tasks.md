@@ -242,6 +242,7 @@
 **Dependencies:** Task 1 (needs freed-slot timing + label-grammar helpers)
 **Complexity:** Medium
 **Risk:** normal
+**Blocker (2026-11-02):** `plugin/workflows/spec-implement.js` does not load: `function fallbackReady` (decisions block, line 648) collides with `let fallbackReady = []` (scheduler body, line 790), so every `bridge.run` fails with `Identifier 'fallbackReady' has already been declared`. Pre-existing on `integrate/deterministic-plan` (worktree == integrate); breaks all previously-merged bridge tests too. Tests added below collect but cannot verify predicates until the rename lands (owned by Task 9/10/14).
 ---
 ### Task 14: Idle-gated plan triggers and deterministic freed-slot scheduling
 **Status:** Not Started
