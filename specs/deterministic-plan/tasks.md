@@ -558,7 +558,7 @@
 **Risk:** normal
 ---
 ### Task 32: Vendored seam-usage proofs
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 1.2, 4.1, 5.2, 5.3
 **Description:** Implements the TC-35 seam-called-by-real-code half of the draft test track (TC-34 parity lives in Task 25). On a fallback run the script's per-request scheduling agrees with `fallbackReady(…)` on the same inputs (1.2); each batched review's coverage agrees with the `reviewGroups` seam (4.1); `ck stats show` overhead numbers equal `overheadShare(…)` on the record (5.2, 5.3). (TC-8/TC-29/TC-30 contract bodies live in Tasks 2 and 16; this task only proves the seams are actually called.) Needs Tasks 10 + 18 + 33 to pass.
