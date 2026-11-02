@@ -1666,8 +1666,17 @@ def thrash_idle_plans(logs) -> List[str]:
 
 
 def assert_no_plan_between_finish_and_start(events, label: str) -> int:
-    """No `plan` request between any implementer finish and the next `task N`
-    request (the 3.3 thrash predicate, TC-13 shape). Returns the pair count."""
+    """No freed-slot-caused `plan` between any implementer finish and the next
+    `task N` request (the 3.3 thrash predicate, TC-13 shape). Returns the pair count.
+
+    A plan in the segment is a violation ONLY when no `land end` also falls in
+    that segment (P-8's lands_between exemption, cf. plan_schedule_violations):
+    3.3 forbids freed-slot-caused plans, not 3.1-mandated first-after-landing
+    plans, which positionally interleave between a finish and a later task start
+    under the harness FIFO runtime queue (a landing plan requested at a land end
+    starts at/after the next finish when slots are full). The strict form
+    contradicts 3.1/box-1 and the landed regression suites (finish_first
+    TC-23/TC-28/TC-29, landing_speed TC-8/TC-10/TC-62)."""
     pairs = 0
     for i, e in enumerate(events):
         if not THRASH_TASK_END.match(e):
@@ -1677,7 +1686,9 @@ def assert_no_plan_between_finish_and_start(events, label: str) -> int:
             continue  # last finishes have no next task start
         pairs += 1
         between = events[i + 1:nxt]
-        assert not any(x.startswith("plan ") for x in between), (
+        plans_between = [x for x in between if THRASH_PLAN.match(x)]
+        lands_between = any(x.startswith("land ") and x.endswith(" end") for x in between)
+        assert not (plans_between and not lands_between), (
             label, f"plan smuggled between {e} and {events[nxt]}", between)
     return pairs
 
@@ -1749,7 +1760,11 @@ def test_redteam_plan_thrash_freed_slot_races_landing_end(bridge):  # noqa: F811
     deps = {"1": [], "2": [], "3": [], "4": []}
     cfg = redteam_project(deps, [{}])
     cfg["project"]["durations"] = {"1": 100, "2": 10, "3": 10, "4": 10}
-    cfg["project"]["mergeDurations"] = {"1": 150}
+    # Task 2 lands slowly (150 ms) so its land window (requested right after its
+    # finish) still spans the later finishes and task 1's landing: several
+    # implementer finishes deterministically fall between a land request and
+    # the next land end on the virtual clock.
+    cfg["project"]["mergeDurations"] = {"1": 150, "2": 150}
     cfg["args"]["maxConcurrent"] = 2
     cfg["args"]["mergeBatch"] = 1
     out = bridge.run(cfg["project"], cfg["args"], slots=2)
@@ -1794,7 +1809,10 @@ def test_redteam_plan_thrash_empty_then_instantly_ready(bridge):  # noqa: F811
     deps = {"1": [], "2": ["1"]}
     cfg = redteam_project(deps, [{}])
     cfg["args"]["maxConcurrent"] = 1
-    out = bridge.run(cfg["project"], cfg["args"], slots=1)
+    # Two runtime slots (one implementer slot): the idle re-read must overlap
+    # land 1 in flight, which needs a second runtime slot — slots=1 holds the
+    # only slot in land 1 and no idle plan could ever start before land 1 end.
+    out = bridge.run(cfg["project"], cfg["args"], slots=2)
     result = out["result"]
     assert result.get("outcome") == "complete", (result.get("outcome"), result.get("reason"))
     assert set(result["merged"]) == set(deps), result["merged"]
