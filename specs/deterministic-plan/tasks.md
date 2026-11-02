@@ -308,9 +308,10 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_plan.py -k redteam_review_batching`
 **Verifies:** Task 18 (exercises wave-review scheduling; fails until that code exists)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real script review scheduling; coverage from review ledger/prompts)
-- [ ] Tests fail before the implementation exists for the right reason (spurious combined or empty reviews run)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real script review scheduling; coverage from review ledger/prompts)
+- [x] Tests fail before the implementation exists for the right reason (spurious combined or empty reviews run)
+- [x] No mocks of the project's own code in integration tests
+**Note (2026-11-02):** 3 of 4 red-team tests fail for the right reason (no `review-wave` labels pre-Task-18; the protected unmerged task still gets `review 2`); `test_redteam_review_batching_all_risky_no_batch` passes pre-18 (one-per-task reviews are trivially individual with no batch) and guards the Task 18 code against adding a combined review to risky-only waves.
 **Dependencies:** Task 1 (needs `risk` maps + review ledger harness)
 **Complexity:** Medium
 **Risk:** normal

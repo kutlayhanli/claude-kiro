@@ -1631,3 +1631,180 @@ def test_redteam_plan_thrash_depless_shaped_deps(bridge):  # noqa: F811
                 shape, f"no plan between task {prev} end and task {nxt} (dep-less shape treated as deps-mode)", between)
 
 
+# ------------------------------------------------- red-team: review batching (4.3/4.6)
+#
+# Requirement 4.3: a risky-only wave SHALL NOT run a combined review. Each
+# test below is an adversarial shape where a wave-batching implementation
+# could smuggle in a spurious `review-wave` label: every task risky, risk
+# tags in near-miss surface forms, an empty merged wave, a single-task wave.
+# Requirement 4.6: no wave merged since the last review SHALL NOT run an
+# empty batched review.
+#
+# All tests run the real script through the bridge plus the `reviewGroups`
+# seam (Task 9, present). Before Task 18 the script runs one `review N` per
+# task with no `review-wave` label, so every test with a batched-review
+# assertion fails for the right reason (missing batch labels); the
+# all-risky bridge shape passes pre-18 (nothing to batch yet) and guards the
+# Task 18 code against adding a combined review to risky-only waves.
+
+
+def test_redteam_review_batching_all_risky_no_batch(bridge):  # noqa: F811
+    """4.3 red-team: an all-risky wave runs only individual reviews, no batch.
+
+    The whole later wave is safety-tagged. A batcher keyed on "wave merged,
+    so batch it" without consulting the risk split would emit one combined
+    review over the risky tasks; the contract says risky-only waves get
+    individuals only and no combined review.
+    """
+    ids = ["1", "2", "3", "4"]
+    wave = ids[1:]
+    risk = {t: "safety" for t in ids}
+    # Seam first: the split is exact (fails pre-Task-9 with the missing-seam
+    # message, the right reason).
+    out = seam_review_groups(wave, risk)
+    assert out["individual"] == wave, out
+    assert out["batched"] == [], out
+
+    cfg = wave_project(ids, risk, {})
+    out = bridge.run(cfg["project"], cfg["args"], slots=4)
+    result = out["result"]
+    assert result.get("outcome") == "complete", (result.get("outcome"), result.get("reason"))
+    assert set(result["merged"]) == set(ids), result["merged"]
+    # No combined review anywhere: zero batch labels, and no batch covers a
+    # risky task even as a subset.
+    assert batch_review_labels(out["events"]) == [], batch_review_labels(out["events"])
+    for label in review_events(out["events"]):
+        assert covers_of(out, label), (label, "an empty review ran")
+    for n in wave:
+        assert any(l == f"review {n}" for l in individual_review_labels(out["events"])), (n, out["events"])
+
+
+def test_redteam_review_batching_risk_tag_mutations(bridge):  # noqa: F811
+    """4.2/4.3 red-team: near-miss risk-tag surface forms route exactly.
+
+    `Safety`/`SAFETY` are the safety tag in different cases (the seam folds
+    case, same as `isSafety`); `' safety '` carries whitespace, a missing key
+    carries no tag, and `'urgent'` is an unknown value -- none of which equal
+    `safety`, so the seam batches them. A trimmer would individual-review the
+    whitespace task (an extra agent over the W+R bound); a script that ignores
+    the seam would misroute either side.
+    """
+    wave = ["2", "3", "4", "5", "6"]
+    risk = {"2": "Safety", "3": "SAFETY", "4": " safety ", "6": "urgent"}
+    # Task 5 has no entry at all (missing/unknown risk value).
+    grouped = seam_review_groups(wave, risk)
+    assert grouped["individual"] == ["2", "3"], grouped
+    assert grouped["batched"] == ["4", "5", "6"], grouped
+
+    ids = ["1"] + wave
+    full_risk = {"1": "normal", **risk}
+    cfg = wave_project(ids, full_risk, {})
+    del cfg["project"]["risk"]["5"]
+    del cfg["args"]["risk"]["5"]
+    out = bridge.run(cfg["project"], cfg["args"], slots=max(4, len(ids)))
+    result = out["result"]
+    assert result.get("outcome") == "complete", (result.get("outcome"), result.get("reason"))
+    assert set(result["merged"]) == set(ids), result["merged"]
+    # Case-folded safety tasks get individuals only; no batch covers them
+    # (fails pre-Task-18: reviews are one-per-task, no batch labels exist).
+    for n in ("2", "3"):
+        assert any(l == f"review {n}" for l in individual_review_labels(out["events"])), (n, out["events"])
+    assert not [l for l in batch_review_labels(out["events"])
+                if set(covers_of(out, l)) & {"2", "3"}], batch_review_labels(out["events"])
+    # Whitespace/missing/unknown tags batch with the wave's non-risky tasks.
+    assert len(batches_covering(out, ["4", "5", "6"])) == 1, batch_review_labels(out["events"])
+    assert not [l for l in individual_review_labels(out["events"])
+                if l.split()[1] in ("4", "5", "6")], individual_review_labels(out["events"])
+
+
+def test_redteam_review_batching_empty_wave_no_review(bridge):  # noqa: F811
+    """4.6 red-team: an empty merged wave runs no (batched) review.
+
+    Task 2 is protected, so it never merges: the "wave" of unmerged work is
+    empty. A batcher that fires per landing or per wave slot instead of per
+    merged set would emit an empty `review-wave` label or review the
+    unmerged task; the contract says no review agent runs. The merged wave
+    is still batched exactly once, and no already-reviewed task is
+    re-covered by a stale second batch (fails pre-Task-18: no batch labels).
+    """
+    # Seam first: empty merged yields no review groups (the 4.6 unit oracle).
+    empty = seam_review_groups([], {"1": "safety"})
+    assert empty["batched"] == [] and empty["individual"] == [], empty
+
+    deps = {"1": [], "2": []}
+    project = {
+        "deps": dict(deps),
+        "durations": {"1": 10, "2": 50},
+        "mergeDurations": {"1": 300},
+        "planDurations": dict(PLAN_MS_ALL),
+        "protectedTasks": ["2"],  # task 2 never merges: its wave stays empty
+    }
+    args = {
+        "deps": dict(deps),
+        "remaining": ["1", "2"],
+        "maxConcurrent": 4,
+        "agents": {"reviewer": dict(REVIEWER)},
+    }
+    out = bridge.run(project, args, slots=4)
+    assert out["result"]["merged"] == ["1"], out["result"]
+    # Nothing covers the unmerged task, and no review ran empty.
+    covering2 = [l for l in review_events(out["events"]) if "2" in covers_of(out, l)]
+    assert covering2 == [], (covering2, "an empty batched review ran for the unmerged task")
+    for label in review_events(out["events"]):
+        covered = covers_of(out, label)
+        assert covered, (label, "an empty review ran")
+        assert set(covered) <= {"1"}, (label, covered)
+    # The merged wave is batched exactly once; it is never re-covered.
+    assert len(batches_covering(out, ["1"])) == 1, batch_review_labels(out["events"])
+    covering1 = [l for l in review_events(out["events"]) if "1" in covers_of(out, l)]
+    assert len(covering1) == 1, (covering1, "the reviewed task was re-covered by a stale batch")
+
+
+def test_redteam_review_batching_single_task_wave_flagged(bridge):  # noqa: F811
+    """4.3/4.4 red-team: single-task waves, flagged and risky.
+
+    A one-task non-risky wave whose batched verdict flags its only task must
+    revise that task alone and re-review it (no wave-mates to touch, no extra
+    agents beyond the re-review). A one-task risky wave must stay individual
+    with no combined review. A batcher with a wave-size floor would skip the
+    single-task batch; one without a risk check would batch the risky task.
+    """
+    # Part A: single non-risky task wave with a flagged batched verdict.
+    ids = ["1", "2"]
+    flagged_verdict = {
+        "verdict": "changes",
+        "findings": [{"task": "2", "severity": "blocking", "file": "x.py",
+                      "issue": "single-task wave finding on 2", "fix": "fix 2"}],
+    }
+    # The batched verdict is looked up by the wave's first covered task.
+    cfg = wave_project(ids, {}, {"2": [flagged_verdict, "approve"]})
+    out = bridge.run(cfg["project"], cfg["args"], slots=4)
+    result = out["result"]
+    assert result.get("halted") is False, result.get("reason")
+    assert set(result["merged"]) == set(ids), result["merged"]
+    # The lone wave task gets exactly one batch (fails pre-Task-18: no
+    # review-wave labels), then revises alone and is re-reviewed once.
+    assert merged_waves(out["events"], ids)[-1] == ["2"], merged_waves(out["events"], ids)
+    assert len(batches_covering(out, ["2"])) == 1, batch_review_labels(out["events"])
+    assert any(re.match(r"^task 2( \[test\])? revise", e) for e in out["events"]), (
+        "the flagged single-task wave never revised", out["events"])
+    covering2 = [l for l in review_events(out["events"]) if "2" in covers_of(out, l)]
+    assert len(covering2) == 2, (covering2, "the flagged task was not re-reviewed exactly once")
+    # The untouched wave-mate approves with no revise and no extra agent.
+    assert not any(re.match(r"^task 1( \[test\])? revise", e) for e in out["events"]), out["events"]
+    covering1 = [l for l in review_events(out["events"]) if "1" in covers_of(out, l)]
+    assert len(covering1) == 1, (covering1, "an unflagged task got an extra review agent")
+    rows = {t["task"]: t for t in result.get("tasks", [])}
+    assert rows["2"].get("review", {}).get("verdict") == "approve", rows["2"].get("review")
+
+    # Part B: single risky-task wave stays individual with no combined review.
+    out = seam_review_groups(["2"], {"2": "safety"})
+    assert out["individual"] == ["2"] and out["batched"] == [], out
+    cfg = wave_project(ids, {"2": "safety"}, {})
+    out = bridge.run(cfg["project"], cfg["args"], slots=4)
+    assert set(out["result"]["merged"]) == set(ids), out["result"]["merged"]
+    assert not [l for l in batch_review_labels(out["events"]) if "2" in covers_of(out, l)], (
+        batch_review_labels(out["events"]))
+    assert any(l == "review 2" for l in individual_review_labels(out["events"])), out["events"]
+
+
