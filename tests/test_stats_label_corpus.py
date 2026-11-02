@@ -74,3 +74,38 @@ def test_corpus_check_fails_naming_an_unknown_label():
     entries.append(("spec-implement", "frobnicate 99"))
     with pytest.raises(AssertionError, match="frobnicate 99"):
         _check_corpus(entries)
+
+
+def test_review_wave_label_maps_to_reviewer_with_wave_and_tasks():
+    """Task 36 (4.1, NFR-4, 5.2): the batched-review label is a review agent."""
+    from claude_kiro.analytics import parse_label
+
+    m = parse_label("review-wave 2 tasks 4 5 7", "spec-implement")
+    assert _get(m, "role") == "reviewer"
+    assert _get(m, "matched") is True
+    assert _get(m, "wave") == 2
+    assert list(_get(m, "tasks")) == ["4", "5", "7"]
+
+    # Every review-wave label the real script emits (via the emit_labels
+    # wave-merge scenario) parses as a review agent, never `other`, so the
+    # W + R bound and the overhead reviewer share count it.
+    corpus = _emitted()
+    waves = [c["label"] for c in corpus if c["label"].startswith("review-wave ")]
+    assert waves, "emit_labels.mjs produced no review-wave label"
+    for label in waves:
+        m = parse_label(label, "spec-implement")
+        assert _get(m, "role") == "reviewer", label
+        assert _get(m, "matched") is True, label
+        assert isinstance(_get(m, "wave"), int), label
+        assert len(list(_get(m, "tasks"))) >= 1, label
+
+
+def test_malformed_review_wave_labels_stay_other():
+    from claude_kiro.analytics import parse_label
+
+    for label in ("review-wave", "review-wave 2", "review-wave 2 tasks",
+                  "review-wave x tasks 1 2", "review-wave 2 tasks ",
+                  "Review-Wave 2 tasks 1 2"):
+        m = parse_label(label, "spec-implement")
+        assert _get(m, "matched") is False, label
+        assert _get(m, "role") == "other", label
