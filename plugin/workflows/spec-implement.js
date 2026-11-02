@@ -787,7 +787,7 @@ function call(kind, prompt, opts) {
 // The scheduler's view of the plan (applyPlanView) and what runs now.
 let view = { order: [], deps: {}, done: new Set(), cycles: [], verifyCycles: [] }
 let current = null          // the last plan applied
-let lastPlanReady = []       // without args.deps: the ready list of the plan that just returned, used once
+let lastPlanReady = []      // without args.deps: the ready list of the plan that just returned, used once
 let planFallbacks = []    // one entry per fallback: { planStep, trigger, source, ready }
 let degraded = false      // true once any fallback fired
 let lastGood = null       // { ready, deps, order } of the last consistent plan: the dep-less fallback layer

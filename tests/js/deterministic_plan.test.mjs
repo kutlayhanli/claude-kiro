@@ -1,5 +1,5 @@
 // Deterministic-plan example cases (Stories 1-4). Covered here: TC-0 smoke, TC-1,
-// TC-3..TC-7, TC-9..TC-22. TC-2 and TC-26 arrive with the tasks that own them.
+// TC-2..TC-7, TC-9..TC-22. TC-26 arrives with the task that owns it.
 // Run: node tests/js/deterministic_plan.test.mjs [TC-id ...]  (no ids: run every case)
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
@@ -79,6 +79,28 @@ await test('TC-1 retry once then adopt: inconsistent first plan retries with the
   assert.equal(result.degraded, false, 'a run adopted from the retry counts no fallback')
   assert.ok(Array.isArray(result.planFallbacks), 'the result carries the fallback list')
   assert.equal(result.planFallbacks.length, 0, 'no fallback was recorded')
+})
+
+await test('TC-2 twice-inconsistent plan falls back and completes degraded with no third attempt (1.2, 1.3)', async () => {
+  const deps = { 1: [], 2: ['1'] }
+  // Both plan answers claim ready ['2'] against truthful deps (2 is not ready:
+  // 1 is not Done). The retry fails too, so the run continues from the
+  // deterministic ready list instead of halting.
+  const p = project({ deps, planSeq: [{ ready: ['2'] }, { ready: ['2'] }] })
+  const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: withGraph(deps) })
+  assert.ok(idx(p.state, 'plan 1') >= 0, 'the start plan ran')
+  assert.ok(idx(p.state, 'plan 1 retry') > idx(p.state, 'plan 1'), 'the inconsistent plan was retried once')
+  assert.deepEqual(p.state.events.filter(e => e === 'plan 1' || e === 'plan 1 retry'), ['plan 1', 'plan 1 retry'], 'no third plan attempt after the retry')
+  assert.equal(result.halted, false, 'the run continued from the deterministic list instead of halting')
+  assert.notEqual(result.reason, 'planning step failed')
+  assert.deepEqual(result.merged.sort(), ['1', '2'], 'every task merged')
+  assert.equal(result.degraded, true, 'a fallback run is marked degraded')
+  const fallbacks = result.planFallbacks || []
+  assert.ok(fallbacks.length >= 1, 'at least one fallback was recorded')
+  assert.equal(fallbacks[0].planStep, 1, 'the fallback names the triggering plan step (1.3)')
+  assert.equal(fallbacks[0].trigger, 'start', 'the fallback names its trigger (1.3)')
+  assert.equal(fallbacks[0].source, 'deps', 'the fallback came from the supplied deps layer (2.1)')
+  assert.ok(logs.some(l => /plan 1/.test(l) && /inconsistent/.test(l)), 'the log names the triggering plan attempt')
 })
 
 await test('TC-3 healthy plan: no degraded mark and no fallback (1.4)', async () => {
@@ -535,6 +557,35 @@ await test('TC-22 no wave merged: an unmerged task gets no review (4.6)', async 
   assert.deepEqual(covering2, [], 'no review agent is requested for the unmerged task (no empty batched review)')
   // The reviews are on: the merged wave was reviewed.
   assert.equal(batchesCovering(p, ['1']).length, 1, 'the merged wave still gets its batched review')
+})
+
+await test('TC-26 overhead above threshold warns without halting/failing/retrying (5.4)', async () => {
+  // Forced overhead: tiny task work (1ms each) against many plan/review/land
+  // agents (6 independent tasks at maxConcurrent 1: a plan plus a review plus
+  // a landing per wave; plan/review/merge calls slowed so the plan/review/land
+  // share dominates under any agent-time measure). Needs the Task 22 warn-only
+  // wiring: the run still completes, nothing names overhead as a stop reason,
+  // and the report flags the overhead warning.
+  const deps = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] }
+  const slow = { 1: 50, 2: 50, 3: 50, 4: 50, 5: 50, 6: 50, 7: 50, 8: 50, 9: 50, 10: 50, 11: 50, 12: 50 }
+  const p = project({ deps, durations: { 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1 }, planDurations: slow, reviewDurations: slow, mergeDurations: slow })
+  const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: reviewArgs(deps, { maxConcurrent: 1 }) })
+  assert.equal(result.halted, false, 'the run still completes under forced overhead')
+  assert.equal(result.outcome, 'complete', 'the outcome is complete, not halted or blocked')
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3', '4', '5', '6'], 'every task merged')
+  assert.ok(!result.reason || !/overhead/i.test(String(result.reason)), `no stop reason names overhead (saw: ${result.reason})`)
+  assert.deepEqual(planRetries(p.state.events), [], 'healthy plans need no retry: overhead triggers no retry')
+  checkPlanTriggers(p.state.events, logs, 'TC-26')
+  assert.equal(result.degraded, false, 'a healthy run carries no degraded mark even under forced overhead')
+  assert.ok(Array.isArray(result.planFallbacks), 'the result carries the fallback list')
+  assert.equal(result.planFallbacks.length, 0, 'no fallback was recorded')
+  const overhead = result.overhead
+  assert.ok(overhead && typeof overhead === 'object', 'the result carries the overhead field (Task 22 warn-only wiring)')
+  assert.equal(overhead.threshold, 0.5, 'the published threshold is 0.5')
+  assert.ok(typeof overhead.share === 'number' && overhead.share > overhead.threshold, `the forced run exceeds the threshold (share=${overhead && overhead.share})`)
+  assert.equal(overhead.warned, true, 'the over-threshold run flags the warning')
+  const warnLine = logs.find(l => /overhead/i.test(l) && /warn/i.test(l))
+  assert.ok(warnLine, 'the report flags the overhead warning')
 })
 
 const unknown = [...only].filter(id => !seen.has(id))
