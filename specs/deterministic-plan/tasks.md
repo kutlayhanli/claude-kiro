@@ -299,7 +299,7 @@
 **Risk:** normal
 ---
 ### Task 17: Red-team review batching
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 4.3, 4.6
 **Description:** Try to break each SHALL NOT clause of Story 4 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test named `test_redteam_review_batching_*`. Targets 4.3 (risky-only wave SHALL NOT run a combined review) and 4.6 (SHALL NOT run an empty batched review): `risk` tags with case/whitespace variants (`Safety`, `SAFETY`, ` safety `), missing/unknown risk values, single-risky-task waves, empty merged wave after failed landing, wave whose tasks were all already reviewed. Needs the Task 18 review batching to pass.
