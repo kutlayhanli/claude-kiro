@@ -821,13 +821,10 @@ async function runPlan(trigger) {
     if (usablePlan(p) && !(p.error && !p.done.length && !p.remaining.length)) {
       const n = normalizePlan(p)
       // Done is ground truth even when the ready list is not: fold it in so the
-      // fallback below never re-schedules an already-finished task (1.5).
+      // fallback below never re-schedules an already-finished task (1.5). (Order
+      // and deps stay on the args-seeded view per D5: the fallback is computed
+      // from the deps arg, never from a failed plan's graph.)
       for (const d of n.done) view.done.add(d)
-      // The graph may be fresher than the view (tasks.md relink mid-run): refresh
-      // structure from every usable answer. Readiness is always recomputed, never
-      // trusted; the union keeps tasks a bad answer omits.
-      for (const [k, v] of Object.entries(n.deps || {})) view.deps[k] = v
-      for (const t of n.remaining) if (!view.order.includes(t)) view.order.push(t)
       // Nothing remaining: the ready list is vacuous (a bad answer may name unknown
       // ids `normalizePlan` cannot filter without a remaining list). Adopt the done
       // state, schedule nothing, count no fallback (1.4).
