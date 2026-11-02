@@ -828,6 +828,10 @@ async function runPlan(trigger) {
       // trusted; the union keeps tasks a bad answer omits.
       for (const [k, v] of Object.entries(n.deps || {})) view.deps[k] = v
       for (const t of n.remaining) if (!view.order.includes(t)) view.order.push(t)
+      // Nothing remaining: the ready list is vacuous (a bad answer may name unknown
+      // ids `normalizePlan` cannot filter without a remaining list). Adopt the done
+      // state, schedule nothing, count no fallback (1.4).
+      if (!n.remaining.length) n.ready = []
       // A task a plan reports as busy is left out of its ready list: it is not a mismatch.
       if (planConsistent(n, [...exclude, ...n.busy.map(b => b.task)])) {
         if (p.error) log(`${label}: the planning agent left a note (not a failure): ${trim(p.error, 300)}`)
