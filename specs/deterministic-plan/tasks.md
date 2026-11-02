@@ -611,7 +611,7 @@
 **Risk:** normal
 ---
 ### Task 35: Bench summary carries degraded and overhead through
-**Status:** In Progress (land-gate fallout migrations, 2026-11-02)
+**Status:** Done (STOP-1/2/3 migrations green, full suite 3013 passed 2026-11-02)
 **Track:** impl
 **Requirements:** 5.1, 6.3
 **Description:** In `src/claude_kiro/bench.py`, extend `summarize_report` to copy `degraded`, `planFallbacks`/`plan_fallbacks`, and `overhead` through from the workflow report so the equity re-run comparison (lower plan/review/landing share, no planning halt) can read them. Additive copies with `.get`; absent fields stay absent.
