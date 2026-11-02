@@ -1,5 +1,5 @@
 // Deterministic-plan example cases (Stories 1-4). Covered here: TC-0 smoke, TC-1,
-// TC-3..TC-7, TC-9..TC-22. TC-2 and TC-26 arrive with the tasks that own them.
+// TC-2..TC-7, TC-9..TC-22. TC-26 arrives with the task that owns it.
 // Run: node tests/js/deterministic_plan.test.mjs [TC-id ...]  (no ids: run every case)
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
@@ -79,6 +79,28 @@ await test('TC-1 retry once then adopt: inconsistent first plan retries with the
   assert.equal(result.degraded, false, 'a run adopted from the retry counts no fallback')
   assert.ok(Array.isArray(result.planFallbacks), 'the result carries the fallback list')
   assert.equal(result.planFallbacks.length, 0, 'no fallback was recorded')
+})
+
+await test('TC-2 twice-inconsistent plan falls back and completes degraded with no third attempt (1.2, 1.3)', async () => {
+  const deps = { 1: [], 2: ['1'] }
+  // Both plan answers claim ready ['2'] against truthful deps (2 is not ready:
+  // 1 is not Done). The retry fails too, so the run continues from the
+  // deterministic ready list instead of halting.
+  const p = project({ deps, planSeq: [{ ready: ['2'] }, { ready: ['2'] }] })
+  const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: withGraph(deps) })
+  assert.ok(idx(p.state, 'plan 1') >= 0, 'the start plan ran')
+  assert.ok(idx(p.state, 'plan 1 retry') > idx(p.state, 'plan 1'), 'the inconsistent plan was retried once')
+  assert.deepEqual(p.state.events.filter(e => e === 'plan 1' || e === 'plan 1 retry'), ['plan 1', 'plan 1 retry'], 'no third plan attempt after the retry')
+  assert.equal(result.halted, false, 'the run continued from the deterministic list instead of halting')
+  assert.notEqual(result.reason, 'planning step failed')
+  assert.deepEqual(result.merged.sort(), ['1', '2'], 'every task merged')
+  assert.equal(result.degraded, true, 'a fallback run is marked degraded')
+  const fallbacks = result.planFallbacks || []
+  assert.ok(fallbacks.length >= 1, 'at least one fallback was recorded')
+  assert.equal(fallbacks[0].planStep, 1, 'the fallback names the triggering plan step (1.3)')
+  assert.equal(fallbacks[0].trigger, 'start', 'the fallback names its trigger (1.3)')
+  assert.equal(fallbacks[0].source, 'deps', 'the fallback came from the supplied deps layer (2.1)')
+  assert.ok(logs.some(l => /plan 1/.test(l) && /inconsistent/.test(l)), 'the log names the triggering plan attempt')
 })
 
 await test('TC-3 healthy plan: no degraded mark and no fallback (1.4)', async () => {

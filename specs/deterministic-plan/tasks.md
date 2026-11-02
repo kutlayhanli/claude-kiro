@@ -333,7 +333,7 @@
 **Risk:** normal
 ---
 ### Task 19: Workflow example for degraded fallback completion
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.2, 1.3
 **Description:** Implements TC-2 in `tests/js/deterministic_plan.test.mjs` (split from the Task 5 retry cases: TC-2 asserts scheduling continues with no third plan attempt, which needs the Task 14 gating, and asserts `result.degraded` plus fallback count/triggers, which needs the Task 22 result fields). Given `planSeq` [inconsistent, inconsistent] with truthful `deps` in args: a second `plan 1 retry` is followed by no third plan attempt; every task merges; `result.degraded is True`, fallback count ≥ 1, and the log/result names the triggering plan attempt (`plan 1`). Assert only on `events`/`prompts`/`result`/`logs`, never script internals.
@@ -342,9 +342,9 @@
 **Verify:** `node tests/js/deterministic_plan.test.mjs TC-2`
 **Verifies:** Task 22 (needs fallback scheduling plus degraded result fields; fails until both exist)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real workflow script under fake runtime, labels + result + logs)
-- [ ] Tests fail before the implementation exists for the right reason (script halts `planning step failed` on twice-inconsistent plan; no `degraded`/`plan_fallbacks` fields)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real workflow script under fake runtime, labels + result + logs)
+- [x] Tests fail before the implementation exists for the right reason (script halts `planning step failed` on twice-inconsistent plan; no `degraded`/`plan_fallbacks` fields)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs extended fake_project + Node suite skeleton)
 **Complexity:** Low
 **Risk:** normal
