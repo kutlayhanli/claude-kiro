@@ -434,7 +434,7 @@
 **Risk:** normal
 ---
 ### Task 25: Vendored parity and seam-usage proofs
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 1.2, 2.1, 2.2
 **Description:** Implements the TC-34 parity half of the draft test track (TC-35 seam-usage lives in Task 32): any workflow script change keeps the OpenCode vendored copy byte-identical to the plugin source (extended `tests/test_plugin.py` dogfood test), and `validateWorkflowArgs` still requires `spec`+`root` for spec-implement while `deps` stays optional by design (`opencode/test/workflow-tool.test.ts`). This protects the deps/last-good/halt layering (2.1, 2.2) on both harnesses. OpenCode path verified with `node --test test/*.test.ts` from `opencode/`.
