@@ -497,8 +497,8 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_stats.py -k plan_fallbacks_counts`
 **Verified by:** Task 27 (its tests are the oracle)
 **Acceptance:**
-- [ ] Collected runs from post-change results carry `counts.plan_fallbacks` equal to `stats.planFallbacks`
-- [ ] Pre-change records without the field produce no `plan_fallbacks` key and every existing figure is unchanged (5.5, 5.6)
+- [x] Collected runs from post-change results carry `counts.plan_fallbacks` equal to `stats.planFallbacks`
+- [x] Pre-change records without the field produce no `plan_fallbacks` key and every existing figure is unchanged (5.5, 5.6)
 **Dependencies:** Task 27 (its tests are the oracle)
 **Complexity:** Low
 **Risk:** normal
