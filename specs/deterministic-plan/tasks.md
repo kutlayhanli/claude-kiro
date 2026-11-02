@@ -227,7 +227,7 @@
 **Risk:** normal
 ---
 ### Task 13: Red-team plan-agent thrash
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.3
 **Description:** Try to break each SHALL NOT clause of Story 3 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test named `test_redteam_plan_thrash_*`. Targets 3.3 (SHALL NOT run a plan agent after every freed slot when deterministic ready decides): rapid successive finishes with ready always non-empty, freed slot racing a landing end, empty-then-instantly-ready transitions, dep-less-shaped `deps` (`null`/`[]`/string) smuggled into a deps run. Needs the Task 14 gating to pass.
@@ -236,12 +236,13 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_plan.py -k redteam_plan_thrash`
 **Verifies:** Task 14 (exercises `planDecision` gating; fails until that code exists)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real script trace ordering under adversarial finish/landing interleavings)
-- [ ] Tests fail before the implementation exists for the right reason (extra plan agents between finish and ready start)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real script trace ordering under adversarial finish/landing interleavings)
+- [x] Tests fail before the implementation exists for the right reason (extra plan agents between finish and ready start)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs freed-slot timing + label-grammar helpers)
 **Complexity:** Medium
 **Risk:** normal
+**Note (2026-11-02):** Prior blocker resolved by Task 20 merge (scheduler-local `fallbackReady` renamed to `lastPlanReady`): `bridge.run` now executes; 3 of 4 red-team tests fail for the right reason (extra plan agents between finish and ready start, pending Task 14), 1 passes.
 ---
 ### Task 14: Idle-gated plan triggers and deterministic freed-slot scheduling
 **Status:** Not Started
@@ -332,7 +333,7 @@
 **Risk:** normal
 ---
 ### Task 19: Workflow example for degraded fallback completion
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.2, 1.3
 **Description:** Implements TC-2 in `tests/js/deterministic_plan.test.mjs` (split from the Task 5 retry cases: TC-2 asserts scheduling continues with no third plan attempt, which needs the Task 14 gating, and asserts `result.degraded` plus fallback count/triggers, which needs the Task 22 result fields). Given `planSeq` [inconsistent, inconsistent] with truthful `deps` in args: a second `plan 1 retry` is followed by no third plan attempt; every task merges; `result.degraded is True`, fallback count ≥ 1, and the log/result names the triggering plan attempt (`plan 1`). Assert only on `events`/`prompts`/`result`/`logs`, never script internals.
@@ -341,15 +342,15 @@
 **Verify:** `node tests/js/deterministic_plan.test.mjs TC-2`
 **Verifies:** Task 22 (needs fallback scheduling plus degraded result fields; fails until both exist)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real workflow script under fake runtime, labels + result + logs)
-- [ ] Tests fail before the implementation exists for the right reason (script halts `planning step failed` on twice-inconsistent plan; no `degraded`/`plan_fallbacks` fields)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real workflow script under fake runtime, labels + result + logs)
+- [x] Tests fail before the implementation exists for the right reason (script halts `planning step failed` on twice-inconsistent plan; no `degraded`/`plan_fallbacks` fields)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs extended fake_project + Node suite skeleton)
 **Complexity:** Low
 **Risk:** normal
 ---
 ### Task 20: Workflow example for overhead warn-only
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.4
 **Description:** Implements the workflow half of TC-26 in `tests/js/deterministic_plan.test.mjs` (CLI half in Task 29). Given a run whose plan/review/landing share is forced above the published threshold (tiny task durations, many plan/review agents): the run still completes with no stop reason naming overhead (warn-only: no halt/fail/retry), while the report flags the overhead warning. Needs the Task 22 warn-only wiring to pass; pairs with the Task 29 CLI assertions on the same run shape.
@@ -358,9 +359,9 @@
 **Verify:** `node tests/js/deterministic_plan.test.mjs TC-26`
 **Verifies:** Task 22 (exercises overhead warn-only wiring; fails until that code exists)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real script scheduling over a forced-overhead run)
-- [ ] Tests fail before the implementation exists for the right reason (run halts/fails/retries naming overhead, or warning missing)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real script scheduling over a forced-overhead run)
+- [x] Tests fail before the implementation exists for the right reason (run halts/fails/retries naming overhead, or warning missing)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs fake_project timing controls for forced overhead)
 **Complexity:** Medium
 **Risk:** normal
@@ -504,7 +505,7 @@
 **Risk:** normal
 ---
 ### Task 29: CLI examples for overhead visibility
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.1, 5.2, 5.3, 5.4, 5.5, 5.6
 **Description:** Implements TC-23, TC-24, TC-25, TC-26 (CLI half), TC-27, TC-28 in `tests/test_deterministic_stats.py` via real `ck stats` subprocesses over `FakeClaudeHome` stores (`tests/stats_helpers.py`). TC-23: degraded run with 2 fallbacks at `plan 2`/`plan 3 retry` → report names degraded + count + triggers. TC-24: plan/review/land agent share beside `plan_fallbacks`. TC-25: `--json` values equal text-view parsed numbers. TC-26: forced-overhead run → warning flagged, completes, no overhead stop reason (pairs with Task 20 workflow half). TC-27: pre-change `pre-deterministic-record.json` → `not recorded`, existing figures unchanged. TC-28: old + new records → old reads without re-collection, bytes identical. Needs Tasks 28 + 33 (counts + show rendering).
@@ -513,9 +514,9 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_stats.py -k "TC23 or TC24 or TC25 or TC26 or TC27 or TC28 or degraded_report"`
 **Verifies:** Task 33 (exercises `ck stats show` rendering end to end; fails until that code exists)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real `ck stats show`/`collect` subprocesses over FakeClaudeHome stores)
-- [ ] Tests fail before the implementation exists for the right reason (no `degraded`/`plan_fallbacks`/overhead-share fields in records or show output)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real `ck stats show`/`collect` subprocesses over FakeClaudeHome stores)
+- [x] Tests fail before the implementation exists for the right reason (no `degraded`/`plan_fallbacks`/overhead-share fields in records or show output)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs `implement_result()` kwargs + pre-change fixture record)
 **Complexity:** Medium
 **Risk:** normal

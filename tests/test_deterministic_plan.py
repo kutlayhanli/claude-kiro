@@ -1396,6 +1396,18 @@ def test_batch_verdict_fanout(bridge, data):  # noqa: F811
 # every freed slot fails the trace predicates for the right reason (extra plan
 # agents between finish and ready start). Imports of project code stay inside
 # the loader subprocess calls so the module always collects.
+# ------------------------------------------------- red-team: plan-agent thrash (3.3)
+#
+# Requirement 3.3: no plan agent after every freed implementing slot when the
+# deterministic ready list already determines what starts next. Each test below
+# is an adversarial timing/slot shape where a per-freed-slot re-reader would
+# smuggle an extra `plan` between a finish and the next `task N` request:
+# rapid successive finishes with ready always non-empty, a freed slot racing
+# a landing end, empty-then-instantly-ready transitions, and dep-less-shaped
+# `deps` (`null`/`[]`/string) smuggled into a deps run. All run the real
+# script through the bridge with healthy plans and script-side readiness on
+# (Task 14's `planDecision` gating); the failure mode is extra plan agents
+# between finish and ready start.
 
 PLAN_DECISION_CALLER = (
     f"import {{ loadDecisions }} from {LOAD_DECISIONS_URL!r};"
@@ -1408,7 +1420,7 @@ PLAN_DECISION_CALLER = (
 def seam_plan_decision(trigger: str, script_readiness: bool = True, plan_in_flight: bool = False,
                        idle_armed: bool = True, free_slot: bool = True, ready_count: int = 0,
                        open_count: int = 1, stop_launching: bool = False) -> str:
-    """Call the `planDecision` decision seam (exists in the base; Task 14 gates it)."""
+    """Call the `planDecision` decision seam (exists today; Task 14 owns the gating)."""
     payload = json.dumps({
         "trigger": trigger,
         "scriptReadiness": script_readiness,
@@ -1429,6 +1441,7 @@ def seam_plan_decision(trigger: str, script_readiness: bool = True, plan_in_flig
     return json.loads(proc.stdout)["decision"]
 
 
+# ------------------------------------------------- P-8 / P-14 schedule helpers (Task 11)
 def plan_schedule_violations(trace, ready_at) -> List[str]:
     """Check the Story-3 schedule relations on one bridge trace.
 
@@ -1600,5 +1613,216 @@ def test_freed_slot_and_idle_arming(bridge, data):  # noqa: F811
     first = next(i for i, label in enumerate(requests) if TASK_LABEL.match(label))
     assert any(PLAN_LABEL.match(label) and not PLAN_LABEL.match(label).group(2)
                for label in requests[first + 1:]), requests
+
+
+# ------------------------------------------------- red-team thrash helpers (Task 13)
+THRASH_PLAN = re.compile(r"^plan \d+$")
+THRASH_TASK_END = re.compile(r"^task \d+ end$")
+
+
+def thrash_plans(events) -> List[str]:
+    """Non-retry `plan N` request labels in event order."""
+    return [e for e in events if THRASH_PLAN.match(e)]
+
+
+def thrash_plan_any(events) -> List[str]:
+    """Every `plan ...` request label (including retries) in event order."""
+    return [e for e in events if e.startswith("plan ")]
+
+
+def thrash_land_reqs(events) -> List[str]:
+    return [e for e in events if e.startswith("land ") and not e.endswith(" end")]
+
+
+def thrash_land_ends(events) -> List[str]:
+    return [e for e in events if e.startswith("land ") and e.endswith(" end")]
+
+
+def thrash_idle_plans(logs) -> List[str]:
+    """Idle-triggered plan labels from the script logs (`plan N (idle):`)."""
+    return sorted({f"plan {m}" for m in re.findall(r"plan (\d+) \(idle\)", "\n".join(logs))},
+                  key=lambda label: int(label.split()[1]))
+
+
+def assert_no_plan_between_finish_and_start(events, label: str) -> int:
+    """No `plan` request between any implementer finish and the next `task N`
+    request (the 3.3 thrash predicate, TC-13 shape). Returns the pair count."""
+    pairs = 0
+    for i, e in enumerate(events):
+        if not THRASH_TASK_END.match(e):
+            continue
+        nxt = next((j for j in range(i + 1, len(events)) if TASK_LABEL.match(events[j])), None)
+        if nxt is None:
+            continue  # last finishes have no next task start
+        pairs += 1
+        between = events[i + 1:nxt]
+        assert not any(x.startswith("plan ") for x in between), (
+            label, f"plan smuggled between {e} and {events[nxt]}", between)
+    return pairs
+
+
+def assert_thrash_triggers(events, logs, label: str) -> None:
+    """Every non-retry plan is the start plan, the first plan after a landing
+    completed, or an idle re-read (the 3.1 trigger contract, TC-11 shape)."""
+    idle = set(thrash_idle_plans(logs))
+    positions = [(e, i) for i, e in enumerate(events) if THRASH_PLAN.match(e)]
+    assert positions, f"{label}: at least one plan agent ran"
+    assert positions[0][0] == "plan 1", (label, positions)
+    for k in range(1, len(positions)):
+        cur, at = positions[k]
+        _, prev_at = positions[k - 1]
+        if cur in idle:
+            continue
+        between = events[prev_at + 1:at]
+        assert any(x.startswith("land ") and x.endswith(" end") for x in between), (
+            label, f"{cur} is not the first plan after a landing", between)
+
+
+def assert_thrash_plan_bound(events, logs, label: str) -> None:
+    """Plan count stays within 1 start + landings + idle (the 3.3 count bound)."""
+    plans = thrash_plans(events)
+    bound = 1 + len(thrash_land_reqs(events)) + len(thrash_idle_plans(logs))
+    assert len(plans) <= bound, (label, plans, bound)
+
+
+def test_redteam_plan_thrash_rapid_successive_finishes(bridge):  # noqa: F811
+    """3.3 red-team: rapid successive finishes with ready always non-empty.
+
+    Six independent tasks with staggered durations cycle two slots, so every
+    finish lands while ready tasks are outstanding. A per-freed-slot re-reader
+    would smuggle a plan between each finish and the next start; the gated
+    scheduler starts the next ready task(s) directly.
+    """
+    assert seam_plan_decision("freed", True, free_slot=True, ready_count=2, open_count=4) == "none"
+    assert seam_plan_decision("finished", True, free_slot=True, ready_count=2, open_count=4) == "none"
+    deps = {"1": [], "2": [], "3": [], "4": [], "5": [], "6": []}
+    cfg = redteam_project(deps, [{}])
+    cfg["project"]["durations"] = {"1": 10, "2": 20, "3": 30, "4": 40, "5": 50, "6": 60}
+    cfg["args"]["maxConcurrent"] = 2
+    out = bridge.run(cfg["project"], cfg["args"], slots=2)
+    result = out["result"]
+    assert result.get("outcome") == "complete", (result.get("outcome"), result.get("reason"))
+    assert set(result["merged"]) == set(deps), result["merged"]
+    assert not [label for label in thrash_plan_any(out["events"]) if label.endswith(" retry")], out["events"]
+    requested = task_requests(out["trace"])
+    for n in deps:
+        assert requested.count(n) == 1, (n, requested)
+    pairs = assert_no_plan_between_finish_and_start(out["events"], "rapid-finishes")
+    assert pairs >= 3, (pairs, out["events"])  # the finishes really did queue up behind ready work
+    assert_thrash_triggers(out["events"], out["logs"], "rapid-finishes")
+    assert_thrash_plan_bound(out["events"], out["logs"], "rapid-finishes")
+
+
+def test_redteam_plan_thrash_freed_slot_races_landing_end(bridge):  # noqa: F811
+    """3.3 red-team: a freed slot racing a landing end.
+
+    Task 1 is slow to implement and slower to land while tasks 2-4 cycle the
+    other slot, so implementer finishes land mid-landing. Even with a
+    `plan` in flight or a landing completing underneath, no plan may appear
+    between a finish and the next task start the deterministic list already
+    determined.
+    """
+    assert seam_plan_decision("freed", True, plan_in_flight=True, free_slot=True,
+                              ready_count=1, open_count=2) == "none"
+    assert seam_plan_decision("finished", True, free_slot=True, ready_count=1, open_count=2) == "none"
+    deps = {"1": [], "2": [], "3": [], "4": []}
+    cfg = redteam_project(deps, [{}])
+    cfg["project"]["durations"] = {"1": 100, "2": 10, "3": 10, "4": 10}
+    cfg["project"]["mergeDurations"] = {"1": 150}
+    cfg["args"]["maxConcurrent"] = 2
+    cfg["args"]["mergeBatch"] = 1
+    out = bridge.run(cfg["project"], cfg["args"], slots=2)
+    result = out["result"]
+    assert result.get("outcome") == "complete", (result.get("outcome"), result.get("reason"))
+    assert set(result["merged"]) == set(deps), result["merged"]
+    assert not [label for label in thrash_plan_any(out["events"]) if label.endswith(" retry")], out["events"]
+    events = out["events"]
+    # The race really happened: some implementer finish falls between a land
+    # request and the next land end (landings are one at a time per target).
+    land_req = [i for i, e in enumerate(events) if e.startswith("land ") and not e.endswith(" end")]
+    land_end = [i for i, e in enumerate(events) if e.startswith("land ") and e.endswith(" end")]
+    assert land_req and land_end, events
+    raced = False
+    for r in land_req:
+        following = [j for j in land_end if j > r]
+        if not following:
+            continue
+        if any(THRASH_TASK_END.match(events[k]) for k in range(r + 1, following[0])):
+            raced = True
+            break
+    assert raced, ("no finish raced a landing end; retune the timing", events)
+    assert_no_plan_between_finish_and_start(events, "race-landing")
+    assert_thrash_triggers(events, out["logs"], "race-landing")
+    assert_thrash_plan_bound(events, out["logs"], "race-landing")
+
+
+def test_redteam_plan_thrash_empty_then_instantly_ready(bridge):  # noqa: F811
+    """3.3 red-team: empty-then-instantly-ready transitions.
+
+    A two-task chain on one slot: while task 1 lands, nothing is ready and
+    nothing runs, so exactly one idle re-read fires and disarms; when the
+    landing completes, task 2 becomes ready instantly. The landing trigger
+    covers the re-read -- no second idle plan and no freed-slot plan may
+    appear between the record arriving and task 2 starting.
+    """
+    assert seam_plan_decision("idle", True, free_slot=True, ready_count=0,
+                              open_count=1, idle_armed=True) == "run"
+    assert seam_plan_decision("idle", True, free_slot=True, ready_count=0,
+                              open_count=1, idle_armed=False) == "none"
+    assert seam_plan_decision("freed", True, free_slot=True, ready_count=1, open_count=1) == "none"
+    deps = {"1": [], "2": ["1"]}
+    cfg = redteam_project(deps, [{}])
+    cfg["args"]["maxConcurrent"] = 1
+    out = bridge.run(cfg["project"], cfg["args"], slots=1)
+    result = out["result"]
+    assert result.get("outcome") == "complete", (result.get("outcome"), result.get("reason"))
+    assert set(result["merged"]) == set(deps), result["merged"]
+    events, logs = out["events"], out["logs"]
+    idle = thrash_idle_plans(logs)
+    assert idle == ["plan 2"], (idle, events)  # exactly one idle re-read per arming
+    assert events.index("plan 2") < events.index("land 1 end"), (
+        "the idle re-read ran while the landing was still in flight", events)
+    # No second idle plan once the landing completed and task 2 turned ready.
+    assert [p for p in idle if events.index(p) > events.index("land 1 end")] == [], (idle, events)
+    # The freed slot went straight to landing with no plan smuggled in.
+    between = events[events.index("task 1 end") + 1:events.index("land 1")]
+    assert not any(x.startswith("plan ") for x in between), ("plan between finish and land", between)
+    # After the landing, only the landing-triggered re-read precedes task 2.
+    after = events[events.index("land 1 end") + 1:events.index("task 2")]
+    assert not [x for x in after if x in idle], ("second idle plan before task 2", after)
+    assert_thrash_triggers(events, logs, "empty-then-ready")
+    assert_thrash_plan_bound(events, logs, "empty-then-ready")
+
+
+def test_redteam_plan_thrash_depless_shaped_deps(bridge):  # noqa: F811
+    """3.3 red-team: dep-less-shaped `deps` (`null`/`[]`/string) smuggled into a deps run.
+
+    The system's own readiness flag fed a near-miss: `SCRIPT_READINESS` is only
+    true for a plain-object `deps` map, so `null`, an array, and a string are
+    all dep-less runs (3.6). Each must complete AND run a plan agent after
+    freed slots -- the opposite of the 3.3 suppression. A truthiness-only
+    readiness check would treat `[]`/`"1"` as deps-mode and skip those plans,
+    stalling or mis-scheduling the run.
+    """
+    assert seam_plan_decision("freed", False, free_slot=True, ready_count=2, open_count=2) == "run"
+    assert seam_plan_decision("finished", False, free_slot=True, ready_count=1, open_count=1) == "run"
+    deps = {"1": [], "2": [], "3": []}
+    for shape in [None, [], "1"]:
+        cfg = redteam_project(deps, [{}])
+        cfg["args"]["deps"] = shape
+        cfg["args"]["maxConcurrent"] = 1
+        out = bridge.run(cfg["project"], cfg["args"], slots=1)
+        result = out["result"]
+        assert result.get("outcome") == "complete", (shape, result.get("outcome"), result.get("reason"))
+        assert set(result["merged"]) == set(deps), (shape, result["merged"])
+        events = out["events"]
+        for n in ["1", "2", "3"]:
+            assert events.count(f"task {n}") == 1, (shape, n, events)
+        # Dep-less mode re-plans per freed slot (3.6): a plan runs between each
+        # finish and the next start. Missing it means the shape leaked into 3.3.
+        for prev, nxt in [("1", "2"), ("2", "3")]:
+            between = events[events.index(f"task {prev} end") + 1:events.index(f"task {nxt}")]
+            assert any(THRASH_PLAN.match(x) for x in between), (
+                shape, f"no plan between task {prev} end and task {nxt} (dep-less shape treated as deps-mode)", between)
 
 
