@@ -488,7 +488,7 @@
 **Risk:** normal
 ---
 ### Task 28: Shareable counts carry plan_fallbacks
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 5.2, 5.3, 5.6
 **Description:** In `src/claude_kiro/analytics/share.py`, add `"plan_fallbacks"` to `COUNT_KEYS` and extend `_counts` to read `stats.planFallbacks` (int) into `counts.plan_fallbacks`, additive only: when the local stats block lacks the field, the key is absent (never zero-filled). No change to `ck stats collect` plumbing (it already carries `stats.*` through to `counts.*`). Shareable schema gains the dotted path via the existing `counts.*` map.
@@ -497,8 +497,8 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_stats.py -k plan_fallbacks_counts`
 **Verified by:** Task 27 (its tests are the oracle)
 **Acceptance:**
-- [ ] Collected runs from post-change results carry `counts.plan_fallbacks` equal to `stats.planFallbacks`
-- [ ] Pre-change records without the field produce no `plan_fallbacks` key and every existing figure is unchanged (5.5, 5.6)
+- [x] Collected runs from post-change results carry `counts.plan_fallbacks` equal to `stats.planFallbacks`
+- [x] Pre-change records without the field produce no `plan_fallbacks` key and every existing figure is unchanged (5.5, 5.6)
 **Dependencies:** Task 27 (its tests are the oracle)
 **Complexity:** Low
 **Risk:** normal

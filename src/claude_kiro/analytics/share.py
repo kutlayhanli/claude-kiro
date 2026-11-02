@@ -47,6 +47,7 @@ COUNT_KEYS = (
     "gates_green", "gates_red", "cross_tests", "cross_test_blocking", "plan_steps", "plan_failures",
     "review_fixed", "review_not_fixed", "review_escalated", "refuted", "lenses_lost",
     "consistency_passes", "consistency_fixed", "open_questions", "agents_other",
+    "plan_fallbacks",
 )
 INTERRUPTION_ROLES = ("implementer", "test-writer", "reviewer", "fixer", "resolver", "orchestrator")
 COMMAND_FAMILIES = ("sed", "rm", "mv", "git", "python", "redirect", "other")
@@ -488,6 +489,7 @@ def _counts(local: Mapping, tasks: List[Mapping], by_role: Dict[str, int]) -> Di
     c["tasks_not_started"] = _int(stats.get("notStarted"))
     c["plan_steps"] = _int(stats.get("planSteps"))
     c["plan_failures"] = _int(stats.get("planFailures"))
+    c["plan_fallbacks"] = _int(stats.get("planFallbacks"))
     if isinstance(local.get("landings"), list):
         lands = _dicts(local["landings"])
         c["landings"] = len(local["landings"])
