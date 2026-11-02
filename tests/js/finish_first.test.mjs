@@ -97,7 +97,9 @@ await test('TC-23: no new task is requested while a review/revise/land waits for
   assert.equal(result.halted, false)
   assert.deepEqual([...result.merged].sort(), ['1', '2', '3', '4', '5'])
   assertNoTaskRequestWhileFinishQueued(trace)
-  assertLand2Queued(trace)
+  // 3.1: land-2 queueing is structurally unhittable in the 3.1 flow (the landing
+  // plan and land 2 no longer queue together behind one slot), so the
+  // assertLand2Queued non-vacuity check is dropped; the property above holds.
 })
 
 await test('TC-24: once no finish-type agent is queued and a runtime slot is free, a ready task is requested before the next end', async () => {
@@ -136,16 +138,21 @@ await test('TC-65: at saturation a finished implementer\'s review takes the next
   const atStart = trace.slice(0, firstEndAfter).filter(e => e.ev === 'request' && isFirstAttempt(e.label)).map(e => e.label)
   assert.deepEqual(atStart, ['task 1', 'task 2'], 'only 2 tasks requested at start (no runtime slot for a third)')
 
-  // Task 1 ends with all slots busy: its review comes first and takes the freed slot.
+  // Task 1 ends with all slots busy: its merged wave's batch review is requested after
+  // task 1 ended and before any further task start queues ahead of it. Story 4 (4.1):
+  // the review is the `review-wave` batch covering the task; the merge and the 3.1
+  // plan-after-landing legitimately run first, but no task start takes the slot.
   const endTask1 = idxOf(trace, 'end', 'task 1')
-  const reqReview1 = idxOf(trace, 'request', 'review 1', endTask1)
-  assert.ok(reqReview1 > endTask1, 'review 1 was requested after task 1 ended')
+  const batch1 = trace.filter(e => e.ev === 'request').map(e => e.label).find(l => (p.state.reviewTasks[l] || []).includes('1'))
+  assert.ok(batch1, 'task 1 was reviewed by its covering batch (4.1)')
+  const reqBatch1 = idxOf(trace, 'request', batch1, endTask1)
+  assert.ok(reqBatch1 > endTask1, 'the batch review was requested after task 1 ended')
   const laterTask = firstAttemptRequests(trace).find(i => i > endTask1)
-  assert.ok(laterTask === undefined || reqReview1 < laterTask, 'request review 1 precedes any further first-attempt task request')
-  const startReview1 = idxOf(trace, 'start', 'review 1', endTask1)
-  assert.ok(startReview1 > endTask1, 'review 1 started after task 1 ended')
-  const startsBetween = trace.slice(endTask1 + 1, startReview1).filter(e => e.ev === 'start').map(e => e.label)
-  assert.deepEqual(startsBetween, [], 'start review 1 follows end task 1 with no other start between')
+  assert.ok(laterTask === undefined || reqBatch1 < laterTask, 'the batch review request precedes any further first-attempt task request')
+  const startBatch1 = idxOf(trace, 'start', batch1, endTask1)
+  assert.ok(startBatch1 > endTask1, 'the batch review started after task 1 ended')
+  const startsBetween = trace.slice(endTask1 + 1, startBatch1).filter(e => e.ev === 'start').map(e => e.label)
+  assert.ok(startsBetween.every(l => !isFirstAttempt(l)), `no task start takes the slot before the batch review starts (saw: ${startsBetween})`)
 
   // At every first-attempt task request a runtime slot is free, and the task starts at once.
   const st = states(trace)
@@ -177,6 +184,9 @@ await test('TC-25: with nothing queued, finish-first on and off give the same re
   const off = await run(mk(), { ...args, finishFirst: false })
   const seq = t => t.filter(e => ['request', 'start', 'end'].includes(e.ev)).map(e => `${e.ev} ${e.label}`)
   assert.deepEqual(seq(on.trace), seq(off.trace))
+  // overhead is a measured observation (real Date.now() agent ms per run), not schedule state;
+  // TC-25's contract covers scheduling/merging, so exclude it from the exact-equality check.
+  for (const r of [on.result, off.result]) delete r.overhead
   assert.deepEqual(on.result, off.result)
   assert.deepEqual([...on.result.merged].sort((a, b) => a - b), Object.keys(deps))
 })
@@ -185,6 +195,8 @@ await test('TC-25: with nothing queued, finish-first on and off give the same re
 
 // Labels whose end can trigger the request of `label`; the trigger is the latest such end before the request.
 const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+// Story 4 (4.1): the tasks a `review-wave <n> tasks <ids>` batch covers.
+const waveCovers = (l, n) => /^review-wave \d+ tasks /.test(l) && l.split(' tasks ')[1].split(' ').includes(String(n))
 function triggerOf(label) {
   let m
   if ((m = label.match(/^review (\d+)/))) {
@@ -193,12 +205,25 @@ function triggerOf(label) {
   }
   if ((m = label.match(/^task (\d+) revise /))) {
     const n = esc(m[1])
-    return l => new RegExp(`^review ${n}( |$)`).test(l)
+    // Story 4 (4.4): the first revise follows the batched verdict, so a review-wave
+    // batch covering the task also triggers its revision; re-reviews keep the old shape.
+    return l => new RegExp(`^review ${n}( |$)`).test(l) || waveCovers(l, n)
+  }
+  if ((m = label.match(/^review-wave \d+ tasks (.+)$/))) {
+    const ids = m[1].split(' ')
+    // Story 4 (4.1): a wave is reviewed after its land-batch merge step completes;
+    // the step's completion is the covering land end, or the full gate (and its
+    // fix/re-check repair) that ran on the merged batch before its review.
+    const stepDone = l => /^full gate @/.test(l) || /^fix /.test(l) || /^re-check /.test(l)
+    return l => (/^land /.test(l) && l.slice(5).split(' ').some(n => ids.includes(n))) || stepDone(l)
   }
   if ((m = label.match(/^land (.+)$/))) {
     const tasks = m[1].split(' ')
     const own = l => tasks.some(n => new RegExp(`^(task|review|resolve) ${esc(n)}( |$)`).test(l) || l.includes(`(Task ${n} red on landing)`))
-    const step = l => /^land /.test(l) || /^full gate @/.test(l) || /^fix \d+ \(full gate /.test(l) || /^re-check /.test(l)
+    // Story 4 + 3.1: the in-flight landing step's last agent may be the 3.1 plan that
+    // runs after the landing, or the post-merge review cycle (batch, revision
+    // re-review) whose completion releases the next land.
+    const step = l => /^land /.test(l) || /^full gate @/.test(l) || /^fix \d+ \(full gate /.test(l) || /^re-check /.test(l) || /^plan /.test(l) || /^review-wave \d+ tasks /.test(l) || /^review \d+ round \d+$/.test(l)
     return l => own(l) || step(l)  // approval (or fix/resolve) of a task in the batch, or the in-flight landing step's last agent
   }
   if (/^full gate @/.test(label)) return l => /^land /.test(l)
@@ -234,7 +259,7 @@ function assertNeverHeldBack(trace) {
     assert.ok(t >= 0, `no trigger found for "${e.label}" (trace[${i}])`)
     const between = trace.slice(t + 1, i).filter(x => x.ev === 'end').map(x => x.label)
     assert.deepEqual(between, [], `"${e.label}" was requested after its trigger "${trace[t].label}" ended, but only after ${between.join(', ')} also ended`)
-    if (/^review /.test(e.label)) seen.review++
+    if (/^review /.test(e.label) || /^review-wave /.test(e.label)) seen.review++
     else if (/ revise /.test(e.label)) seen.revise++
     else if (/^land /.test(e.label)) seen.land++
     else if (/^full gate/.test(e.label)) seen.full++
@@ -273,7 +298,15 @@ await test('TC-63: hand-built args (no agentSlots, finishFirst absent): nothing 
   const endLand1 = trace.findIndex(e => e.ev === 'end' && /^land /.test(e.label) && e.label.slice(5).split(' ').includes('1'))
   assert.ok(endLand1 >= 0, 'task 1 landed')
   assert.ok(idxOf(trace, 'request', 'task 2') < endLand1, 'task 2 was requested before task 1\'s land ended')
-  assert.ok(idxOf(trace, 'request', 'task 3') < idxOf(trace, 'end', 'review 2'), 'task 3 was requested before review 2 ended')
+  // Story 4 (4.1): reviews are post-merge `review-wave` batches; the review of task 2
+  // is the batch covering it (same intent as the spec_implement slot test: a review
+  // never holds an implementer slot). Deviation from the brief's item-4 drop: this run
+  // is dep-less (hand-built args, no deps), so 3.6 plans-per-launch — not 3.2 — applies
+  // and plan 3 legitimately intervenes; dropping the assert would lose the test's only
+  // review/task-start ordering property, so it migrates to the batch label instead.
+  const batch2 = trace.filter(e => e.ev === 'request').map(e => e.label).find(l => (p.state.reviewTasks[l] || []).includes('2'))
+  assert.ok(batch2, 'task 2 was reviewed by its covering batch (4.1)')
+  assert.ok(idxOf(trace, 'request', 'task 3') < idxOf(trace, 'end', batch2), 'task 3 was requested before the review covering task 2 ended')
 })
 
 await test('TC-27: finish-first off: a task start may queue, and nothing is logged about finish-first', async () => {
@@ -294,7 +327,8 @@ await test('TC-28: no finishFirst arg and agents without `run`: finish-first is 
   const { result, trace, logs } = await run(p, args, 2)
   assert.deepEqual([...result.merged].sort(), ['1', '2', '3', '4', '5'])
   assertNoTaskRequestWhileFinishQueued(trace)
-  assertLand2Queued(trace)
+  // 3.1: land-2 queueing is structurally unhittable in the 3.1 flow (see TC-23);
+  // the assertLand2Queued non-vacuity check is dropped, the property above holds.
   assert.ok(finishFirstLines(logs).length >= 1, 'the deferral was logged')
 })
 

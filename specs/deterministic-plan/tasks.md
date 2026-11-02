@@ -611,7 +611,7 @@
 **Risk:** normal
 ---
 ### Task 35: Bench summary carries degraded and overhead through
-**Status:** Not Started
+**Status:** Done (STOP-1/2/3 migrations green, full suite 3013 passed 2026-11-02)
 **Track:** impl
 **Requirements:** 5.1, 6.3
 **Description:** In `src/claude_kiro/bench.py`, extend `summarize_report` to copy `degraded`, `planFallbacks`/`plan_fallbacks`, and `overhead` through from the workflow report so the equity re-run comparison (lower plan/review/landing share, no planning halt) can read them. Additive copies with `.get`; absent fields stay absent.
@@ -620,11 +620,27 @@
 **Verify:** `uv run pytest -q tests/test_bench.py -k degraded_passthrough`
 **Verified by:** Task 27 (its tests are the oracle)
 **Acceptance:**
-- [ ] `summarize_report` output includes the run's degraded flag, fallback counts, and overhead share when present and omits them when absent
-- [ ] Equity re-run comparison can read lower overhead share with no planning halt from the summary (6.3)
+- [x] `summarize_report` output includes the run's degraded flag, fallback counts, and overhead share when present and omits them when absent
+- [x] Equity re-run comparison can read lower overhead share with no planning halt from the summary (6.3)
 **Dependencies:** Task 22 (data: copies the result fields added there); Task 27 (its tests are the oracle)
 **Complexity:** Low
 **Risk:** normal
+**Migration log (land-gate fallout, 2026-11-02; test/docs-only, no src/ changes except adjudicated STOP-1):**
+- landing_speed TC-11 → rewritten as the deps-mode continue twin: after plan-2 retry task 4 IS requested (fallback), `result.degraded is True`, `planFallbacks` entry `{planStep 2, source deps}` present, running tasks still landed, reason is not `planning step failed`. (1.2, 1.3)
+- landing_speed TC-4 → removed line-71 land-relative ordering only (finish-first deferral holds task 3 until land 1 takes its slot); line-70 plan ordering + merged asserts kept. (1.3 + finish-first deferral)
+- landing_speed TC-17/TC-21 → label-shape: batch covering the task resolved via `state.reviewTasks` (never label-text parsing); TC-21 asserts batch (1) + revision re-review (1). (4.1, 4.4, 4.5)
+- finish_first TC-65 → review-1 references migrated to the batch covering task 1; merge/plan-after-landing legitimately start first, no task start takes the slot. (4.1, 3.1)
+- finish_first TC-26 `triggerOf` → extended minimally, no existing mapping changed: new `review-wave` branch (trigger = land-batch merge completion: covering land end or the full gate / fix / re-check that ran on the batch), revise also triggered by its covering batch, land step accepts the 3.1 plan-after-landing plus the post-merge review-cycle ends; `seen` counts `review-wave` as review. All previously-covered triggers keep working. (3.1, 4.1, 4.4)
+- finish_first TC-63 → deviation from brief item-4: this run is dep-less (hand-built args, no deps), so 3.6 plan-per-launch applies, not 3.2, and plan 3 legitimately intervenes — the prescribed "no intervening plan" assert is factually false and dropping the assert would weaken the test, so the review-gating assert migrated to the batch covering task 2 instead (same intent as the spec_implement slot test). (4.1; dep-less per 3.6)
+- spec_implement slot test (:152) → `review 2 end` migrated to the batch covering task 2; maxRunning + merged + task-2-before-land asserts kept. (4.1)
+- spec_implement reviewer/roles/risk/tiers/blocking tests → label-shape: `review N` opts/prompts resolved to the batch covering the task (model/effort/prompt-diff all hold); re-review `review 1 round 2` kept with post-merge ordering; blocking-survive migrated to merged `['1','2']` + flagged review record `{verdict changes, rounds 1, blocking finding}` + revise happened (task-failure does not transfer: merged∩failed=∅ by Story 4 design); long-finding failure-reason assert migrated to the recorded finding (revise prompt + verdict asserts kept). Verdict/rounds/revise transfer in every migrated case. (4.1, 4.2, 4.4, 4.5)
+- spec_implement planning-log test (:815, second half) + TC-23/TC-28 `assertLand2Queued` + contract-check test → NOT edited, STOP-and-report (see report): planning half-2 behavior changed (fallback now ends blocked, not halted); land-2 queueing structurally infeasible in the new flow (retiming attempted) and removal is guard-denied; batch prompt drops the test-track contract check (src/ off-limits).
+- spec_implement TC-73 → added only the spec'd keys (`degraded`, `overhead` + share/threshold/warned, `planFallbacks`, `stats.planFallbacks`, `tasks[].review.fromBatch/tasks`); no removals; `tasks[].reviewModel/riskTag/startModel/startedAt` already present. (5.1, 5.2)
+- landing_scheduler P-9 → scoped to non-review finish-type agents (land/full gate/fix/re-check): review/revise filtered from request side and ends walk-back (Story 4; review scheduling owned by the review-bound property + TC-17..22); land step additionally accepts the 3.1 plan-after-landing end, else land requests after a review cycle fail on the interleaved plan end — no land/fix/gate assertion changed. (3.1, Story 4)
+- STOP-1 (adjudicated 2026-11-02; minimal additive src/ change as Task 18's unfinished prompt coverage, not a scheduling/landing/review behavior change): `waveReviewPrompt` (plugin/workflows/spec-implement.js) now appends one `CONTRACT_REVIEW(n)` section per covered test-track task (`${TRACKS[n] === 'test' ? ... : ''}` idiom, same as `reviewPrompt`); nothing else in the prompt or flow changed; `.claude/workflows/spec-implement.js` vendored copy re-synced byte-identical. Contract-check test migrated to the batch shape: batch covering task 1 (resolved via `state.reviewTasks`, TC-21 idiom) matches all four contract regexes; batch covering task 2 doesNotMatch `--contracts`. Probe confirmed two separate batches (`review-wave 1 tasks 1`, `review-wave 2 tasks 2`), no merge. (4.1)
+- STOP-2 (adjudicated 2026-11-02): planning-test readyRun half migrated — halted false, outcome blocked, reason /not started: Task 2/, degraded true, planFallbacks ≥ 1 entry each with ready [] and source null and trigger in the plan-trigger vocabulary, notStarted pinned to ['2'] (empirical). Correct per 2.3 scope (a good plan DID return, planning-halt path inapplicable) + 1.2/1.3 (continue, degraded, counted). (2.3, 1.2, 1.3)
+- STOP-3 (adjudicated 2026-11-02; reaffirmed after retiming infeasibility): dropped ONLY the `assertLand2Queued` non-vacuity helper calls in finish_first TC-23/TC-28 (land-2 queueing structurally unhittable in the 3.1 flow); property asserts (`assertNoTaskRequestWhileFinishQueued`, merged sets, deferral log) kept and green. (3.1)
+- NOTE (2026-11-02, not authored by this agent): commit e31fc93 `task 35: complete item-8 planning-log migration to fallback report wording` landed on this branch from outside the worktree session — it migrates the planning-test blockedRun half-1 log assert (`every remaining task was blocked anyway` → `Deterministic fallback: degraded`). This was outside the three adjudicated STOPs, so it is recorded here, not claimed: the orchestrator must adjudicate whether to keep it. Without it the suite stays red at tests/js/spec_implement.test.mjs:854.
 ---
 
 ### Task 36: Review-wave label role mapping

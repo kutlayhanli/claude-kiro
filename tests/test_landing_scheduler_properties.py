@@ -96,6 +96,16 @@ def is_instant(label: str) -> bool:
     return kind(label) in INSTANT or label.startswith("cross-test")
 
 
+def is_review_or_revise(label: str) -> bool:
+    """Review-shape agents (individual, re-review round, or wave batch) and revisions.
+
+    Story 4 retired the pre-merge review/revise trigger model: reviews now run post-merge
+    in waves owned by the review-bound property and TC-17..TC-22, so P-9 scopes to the
+    non-review finish-type agents (land/fix/gate/re-check) and walks past review/revise ends.
+    """
+    return kind(label) in ("review", "revise") or label.startswith("review-wave ")
+
+
 def first_task(label: str) -> Optional[str]:
     m = FIRST_TASK.match(label)
     return m.group(1) if m else None
@@ -293,7 +303,9 @@ def trigger_ok(request: str, trigger: Optional[str]) -> bool:
         members = set(land_tasks(request))
         if tk in ("task", "retry", "revise", "review"):  # an approval (or a passing gate without reviews)
             return bool(tasks_named(trigger) & members)
-        return tk in ("land", "full gate", "fix", "re-check", "resolve")  # the in-flight landing step's last agent
+        # The in-flight landing step's last agent: the next land runs after the 3.1 plan
+        # that follows the landing (review-cycle ends are walked past, Story 4).
+        return tk in ("land", "full gate", "fix", "re-check", "resolve", "plan")
     if k == "full gate":
         return tk == "land"
     if k == "fix":
@@ -317,11 +329,14 @@ def test_p9_finish_type_agents_are_requested_at_their_trigger(bridge, sc, slots)
     for i, e in enumerate(out["trace"]):
         if e["ev"] == "end":
             ends.append(e["label"])
-        elif e["ev"] == "request" and kind(e["label"]) in ("review", "revise", "land", "full gate", "fix", "re-check"):
+        elif e["ev"] == "request" and kind(e["label"]) in ("land", "full gate", "fix", "re-check"):
             # Walk back to the trigger. Only ends of INSTANT agents may lie between it and the request (they end
             # inside the trigger's own microtask flush); any other end means the request waited for an agent.
+            # Review/revise ends are walked past (see is_review_or_revise): Story 4 owns review scheduling.
             between = []
             for label in reversed(ends):
+                if is_review_or_revise(label):
+                    continue
                 if trigger_ok(e["label"], label):
                     break
                 assert is_instant(label), f"request {e['label']} at event {i} comes after end of {label}, past its trigger (ends since: {between}): {events(out)}"
@@ -355,6 +370,11 @@ def test_p10_finish_first_changes_nothing_when_nothing_queues(bridge, sc, agent_
         if any(key(a) == key(b) for a in ons for b in offs):
             return
     assert events(ons[0]) == events(offs[0])
+    # overhead is a measured observation (real Date.now() agent ms per run), not schedule state;
+    # finish-first's contract covers scheduling/merging, so exclude it from the exact-equality check.
+    for r in (ons[0]["result"], offs[0]["result"]):
+        if isinstance(r, dict) and isinstance(r.get("overhead"), dict):
+            r.pop("overhead")
     assert ons[0]["result"] == offs[0]["result"]
 
 

@@ -536,7 +536,7 @@ def summarize_report(report: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         })
     failed = r.get("failed") or []
     final_gate = r.get("finalGate")
-    return {
+    out = {
         "found": bool(r),
         "into": r.get("into"),
         "merged": [str(x) for x in r.get("merged") or []],
@@ -554,6 +554,16 @@ def summarize_report(report: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "agents": r.get("agents"),
         "tasks": tasks,
     }
+    # Degraded/fallback/overhead passthrough (5.1, 6.3): additive .get copies so the
+    # equity re-run comparison can read them; absent fields stay absent.
+    if "degraded" in r:
+        out["degraded"] = r.get("degraded")
+    for key in ("planFallbacks", "plan_fallbacks"):
+        if key in r:
+            out[key] = r.get(key)
+    if "overhead" in r:
+        out["overhead"] = r.get("overhead")
+    return out
 
 
 def collect_agents(progress: Iterable[dict], transcripts: Dict[str, Path], pricing: dict) -> Tuple[List[dict], List[str], int]:
