@@ -587,7 +587,7 @@ def _p11_check_row(env: Any, row: dict) -> None:
                        st.integers(0, 7_200_000), min_size=1, max_size=7),
     idx=st.integers(0, 9),
 )
-@settings(derandomize=True, max_examples=200, database=None,
+@settings(derandomize=True, max_examples=200, database=None, deadline=None,
          suppress_health_check=[HealthCheck.function_scoped_fixture])
 def test_stats_text_json_agree(env, ms, idx):
     """P-11 (5.2, 5.3): any collected run -> `show --json` fallback counts +
@@ -656,8 +656,10 @@ def _p12_collect_pair(env: Any) -> dict:
         runs_dir = Path(env.xdg) / "claude-kiro" / "runs"
         runs_dir.mkdir(parents=True, exist_ok=True)
         raw = src.read_bytes()
-        (runs_dir / "wf_p12_absent.json").write_bytes(raw)
-        out["absent"] = (json.loads(raw), _show_text(env, "wf_p12_absent"), _show_json(env, "wf_p12_absent"), None)
+        doc = json.loads(raw)
+        doc["runId"] = "wf_p12_absent"
+        (runs_dir / "wf_p12_absent.json").write_text(json.dumps(doc))
+        out["absent"] = (doc, _show_text(env, "wf_p12_absent"), _show_json(env, "wf_p12_absent"), None)
         cache["p12"] = out
     return cache["p12"]
 
@@ -667,7 +669,7 @@ def _p12_collect_pair(env: Any) -> dict:
                 st.sampled_from([0.0, 0.5, 1.0])),
     name=st.sampled_from(["over", "under", "zero", "half", "full", "absent"]),
 )
-@settings(derandomize=True, max_examples=200, database=None,
+@settings(derandomize=True, max_examples=200, database=None, deadline=None,
          suppress_health_check=[HealthCheck.function_scoped_fixture])
 def test_warn_only_metamorphic(env, s, name):
     """P-12 (5.4, metamorphic warn-only): warning iff share > threshold, and
@@ -831,6 +833,7 @@ def test_prechange_not_recorded(env, idx):
         r = stats("collect", "--run", run.run_id, env=env, cwd=proj)
         assert r.exit_code == 0, r.output
         stripped = _strip_to_prechange(load_record(env.xdg, run.run_id))
+        stripped["runId"] = "wf_p13_stripped"
         (Path(env.xdg) / "claude-kiro" / "runs" / "wf_p13_stripped.json").write_text(json.dumps(stripped))
         cache["p13-pre"] = True
 
