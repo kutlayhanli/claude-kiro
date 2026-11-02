@@ -864,3 +864,177 @@ PROPERTIES = {
     "P-12": "test_warn_only_metamorphic",
     "P-13": "test_prechange_not_recorded",
 }
+
+
+# --------------------------------------------------------------------------- Task 31: red-team warn-only (5.4)
+#
+# Adversarial cases for the warn-only budget (requirement 5.4: SHALL NOT halt,
+# fail or retry because of overhead). Every case reaches the real boundary:
+# real `ck stats collect`/`show` subprocesses over FakeClaudeHome stores plus
+# direct calls to the Task 33 seams (`overheadShare`/`overheadWarning`). No
+# mocks of the project's own code; project modules are imported inside test
+# bodies so collection never depends on the missing code.
+#
+# They fail until Task 33 lands, for the right reason: `overheadShare` /
+# `overheadWarning` do not exist yet (AttributeError on first seam call) and
+# `ck stats show` prints no `overhead (plan/review/land share):` line.
+
+
+_RT_FB = [
+    {"planStep": 2, "trigger": "start", "source": "deps", "ready": ["3"]},
+]
+
+
+def test_redteam_warn_only_exact_threshold_no_warn(env):
+    """Share exactly at the published threshold (0.5) warns nothing and the
+    run completes with no stop reason naming overhead."""
+    from claude_kiro.analytics.show import overheadShare, overheadWarning
+
+    assert overheadWarning(0.5) is False, "share exactly at threshold must not warn"
+    assert overheadWarning(0.5001) is True, "share just above threshold must warn"
+
+    from stats_helpers import AgentSpec
+
+    agents = [
+        AgentSpec("plan 1", duration_ms=60_000),
+        AgentSpec("review 1", duration_ms=30_000),
+        AgentSpec("land 1", duration_ms=30_000),
+        AgentSpec("task 1", duration_ms=120_000),
+    ]
+    _, sess, proj = _world(env)
+    run = sess.implement_run(
+        "wf_rt_exact", result=implement_result(degraded=True, planFallbacks=list(_RT_FB)), agents=agents)
+    rec = _collect_run(env, proj, run.run_id)
+    assert overheadShare(_by_role_ms(rec)) == pytest.approx(0.5)
+
+    text = _show_text(env, run.run_id)
+    data = _show_json(env, run.run_id)
+    oh = data.get("overhead") or {}
+    assert oh.get("share") == pytest.approx(0.5), f"exact-threshold share != 0.5: {oh}"
+    assert oh.get("warned") is False, f"exact-threshold share must not warn: {oh}"
+    ov = _find_line(text, "overhead", "plan/review/land share")
+    assert ov is not None, f"no overhead line in show output:\n{text}"
+    assert "warn" not in ov.lower(), f"exact-threshold line must carry no warn flag: {ov!r}"
+    assert data.get("outcome") == "complete"
+    blob = json.dumps({k: data.get(k) for k in ("outcome", "reason", "stopReason", "halted", "failed")})
+    assert "overhead" not in blob.lower(), f"stop reason names overhead (must be warn-only): {blob}"
+
+
+def test_redteam_warn_only_all_plan_share_warns_without_halting(env):
+    """Share 100% with all-plan agents warns, yet the run still completes
+    with its agent sequence intact and no stop reason naming overhead."""
+    from claude_kiro.analytics.show import overheadShare, overheadWarning
+
+    assert overheadWarning(1.0) is True, "100% overhead share must warn"
+
+    from stats_helpers import AgentSpec
+
+    agents = [AgentSpec("plan 1", duration_ms=60_000), AgentSpec("plan 2", duration_ms=60_000)]
+    _, sess, proj = _world(env)
+    run = sess.implement_run(
+        "wf_rt_allplan", result=implement_result(degraded=True, planFallbacks=list(_RT_FB)), agents=agents)
+    rec = _collect_run(env, proj, run.run_id)
+    assert overheadShare(_by_role_ms(rec)) == pytest.approx(1.0)
+
+    text = _show_text(env, run.run_id)
+    data = _show_json(env, run.run_id)
+    oh = data.get("overhead") or {}
+    assert oh.get("warned") is True, f"100% share must warn: {oh}"
+    ov = _find_line(text, "overhead", "plan/review/land share")
+    assert ov is not None, f"no overhead line in show output:\n{text}"
+    assert "warn" in ov.lower(), f"100% share line must carry the warn flag: {ov!r}"
+    assert data.get("outcome") == "complete", "all-plan run must complete (warn-only)"
+    assert [a.get("label") for a in rec.get("agents", [])] == ["plan 1", "plan 2"], "agent sequence changed"
+    blob = json.dumps({k: data.get(k) for k in ("outcome", "reason", "stopReason", "halted", "failed")})
+    assert "overhead" not in blob.lower(), f"stop reason names overhead (must be warn-only): {blob}"
+
+
+def test_redteam_warn_only_missing_share_never_warns(env):
+    """A None/missing share never warns — not even at the most permissive
+    reading of the threshold — and the run completes with no overhead stop."""
+    from claude_kiro.analytics.show import overheadShare, overheadWarning
+
+    assert overheadWarning(None) is False, "missing share must never warn"
+    assert overheadShare({}) is None, "empty byRole ms must give None"
+
+    from stats_helpers import AgentSpec
+
+    agents = [AgentSpec("plan 1", duration_ms=0), AgentSpec("task 1", duration_ms=0)]
+    _, sess, proj = _world(env)
+    run = sess.implement_run(
+        "wf_rt_missing", result=implement_result(degraded=True, planFallbacks=list(_RT_FB)), agents=agents)
+    rec = _collect_run(env, proj, run.run_id)
+    assert overheadShare(_by_role_ms(rec)) is None, "zero-total ms must give None"
+
+    text = _show_text(env, run.run_id)
+    data = _show_json(env, run.run_id)
+    oh = data.get("overhead") or {}
+    assert oh.get("share") is None, f"missing share must stay null: {oh}"
+    assert oh.get("warned") is False, f"missing share must never warn: {oh}"
+    ov = _find_line(text, "overhead", "plan/review/land share")
+    assert ov is not None, f"no overhead line in show output:\n{text}"
+    assert "warn" not in ov.lower(), f"missing-share line must carry no warn flag: {ov!r}"
+    assert data.get("outcome") == "complete"
+
+
+def test_redteam_warn_only_threshold_shaped_strings_never_warn(env):
+    """Threshold-shaped strings fed back as share values (the system's own
+    report wording, percents, bare numbers, bools) must not warn, crash, or
+    halt the run: only a real numeric share above 0.5 warns."""
+    from claude_kiro.analytics.show import overheadShare, overheadWarning
+
+    for shaped in ("0.5", "50%", "above 50% threshold", "0.61", "1.0", True, False, float("nan")):
+        assert overheadWarning(shaped) is False, f"threshold-shaped {shaped!r} must never warn"
+    assert overheadShare(
+        {"plan": "60000", "reviewer": "60000", "land": "60000", "implementer": "120000"}) is None, (
+        "string ms cells must be ignored (share None), not coerced into a warning share")
+
+    _, sess, proj = _world(env)
+    run = sess.implement_run("wf_rt_strings", result=implement_result(), agents=_tc23_agents())
+    rec = _collect_run(env, proj, run.run_id)
+    assert overheadShare(_by_role_ms(rec)) == pytest.approx(0.6)
+    data = _show_json(env, run.run_id)
+    assert data.get("outcome") == "complete"
+    blob = json.dumps({k: data.get(k) for k in ("outcome", "reason", "stopReason", "halted", "failed")})
+    assert "overhead" not in blob.lower(), f"stop reason names overhead (must be warn-only): {blob}"
+
+
+def test_redteam_warn_only_warning_preserves_real_failure(env):
+    """An overhead warning coinciding with a real failure must not mask or
+    rename it: the warning flags while the outcome stays halted, the failed
+    task and its gate-red reason stay visible, and nothing names overhead as
+    the stop reason."""
+    from claude_kiro.analytics.show import overheadWarning
+
+    from stats_helpers import AgentSpec, TaskSpec
+
+    agents = [
+        AgentSpec("plan 1", duration_ms=60_000),
+        AgentSpec("task 1", duration_ms=120_000),
+        AgentSpec("review 1", duration_ms=60_000),
+        AgentSpec("land 1", duration_ms=60_000),
+    ]
+    tasks = [TaskSpec(task="1", ok=True), TaskSpec(task="2", ok=False, reason="gate red")]
+    result = implement_result(tasks=tasks, outcome="halted", degraded=True, planFallbacks=list(_RT_FB))
+    _, sess, proj = _world(env)
+    run = sess.implement_run("wf_rt_coincident", result=result, agents=agents)
+    rec = _collect_run(env, proj, run.run_id)
+
+    from claude_kiro.analytics.show import overheadShare
+
+    share = overheadShare(_by_role_ms(rec))
+    assert share is not None and share > 0.5, f"coincident run must be over threshold: {share}"
+    assert overheadWarning(share) is True, "over-threshold coincident run must warn"
+
+    text = _show_text(env, run.run_id)
+    data = _show_json(env, run.run_id)
+    oh = data.get("overhead") or {}
+    assert oh.get("warned") is True, f"coincident over-threshold run must warn: {oh}"
+    ov = _find_line(text, "overhead", "plan/review/land share")
+    assert ov is not None and "warn" in ov.lower(), f"coincident overhead line must warn: {ov!r}"
+    assert data.get("outcome") == "halted", "warning must not rename the real halted outcome"
+    assert "halted" in text.lower(), "warning must not mask the halted outcome in the text view"
+    assert "1 failed" in text, f"real failed task must stay visible beside the warning:\n{text}"
+    assert "gate red" in text, f"real gate-red reason must stay visible beside the warning:\n{text}"
+    blob = json.dumps({k: data.get(k) for k in ("outcome", "reason", "stopReason", "halted", "failed")})
+    assert "overhead" not in blob.lower(), f"stop reason renamed to overhead: {blob}"

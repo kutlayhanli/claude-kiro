@@ -550,9 +550,9 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_stats.py -k redteam_warn_only`
 **Verifies:** Task 33 (exercises workflow warn-only plus `ck stats show` over adversarial records; fails until that code exists)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real script scheduling + real `ck stats show` over adversarial records)
-- [ ] Tests fail before the implementation exists for the right reason (run halts/fails/retries naming overhead, or warning missing at 100%)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real script scheduling + real `ck stats show` over adversarial records)
+- [x] Tests fail before the implementation exists for the right reason (run halts/fails/retries naming overhead, or warning missing at 100%)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs FakeClaudeHome + overhead table harness)
 **Complexity:** Medium
 **Risk:** normal
