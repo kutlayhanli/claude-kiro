@@ -41,6 +41,8 @@ PROPERTIES = {
     "P-7": "test_unknown_dep_never_ready",
     "P-9": "test_review_bound",
     "P-10": "test_batch_verdict_fanout",
+    "P-8": "test_no_plan_between_finish_and_start",
+    "P-14": "test_freed_slot_and_idle_arming",
 }
 
 BRIDGE_SETTINGS = settings(derandomize=True, max_examples=60, database=None, deadline=None)
@@ -1376,6 +1378,24 @@ def test_batch_verdict_fanout(bridge, data):  # noqa: F811
         assert rows[n].get("review", {}).get("verdict") == "approve", (n, rows[n].get("review"))
 
 
+# ------------------------------------------------- P-8 / P-14 (Story 3 group)
+#
+# Plan-agent schedule properties over the `planDecision` decision seam
+# (design.md: planDecision({ trigger, scriptReadiness, planInFlight, idleArmed,
+# freeSlot, readyCount, openCount, stopLaunching }) -> 'run'|'coalesce'|'none')
+# plus the real script's trace through the bridge with healthy plans.
+# P-8 (3.1, 3.3): with healthy plans, no non-retry `plan` occurs between a task
+# finish and the next `task N` request when the deterministic ready list is
+# non-empty; plan requests are only start / first-after-landing / idle.
+# P-14 (3.2, 3.4): a freed slot with non-empty ready starts the next ready
+# task(s) before any `plan`; an idle re-read that finds nothing ready arms no
+# second re-read until a landing end or task record. Both tighten the
+# landing-speed P-6 relation. Before Task 14 the freed/finished gating must
+# come from the seam: a `planDecision` that returns `run` for freed/finished
+# with script readiness fails the seam tables, and a script that plans after
+# every freed slot fails the trace predicates for the right reason (extra plan
+# agents between finish and ready start). Imports of project code stay inside
+# the loader subprocess calls so the module always collects.
 # ------------------------------------------------- red-team: plan-agent thrash (3.3)
 #
 # Requirement 3.3: no plan agent after every freed implementing slot when the
@@ -1397,9 +1417,9 @@ PLAN_DECISION_CALLER = (
 )
 
 
-def seam_plan_decision(trigger, script_readiness, plan_in_flight=False,
-                       idle_armed=True, free_slot=True, ready_count=0,
-                       open_count=1, stop_launching=False) -> str:
+def seam_plan_decision(trigger: str, script_readiness: bool = True, plan_in_flight: bool = False,
+                       idle_armed: bool = True, free_slot: bool = True, ready_count: int = 0,
+                       open_count: int = 1, stop_launching: bool = False) -> str:
     """Call the `planDecision` decision seam (exists today; Task 14 owns the gating)."""
     payload = json.dumps({
         "trigger": trigger,
@@ -1421,6 +1441,181 @@ def seam_plan_decision(trigger, script_readiness, plan_in_flight=False,
     return json.loads(proc.stdout)["decision"]
 
 
+# ------------------------------------------------- P-8 / P-14 schedule helpers (Task 11)
+def plan_schedule_violations(trace, ready_at) -> List[str]:
+    """Check the Story-3 schedule relations on one bridge trace.
+
+    `ready_at(i)` returns the deterministic ready list just after event `i`
+    (via the `readyTasks` seam through `bridge.ready`). A violation is:
+    - a non-retry plan that is neither the start plan, the first plan after a
+      land end, nor a rearmed idle plan (rearm = a landing end or an
+      implementer end since the previous idle plan);
+    - a non-retry plan between an implementer end and the next first-task
+      request while the ready list at the finish is non-empty and no land end
+      intervenes (the freed slot must start ready tasks directly, 3.2/3.3).
+    """
+    violations = []
+    idle_seen = False
+    rearmed = False
+    land_ended = False
+    seen_plan = False
+    for i, e in enumerate(trace):
+        label = e["label"]
+        if e["ev"] == "end" and label.startswith("land "):
+            land_ended = True
+            rearmed = True
+        elif e["ev"] == "end" and label.startswith("task "):
+            rearmed = True
+        elif e["ev"] == "request" and PLAN_LABEL.match(label) and not PLAN_LABEL.match(label).group(2):
+            if not seen_plan:
+                seen_plan = True  # the start plan
+            elif land_ended:
+                pass  # the first plan after a landing
+            else:
+                if idle_seen and not rearmed:
+                    violations.append(f"idle {label} at event {i} without a landing or task end since the previous idle plan")
+                idle_seen = True
+                rearmed = False
+            land_ended = False
+    for i, e in enumerate(trace):
+        if e["ev"] != "end" or not e["label"].startswith("task "):
+            continue
+        if not ready_at(i):
+            continue  # empty ready at the finish: a re-read may legitimately run
+        for j in range(i + 1, len(trace)):
+            f = trace[j]
+            if f["ev"] != "request" or not TASK_LABEL.match(f["label"]):
+                continue
+            segment = trace[i + 1:j]
+            plans_between = [g["label"] for g in segment
+                             if g["ev"] == "request" and PLAN_LABEL.match(g["label"])
+                             and not PLAN_LABEL.match(g["label"]).group(2)]
+            lands_between = any(g["ev"] == "end" and g["label"].startswith("land ") for g in segment)
+            if plans_between and not lands_between:
+                violations.append(
+                    f"plan {plans_between} between finish of {e['label']} (event {i}) and "
+                    f"next {f['label']} (event {j}) with ready non-empty and no landing between")
+            break
+    return violations
+
+
+def schedule_outcome_violations(bridge, sc: Dict, out: Dict) -> List[str]:
+    """P-8/P-14 trace predicates with the ready oracle threaded through."""
+    deps = sc["project"]["deps"]
+    order = sc["args"]["remaining"]
+    trace = out["trace"]
+    done: set = set()
+    requested: List[str] = []
+    ready_cache: Dict[int, List[str]] = {}
+    for i, e in enumerate(trace):
+        if e["ev"] == "end" and e["label"].startswith("land "):
+            done |= set(e["label"][len("land "):].split())
+        elif e["ev"] == "request" and TASK_LABEL.match(e["label"]):
+            requested.append(TASK_LABEL.match(e["label"]).group(1))
+        ready_cache[i] = bridge.ready(deps, done=sorted(done), exclude=list(requested), order=order)
+    return plan_schedule_violations(trace, ready_cache.__getitem__)
+
+
+def prepare_schedule_sc(draw, plan_seq: str = "consistent") -> Dict:
+    """A healthy-plan scenarios() draw with script-side readiness on (args.deps/
+    remaining from the graph), the maxConcurrent 1-4 sweep, freed-slot timing
+    (1 ms plans plus one slow task), and no relink/checkRed so the ready oracle
+    sees the run's own deps and every landing merges."""
+    sc = prepare_retry_sc(draw(scenarios(plan_seq=plan_seq), label="scenario"))
+    sc["args"]["maxConcurrent"] = draw(st.sampled_from([1, 2, 3, 4]), label="maxConcurrent")
+    sc["slots"] = draw(st.sampled_from([1, 2, 3, 4, 5, 6, None]), label="slots")
+    sc["project"].pop("relink", None)
+    sc["project"]["checkRed"] = []
+    ids = list(sc["project"]["deps"])
+    slow = draw(st.sampled_from(ids), label="slow-task")
+    sc["project"]["durations"][slow] = draw(st.integers(100, 300), label="slow-ms")
+    return sc
+
+
+# --------------------------------------------------------------------------- P-8
+
+
+@BRIDGE_SETTINGS
+@given(st.data())
+def test_no_plan_between_finish_and_start(bridge, data):  # noqa: F811
+    """P-8 (3.1, 3.3): healthy plans, any scenario -> no non-retry `plan`
+    between a task finish and the next `task N` when deterministic ready is
+    non-empty; plans only start / first-after-landing / idle.
+
+    Generators: scenarios() with args.deps, healthy plans, maxConcurrent 1-4
+    sweep, slow-task freed-slot timing, chains/diamonds for empty-ready idle
+    draws. Metamorphic: the same scenario with uniform fast timing keeps the
+    schedule. Negatives/complements at the seam: start/landing run, dep-less
+    freed/finished run (3.6), unknown triggers never run."""
+    sc = prepare_schedule_sc(data.draw, plan_seq="consistent")
+    out = bridge.run(sc["project"], sc["args"], slots=sc["slots"])
+    assert schedule_outcome_violations(bridge, sc, out) == [], out["result"].get("reason")
+
+    # The seam agrees: freed/finished never run a plan when the script computes
+    # readiness (3.2, 3.3); start and landing always run (3.1).
+    assert seam_plan_decision("freed") == "none"
+    assert seam_plan_decision("finished") == "none"
+    assert seam_plan_decision("start") == "run"
+    assert seam_plan_decision("landing") == "run"
+    # Negatives: without dep data the script must plan per freed slot (3.6);
+    # unknown triggers and stopped launches never run.
+    assert seam_plan_decision("freed", script_readiness=False) == "run"
+    assert seam_plan_decision("finished", script_readiness=False) == "run"
+    assert seam_plan_decision("bogus") == "none"
+    assert seam_plan_decision("landing", stop_launching=True) == "none"
+    assert seam_plan_decision("start", plan_in_flight=True) == "coalesce"
+
+    # Metamorphic: uniform fast timing keeps the same schedule relations.
+    fast = copy.deepcopy(sc)
+    for t in fast["project"]["durations"]:
+        fast["project"]["durations"][t] = 2
+    out2 = bridge.run(fast["project"], fast["args"], slots=fast["slots"])
+    assert schedule_outcome_violations(bridge, fast, out2) == [], out2["result"].get("reason")
+
+
+# --------------------------------------------------------------------------- P-14
+
+
+@BRIDGE_SETTINGS
+@given(st.data())
+def test_freed_slot_and_idle_arming(bridge, data):  # noqa: F811
+    """P-14 (3.2, 3.4): a freed slot with non-empty deterministic ready starts
+    the next ready task(s) before any `plan`; an idle re-read that finds
+    nothing ready arms no second re-read until a landing end or task record.
+
+    Generators: same freed-slot draws as P-8 plus the idle truth table at the
+    seam. Complement (3.6): a fixed dep-less chain still plans per freed slot.
+    """
+    # Seam first: the idle gate is exact (fails if Task 14 wired it loosely).
+    assert seam_plan_decision("idle") == "run"  # freeSlot + ready 0 + open + armed
+    assert seam_plan_decision("idle", idle_armed=False) == "none"  # no second re-read until re-armed
+    assert seam_plan_decision("idle", ready_count=2) == "none"  # ready non-empty: start tasks, no plan
+    assert seam_plan_decision("idle", open_count=0) == "none"  # nothing open: no re-read
+    assert seam_plan_decision("idle", free_slot=False) == "none"
+    assert seam_plan_decision("idle", plan_in_flight=True) == "coalesce"
+    assert seam_plan_decision("idle", stop_launching=True) == "none"
+
+    sc = prepare_schedule_sc(data.draw, plan_seq="consistent")
+    out = bridge.run(sc["project"], sc["args"], slots=sc["slots"])
+    assert schedule_outcome_violations(bridge, sc, out) == [], out["result"].get("reason")
+
+    # Complement (3.6): without dep data the script plans per freed slot, so a
+    # fixed dep-less chain shows a non-retry plan after the first task request.
+    chain = {"1": [], "2": ["1"], "3": ["2"]}
+    project = {
+        "deps": dict(chain),
+        "durations": {t: 5 for t in chain},
+        "planDurations": dict(PLAN_MS_ALL),
+    }
+    out = bridge.run(project, {"maxConcurrent": 1}, slots=2)
+    assert out["result"].get("outcome") == "complete", out["result"].get("reason")
+    requests = [e["label"] for e in out["trace"] if e["ev"] == "request"]
+    first = next(i for i, label in enumerate(requests) if TASK_LABEL.match(label))
+    assert any(PLAN_LABEL.match(label) and not PLAN_LABEL.match(label).group(2)
+               for label in requests[first + 1:]), requests
+
+
+# ------------------------------------------------- red-team thrash helpers (Task 13)
 THRASH_PLAN = re.compile(r"^plan \d+$")
 THRASH_TASK_END = re.compile(r"^task \d+ end$")
 
@@ -1629,5 +1824,182 @@ def test_redteam_plan_thrash_depless_shaped_deps(bridge):  # noqa: F811
             between = events[events.index(f"task {prev} end") + 1:events.index(f"task {nxt}")]
             assert any(THRASH_PLAN.match(x) for x in between), (
                 shape, f"no plan between task {prev} end and task {nxt} (dep-less shape treated as deps-mode)", between)
+
+
+# ------------------------------------------------- red-team: review batching (4.3/4.6)
+#
+# Requirement 4.3: a risky-only wave SHALL NOT run a combined review. Each
+# test below is an adversarial shape where a wave-batching implementation
+# could smuggle in a spurious `review-wave` label: every task risky, risk
+# tags in near-miss surface forms, an empty merged wave, a single-task wave.
+# Requirement 4.6: no wave merged since the last review SHALL NOT run an
+# empty batched review.
+#
+# All tests run the real script through the bridge plus the `reviewGroups`
+# seam (Task 9, present). Before Task 18 the script runs one `review N` per
+# task with no `review-wave` label, so every test with a batched-review
+# assertion fails for the right reason (missing batch labels); the
+# all-risky bridge shape passes pre-18 (nothing to batch yet) and guards the
+# Task 18 code against adding a combined review to risky-only waves.
+
+
+def test_redteam_review_batching_all_risky_no_batch(bridge):  # noqa: F811
+    """4.3 red-team: an all-risky wave runs only individual reviews, no batch.
+
+    The whole later wave is safety-tagged. A batcher keyed on "wave merged,
+    so batch it" without consulting the risk split would emit one combined
+    review over the risky tasks; the contract says risky-only waves get
+    individuals only and no combined review.
+    """
+    ids = ["1", "2", "3", "4"]
+    wave = ids[1:]
+    risk = {t: "safety" for t in ids}
+    # Seam first: the split is exact (fails pre-Task-9 with the missing-seam
+    # message, the right reason).
+    out = seam_review_groups(wave, risk)
+    assert out["individual"] == wave, out
+    assert out["batched"] == [], out
+
+    cfg = wave_project(ids, risk, {})
+    out = bridge.run(cfg["project"], cfg["args"], slots=4)
+    result = out["result"]
+    assert result.get("outcome") == "complete", (result.get("outcome"), result.get("reason"))
+    assert set(result["merged"]) == set(ids), result["merged"]
+    # No combined review anywhere: zero batch labels, and no batch covers a
+    # risky task even as a subset.
+    assert batch_review_labels(out["events"]) == [], batch_review_labels(out["events"])
+    for label in review_events(out["events"]):
+        assert covers_of(out, label), (label, "an empty review ran")
+    for n in wave:
+        assert any(l == f"review {n}" for l in individual_review_labels(out["events"])), (n, out["events"])
+
+
+def test_redteam_review_batching_risk_tag_mutations(bridge):  # noqa: F811
+    """4.2/4.3 red-team: near-miss risk-tag surface forms route exactly.
+
+    `Safety`/`SAFETY` are the safety tag in different cases (the seam folds
+    case, same as `isSafety`); `' safety '` carries whitespace, a missing key
+    carries no tag, and `'urgent'` is an unknown value -- none of which equal
+    `safety`, so the seam batches them. A trimmer would individual-review the
+    whitespace task (an extra agent over the W+R bound); a script that ignores
+    the seam would misroute either side.
+    """
+    wave = ["2", "3", "4", "5", "6"]
+    risk = {"2": "Safety", "3": "SAFETY", "4": " safety ", "6": "urgent"}
+    # Task 5 has no entry at all (missing/unknown risk value).
+    grouped = seam_review_groups(wave, risk)
+    assert grouped["individual"] == ["2", "3"], grouped
+    assert grouped["batched"] == ["4", "5", "6"], grouped
+
+    ids = ["1"] + wave
+    full_risk = {"1": "normal", **risk}
+    cfg = wave_project(ids, full_risk, {})
+    del cfg["project"]["risk"]["5"]
+    del cfg["args"]["risk"]["5"]
+    out = bridge.run(cfg["project"], cfg["args"], slots=max(4, len(ids)))
+    result = out["result"]
+    assert result.get("outcome") == "complete", (result.get("outcome"), result.get("reason"))
+    assert set(result["merged"]) == set(ids), result["merged"]
+    # Case-folded safety tasks get individuals only; no batch covers them
+    # (fails pre-Task-18: reviews are one-per-task, no batch labels exist).
+    for n in ("2", "3"):
+        assert any(l == f"review {n}" for l in individual_review_labels(out["events"])), (n, out["events"])
+    assert not [l for l in batch_review_labels(out["events"])
+                if set(covers_of(out, l)) & {"2", "3"}], batch_review_labels(out["events"])
+    # Whitespace/missing/unknown tags batch with the wave's non-risky tasks.
+    assert len(batches_covering(out, ["4", "5", "6"])) == 1, batch_review_labels(out["events"])
+    assert not [l for l in individual_review_labels(out["events"])
+                if l.split()[1] in ("4", "5", "6")], individual_review_labels(out["events"])
+
+
+def test_redteam_review_batching_empty_wave_no_review(bridge):  # noqa: F811
+    """4.6 red-team: an empty merged wave runs no (batched) review.
+
+    Task 2 is protected, so it never merges: the "wave" of unmerged work is
+    empty. A batcher that fires per landing or per wave slot instead of per
+    merged set would emit an empty `review-wave` label or review the
+    unmerged task; the contract says no review agent runs. The merged wave
+    is still batched exactly once, and no already-reviewed task is
+    re-covered by a stale second batch (fails pre-Task-18: no batch labels).
+    """
+    # Seam first: empty merged yields no review groups (the 4.6 unit oracle).
+    empty = seam_review_groups([], {"1": "safety"})
+    assert empty["batched"] == [] and empty["individual"] == [], empty
+
+    deps = {"1": [], "2": []}
+    project = {
+        "deps": dict(deps),
+        "durations": {"1": 10, "2": 50},
+        "mergeDurations": {"1": 300},
+        "planDurations": dict(PLAN_MS_ALL),
+        "protectedTasks": ["2"],  # task 2 never merges: its wave stays empty
+    }
+    args = {
+        "deps": dict(deps),
+        "remaining": ["1", "2"],
+        "maxConcurrent": 4,
+        "agents": {"reviewer": dict(REVIEWER)},
+    }
+    out = bridge.run(project, args, slots=4)
+    assert out["result"]["merged"] == ["1"], out["result"]
+    # Nothing covers the unmerged task, and no review ran empty.
+    covering2 = [l for l in review_events(out["events"]) if "2" in covers_of(out, l)]
+    assert covering2 == [], (covering2, "an empty batched review ran for the unmerged task")
+    for label in review_events(out["events"]):
+        covered = covers_of(out, label)
+        assert covered, (label, "an empty review ran")
+        assert set(covered) <= {"1"}, (label, covered)
+    # The merged wave is batched exactly once; it is never re-covered.
+    assert len(batches_covering(out, ["1"])) == 1, batch_review_labels(out["events"])
+    covering1 = [l for l in review_events(out["events"]) if "1" in covers_of(out, l)]
+    assert len(covering1) == 1, (covering1, "the reviewed task was re-covered by a stale batch")
+
+
+def test_redteam_review_batching_single_task_wave_flagged(bridge):  # noqa: F811
+    """4.3/4.4 red-team: single-task waves, flagged and risky.
+
+    A one-task non-risky wave whose batched verdict flags its only task must
+    revise that task alone and re-review it (no wave-mates to touch, no extra
+    agents beyond the re-review). A one-task risky wave must stay individual
+    with no combined review. A batcher with a wave-size floor would skip the
+    single-task batch; one without a risk check would batch the risky task.
+    """
+    # Part A: single non-risky task wave with a flagged batched verdict.
+    ids = ["1", "2"]
+    flagged_verdict = {
+        "verdict": "changes",
+        "findings": [{"task": "2", "severity": "blocking", "file": "x.py",
+                      "issue": "single-task wave finding on 2", "fix": "fix 2"}],
+    }
+    # The batched verdict is looked up by the wave's first covered task.
+    cfg = wave_project(ids, {}, {"2": [flagged_verdict, "approve"]})
+    out = bridge.run(cfg["project"], cfg["args"], slots=4)
+    result = out["result"]
+    assert result.get("halted") is False, result.get("reason")
+    assert set(result["merged"]) == set(ids), result["merged"]
+    # The lone wave task gets exactly one batch (fails pre-Task-18: no
+    # review-wave labels), then revises alone and is re-reviewed once.
+    assert merged_waves(out["events"], ids)[-1] == ["2"], merged_waves(out["events"], ids)
+    assert len(batches_covering(out, ["2"])) == 1, batch_review_labels(out["events"])
+    assert any(re.match(r"^task 2( \[test\])? revise", e) for e in out["events"]), (
+        "the flagged single-task wave never revised", out["events"])
+    covering2 = [l for l in review_events(out["events"]) if "2" in covers_of(out, l)]
+    assert len(covering2) == 2, (covering2, "the flagged task was not re-reviewed exactly once")
+    # The untouched wave-mate approves with no revise and no extra agent.
+    assert not any(re.match(r"^task 1( \[test\])? revise", e) for e in out["events"]), out["events"]
+    covering1 = [l for l in review_events(out["events"]) if "1" in covers_of(out, l)]
+    assert len(covering1) == 1, (covering1, "an unflagged task got an extra review agent")
+    rows = {t["task"]: t for t in result.get("tasks", [])}
+    assert rows["2"].get("review", {}).get("verdict") == "approve", rows["2"].get("review")
+
+    # Part B: single risky-task wave stays individual with no combined review.
+    out = seam_review_groups(["2"], {"2": "safety"})
+    assert out["individual"] == ["2"] and out["batched"] == [], out
+    cfg = wave_project(ids, {"2": "safety"}, {})
+    out = bridge.run(cfg["project"], cfg["args"], slots=4)
+    assert set(out["result"]["merged"]) == set(ids), out["result"]["merged"]
+    assert not [l for l in batch_review_labels(out["events"]) if "2" in covers_of(out, l)], (
+        batch_review_labels(out["events"]))
+    assert any(l == "review 2" for l in individual_review_labels(out["events"])), out["events"]
 
 

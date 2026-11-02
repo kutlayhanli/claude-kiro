@@ -190,7 +190,7 @@
 **Risk:** normal
 ---
 ### Task 11: Property tests for plan-agent schedule
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 3.2, 3.3, 3.4
 **Description:** Covers P-8, P-14 (Story 3 group; seam `planDecision`). P-8: healthy plans, any scenario → no non-retry `plan` between task finish and next `task N` when deterministic ready non-empty; plans only start / first-after-landing / idle. P-14: freed slot with non-empty ready starts next task(s) before any plan; idle re-read finding nothing ready arms no second re-read until landing end or task record. Generators `scenarios()` with `args.deps`, healthy plans, maxConcurrent 1–4; freed-slot timing (`planDurations`, slow tasks) and empty-ready draws. Tightens landing-speed P-6 relation. Needs the Task 14 gating to pass.
@@ -200,10 +200,10 @@
 **Properties:** P-8, P-14
 **Verifies:** Task 14 (exercises the `planDecision` gating; fails until that code exists)
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the row (maxConcurrent sweep; slow-task timing; empty-ready idle draws)
-- [ ] Settings are deterministic (`@settings(derandomize=True, max_examples=60, database=None)`)
-- [ ] The tests call the decision seam, not a server (`planDecision` directly + trace predicates via bridge)
-- [ ] File declares `PROPERTIES = {"P-8": ..., "P-14": ...}` (merged map)
+- [x] The generators cover every surface form and negative listed in the row (maxConcurrent sweep; slow-task timing; empty-ready idle draws)
+- [x] Settings are deterministic (`@settings(derandomize=True, max_examples=60, database=None)`)
+- [x] The tests call the decision seam, not a server (`planDecision` directly + trace predicates via bridge)
+- [x] File declares `PROPERTIES = {"P-8": ..., "P-14": ...}` (merged map)
 **Dependencies:** Task 1 (needs label-grammar helpers + trace predicates)
 **Complexity:** High
 **Risk:** normal
@@ -299,7 +299,7 @@
 **Risk:** normal
 ---
 ### Task 17: Red-team review batching
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 4.3, 4.6
 **Description:** Try to break each SHALL NOT clause of Story 4 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test named `test_redteam_review_batching_*`. Targets 4.3 (risky-only wave SHALL NOT run a combined review) and 4.6 (SHALL NOT run an empty batched review): `risk` tags with case/whitespace variants (`Safety`, `SAFETY`, ` safety `), missing/unknown risk values, single-risky-task waves, empty merged wave after failed landing, wave whose tasks were all already reviewed. Needs the Task 18 review batching to pass.
@@ -308,9 +308,10 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_plan.py -k redteam_review_batching`
 **Verifies:** Task 18 (exercises wave-review scheduling; fails until that code exists)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real script review scheduling; coverage from review ledger/prompts)
-- [ ] Tests fail before the implementation exists for the right reason (spurious combined or empty reviews run)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real script review scheduling; coverage from review ledger/prompts)
+- [x] Tests fail before the implementation exists for the right reason (spurious combined or empty reviews run)
+- [x] No mocks of the project's own code in integration tests
+**Note (2026-11-02):** 3 of 4 red-team tests fail for the right reason (no `review-wave` labels pre-Task-18; the protected unmerged task still gets `review 2`); `test_redteam_review_batching_all_risky_no_batch` passes pre-18 (one-per-task reviews are trivially individual with no batch) and guards the Task 18 code against adding a combined review to risky-only waves.
 **Dependencies:** Task 1 (needs `risk` maps + review ledger harness)
 **Complexity:** Medium
 **Risk:** normal
