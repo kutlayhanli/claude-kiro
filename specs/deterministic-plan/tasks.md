@@ -341,9 +341,9 @@
 **Verify:** `node tests/js/deterministic_plan.test.mjs TC-2`
 **Verifies:** Task 22 (needs fallback scheduling plus degraded result fields; fails until both exist)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real workflow script under fake runtime, labels + result + logs)
-- [ ] Tests fail before the implementation exists for the right reason (script halts `planning step failed` on twice-inconsistent plan; no `degraded`/`plan_fallbacks` fields)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real workflow script under fake runtime, labels + result + logs)
+- [x] Tests fail before the implementation exists for the right reason (script halts `planning step failed` on twice-inconsistent plan; no `degraded`/`plan_fallbacks` fields)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs extended fake_project + Node suite skeleton)
 **Complexity:** Low
 **Risk:** normal
