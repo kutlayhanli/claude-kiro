@@ -1128,11 +1128,35 @@ function setBatchApproval(n, review, waveNo, batched) {
     : { verdict: 'unreviewed', rounds: 0, fromBatch: waveNo, tasks: [...batched], ...by }
 }
 
+// Guard-ladder climb for a post-merge revision that guard-stopped (S17,
+// preserved post-merge: the task already merged, so a stop exhausted through
+// the top records the verdict and keeps the merge instead of parking).
+async function climbTaskGuard(n, slot, attempted) {
+  slot.guard = slot.guard || { tried: new Set(), k: 0 }
+  const { rec } = slot
+  for (const model of guardLadder(attempted)) {
+    if (slot.guard.tried.has(model)) continue
+    slot.guard.tried.add(model)
+    slot.guard.k++
+    log(`Task ${n}: guard stop, trying ${model} (guard ${slot.guard.k})`)
+    let r = await call('task', retryPrompt(n, slot.r, rec.attempts - slot.guard.k), { label: `${label(n)} guard ${slot.guard.k} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
+    slot.r = r
+    rec.result = r
+    rec.finishedAt = r && r.finishedAt
+    rec.attempts++
+    rec.escalations.push({ stage: 'guard', model })
+    rec.startedAt = rec.startedAt || (r && r.startedAt)
+    if (!guardStopOf(r)) break
+  }
+  return slot.r
+}
+
 // Post-merge review/revise loop shared by wave-flagged tasks (4.4) and
 // risky-individual tasks (4.2): the first verdict (batch or individual) is
 // round 0, each `changes` routes the task alone to revision and re-review,
 // escalating surviving blocking findings up the ladder like the old pre-land
-// loop. Records rec.review; the task stays merged whatever the verdict.
+// loop. A revision that guard-stops climbs the ladder before the review goes
+// on. Records rec.review; the task stays merged whatever the verdict.
 async function polishReview(n, first, opts) {
   const slot = pendingReview.get(n)
   if (!slot) return null
@@ -1146,36 +1170,40 @@ async function polishReview(n, first, opts) {
       ? { verdict: cur.verdict, rounds: round, findings: cur.findings, summary: cur.summary, ...by }
       : { verdict: 'unreviewed', rounds: round, ...by }
   }
-  const revised = async (prompt, lbl, o, model) => {
+  const revised = async (prompt, lbl, o) => {
     working.add(n)  // a revision takes a slot but never waits for one: the task is nearly done
     r = await call('revise', prompt, { label: lbl, phase: phaseOf(n), schema: RESULT, ...o })
     slot.r = r
     rec.result = r
     rec.finishedAt = r && r.finishedAt
-    if (model) rec.escalations.push({ stage: 'revise', model })
     releaseSlot(n)
+  }
+  // Returns true when a guard stop exhausted the ladder (caller records).
+  const climbOnGuardStop = async model => {
+    if (!guardStopOf(r)) return false
+    await climbTaskGuard(n, slot, model)
+    r = slot.r
+    if (guardStopOf(r)) {
+      log(`Task ${n}: guard stop through the top of the ladder post-merge; keeping the merge and recording the verdict`)
+      record()
+      return true
+    }
+    return false
   }
   while (cur && cur.verdict === 'changes' && round < REVIEW_ROUNDS && ok(r)) {
     round++
     log(`Task ${n}: reviewer asked for changes, revision ${round}/${REVIEW_ROUNDS}`)
     await revised(revisePrompt(n, cur, round), `${label(n)} revise ${round}`, codeOpts(n))
-    if (guardStopOf(r)) {
-      log(`Task ${n}: guard stop during post-merge revision; keeping the merge and recording the verdict`)
-      record()
-      return cur
-    }
+    if (await climbOnGuardStop(codeOpts(n).model)) return cur
     if (ok(r)) cur = await call('review', reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts })
   }
   for (const model of ladderOf(n)) {
     if (!(cur && cur.verdict === 'changes' && ok(r))) break
     round++
     log(`Task ${n}: blocking findings remain, escalating the revision to ${model}`)
-    await revised(revisePrompt(n, cur, round), `${label(n)} revise ${round} (${model})`, escalated(codeOpts(n), model), model)
-    if (guardStopOf(r)) {
-      log(`Task ${n}: guard stop during post-merge revision; keeping the merge and recording the verdict`)
-      record()
-      return cur
-    }
+    await revised(revisePrompt(n, cur, round), `${label(n)} revise ${round} (${model})`, escalated(codeOpts(n), model))
+    if (await climbOnGuardStop(model)) return cur
+    rec.escalations.push({ stage: 'revise', model })
     if (ok(r)) cur = await call('review', reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts })
   }
   record()
