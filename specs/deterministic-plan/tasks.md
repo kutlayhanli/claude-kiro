@@ -407,7 +407,7 @@
 **Risk:** safety (runs real paid agents and mutates fixture branches, including the manual equity re-run)
 ---
 ### Task 22: Degraded result, overhead fields, and warn-only report
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.3, 5.1, 5.4, 2.4, 2.5, 6.1
 **Description:** Extend the workflow return shape and report in `plugin/workflows/spec-implement.js` with additive fields only. Result gains `degraded: boolean`, `planFallbacks: FallbackEntry[]`, `stats.planFallbacks: number` (planFallbacks.length; pre-change runs omit it), and `overhead: { share, threshold, warned }` where share is the plan/review/land share of agent ms (computed from in-script agent timing, reviewer share including `review-wave` agents (counted as review agents, consistent with the Task 36 role mapping); null when unknown), threshold is `OVERHEAD_WARN_THRESHOLD` (0.5), warned is `share != null && share > threshold`. Report gains a "deterministic fallback" section (degraded mark, fallback count, triggering attempts — what the Task 21 fixture gate asserts per 6.1) and an overhead line with the warn-only flag. After the report is built, an `overheadWarning(share)`-equivalent check sets `overhead.warned` but never sets `stopLaunching` (warn-only per 5.4). `stats.planSteps`/`planFailures` semantics unchanged. Old records without the new fields are untouched (rendered `not recorded` downstream).
@@ -416,8 +416,8 @@
 **Verify:** `node tests/js/deterministic_plan.test.mjs TC-2 TC-26` `uv run pytest -q -n auto tests/test_deterministic_fixture.py`
 **Verified by:** Task 19, Task 20, Task 21 (its tests are the oracle)
 **Acceptance:**
-- [ ] Fallback runs return `degraded: true` with fallback count and triggering attempts; healthy runs carry no degraded mark (1.3, 5.1, 6.1)
-- [ ] Result carries `stats.planFallbacks` and `overhead { share, threshold: 0.5, warned }`; overhead above threshold warns without halting/failing/retrying (5.4)
+- [x] Fallback runs return `degraded: true` with fallback count and triggering attempts; healthy runs carry no degraded mark (1.3, 5.1, 6.1)
+- [x] Result carries `stats.planFallbacks` and `overhead { share, threshold: 0.5, warned }`; overhead above threshold warns without halting/failing/retrying (5.4)
 **Dependencies:** Task 18 (extends the return/report built on the review/fallback flow edited there); Task 19 (its tests are the oracle); Task 20 (its tests are the oracle); Task 21 (its tests are the oracle)
 **Complexity:** Medium
 **Risk:** normal
