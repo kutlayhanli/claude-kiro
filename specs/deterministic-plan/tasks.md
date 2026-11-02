@@ -488,7 +488,7 @@
 **Risk:** normal
 ---
 ### Task 28: Shareable counts carry plan_fallbacks
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 5.2, 5.3, 5.6
 **Description:** In `src/claude_kiro/analytics/share.py`, add `"plan_fallbacks"` to `COUNT_KEYS` and extend `_counts` to read `stats.planFallbacks` (int) into `counts.plan_fallbacks`, additive only: when the local stats block lacks the field, the key is absent (never zero-filled). No change to `ck stats collect` plumbing (it already carries `stats.*` through to `counts.*`). Shareable schema gains the dotted path via the existing `counts.*` map.
