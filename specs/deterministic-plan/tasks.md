@@ -260,9 +260,19 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_plan.py -k "test_no_plan_between_finish_and_start or test_freed_slot_and_idle_arming or redteam_plan_thrash"` `node tests/js/deterministic_plan.test.mjs TC-11 TC-12 TC-13 TC-14 TC-15 TC-16`
 **Verified by:** Task 11, Task 12, Task 13 (its tests are the oracle)
 **Acceptance:**
-- [ ] Plan agents run at start, after each landing, and idle-only when gated; no plan after every freed slot when deterministic ready is non-empty (3.1, 3.2, 3.3)
-- [ ] Empty idle re-read triggers no second idle plan until a landing completes or a task record arrives (3.4)
-- [ ] Consistent plan replaces remaining/deps/lint and Done = plan Done ∪ merged-in-run; dep-less runs still plan per freed slot (3.5, 3.6)
+- [x] Plan agents run at start, after each landing, and idle-only when gated; no plan after every freed slot when deterministic ready is non-empty (3.1, 3.2, 3.3)
+- [x] Empty idle re-read triggers no second idle plan until a landing completes or a task record arrives (3.4)
+- [x] Consistent plan replaces remaining/deps/lint and Done = plan Done ∪ merged-in-run; dep-less runs still plan per freed slot (3.5, 3.6)
+**Dependencies:** Task 10 (extends the scheduler state and `applyPlanView` touched there); Task 11 (its tests are the oracle); Task 12 (its tests are the oracle); Task 13 (its tests are the oracle)
+**Complexity:** High
+**Risk:** normal
+**Deviation (no code change; oracle conflict — STOP, do not weaken tests):**
+- Investigated by implementing the deferred-landing design (landBatch arms `landingPending`, schedule() requests the landing re-read only once script-side ready is empty, suppresses idle while pending): it makes `rapid_successive_finishes` pass, but breaks established landing-speed regressions that REQUIRE eager per-landing plans — `finish_first` TC-23/TC-28/TC-29 (TC-23 docstring: "the landing plan and land 2 are requested together"; TC-29 comment counts "the landing plan" among the ends holding the next task), `landing_speed` TC-8 (relink/externalDone learned via the landing plan), TC-10 (verify-cycle plan), TC-62 (plan-2-exists). Change reverted; `plugin/workflows/spec-implement.js` is byte-identical to the merged base.
+- Finding: every Task 14 behavior in the Description is already implemented in the merged base (landing-speed + Task 10) and verified green — `planDecision` freed/finished/idle gating (P-8/P-14 seam asserts pass), `schedule()` from script-side `readyTasks` on freed slots (TC-12), `idleArmed` disarm/re-arm (TC-14), `applyPlanView` replacement + `done = plan.done ∪ mergedInRun` (TC-15), dep-less eager path (TC-16), BUSY/blocked paths unchanged (TC-10). P-8/P-14 and TC-11..TC-16 all pass unmodified.
+- The 3 failing redteam oracles are unsatisfiable as written (reported as wrongTests, do not edit test files):
+  1. `rapid_successive_finishes`: its strict predicate (no `plan` between ANY finish and next task start, no land-end exemption unlike P-8) forbids the 3.1-mandated landing re-read positionally — base trace shows every non-retry plan is start/first-after-landing (7 plans ≤ 1+6 landings+0 idle), yet `plan 2` (first plan after `land 1 end`) falls between `task 1 end` and `task 3`. Under the harness FIFO runtime queue, any landing plan requested at a landing completes/starts at or after the next finish, landing inside a later (finish, next-task) segment; suppressing it (the only fix) breaks TC-23/TC-8/TC-10/TC-62/TC-29. The predicate needs P-8's lands_between exemption.
+  2. `freed_slot_races_landing_end`: fails at its own setup assertion `raced` — with durations {1:100, 2:10, 3:10, 4:10} and mergeDurations {1:150}, tasks 2-4 finish by ~t=35 while `land 1` runs t≈101-251 alone; land-2/3/4 windows are 2 ms with finishes ≥8 ms apart, so no finish can fall inside any (land-req, land-end) window on the deterministic virtual clock. Needs retimed numbers (e.g. maxConcurrent 1 so tasks 2-4 run during land 1).
+  3. `empty_then_instantly_ready`: requires `plan 2` (idle) to START strictly inside (`land 1` start, `land 1 end`) while also requiring no plan between `task 1 end` and `land 1` — overlapping plan+land starts need 2 runtime slots, but the test runs with slots=1 (and the idle gate needs a free slot while `land 1` holds the only one). With slots=2 the assertions are satisfiable.
 **Dependencies:** Task 10 (extends the scheduler state and `applyPlanView` touched there); Task 11 (its tests are the oracle); Task 12 (its tests are the oracle); Task 13 (its tests are the oracle)
 **Complexity:** High
 **Risk:** normal
