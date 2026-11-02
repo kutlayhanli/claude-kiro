@@ -523,7 +523,7 @@
 **Risk:** normal
 ---
 ### Task 30: Property tests for overhead stats
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.1, 5.2, 5.3, 5.4, 5.5, 5.6
 **Description:** Covers P-11, P-12, P-13 (Story 5 group; seams `overheadShare`/`overheadWarning`). P-11: any collected run → `show --json` fallback counts + overhead shares equal text-view parsed numbers and `overheadShare(record)` on the same record; plan/review/land-present runs show all three shares. Table-driven FakeClaudeHome runs (plan/review/land mixes, zero-duration, missing `startedAt`, pre-change records). P-12 (metamorphic warn-only): any overhead share 0–100% × thresholds {0%,50%,100%,absent} → flagged run's merged set, stop reason, agent sequence equal threshold-disabled run; warning iff share > threshold. P-13: any pre-change record → `not recorded` + pre-existing keys unchanged, re-collect never rewrites bytes; complement: post-change degraded runs always show {degraded, count, triggers}. 8+ table runs × committed `pre-deterministic-record.json`. Needs Tasks 28 + 33.
@@ -533,10 +533,10 @@
 **Properties:** P-11, P-12, P-13
 **Verifies:** Task 33 (exercises show rendering plus `overheadShare`/`overheadWarning`; fails until that code exists)
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the row (agent mixes, zero-duration, missing timestamps, failed/revise/red-landing/unfinished runs, all threshold levels)
-- [ ] Settings are deterministic (`@settings(derandomize=True, max_examples=200, database=None)`; table-driven where CLI-bound)
-- [ ] The tests call the decision seam, not a server (`overheadShare`/`overheadWarning` directly + real `ck stats` CLI for text/JSON)
-- [ ] File declares `PROPERTIES = {"P-11": ..., "P-12": ..., "P-13": ...}` for `ck gate`
+- [x] The generators cover every surface form and negative listed in the row (agent mixes, zero-duration, missing timestamps, failed/revise/red-landing/unfinished runs, all threshold levels)
+- [x] Settings are deterministic (`@settings(derandomize=True, max_examples=200, database=None)`; table-driven where CLI-bound)
+- [x] The tests call the decision seam, not a server (`overheadShare`/`overheadWarning` directly + real `ck stats` CLI for text/JSON)
+- [x] File declares `PROPERTIES = {"P-11": ..., "P-12": ..., "P-13": ...}` for `ck gate`
 **Dependencies:** Task 1 (needs FakeClaudeHome table harness + pre-change record)
 **Complexity:** High
 **Risk:** normal
