@@ -691,7 +691,13 @@ def _implement_metrics(result: Mapping, rows: List[dict], workflow_name: str, tr
     config = None
     if agents is not None:
         config = {k: c for k, c in ((k, _split_config(v)) for k, v in agents.items()) if c is not None}
-    return {
+    local_result: Dict[str, Any] = {}
+    if isinstance(result.get("degraded"), bool):
+        local_result["degraded"] = result["degraded"]
+    fallbacks = result.get("planFallbacks")
+    if isinstance(fallbacks, list):
+        local_result["planFallbacks"] = list(fallbacks)
+    metrics: Dict[str, Any] = {
         "reportSource": result.get("reportSource") if isinstance(result.get("reportSource"), str) else None,
         "taskSpanMinutes": _num(timing.get("minutes")),
         "tasks": tasks, "landings": landings, "fullGates": full_gates, "finalGate": final_gate, "crossTests": cross,
@@ -699,6 +705,9 @@ def _implement_metrics(result: Mapping, rows: List[dict], workflow_name: str, tr
         "stats": {k: _int(v) for k, v in stats.items()} if isinstance(stats, dict) else None,
         "agentsConfig": config,
     }
+    if local_result:
+        metrics["result"] = local_result
+    return metrics
 
 
 def _create_metrics(result: Mapping, rows: List[dict]) -> dict:
