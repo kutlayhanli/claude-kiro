@@ -559,7 +559,7 @@
 **Risk:** normal
 ---
 ### Task 32: Vendored seam-usage proofs
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.2, 4.1, 5.2, 5.3
 **Description:** Implements the TC-35 seam-called-by-real-code half of the draft test track (TC-34 parity lives in Task 25). On a fallback run the script's per-request scheduling agrees with `fallbackReady(…)` on the same inputs (1.2); each batched review's coverage agrees with the `reviewGroups` seam (4.1); `ck stats show` overhead numbers equal `overheadShare(…)` on the record (5.2, 5.3). (TC-8/TC-29/TC-30 contract bodies live in Tasks 2 and 16; this task only proves the seams are actually called.) Needs Tasks 10 + 18 + 33 to pass.
@@ -569,9 +569,9 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_plan.py -k seam_usage` `uv run pytest -q tests/test_deterministic_stats.py -k seam_usage`
 **Verifies:** Task 33 (latest code it exercises: show rendering; fails until that code exists)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real files for parity; real script/CLI + seams for TC-35)
-- [ ] Tests fail before the implementation exists for the right reason (stale vendored copy or unused seam diverges from behavior)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real files for parity; real script/CLI + seams for TC-35)
+- [x] Tests fail before the implementation exists for the right reason (stale vendored copy or unused seam diverges from behavior)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs harness contract seams + bridge)
 **Complexity:** Low
 **Risk:** normal

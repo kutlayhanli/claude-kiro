@@ -864,3 +864,51 @@ PROPERTIES = {
     "P-12": "test_warn_only_metamorphic",
     "P-13": "test_prechange_not_recorded",
 }
+
+
+# --------------------------------------------------------------------------- TC-35 (Task 32)
+#
+# Seam-called-by-real-code proof, overhead half (requirements 5.2, 5.3): `ck
+# stats show` overhead numbers equal `overheadShare(...)` on the same record,
+# and the warn flag equals `overheadWarning(...)` on that share. (TC-8/TC-29/
+# TC-30 contract bodies live in Tasks 2/16; this task only proves the seams
+# are actually called.) Fails until Task 33: the `overheadShare` /
+# `overheadWarning` import raises, and show prints no overhead line. The
+# project seam is imported inside the test body so collection never depends
+# on the missing code.
+
+
+def test_seam_usage_overhead_share(env):
+    """TC-35 overhead half (5.2, 5.3): show overhead numbers equal the seam."""
+    from claude_kiro.analytics.show import overheadShare, overheadWarning  # noqa: E402
+
+    entries = [{"planStep": 2, "trigger": "start", "source": "deps", "ready": ["3"]}]
+    _, sess, proj = _world(env)
+    rid = _collect_degraded(env, proj, sess, "wf_tc35_seam", entries, _tc23_agents())
+    rec = load_record(env.xdg, rid)
+
+    by_ms = _by_role_ms(rec)
+    assert by_ms, "collected record has no byRole ms cells"
+    share = overheadShare(by_ms)
+    assert share is not None, "seam returned None for a run with agent time"
+    assert share == pytest.approx(0.6), (share, by_ms)
+    assert overheadWarning(share) is True
+    assert overheadWarning(None) is False
+
+    text = _show_text(env, rid)
+    ov = _find_line(text, "overhead")
+    assert ov is not None and "not recorded" not in ov.lower(), f"no overhead line:\n{text}"
+    assert _parse_pct(ov) == pytest.approx(share), (ov, share)
+
+    data = _show_json(env, rid)
+    oh = data.get("overhead") or {}
+    assert oh.get("recorded") is True, f"overhead not recorded in --json: {oh}"
+    assert oh.get("share") == pytest.approx(share), (oh, share)
+    assert oh.get("threshold") == 0.5, oh
+    assert oh.get("warned") == overheadWarning(share), (oh, share)
+
+    fb = _find_line(text, "plan fallbacks")
+    assert fb is not None and _parse_fb_count(fb) == 1, f"fallback count line wrong:\n{text}"
+    pf = data.get("planFallbacks") or {}
+    assert pf.get("recorded") is True and pf.get("count") == 1, pf
+    assert _parse_fb_count(fb) == pf.get("count"), (fb, pf)

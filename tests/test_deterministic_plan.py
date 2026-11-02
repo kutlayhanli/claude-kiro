@@ -1826,6 +1826,118 @@ def test_redteam_plan_thrash_depless_shaped_deps(bridge):  # noqa: F811
                 shape, f"no plan between task {prev} end and task {nxt} (dep-less shape treated as deps-mode)", between)
 
 
+# --------------------------------------------------------------------------- TC-35 (Task 32)
+#
+# Seam-called-by-real-code proofs (requirements 1.2, 4.1): on a fallback run
+# the script's per-request scheduling agrees with `fallbackReady(...)` on the
+# same inputs, and each batched review's coverage agrees with the
+# `reviewGroups` seam. (TC-8/TC-29/TC-30 contract bodies live in Tasks 2/16;
+# this task only proves the seams are actually called.) Fail until Tasks
+# 10+18: pre-Task-10 an always-inconsistent run halts with "planning step
+# failed" instead of continuing degraded; pre-Task-18 the script runs one
+# `review N` per task with no `review-wave` label. Project seams are reached
+# only through the Node loader / bridge subprocess calls, so collection never
+# depends on the missing code.
+
+TASK_REQ = re.compile(r"^task (\d+)$")
+TASK_END = re.compile(r"^task (\d+) end$")
+
+
+def test_seam_usage_fallback_scheduling(bridge):  # noqa: F811
+    """TC-35 fallback half (1.2): the script's per-request scheduling agrees
+    with `fallbackReady(...)` on the same inputs.
+
+    Fixed diamond graph, every plan answer inconsistent (`badReady`, the
+    scenarios() always-bad shape): the start fallback sees empty done/exclude,
+    so the seam on those exact inputs must equal the deterministic oracle with
+    source `deps`; every later `task N` request must be a member of the seam
+    recomputed with done = tasks ended before the request; the run completes
+    degraded with the full merged set.
+    """
+    deps = {"1": [], "2": ["1"], "3": ["1"], "4": ["2", "3"]}
+    project = {
+        "deps": {t: list(ds) for t, ds in deps.items()},
+        "durations": {t: 2 for t in deps},
+        "planDurations": dict(PLAN_MS_ALL),
+        "badReady": ["999"],
+    }
+    args = {
+        "deps": {t: list(ds) for t, ds in deps.items()},
+        "remaining": list(deps),
+        "maxConcurrent": 2,
+    }
+
+    # Seam agreement on the exact inputs the start fallback uses (empty
+    # done/exclude: nothing runs or merges before plan 1 fails twice).
+    oracle = bridge.ready(deps)
+    assert oracle == ["1"], oracle
+    start = seam_fallback(True, oracle, [], [], [])
+    assert start["ready"] == oracle and start["source"] == "deps", start
+
+    out = bridge.run(project, args, slots=2)
+    result = out["result"]
+    assert result.get("outcome") == "complete", (result.get("outcome"), result.get("reason"))
+    assert result.get("degraded") is True, (result.get("degraded"), result.get("reason"))
+    assert set(result["merged"]) == set(deps), (result["merged"], deps)
+
+    # Per-request agreement: each requested task is in the seam's ready list
+    # for done = tasks ended before that request (observable completions).
+    order = list(deps)
+    done: List[str] = []
+    scheduled: List[str] = []
+    for e in out["events"]:
+        end = TASK_END.match(e)
+        if end:
+            done.append(end.group(1))
+            continue
+        req = TASK_REQ.match(e)
+        if req:
+            fb = fallback_via_seam(order, deps, done, [])
+            assert req.group(1) in fb["ready"], (req.group(1), fb, done)
+            scheduled.append(req.group(1))
+    assert scheduled, "fallback run scheduled no tasks"
+    assert set(scheduled) == set(deps), (scheduled, deps)
+
+
+def test_seam_usage_review_coverage(bridge):  # noqa: F811
+    """TC-35 review half (4.1): each batched review's coverage agrees with the
+    `reviewGroups` seam on the merged wave.
+
+    Fixed two-wave run (task 1 lands alone, the rest merge as one wave) with
+    one safety task: the non-risky tasks of each merged wave must be covered
+    by exactly the seam's `batched` set, and every risky task must hold its own
+    individual review matching the seam's `individual` set.
+    """
+    ids = ["1", "2", "3", "4"]
+    risk = {"1": "normal", "2": "normal", "3": "safety", "4": "normal"}
+    cfg = wave_project(ids, risk, {})
+    out = bridge.run(cfg["project"], cfg["args"], slots=max(4, len(ids)))
+    result = out["result"]
+    assert result.get("outcome") == "complete", (result.get("outcome"), result.get("reason"))
+    merged = [str(t) for t in result["merged"]]
+    assert set(merged) == set(ids), (merged, ids)
+
+    batches = batch_review_labels(out["events"])
+    assert batches, "no batched review-wave ran (one-review-per-task behavior)"
+    waves = merged_waves(out["events"], merged)
+    assert waves, out["events"]
+    for w in waves:
+        seam = seam_review_groups(w, risk)
+        plain = [t for t in w if str(risk.get(t, "normal")).lower() != "safety"]
+        risky = [t for t in w if str(risk.get(t, "normal")).lower() == "safety"]
+        assert sorted(seam["batched"]) == sorted(plain), (w, seam)
+        assert sorted(seam["individual"]) == sorted(risky), (w, seam)
+        if plain:
+            touched = [label for label in batches if set(covers_of(out, label)) & set(w)]
+            assert len(touched) == 1, (w, touched)
+            assert sorted(covers_of(out, touched[0])) == sorted(seam["batched"]), (
+                w, covers_of(out, touched[0]), seam)
+        for r in risky:
+            covered_by = [label for label in individual_review_labels(out["events"])
+                          if r in covers_of(out, label)]
+            assert covered_by, (r, "risky task has no individual review")
+
+
 # ------------------------------------------------- red-team: review batching (4.3/4.6)
 #
 # Requirement 4.3: a risky-only wave SHALL NOT run a combined review. Each
