@@ -800,6 +800,11 @@ def test_last_good_layering(bridge, data):  # noqa: F811
         assert not out["result"].get("degraded"), out["result"].get("degraded")
         assert fallback_entries(out["result"]) == []
     elif shape == "good-bad-bad":
+        # Single-task dep-less graphs can never yield a schedulable fallback window
+        # after adoption (the only task is always done-or-running at any fallback),
+        # so the arm's entry/degraded asserts are vacuous there; multi-task draws
+        # cover the lastGood-layering contract.
+        assume(len(ids) > 1)
         sc["project"]["planSeq"] = [{}, {"ready": [absent]}, {"ready": [absent]}]
         out = bridge.run(sc["project"], sc["args"], slots=sc["slots"])
         result = out["result"]
