@@ -653,6 +653,13 @@ function parkAction({ interactive } = {}) {
 // ms above which the result/report warns without halting, failing or retrying.
 const OVERHEAD_WARN_THRESHOLD = 0.5
 
+// Warn-only overhead flag (5.4, D8, NFR-5): true when the plan/review/land
+// share of agent ms exceeds the published threshold. Pure: callers only copy
+// the flag into the result/report; it never halts, fails or retries the run.
+function overheadWarning(share) {
+  return share != null && share > OVERHEAD_WARN_THRESHOLD
+}
+
 // The D5 layered fallback source (1.2, 2.1-2.3): scriptReady minus excluded/done
 // when hasDeps and non-empty yields source 'deps'; else lastGoodReady minus
 // excluded/done when non-empty yields source 'last-good'; else empty/null for
@@ -782,6 +789,7 @@ function normalizePlan(p) {
 // is how the script estimates what waits for a runtime slot, and wakes the main loop when one settles.
 const inFlight = []   // { seq, kind }
 let callSeq = 0
+const agentMs = {}     // kind -> ms of agent time (wall clock around agent calls): the overhead-share input (5.4)
 let poked = false
 let wakeLoop = null
 function poke() {
@@ -792,10 +800,12 @@ const signal = () => (poked ? Promise.resolve() : new Promise(resolve => { wakeL
 function call(kind, prompt, opts) {
   const entry = { seq: ++callSeq, kind }
   inFlight.push(entry)
+  const t0 = Date.now()
   return (async () => {
     try {
       return await agent(prompt, opts)
     } finally {
+      agentMs[kind] = (agentMs[kind] || 0) + (Date.now() - t0)
       const i = inFlight.indexOf(entry)
       if (i >= 0) inFlight.splice(i, 1)
       poke()
@@ -1429,8 +1439,19 @@ async function runTask(n) {
 }
 
 phase('Plan')
+// Overhead share (5.4): plan/review/land agent ms over all agent ms, from the
+// in-script wall-clock timing around agent calls. Reviewer time includes
+// `review-wave` agents (each counts as one review agent, consistent with the
+// role mapping). Null when no agent time is recorded yet. Warn-only: the flag
+// below never sets stopLaunching.
+function buildOverhead() {
+  const at = k => agentMs[k] || 0
+  const total = Object.values(agentMs).reduce((s, v) => s + v, 0)
+  const share = total > 0 ? (at('plan') + at('review') + at('review-wave') + at('land')) / total : null
+  return { share, threshold: OVERHEAD_WARN_THRESHOLD, warned: overheadWarning(share) }
+}
 const startPlan = await requestPlan('start')
-if (!startPlan) return { halted: true, refused: false, reason: PLAN_FAILED, into: INTO, degraded, planFallbacks }
+if (!startPlan) return { halted: true, refused: false, reason: PLAN_FAILED, into: INTO, degraded, planFallbacks, overhead: buildOverhead() }
 if (startPlan.cycles.length || startPlan.verifyCycles.length) {
   log('Refusing to launch: the plan has a cycle. Fix tasks.md (see `ck lint`) and run again.')
   return {
@@ -1442,6 +1463,7 @@ if (startPlan.cycles.length || startPlan.verifyCycles.length) {
     into: INTO,
     degraded,
     planFallbacks,
+    overhead: buildOverhead(),
   }
 }
 const initialPlan = startPlan
@@ -1621,6 +1643,23 @@ else if (notStarted.length || failedList.length || needsInput.length) {
     : waiting || `not started: ${notStarted.map(n => `Task ${n}`).join(', ')}`
 } else if (planFailed) reason = null
 if (outcome === 'blocked') log(reason)
+// Deterministic-fallback report section (5.1, 6.1): degraded mark, fallback
+// count and the triggering plan attempts.
+if (planFallbacks.length) {
+  log(`Deterministic fallback: degraded, ${planFallbacks.length} fallback(s): ${planFallbacks.map(e => `plan ${e.planStep} (${e.trigger}, ${e.source || 'no data'})`).join('; ')}`)
+} else {
+  log('Deterministic fallback: clean run, no fallbacks')
+}
+// Overhead report line (5.4, warn-only): the flag is recorded and logged, and
+// never sets stopLaunching.
+const overhead = buildOverhead()
+if (overhead.share == null) {
+  log('Overhead (plan/review/land share): not recorded')
+} else {
+  const pct = `${(overhead.share * 100).toFixed(0)}%`
+  const thr = `${overhead.threshold * 100}%`
+  log(`Overhead (plan/review/land share): ${pct}${overhead.warned ? ` (warn: above ${thr} threshold)` : ''}`)
+}
 
 return {
   halted: outcome === 'halted',
@@ -1654,5 +1693,6 @@ return {
   crossTests,
   degraded,
   planFallbacks,
+  overhead,
   stats: { initiallyDone, merged: merged.length, failed: failedList.length, notStarted: notStarted.length, planSteps: refills, planFailures, planFallbacks: planFallbacks.length, fixes: fixCount, landings: landings.length, bisected: landings.filter(l => l.bisected).length },
 }
