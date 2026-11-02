@@ -829,10 +829,11 @@ async function runPlan(trigger) {
       // empties its ready list (1.1: a raw non-empty ready never follows from the
       // graph); raw-empty + truth-empty still adopts via the check below (1.4).
       const namesNothingRunnable = p.ready.length > 0 && n.ready.length === 0
-      // Nothing remaining: the ready list is vacuous. Adopt the done state,
-      // schedule nothing, count no fallback (1.4) — unless the answer lied
-      // (namesNothingRunnable), which retries instead.
-      if (!n.remaining.length) n.ready = []
+      // Vacuous adoption is gated on raw-empty: a plan whose remaining is empty adopts
+      // without a consistency check ONLY when its raw ready was already empty; a
+      // non-empty claim against an empty remaining set is checked below (and fails:
+      // nothing matches an empty order).
+      if (!n.remaining.length && p.ready.length === 0) n.ready = []
       // A task a plan reports as busy is left out of its ready list: it is not a mismatch.
       if (!namesNothingRunnable && planConsistent(n, [...exclude, ...n.busy.map(b => b.task)])) {
         if (p.error) log(`${label}: the planning agent left a note (not a failure): ${trim(p.error, 300)}`)
@@ -875,8 +876,15 @@ async function runPlan(trigger) {
     if (!current) current = s
     return s
   }
-  if (!fb.ready.length && !SCRIPT_READINESS) {
-    return null  // neither dep-less layer has data: the existing PLAN_FAILED halt path in requestPlan (2.3). No entry, degraded untouched.
+  // Halting abandons future launches — meaningful only when unstarted tasks exist
+  // to abandon (TC-7); with nothing unstarted the halt is vacuous, so record
+  // truthfully and finish via in-flight landings (P-6 singleton).
+  const universe = (lastGood && lastGood.order && lastGood.order.length) ? lastGood.order : effOrder
+  const runningSet = new Set([...running.keys()])
+  const failedSet = new Set([...failed.keys()])
+  const unstarted = universe.filter(t => !doneArr.includes(t) && !runningSet.has(t) && !failedSet.has(t) && !exclArr.includes(t))
+  if (!fb.ready.length && !SCRIPT_READINESS && unstarted.length) {
+    return null  // Halt: unstarted tasks remain but no deterministic data can schedule them (2.3, TC-7). No entry, degraded untouched.
   }
   // Every double-failure trigger with deterministic data records a fallback entry,
   // even when the resulting ready list is empty (an empty entry records a fallback
