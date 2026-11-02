@@ -172,7 +172,7 @@
 **Risk:** normal
 ---
 ### Task 10: Retry-once-then-fallback in runPlan with degraded marking
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 2.2, 2.3, 2.5
 **Description:** Modify `runPlan(trigger)` in `plugin/workflows/spec-implement.js`: keep two attempts with the same per-attempt exclude capture and `planConsistent` check, incrementing `planFailures` per failed attempt. On second failure call `fallbackReady(...)` (scriptReady computed from script-side `readyTasks` over `view` plus run's Done/running/failed/merged sets when `SCRIPT_READINESS`, else empty — so unknown-dep tasks never start on a guess per 2.5; lastGoodReady from stored last-good plan). If it yields a non-empty list, append `{ planStep, trigger, source, ready }` to a new `planFallbacks` array, set `degraded = true`, adopt the fallback as the scheduling ready list, and return a synthetic plan view (`{ fromFallback: true, ... }`) instead of null. Only when `fallbackReady` yields nothing, return null so the existing `PLAN_FAILED` halt path in `requestPlan` runs (start-plan failure with hand-built args lacking `deps`). Add `lastGood = { ready, deps, order } | null` state: update it in `applyPlanView` on every consistent plan (first attempt or retry success counts no fallback per 1.4); a fallback view never overwrites it. `fallbackReady` must subtract running/failed/parked/`mergedInRun`/`done` so merged/running tasks are excluded and their records untouched (1.5).
