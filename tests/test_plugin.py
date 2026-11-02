@@ -259,6 +259,49 @@ def test_deterministic_docs_plan_triggers():
         assert "freed slot" in step7, f"{path}: Step 7 must say no re-read runs after every freed slot"
 
 
+# --- deterministic-plan workflow-script parity (Task 25; verifies Task 26) --------
+#
+# TC-34 contract half: the workflow script ships on both harnesses, so any
+# change to the plugin source must keep both vendored copies byte-identical.
+# Reads the real files: no mocks, no copies of the content under test. Fails
+# until the Task 26 refresh regenerates the OpenCode vendored copy (missing
+# or stale file) — the only allowed divergence.
+
+OPENCODE_VENDORED_SPEC_IMPLEMENT = (
+    REPO / "opencode" / "vendor" / "workflows" / "spec-implement.js"
+)
+CLAUDE_VENDORED_SPEC_IMPLEMENT = REPO / ".claude" / "workflows" / "spec-implement.js"
+
+
+def test_opencode_vendored_workflow_matches_plugin_source():
+    """TC-34: `opencode/vendor/workflows/spec-implement.js` is byte-identical
+    to `plugin/workflows/spec-implement.js` (1.2, 2.1, 2.2)."""
+    source = (PLUGIN / "workflows" / "spec-implement.js").read_bytes()
+    assert len(source) > 0, "plugin source workflow script is empty"
+    assert OPENCODE_VENDORED_SPEC_IMPLEMENT.exists(), (
+        f"missing OpenCode vendored copy (run the vendor refresh): "
+        f"{OPENCODE_VENDORED_SPEC_IMPLEMENT}"
+    )
+    assert OPENCODE_VENDORED_SPEC_IMPLEMENT.read_bytes() == source, (
+        "OpenCode vendored copy diverged from plugin/workflows/spec-implement.js "
+        "(refresh it from the plugin source)"
+    )
+
+
+def test_claude_vendored_workflow_matches_plugin_source():
+    """TC-34: `.claude/workflows/spec-implement.js` is byte-identical to
+    `plugin/workflows/spec-implement.js` (1.2, 2.1, 2.2)."""
+    source = (PLUGIN / "workflows" / "spec-implement.js").read_bytes()
+    assert len(source) > 0, "plugin source workflow script is empty"
+    assert CLAUDE_VENDORED_SPEC_IMPLEMENT.exists(), (
+        f"missing vendored copy (run `uv run ck vendor`): {CLAUDE_VENDORED_SPEC_IMPLEMENT}"
+    )
+    assert CLAUDE_VENDORED_SPEC_IMPLEMENT.read_bytes() == source, (
+        ".claude vendored copy diverged from plugin/workflows/spec-implement.js "
+        "(run `uv run ck vendor`)"
+    )
+
+
 def test_deterministic_docs_review_batching():
     """Step 7 documents wave-batched review with the risky-always-individual
     rule (4.1, 4.2)."""
