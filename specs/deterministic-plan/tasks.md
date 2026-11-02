@@ -299,7 +299,7 @@
 **Risk:** normal
 ---
 ### Task 17: Red-team review batching
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 4.3, 4.6
 **Description:** Try to break each SHALL NOT clause of Story 4 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test named `test_redteam_review_batching_*`. Targets 4.3 (risky-only wave SHALL NOT run a combined review) and 4.6 (SHALL NOT run an empty batched review): `risk` tags with case/whitespace variants (`Safety`, `SAFETY`, ` safety `), missing/unknown risk values, single-risky-task waves, empty merged wave after failed landing, wave whose tasks were all already reviewed. Needs the Task 18 review batching to pass.
@@ -308,9 +308,10 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_plan.py -k redteam_review_batching`
 **Verifies:** Task 18 (exercises wave-review scheduling; fails until that code exists)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real script review scheduling; coverage from review ledger/prompts)
-- [ ] Tests fail before the implementation exists for the right reason (spurious combined or empty reviews run)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real script review scheduling; coverage from review ledger/prompts)
+- [x] Tests fail before the implementation exists for the right reason (spurious combined or empty reviews run)
+- [x] No mocks of the project's own code in integration tests
+**Note (2026-11-02):** 3 of 4 red-team tests fail for the right reason (no `review-wave` labels pre-Task-18; the protected unmerged task still gets `review 2`); `test_redteam_review_batching_all_risky_no_batch` passes pre-18 (one-per-task reviews are trivially individual with no batch) and guards the Task 18 code against adding a combined review to risky-only waves.
 **Dependencies:** Task 1 (needs `risk` maps + review ledger harness)
 **Complexity:** Medium
 **Risk:** normal
