@@ -189,7 +189,12 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
       const n = covered[0]
       const key = n ?? l
       state.reviewTasks[l] = covered
-      state.reviewCount[key] = (state.reviewCount[key] || 0) + 1
+      // A batched review IS each covered task's review (single-wave contract):
+      // advance every covered task's counter while the verdict below is still
+      // looked up by the first covered task's entry, so a flagged task's
+      // single re-review reaches its second entry. Single-covered (individual)
+      // labels behave exactly as before.
+      for (const t of new Set(covered.length ? covered : [key])) state.reviewCount[t] = (state.reviewCount[t] || 0) + 1
       const startedAt = stamp()
       await sleep(n != null ? reviewDurations[n] ?? 0 : 0)
       state.events.push(`${l} end`)

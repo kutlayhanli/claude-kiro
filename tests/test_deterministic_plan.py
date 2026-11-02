@@ -1175,6 +1175,10 @@ def wave_project(ids, risk: Dict, reviews: Dict, extra_project: Dict = None) -> 
         "deps": {t: [] for t in ids},
         "remaining": list(ids),
         "maxConcurrent": max(4, len(ids)),
+        # Single-wave contract: the later wave must land in one land batch, so
+        # size the merge window for the whole wave (default 4 would split 5-6
+        # task waves 4+1 and no single batch review could cover the wave).
+        "mergeBatch": max(6, len(ids)),
         "agents": {"reviewer": dict(REVIEWER)},
         "risk": {t: risk.get(t, "normal") for t in ids},
     }

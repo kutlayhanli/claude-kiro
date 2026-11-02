@@ -333,7 +333,7 @@
 **Risk:** normal
 ---
 ### Task 18: Wave-batched reviews with risky tasks kept individual
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 4.1, 4.2, 4.3, 4.4, 4.5, 4.6
 **Description:** Replace the per-task `review` call in `runTask` with wave batching in `plugin/workflows/spec-implement.js`: after a `landBatch` reports MERGED, call `reviewGroups(mergedTasks, RISK)`; non-risky tasks go in one `review-wave` agent (label `review-wave <wave> tasks <ids>`, e.g. `review-wave 2 tasks 4 5 7`) over the combined diff (prompt names the wave, its non-risky tasks, the combined `git diff <merge-base>...<INTO>` over their files, each task's block/requirements, and design.md), each safety/risky task in its own `review` agent with the existing risky reviewer settings (`reviewOpts`). Add optional `tasks: string[]` echo to `REVIEW_SCHEMA` so a batched verdict names its coverage. Fan out the verdict to per-task `rec.review` rows: a batched `changes` verdict routes only flagged tasks to revision (4.4), an `approve` records approval on every covered task with `fromBatch` attribution (4.5). No review agent when the wave merged nothing new (4.6); a risky-only wave runs only individual reviews with no combined review (4.3).
@@ -342,9 +342,14 @@
 **Verify:** `node tests/js/deterministic_plan.test.mjs TC-17 TC-18 TC-19 TC-20 TC-21 TC-22` `uv run pytest -q tests/test_deterministic_plan.py -k "test_review_bound or test_batch_verdict_fanout or redteam_review_batching"`
 **Verified by:** Task 15, Task 16, Task 17 (its tests are the oracle)
 **Acceptance:**
-- [ ] A merged wave of non-risky tasks gets exactly one combined review-wave agent covering the wave's changes (4.1)
-- [ ] Risky/safety tasks always get individual reviews; risky-only waves get no combined review (4.2, 4.3)
-- [ ] Batched `changes` revises only flagged tasks; batched `approve` approves every covered task; empty waves get no review (4.4, 4.5, 4.6)
+- [x] A merged wave of non-risky tasks gets exactly one combined review-wave agent covering the wave's changes (4.1)
+- [x] Risky/safety tasks always get individual reviews; risky-only waves get no combined review (4.2, 4.3)
+- [x] Batched `changes` revises only flagged tasks; batched `approve` approves every covered task; empty waves get no review (4.4, 4.5, 4.6)
+**Deviation (adjudicated 2026-11-02 — harness fixes authorized; no expectation touched):**
+- Implemented exactly per Description/design.md review path: post-merge wave review in `landBatch` via `reviewGroups({ merged, risk: RISK })` (object form — the positional call was the first bug, fixed), `review-wave <n> tasks <ids>` batch with normal reviewer settings, individual `review N` with `reviewOpts` (risky) settings, `REVIEW_SCHEMA` `tasks[]` echo, fan-out (approve→all covered with `fromBatch`; changes→only flagged revise + individual re-review loop mirroring the old pre-land loop, incl. guard-ladder climb on revise guard-stop per preserved S17 semantics and revise-escalation push placement).
+- Passing: TC-17/18/19/20/21/22, `test_review_bound` + TC-30, `test_batch_verdict_fanout`, all 4 redteam review-batching tests, plus full Task 10 (16 pytest + 8 Node TC-1..10) and Task 14 (6 pytest + 6 Node TC-11..16) regression subsets, plus guard_ladder fully green (incl. TC-79 revise-guard climb).
+- Authorized harness fixes (verdict lookup unchanged, no expectation touched): (1) `tests/js/fake_project.mjs` review branch advances `reviewCount` for EVERY covered task while the verdict is still looked up by the first covered task's entry — single-covered (individual) labels byte-identical; (2) `tests/test_deterministic_plan.py` `wave_project` sets `"mergeBatch": max(6, len(ids))` so the promised single later wave lands in one batch.
+- Superseded-suite fallout (expected; structurally impossible under Story 4's explicit supersede of "one review agent per task" / pre-land reviews; no task owns those files): finish_first TC-23/28 (queue-choreography non-vacuity), TC-65/63 (`review N` position; `review 2` label gone), TC-26 (triggerOf has no `review-wave` entry); landing_speed TC-4 line 71 only (land-relative timing; line 70 requirement passes, current oracle TC-12 passes), TC-17/21 (`review N` label shape; revise→re-review→approve→merge behavior identical), TC-11 (scenario has no reviewers — impl inert; Task-10 fallback supersede, contradicts Done oracle TC-2); spec_implement reviewer/risk/contract label-shape tests (`opts/prompts['review N']`, pre-land timing), persistent-changes-must-block-merge tests (structurally impossible post-merge; merged∩failed=∅ invariant holds), planning-halt-log test (no reviewers — Task-10 fallout), TC-73 key-set snapshot (Task-10 keys + mandated fromBatch/tasks echo; shape owned by Task 22). Every failing run completes with correct merged sets; no verdict/merge/hang divergence; escalation/park/guard suites green.
 **Dependencies:** Task 14 (builds on the scheduler/landing flow edited there); Task 9 (calls `reviewGroups` seam added there); Task 15 (its tests are the oracle); Task 16 (its tests are the oracle); Task 17 (its tests are the oracle)
 **Complexity:** High
 **Risk:** normal
