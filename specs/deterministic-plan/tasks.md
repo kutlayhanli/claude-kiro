@@ -647,7 +647,7 @@
 ---
 
 ### Task 36: Review-wave label role mapping
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 4.1, NFR-4, 5.2
 **Description:** In `src/claude_kiro/analytics/roles.py`, add a `review-wave` pattern to the spec-implement grammar: the batched-review label `review-wave <wave> tasks <ids>` emitted by Task 18 maps to role `reviewer` with `matched=True`, `wave=<wave>`, and `tasks` set to the covered task ids (criterion 4.1: the batched review is a review agent, never `other`). This is what the W + R review-count bound (NFR-4, counted over role-`reviewer` labels) and the overhead reviewer share (5.2, Task 33) count. Extend the `tests/js/emit_labels.mjs` review branch to answer `review-wave ...` labels (parse covered ids from the label, return a verdict shaped like an individual review) and add a wave-merge scenario so the emitted corpus includes a `review-wave` label; assert the mapping directly in `tests/test_stats_label_corpus.py` (role reviewer, wave number, covered tasks, `matched=True`).
@@ -658,9 +658,9 @@
 **Verify:** `uv run pytest -q tests/test_stats_label_corpus.py`
 **Verified by:** Task 16 (its P-9 review-count bound counts each `review-wave` label as one review agent via this mapping)
 **Acceptance:**
-- [ ] `review-wave <wave> tasks <ids>` parses to role reviewer with the wave number and covered task ids; no batched-review label parses as `other` (4.1)
-- [ ] W + R bound and overhead reviewer share count `review-wave` labels as review agents (NFR-4, 5.2)
-- [ ] Tests exercise the real boundary named in the test plan (real script emission via emit_labels plus real `parse_label`)
+- [x] `review-wave <wave> tasks <ids>` parses to role reviewer with the wave number and covered task ids; no batched-review label parses as `other` (4.1)
+- [x] W + R bound and overhead reviewer share count `review-wave` labels as review agents (NFR-4, 5.2)
+- [x] Tests exercise the real boundary named in the test plan (real script emission via emit_labels plus real `parse_label`)
 **Dependencies:** Task 18 (maps the batched-review label that code emits); Task 16 (its tests are the oracle)
 **Complexity:** Low
 **Risk:** normal
