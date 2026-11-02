@@ -349,7 +349,7 @@
 **Risk:** normal
 ---
 ### Task 20: Workflow example for overhead warn-only
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 5.4
 **Description:** Implements the workflow half of TC-26 in `tests/js/deterministic_plan.test.mjs` (CLI half in Task 29). Given a run whose plan/review/landing share is forced above the published threshold (tiny task durations, many plan/review agents): the run still completes with no stop reason naming overhead (warn-only: no halt/fail/retry), while the report flags the overhead warning. Needs the Task 22 warn-only wiring to pass; pairs with the Task 29 CLI assertions on the same run shape.
