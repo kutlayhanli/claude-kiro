@@ -40,6 +40,7 @@ Nothing outside this list is ever exported. Pattern syntax: `*` = a segment whos
 - `counts.lenses_lost`: non-negative integer
 - `counts.open_questions`: non-negative integer
 - `counts.plan_failures`: non-negative integer
+- `counts.plan_fallbacks`: non-negative integer
 - `counts.plan_steps`: non-negative integer
 - `counts.refuted`: non-negative integer
 - `counts.retries`: non-negative integer
@@ -188,5 +189,5 @@ identity and the names of non-ck workflows. Any hit blocks the submission.
 - sources: `workflow`, `agents`
 - missing kinds: `result`, `runfile`, `agent_entries`, `transcripts`, `meta`, `timing`, `ck_version`
 - phases: `plan`, `wave`, `tasks`, `final_gate`, `report`, `requirements`, `design_test_plan`, `task_tracks`, `link`, `adversarial_review`, `revise`, `consistency_check`, `other`
-- count keys: `tasks`, `tasks_merged`, `tasks_failed`, `tasks_not_started`, `waves`, `agents`, `attempts`, `retries`, `escalations`, `review_rounds`, `conflicts`, `conflicts_inferred`, `fixes`, `landings`, `bisects`, `gates_green`, `gates_red`, `cross_tests`, `cross_test_blocking`, `plan_steps`, `plan_failures`, `review_fixed`, `review_not_fixed`, `review_escalated`, `refuted`, `lenses_lost`, `consistency_passes`, `consistency_fixed`, `open_questions`, `agents_other`
+- count keys: `tasks`, `tasks_merged`, `tasks_failed`, `tasks_not_started`, `waves`, `agents`, `attempts`, `retries`, `escalations`, `review_rounds`, `conflicts`, `conflicts_inferred`, `fixes`, `landings`, `bisects`, `gates_green`, `gates_red`, `cross_tests`, `cross_test_blocking`, `plan_steps`, `plan_failures`, `plan_fallbacks`, `review_fixed`, `review_not_fixed`, `review_escalated`, `refuted`, `lenses_lost`, `consistency_passes`, `consistency_fixed`, `open_questions`, `agents_other`
 - usage keys: `input`, `output`, `cacheRead`, `cacheCreation`

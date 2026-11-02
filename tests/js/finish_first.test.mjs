@@ -177,6 +177,9 @@ await test('TC-25: with nothing queued, finish-first on and off give the same re
   const off = await run(mk(), { ...args, finishFirst: false })
   const seq = t => t.filter(e => ['request', 'start', 'end'].includes(e.ev)).map(e => `${e.ev} ${e.label}`)
   assert.deepEqual(seq(on.trace), seq(off.trace))
+  // overhead is a measured observation (real Date.now() agent ms per run), not schedule state;
+  // TC-25's contract covers scheduling/merging, so exclude it from the exact-equality check.
+  for (const r of [on.result, off.result]) delete r.overhead
   assert.deepEqual(on.result, off.result)
   assert.deepEqual([...on.result.merged].sort((a, b) => a - b), Object.keys(deps))
 })

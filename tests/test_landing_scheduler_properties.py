@@ -355,6 +355,11 @@ def test_p10_finish_first_changes_nothing_when_nothing_queues(bridge, sc, agent_
         if any(key(a) == key(b) for a in ons for b in offs):
             return
     assert events(ons[0]) == events(offs[0])
+    # overhead is a measured observation (real Date.now() agent ms per run), not schedule state;
+    # finish-first's contract covers scheduling/merging, so exclude it from the exact-equality check.
+    for r in (ons[0]["result"], offs[0]["result"]):
+        if isinstance(r, dict) and isinstance(r.get("overhead"), dict):
+            r.pop("overhead")
     assert ons[0]["result"] == offs[0]["result"]
 
 
