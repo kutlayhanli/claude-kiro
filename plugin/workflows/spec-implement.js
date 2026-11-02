@@ -883,8 +883,8 @@ async function runPlan(trigger) {
   const runningSet = new Set([...running.keys()])
   const failedSet = new Set([...failed.keys()])
   const unstarted = universe.filter(t => !doneArr.includes(t) && !runningSet.has(t) && !failedSet.has(t) && !exclArr.includes(t))
-  if (!fb.ready.length && !SCRIPT_READINESS && unstarted.length) {
-    return null  // Halt: unstarted tasks remain but no deterministic data can schedule them (2.3, TC-7). No entry, degraded untouched.
+  if (!fb.ready.length && !SCRIPT_READINESS && (unstarted.length || !universe.length)) {
+    return null  // Halt: dep-less with nothing schedulable and (unstarted tasks remain OR no task universe known at all) (2.3, TC-7). No entry, degraded untouched.
   }
   // Every double-failure trigger with deterministic data records a fallback entry,
   // even when the resulting ready list is empty (an empty entry records a fallback
