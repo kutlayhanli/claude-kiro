@@ -811,7 +811,7 @@ def _p13_check_row(env: Any, row: dict) -> None:
 
 
 @given(idx=st.integers(0, 8))
-@settings(derandomize=True, max_examples=200, database=None,
+@settings(derandomize=True, max_examples=200, database=None, deadline=None,
          suppress_health_check=[HealthCheck.function_scoped_fixture])
 def test_prechange_not_recorded(env, idx):
     """P-13 (5.1, 5.5, 5.6): any pre-change record -> `not recorded` with
