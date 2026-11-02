@@ -513,9 +513,9 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_stats.py -k "TC23 or TC24 or TC25 or TC26 or TC27 or TC28 or degraded_report"`
 **Verifies:** Task 33 (exercises `ck stats show` rendering end to end; fails until that code exists)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real `ck stats show`/`collect` subprocesses over FakeClaudeHome stores)
-- [ ] Tests fail before the implementation exists for the right reason (no `degraded`/`plan_fallbacks`/overhead-share fields in records or show output)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real `ck stats show`/`collect` subprocesses over FakeClaudeHome stores)
+- [x] Tests fail before the implementation exists for the right reason (no `degraded`/`plan_fallbacks`/overhead-share fields in records or show output)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs `implement_result()` kwargs + pre-change fixture record)
 **Complexity:** Medium
 **Risk:** normal
