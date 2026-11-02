@@ -190,7 +190,7 @@
 **Risk:** normal
 ---
 ### Task 11: Property tests for plan-agent schedule
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 3.2, 3.3, 3.4
 **Description:** Covers P-8, P-14 (Story 3 group; seam `planDecision`). P-8: healthy plans, any scenario → no non-retry `plan` between task finish and next `task N` when deterministic ready non-empty; plans only start / first-after-landing / idle. P-14: freed slot with non-empty ready starts next task(s) before any plan; idle re-read finding nothing ready arms no second re-read until landing end or task record. Generators `scenarios()` with `args.deps`, healthy plans, maxConcurrent 1–4; freed-slot timing (`planDurations`, slow tasks) and empty-ready draws. Tightens landing-speed P-6 relation. Needs the Task 14 gating to pass.
@@ -200,10 +200,10 @@
 **Properties:** P-8, P-14
 **Verifies:** Task 14 (exercises the `planDecision` gating; fails until that code exists)
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the row (maxConcurrent sweep; slow-task timing; empty-ready idle draws)
-- [ ] Settings are deterministic (`@settings(derandomize=True, max_examples=60, database=None)`)
-- [ ] The tests call the decision seam, not a server (`planDecision` directly + trace predicates via bridge)
-- [ ] File declares `PROPERTIES = {"P-8": ..., "P-14": ...}` (merged map)
+- [x] The generators cover every surface form and negative listed in the row (maxConcurrent sweep; slow-task timing; empty-ready idle draws)
+- [x] Settings are deterministic (`@settings(derandomize=True, max_examples=60, database=None)`)
+- [x] The tests call the decision seam, not a server (`planDecision` directly + trace predicates via bridge)
+- [x] File declares `PROPERTIES = {"P-8": ..., "P-14": ...}` (merged map)
 **Dependencies:** Task 1 (needs label-grammar helpers + trace predicates)
 **Complexity:** High
 **Risk:** normal
