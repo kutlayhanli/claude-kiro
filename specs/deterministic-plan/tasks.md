@@ -181,10 +181,16 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_plan.py -k "test_retry_once or test_fallback_continues or test_degraded_marking or test_fallback_exclusions or test_last_good_layering or test_unknown_dep or redteam_fallback_counting or redteam_unknown_dep"` `node tests/js/deterministic_plan.test.mjs TC-1 TC-3 TC-4 TC-5 TC-6 TC-7 TC-9 TC-10`
 **Verified by:** Task 3, Task 4, Task 5, Task 6, Task 7, Task 8 (its tests are the oracle)
 **Acceptance:**
-- [ ] Inconsistent first plan triggers exactly one retry with the same inputs; consistent retry is adopted with no fallback counted (1.1, 1.4)
-- [ ] Twice-failed plan with deterministic data continues scheduling instead of halting, with a `planFallbacks` entry recording planStep, trigger, source, ready (1.2, 1.3)
-- [ ] Twice-failed plan with neither deps nor last-good data returns null into the existing `PLAN_FAILED` halt while running tasks finish/land (2.3)
-- [ ] Fallback scriptReady comes from script-side `readyTasks`, so unknown-dep tasks never appear in the fallback list (2.5)
+- [x] Inconsistent first plan triggers exactly one retry with the same inputs; consistent retry is adopted with no fallback counted (1.1, 1.4)
+- [x] Twice-failed plan with deterministic data continues scheduling instead of halting, with a `planFallbacks` entry recording planStep, trigger, source, ready (1.2, 1.3)
+- [x] Twice-failed plan with neither deps nor last-good data returns null into the existing `PLAN_FAILED` halt while running tasks finish/land (2.3)
+- [x] Fallback scriptReady comes from script-side `readyTasks`, so unknown-dep tasks never appear in the fallback list (2.5)
+**Deviation:**
+- Runtime one-shot variable renamed `fallbackReady` -> `lastPlanReady` (3 sites). The Task 9 `fallbackReady` seam (decisions block, Harness Contract) is untouched; the old name shadowed it and threw `Identifier 'fallbackReady' has already been declared` at load, failing every workflow test including TC-0. Name `lastPlanReady` adopted (was `oneShotReady` in an interim commit) to match Task 20's identical rename and avoid a land conflict.
+- `lastGood` is updated in `runPlan` right after `applyPlanView` returns (not inside `applyPlanView`): `applyPlanView` lives in the pure decisions block evaluated standalone by `load_decisions`, so a side effect there would break the seam harness. Behavior identical — `applyPlanView` is only called from the `runPlan` success path, and a fallback view never touches `lastGood`.
+- Empty-`fallbackReady` rule refined by data availability: dep-less + empty -> `null` (halt, 2.3: TC-7, P-6 bad-bad); deps-mode + empty + non-start -> empty synthetic view, no halt and no entry (the frontier is in flight; a later landing re-triggers and recomputes — halting here strands in-flight work, P-2); deps-mode + empty at start -> empty synthetic view (graceful all-done start, P-5 all-done draw). Box 3's halt is for "neither deps nor last-good data".
+- Vacuous-adopt: a usable plan with empty `remaining` is adopted with `ready: []` (no retry, no fallback). `normalizePlan` cannot filter unknown ready ids without a remaining list, so an all-done plan with a garbage ready list would otherwise double-fail and halt/fall back on a run with nothing to do (P-5 all-done draw, P-3 single-task draw). Consistent with 1.4 (consistent plans count no fallback).
+- Failed-but-usable attempts fold their `done` into `view.done` (ground truth for 1.5; the only channel by which pre-existing Done reaches a start fallback, TC-4/P-5 done seeds). Order/deps stay on the args-seeded view per D5 (fallback is computed from the deps arg, never from a failed plan's graph).
 **Dependencies:** Task 9 (calls `fallbackReady` seam added there); Task 3 (its tests are the oracle); Task 4 (its tests are the oracle); Task 5 (its tests are the oracle); Task 6 (its tests are the oracle); Task 7 (its tests are the oracle); Task 8 (its tests are the oracle)
 **Complexity:** High
 **Risk:** normal
