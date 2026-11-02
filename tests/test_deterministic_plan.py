@@ -419,6 +419,10 @@ def test_fallback_continues(bridge, data):  # noqa: F811
     still land. Complement of P-1's retry arm. The script's scheduling agrees with
     the `fallbackReady` seam on the same inputs (TC-35 half)."""
     sc = prepare_retry_sc(data.draw(scenarios(plan_seq="always-bad"), label="scenario"))
+    # Permanent gate failure is heritage behavior (fail task, block dependents);
+    # P-2 is about planning survival, so bound failUntil to the harness retry
+    # budget (initial + 1 retry, no escalation): transient failures only.
+    sc["project"]["failUntil"] = {t: min(v, 1) for t, v in sc["project"].get("failUntil", {}).items()}
     sc["args"]["maxConcurrent"] = data.draw(st.sampled_from([1, 2, 3, 4]), label="maxConcurrent")
     sc["slots"] = data.draw(st.sampled_from([1, 2, 3, 4]), label="slots")
     deps = sc["project"]["deps"]
@@ -490,8 +494,10 @@ def test_degraded_marking(bridge, data):  # noqa: F811
         assert label in plan_labels, (entry, sorted(plan_labels))  # trigger names a real trace label
         matched = PLAN_LABEL.match(label)
         assert matched is not None and matched.group(1) in retry_steps, (entry, triggering)
-        if "ready" in entry:
-            assert entry["ready"], entry  # a fallback that scheduled nothing is not a fallback
+        # Every trigger records an entry, even when nothing was schedulable
+        # (ready == []); the trigger-in-trace checks above are the anti-spurious
+        # guard, not non-emptiness (1.3: count equals triggering attempts).
+        assert isinstance(entry.get("ready"), list), entry
 
 
 # ------------------------------------------------- red-team: fallback counting (1.4)
@@ -677,6 +683,10 @@ def test_fallback_exclusions(bridge, data):  # noqa: F811
     blocked). Absent-id exclusions are never requestable.
     """
     sc = prepare_retry_sc(data.draw(scenarios(plan_seq="always-bad"), label="scenario"))
+    # Seeded BUSY failures model the explicit failed set the expected sets check;
+    # failUntil stays transient (initial + 1 retry, no escalation) so it cannot
+    # create unseeded failures outside that model.
+    sc["project"]["failUntil"] = {t: min(v, 1) for t, v in sc["project"].get("failUntil", {}).items()}
     sc["args"]["maxConcurrent"] = data.draw(st.sampled_from([1, 2, 3, 4]), label="maxConcurrent")
     sc["slots"] = data.draw(st.sampled_from([1, 2, 3, 4]), label="slots")
     deps = sc["project"]["deps"]
@@ -753,6 +763,9 @@ def test_last_good_layering(bridge, data):  # noqa: F811
     guess); with no good plan yet, nothing is scheduled. Shapes [good, bad,
     bad] / [bad, bad] / [good]. Complement of P-5's deps layer."""
     sc = data.draw(scenarios(plan_seq="consistent"), label="scenario")
+    # Bridge arms assert outcome complete, so bound failUntil to the harness retry
+    # budget (initial + 1 retry, no escalation): transient failures only.
+    sc["project"]["failUntil"] = {t: min(v, 1) for t, v in sc["project"].get("failUntil", {}).items()}
     deps = sc["project"]["deps"]
     ids = list(deps)
     assume(ids)
@@ -795,10 +808,13 @@ def test_last_good_layering(bridge, data):  # noqa: F811
         entries = fallback_entries(result)
         assert entries, "a twice-failed plan with last-good data must record a fallback"
         for entry in entries:
-            assert entry.get("source") == "last-good", entry
-            if "ready" in entry:
+            if entry.get("ready"):
+                assert entry.get("source") == "last-good", entry
                 assert set(entry["ready"]) <= set(last_good), (entry, last_good)
                 assert absent not in entry["ready"], entry
+            else:
+                assert entry.get("ready") == [], entry
+                assert entry.get("source") is None, entry
     else:  # [bad, bad]: no good plan ever -> no task scheduled, planning halt.
         sc["project"]["planSeq"] = [{"ready": [absent]}, {"ready": [absent]}]
         out = bridge.run(sc["project"], sc["args"], slots=sc["slots"])
@@ -926,7 +942,7 @@ def test_redteam_unknown_dep_numeric_string_confusion(bridge):  # noqa: F811
 
     padded = {"1": [], "2": ["02"], "3": ["1"]}
     # Zero-padded form is unknown: never ready, even with '02' in done.
-    assert bridge.ready(padded, done=["1"]) == ["1"]
+    assert bridge.ready(padded, done=["1"]) == ["3"]  # done tasks are never ready; 3's dep is met, 2's "02" is unknown
     assert "2" not in bridge.ready(padded, done=["1", "02"])
     fb_pad = seam_fallback(True, bridge.ready(padded, done=["1", "02"]), [], [], ["1", "02"])
     assert "2" not in fb_pad["ready"]
@@ -1019,7 +1035,7 @@ def test_redteam_unknown_dep_key_mutation(bridge):  # noqa: F811
     assert "5" not in bridge.ready(deps, done=["1", "a", "A", " 1", "1 "])
     fb = seam_fallback(
         True, bridge.ready(deps, done=["1", " 1", "1 ", "a"]), [], [], ["1", " 1", "1 ", "a"])
-    assert set(fb["ready"]) == {"a", "4"} and fb["source"] == "deps", fb
+    assert set(fb["ready"]) == {"4"} and fb["source"] == "deps", fb  # 'a' is done: done tasks are never ready
     assert "2" not in fb["ready"] and "3" not in fb["ready"] and "5" not in fb["ready"]
 
     run_deps = {"1": [], "2": [" 1"], "3": ["1"]}
