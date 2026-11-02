@@ -876,7 +876,7 @@ PROPERTIES = {
 # bodies so collection never depends on the missing code.
 #
 # They fail until Task 33 lands, for the right reason: `overheadShare` /
-# `overheadWarning` do not exist yet (AttributeError on first seam call) and
+# `overheadWarning` do not exist yet (ImportError on first seam import) and
 # `ck stats show` prints no `overhead (plan/review/land share):` line.
 
 
@@ -1035,6 +1035,9 @@ def test_redteam_warn_only_warning_preserves_real_failure(env):
     assert data.get("outcome") == "halted", "warning must not rename the real halted outcome"
     assert "halted" in text.lower(), "warning must not mask the halted outcome in the text view"
     assert "1 failed" in text, f"real failed task must stay visible beside the warning:\n{text}"
-    assert "gate red" in text, f"real gate-red reason must stay visible beside the warning:\n{text}"
+    tasks_json = data.get("tasks") or []
+    assert any(isinstance(t, dict) and t.get("ok") is False and t.get("reason") == "gate red"
+               for t in tasks_json), \
+        f"real gate-red reason must stay visible in show --json tasks beside the warning: {json.dumps(tasks_json)}"
     blob = json.dumps({k: data.get(k) for k in ("outcome", "reason", "stopReason", "halted", "failed")})
     assert "overhead" not in blob.lower(), f"stop reason renamed to overhead: {blob}"
