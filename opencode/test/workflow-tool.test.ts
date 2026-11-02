@@ -64,6 +64,32 @@ test("validateWorkflowArgs rejects a spec-implement call with only spec", () => 
   validateWorkflowArgs("inline", {});
 });
 
+test("TC-34: validateWorkflowArgs requires only spec and root for spec-implement", () => {
+  // `deps` stays optional by design: dep-less runs are legal and take the
+  // last-good/halt path on both harnesses (2.1, 2.2). The error message names
+  // exactly the required keys, so adding `deps` to the required set fails here.
+  assert.throws(
+    () => validateWorkflowArgs("spec:spec-implement", { root: "/repo" }),
+    /needs args\.spec, args\.root.*missing: args\.spec/,
+  );
+  assert.throws(
+    () => validateWorkflowArgs("spec:spec-implement", { spec: "  ", root: "/repo" }),
+    /missing: args\.spec/,
+  );
+  assert.throws(
+    () => validateWorkflowArgs("spec:spec-implement", { spec: "demo", root: "" }),
+    /missing: args\.root/,
+  );
+  validateWorkflowArgs("spec:spec-implement", { spec: "demo", root: "/repo" });
+  validateWorkflowArgs("spec:spec-implement", { spec: "demo", root: "/repo", deps: {} });
+  validateWorkflowArgs("spec:spec-implement", {
+    spec: "demo",
+    root: "/repo",
+    deps: { "1": [], "2": [1] },
+    remaining: [1, 2],
+  });
+});
+
 test("a bad submission is rejected, a refusal retries once, then the workflow sees the error", async () => {
   const dir = mkdtempSync(join(tmpdir(), "ck-workflow-tool-"));
   try {
