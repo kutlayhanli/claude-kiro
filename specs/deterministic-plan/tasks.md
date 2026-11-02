@@ -439,7 +439,7 @@
 **Risk:** normal
 ---
 ### Task 24: Skill docs and vendored workflow copies
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 3.1, 3.2, 4.1, 4.2
 **Description:** Update `plugin/skills/implement/SKILL.md` (and vendored `.claude/commands/spec/implement.md`): Step 6 keeps passing `deps`/`remaining`; Step 7 documents the new plan triggers (start / after each landing / idle-only, no re-read after every freed slot when deterministic ready exists) and wave-batched review (one review-wave per merged wave for non-risky tasks, risky/safety tasks always individual). Regenerate `.claude/workflows/spec-implement.js` via `uv run ck vendor` so it is byte-identical to the plugin source. No semantics decided here beyond documenting Tasks 9–22.
@@ -450,8 +450,8 @@
 **Verify:** `uv run pytest -q tests/test_plugin.py -k deterministic_docs` `uv run pytest -q tests/test_plugin.py`
 **Verified by:** Task 23 (its tests are the oracle)
 **Acceptance:**
-- [ ] Skill docs describe start/landing/idle-only plan triggers and wave-batched review with risky-individual rule (3.1, 4.1, 4.2)
-- [ ] Step 6 still passes `deps`/`remaining`; vendored workflow copy is byte-identical to the plugin source
+- [x] Skill docs describe start/landing/idle-only plan triggers and wave-batched review with risky-individual rule (3.1, 4.1, 4.2)
+- [x] Step 6 still passes `deps`/`remaining`; vendored workflow copy is byte-identical to the plugin source
 **Dependencies:** Task 22 (documents the scheduler/review behaviour implemented there); Task 23 (its tests are the oracle)
 **Complexity:** Low
 **Risk:** normal
