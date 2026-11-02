@@ -504,7 +504,7 @@
 **Risk:** normal
 ---
 ### Task 29: CLI examples for overhead visibility
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.1, 5.2, 5.3, 5.4, 5.5, 5.6
 **Description:** Implements TC-23, TC-24, TC-25, TC-26 (CLI half), TC-27, TC-28 in `tests/test_deterministic_stats.py` via real `ck stats` subprocesses over `FakeClaudeHome` stores (`tests/stats_helpers.py`). TC-23: degraded run with 2 fallbacks at `plan 2`/`plan 3 retry` → report names degraded + count + triggers. TC-24: plan/review/land agent share beside `plan_fallbacks`. TC-25: `--json` values equal text-view parsed numbers. TC-26: forced-overhead run → warning flagged, completes, no overhead stop reason (pairs with Task 20 workflow half). TC-27: pre-change `pre-deterministic-record.json` → `not recorded`, existing figures unchanged. TC-28: old + new records → old reads without re-collection, bytes identical. Needs Tasks 28 + 33 (counts + show rendering).
@@ -513,9 +513,9 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_stats.py -k "TC23 or TC24 or TC25 or TC26 or TC27 or TC28 or degraded_report"`
 **Verifies:** Task 33 (exercises `ck stats show` rendering end to end; fails until that code exists)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real `ck stats show`/`collect` subprocesses over FakeClaudeHome stores)
-- [ ] Tests fail before the implementation exists for the right reason (no `degraded`/`plan_fallbacks`/overhead-share fields in records or show output)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real `ck stats show`/`collect` subprocesses over FakeClaudeHome stores)
+- [x] Tests fail before the implementation exists for the right reason (no `degraded`/`plan_fallbacks`/overhead-share fields in records or show output)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs `implement_result()` kwargs + pre-change fixture record)
 **Complexity:** Medium
 **Risk:** normal
