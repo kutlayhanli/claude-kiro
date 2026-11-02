@@ -155,7 +155,7 @@
 **Risk:** normal
 ---
 ### Task 9: Add pure scheduler seams fallbackReady and reviewGroups
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 1.2, 2.1, 2.2, 2.3, 2.4, 2.5, 4.1, 4.2, 4.3, 4.6
 **Description:** In the decisions block of `plugin/workflows/spec-implement.js` (next to `readyTasks`/`planConsistent`/`planDecision`, before the `--- end decisions ---` marker so `tests/js/load_decisions.mjs` can load them via the `extra` option), add two pure functions with no script globals, no I/O, no clock. Owns Harness Contract seam 1 (`fallbackReady`; the implementation reuses `readyTasks` ordering for the `scriptReady` input rather than re-implementing it) and seam 3 (`reviewGroups`, the `batchGroups` role under its final name): `fallbackReady({ hasDeps, scriptReady, lastGoodReady, exclude, done }) -> { ready, source }` implementing the D5 layering (scriptReady minus excluded/done when hasDeps and non-empty yields source `deps`; else lastGoodReady minus excluded/done yields source `last-good`; else empty/`null` for the halt path), and `reviewGroups({ merged, risk }) -> { batched, individual }` (individual = merged tasks whose risk tag is `safety` case-insensitive via existing `isSafety`; batched = the rest; empty merged yields both empty). Add `OVERHEAD_WARN_THRESHOLD = 0.5` script-local constant. Ordering is inherited from the inputs (already ck-plan order); do not re-sort inside the seams. Keep `readyTasks`/`planConsistent`/`planDecision` signatures unchanged in this task.
