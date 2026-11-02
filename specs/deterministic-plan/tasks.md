@@ -568,9 +568,9 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_plan.py -k seam_usage` `uv run pytest -q tests/test_deterministic_stats.py -k seam_usage`
 **Verifies:** Task 33 (latest code it exercises: show rendering; fails until that code exists)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real files for parity; real script/CLI + seams for TC-35)
-- [ ] Tests fail before the implementation exists for the right reason (stale vendored copy or unused seam diverges from behavior)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real files for parity; real script/CLI + seams for TC-35)
+- [x] Tests fail before the implementation exists for the right reason (stale vendored copy or unused seam diverges from behavior)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs harness contract seams + bridge)
 **Complexity:** Low
 **Risk:** normal
