@@ -190,7 +190,7 @@
 **Risk:** normal
 ---
 ### Task 11: Property tests for plan-agent schedule
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 3.2, 3.3, 3.4
 **Description:** Covers P-8, P-14 (Story 3 group; seam `planDecision`). P-8: healthy plans, any scenario → no non-retry `plan` between task finish and next `task N` when deterministic ready non-empty; plans only start / first-after-landing / idle. P-14: freed slot with non-empty ready starts next task(s) before any plan; idle re-read finding nothing ready arms no second re-read until landing end or task record. Generators `scenarios()` with `args.deps`, healthy plans, maxConcurrent 1–4; freed-slot timing (`planDurations`, slow tasks) and empty-ready draws. Tightens landing-speed P-6 relation. Needs the Task 14 gating to pass.
