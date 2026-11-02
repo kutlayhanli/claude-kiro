@@ -788,6 +788,9 @@ function call(kind, prompt, opts) {
 let view = { order: [], deps: {}, done: new Set(), cycles: [], verifyCycles: [] }
 let current = null          // the last plan applied
 let lastPlanReady = []      // without args.deps: the ready list of the plan that just returned, used once
+let planFallbacks = []    // one entry per fallback: { planStep, trigger, source, ready }
+let degraded = false      // true once any fallback fired
+let lastGood = null       // { ready, deps, order } of the last consistent plan: the dep-less fallback layer
 let planRun = null          // the plan agent in flight, if any
 let queuedTrigger = null    // a trigger that arrived while one was in flight: one follow-up
 let idleArmed = true
@@ -817,11 +820,28 @@ async function runPlan(trigger) {
     // An "error" next to a usable plan is a remark, not a failure; an empty plan with an error is a failure.
     if (usablePlan(p) && !(p.error && !p.done.length && !p.remaining.length)) {
       const n = normalizePlan(p)
+      // Done is ground truth even when the ready list is not: fold it in so the
+      // fallback below never re-schedules an already-finished task (1.5). (Order
+      // and deps stay on the args-seeded view per D5: the fallback is computed
+      // from the deps arg, never from a failed plan's graph.)
+      for (const d of n.done) view.done.add(d)
+      // A plan that names no runnable task is inconsistent even when normalization
+      // empties its ready list (1.1: a raw non-empty ready never follows from the
+      // graph); raw-empty + truth-empty still adopts via the check below (1.4).
+      const namesNothingRunnable = p.ready.length > 0 && n.ready.length === 0
+      // Vacuous adoption is gated on raw-empty: a plan whose remaining is empty adopts
+      // without a consistency check ONLY when its raw ready was already empty; a
+      // non-empty claim against an empty remaining set is checked below (and fails:
+      // nothing matches an empty order).
+      if (!n.remaining.length && p.ready.length === 0) n.ready = []
       // A task a plan reports as busy is left out of its ready list: it is not a mismatch.
-      if (planConsistent(n, [...exclude, ...n.busy.map(b => b.task)])) {
+      if (!namesNothingRunnable && planConsistent(n, [...exclude, ...n.busy.map(b => b.task)])) {
         if (p.error) log(`${label}: the planning agent left a note (not a failure): ${trim(p.error, 300)}`)
         current = n
         view = applyPlanView(n, mergedInRun)
+        // The dep-less fallback layer: the last consistent plan's ready/deps/order.
+        // A consistent first attempt or retry success counts no fallback (1.4).
+        lastGood = { ready: [...n.ready], deps: n.deps || {}, order: [...n.remaining] }
         // Task agents own BUSY detection; a busy list from the plan agent is ignored in script-readiness mode.
         for (const b of SCRIPT_READINESS ? [] : n.busy) {
           if (!failed.has(b.task) && !running.has(b.task)) {
@@ -841,7 +861,43 @@ async function runPlan(trigger) {
     planFailures++
     log(`${label}: no usable plan (${(p && p.error && trim(p.error, 300)) || 'no result'})${attempt ? '' : ', retrying'}`)
   }
-  return null
+  // Both attempts failed: resolve the deterministic fallback (D5) instead of halting when data exists.
+  // scriptReady comes from script-side readyTasks, so unknown-dep tasks never appear (2.5); the fallback
+  // subtracts running/failed/parked/merged/done, leaving their records untouched (1.5).
+  const effOrder = view.order.length ? view.order : (Array.isArray(A.remaining) ? A.remaining.map(String) : Object.keys(A.deps || {}).map(String))
+  const effDeps = view.deps && Object.keys(view.deps).length ? view.deps : (A.deps || {})
+  const doneArr = [...view.done]
+  const exclArr = [...excluded()]
+  const scriptReady = SCRIPT_READINESS ? readyTasks({ order: effOrder, deps: effDeps, done: doneArr, exclude: exclArr, blocked: blockedOf(view) }) : []
+  const fb = fallbackReady({ hasDeps: SCRIPT_READINESS, scriptReady, lastGoodReady: lastGood ? lastGood.ready : [], exclude: exclArr, done: doneArr })
+  // A fallback view never overwrites lastGood.
+  const synth = extra => {
+    const s = { fromFallback: true, done: [...view.done], remaining: [...(view.order.length ? view.order : effOrder)], deps: (view.deps && Object.keys(view.deps).length ? view.deps : effDeps), ready: [], cycles: [], verifyCycles: [], busy: [], ...extra }
+    if (!current) current = s
+    return s
+  }
+  if (!fb.ready.length && !SCRIPT_READINESS && (!lastGood || !lastGood.ready.length)) {
+    return null  // Halt: no deterministic data ever (no deps arg, no adopted plan with usable ready): the existing PLAN_FAILED halt path (2.3). No entry, degraded untouched.
+  }
+  // Every double-failure trigger with deterministic data records a fallback entry,
+  // even when the resulting ready list is empty (an empty entry records a fallback
+  // that scheduled nothing; 1.3 counts every trigger). The source is copied verbatim
+  // from the seam (null when neither layer had anything schedulable).
+  planFallbacks.push({ planStep: refills, trigger, source: fb.source, ready: [...fb.ready] })
+  degraded = true
+  if (!fb.ready.length) {
+    // Data present but nothing schedulable (frontier in flight): wait for landings.
+    log(`plan ${refills}: twice inconsistent, nothing schedulable yet; waiting for running tasks`)
+    return synth()
+  }
+  log(`plan ${refills}: twice inconsistent, falling back to the deterministic ready list (${fb.source}): ${fb.ready.join(' ') || '(empty)'}`)
+  if (!SCRIPT_READINESS) {
+    lastPlanReady = [...fb.ready]  // the dep-less schedule path consumes this once
+  } else if (!view.order.length) {
+    // Seed the scheduling view from the run inputs so planContext/schedule sees the fallback list.
+    view = { order: effOrder.map(String), deps: { ...effDeps }, done: new Set(doneArr), cycles: [], verifyCycles: [] }
+  }
+  return synth({ ready: [...fb.ready] })
 }
 
 // At most one plan agent in flight; an eligible trigger arriving meanwhile coalesces into one follow-up.
@@ -1244,7 +1300,7 @@ async function runTask(n) {
 
 phase('Plan')
 const startPlan = await requestPlan('start')
-if (!startPlan) return { halted: true, refused: false, reason: PLAN_FAILED, into: INTO }
+if (!startPlan) return { halted: true, refused: false, reason: PLAN_FAILED, into: INTO, degraded, planFallbacks }
 if (startPlan.cycles.length || startPlan.verifyCycles.length) {
   log('Refusing to launch: the plan has a cycle. Fix tasks.md (see `ck lint`) and run again.')
   return {
@@ -1254,6 +1310,8 @@ if (startPlan.cycles.length || startPlan.verifyCycles.length) {
     cycles: startPlan.cycles,
     verifyCycles: startPlan.verifyCycles,
     into: INTO,
+    degraded,
+    planFallbacks,
   }
 }
 const initialPlan = startPlan
@@ -1464,5 +1522,7 @@ return {
   fullGates,
   finalGate,
   crossTests,
-  stats: { initiallyDone, merged: merged.length, failed: failedList.length, notStarted: notStarted.length, planSteps: refills, planFailures, fixes: fixCount, landings: landings.length, bisected: landings.filter(l => l.bisected).length },
+  degraded,
+  planFallbacks,
+  stats: { initiallyDone, merged: merged.length, failed: failedList.length, notStarted: notStarted.length, planSteps: refills, planFailures, planFallbacks: planFallbacks.length, fixes: fixCount, landings: landings.length, bisected: landings.filter(l => l.bisected).length },
 }
