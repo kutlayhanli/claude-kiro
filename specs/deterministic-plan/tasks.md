@@ -542,7 +542,7 @@
 **Risk:** normal
 ---
 ### Task 31: Red-team warn-only budget
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 5.4
 **Description:** Try to break each SHALL NOT clause of Story 5 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test named `test_redteam_warn_only_*`. Targets 5.4 (SHALL NOT halt, fail or retry because of overhead): share exactly at threshold, share 100% with all-plan agents, `None`/missing share with threshold 0, threshold-shaped strings fed back as share values, overhead warning coinciding with a real failure (warning must not mask or rename the real stop reason). Needs the Task 22 workflow wiring plus Task 33 show rendering.
