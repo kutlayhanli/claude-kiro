@@ -164,9 +164,9 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_plan.py -k fallback_matches_ck_plan` `node -e "import('./tests/js/load_decisions.mjs').then(m => m.loadDecisions({extra: ['fallbackReady', 'reviewGroups']}))"`
 **Verified by:** Task 2 (its tests are the oracle; calls the seam directly plus the real `ck plan` CLI)
 **Acceptance:**
-- [ ] `fallbackReady` with `hasDeps` and non-empty scriptReady returns the deps layer minus excluded/done with source `deps` (1.2, 2.1)
-- [ ] `fallbackReady` without deps data falls back to lastGoodReady minus excluded/done with source `last-good`, and returns empty/null when both layers are empty (2.2, 2.3)
-- [ ] `reviewGroups` splits safety tasks to individual and the rest to batched; empty merged yields no review groups (4.1, 4.2, 4.3, 4.6)
+- [x] `fallbackReady` with `hasDeps` and non-empty scriptReady returns the deps layer minus excluded/done with source `deps` (1.2, 2.1)
+- [x] `fallbackReady` without deps data falls back to lastGoodReady minus excluded/done with source `last-good`, and returns empty/null when both layers are empty (2.2, 2.3)
+- [x] `reviewGroups` splits safety tasks to individual and the rest to batched; empty merged yields no review groups (4.1, 4.2, 4.3, 4.6)
 **Dependencies:** Task 1 (built against the harness extended there); Task 2 (its tests are the oracle)
 **Complexity:** Medium
 **Risk:** normal

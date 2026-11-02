@@ -636,6 +636,41 @@ function parkAction({ interactive } = {}) {
   return interactive ? 'ask' : 'park'
 }
 
+// Warn-only overhead budget (5.4, D8, NFR-5): the plan/review/land share of agent
+// ms above which the result/report warns without halting, failing or retrying.
+const OVERHEAD_WARN_THRESHOLD = 0.5
+
+// The D5 layered fallback source (1.2, 2.1-2.3): scriptReady minus excluded/done
+// when hasDeps and non-empty yields source 'deps'; else lastGoodReady minus
+// excluded/done when non-empty yields source 'last-good'; else empty/null for
+// the halt path. Ordering is the input's (already ck-plan order); never re-sorted.
+// Unknown-dep tasks never appear because scriptReady comes from readyTasks.
+function fallbackReady({ hasDeps, scriptReady, lastGoodReady, exclude, done } = {}) {
+  const skip = new Set([...decisionIds(exclude), ...decisionIds(done)])
+  const clean = list => decisionIds(list).filter(n => !skip.has(n))
+  if (hasDeps) {
+    const fromDeps = clean(scriptReady)
+    if (fromDeps.length > 0) return { ready: fromDeps, source: 'deps' }
+  }
+  const fromLastGood = clean(lastGoodReady)
+  if (fromLastGood.length > 0) return { ready: fromLastGood, source: 'last-good' }
+  return { ready: [], source: null }
+}
+
+// Wave review split (4.1-4.3, 4.6): individual = merged tasks whose risk tag is
+// `safety` (case-insensitive, same check as isSafety); batched = the rest.
+// Empty merged yields both empty (no review). Ordering is the input's.
+function reviewGroups({ merged, risk } = {}) {
+  const tags = risk && typeof risk === 'object' ? risk : {}
+  const batched = []
+  const individual = []
+  for (const n of decisionIds(merged)) {
+    if (String(tags[n] || '').toLowerCase() === 'safety') individual.push(n)
+    else batched.push(n)
+  }
+  return { batched, individual }
+}
+
 // --- end decisions ---
 
 // --- scheduler ---------------------------------------------------------------
