@@ -209,11 +209,15 @@ def implement_result(
     resolves: bool = True,
     into: str = "integrate/demo",
     base: str = "2026-10-12T09:05:00Z",
+    degraded: Optional[bool] = None,
+    planFallbacks: Optional[List[dict]] = None,
 ) -> dict:
     """A `spec-implement` result dict shaped like spec-implement.js:953-982.
 
     `resolves=False` omits the per-task `resolves` field (a pre-change run); `outcome=None` omits `outcome`
     (a pre-0.10 run, which carries only `halted`, `failed` and `notStarted`).
+    `degraded`/`planFallbacks` are the deterministic-plan fallback fields: both default to absent so
+    pre-change records stay byte-identical; when given, `stats.planFallbacks` is the entry count.
     """
     tasks = [TaskSpec(task="1"), TaskSpec(task="2", wave=2)] if tasks is None else tasks
     base_dt = parse_iso(base)
@@ -287,6 +291,11 @@ def implement_result(
     }
     if outcome is not None:
         result["outcome"] = outcome
+    if degraded is not None:
+        result["degraded"] = degraded
+    if planFallbacks is not None:
+        result["planFallbacks"] = planFallbacks
+        result["stats"]["planFallbacks"] = len(planFallbacks)
     return result
 
 
