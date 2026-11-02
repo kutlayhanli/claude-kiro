@@ -227,7 +227,7 @@
 **Risk:** normal
 ---
 ### Task 13: Red-team plan-agent thrash
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 3.3
 **Description:** Try to break each SHALL NOT clause of Story 3 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test named `test_redteam_plan_thrash_*`. Targets 3.3 (SHALL NOT run a plan agent after every freed slot when deterministic ready decides): rapid successive finishes with ready always non-empty, freed slot racing a landing end, empty-then-instantly-ready transitions, dep-less-shaped `deps` (`null`/`[]`/string) smuggled into a deps run. Needs the Task 14 gating to pass.
@@ -236,13 +236,13 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_plan.py -k redteam_plan_thrash`
 **Verifies:** Task 14 (exercises `planDecision` gating; fails until that code exists)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real script trace ordering under adversarial finish/landing interleavings)
-- [ ] Tests fail before the implementation exists for the right reason (extra plan agents between finish and ready start)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real script trace ordering under adversarial finish/landing interleavings)
+- [x] Tests fail before the implementation exists for the right reason (extra plan agents between finish and ready start)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs freed-slot timing + label-grammar helpers)
 **Complexity:** Medium
 **Risk:** normal
-**Blocker (2026-11-02):** `plugin/workflows/spec-implement.js` does not load: `function fallbackReady` (decisions block, line 648) collides with `let fallbackReady = []` (scheduler body, line 790), so every `bridge.run` fails with `Identifier 'fallbackReady' has already been declared`. Pre-existing on `integrate/deterministic-plan` (worktree == integrate); breaks all previously-merged bridge tests too. Tests added below collect but cannot verify predicates until the rename lands (owned by Task 9/10/14).
+**Note (2026-11-02):** Prior blocker resolved by Task 20 merge (scheduler-local `fallbackReady` renamed to `lastPlanReady`): `bridge.run` now executes; 3 of 4 red-team tests fail for the right reason (extra plan agents between finish and ready start, pending Task 14), 1 passes.
 ---
 ### Task 14: Idle-gated plan triggers and deterministic freed-slot scheduling
 **Status:** Not Started
