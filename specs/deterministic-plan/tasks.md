@@ -591,7 +591,7 @@
 **Risk:** normal
 ---
 ### Task 34: planning_fallback issue code
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 5.1, 5.2
 **Description:** In `src/claude_kiro/analytics/issues.py`, add `planning_fallback` to `ISSUE_CODES` and extend `derive_issue_codes` to emit it when `stats.planFallbacks > 0` (alongside the existing `planning_failed` on `planFailures`); no halt/fail semantics change. Pure function of the local record's result fields.
