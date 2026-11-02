@@ -149,7 +149,11 @@ await test('a task in review or waiting to merge does not hold a slot', async ()
   assert.deepEqual(result.merged.sort(), ['1', '2', '3'])
   assert.equal(p.state.maxRunning, 1, 'still one implementing agent at a time')
   assert.ok(idx(p.state, 'task 2') < idx(p.state, landOf(p.state, '1', true)), 'task 2 started while task 1 waited to merge')
-  assert.ok(idx(p.state, 'task 3') < idx(p.state, 'review 2 end'), 'task 3 started while task 2 was in review')
+  // Story 4 (4.1): the review of task 2 is the `review-wave` batch covering it; a review
+  // never holds an implementer slot, so task 3 still starts while task 2 awaits review.
+  const batch2 = p.state.events.filter(e => !e.endsWith(' end')).find(l => (p.state.reviewTasks[l] || []).includes('2'))
+  assert.ok(batch2, 'task 2 was reviewed by its covering batch')
+  assert.ok(idx(p.state, 'task 3') < idx(p.state, `${batch2} end`), 'task 3 started while task 2 awaited review')
 })
 
 await test('a revision after review still runs when the slots are full', async () => {
@@ -235,10 +239,14 @@ await test('reviewer: approves, then the task merges; review runs at the reviewe
   const p = project({ deps: { 1: [] } })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })
   assert.deepEqual(result.merged, ['1'])
-  assert.deepEqual([p.state.opts['review 1'].model, p.state.opts['review 1'].effort], ['opus', 'high'])
-  assert.ok(idx(p.state, 'review 1') < idx(p.state, 'land 1'))
+  // Story 4 (4.1): single waves emit `review-wave <n> tasks <ids>`; the covering batch
+  // is the review, resolved via the review ledger.
+  const batch1 = p.state.events.filter(e => !e.endsWith(' end')).find(l => (p.state.reviewTasks[l] || []).includes('1'))
+  assert.ok(batch1, 'task 1 was reviewed by its covering batch')
+  assert.deepEqual([p.state.opts[batch1].model, p.state.opts[batch1].effort], ['opus', 'high'])
+  assert.ok(idx(p.state, batch1) > idx(p.state, landOf(p.state, '1', true)), 'the batch review runs after its wave merged (4.1)')
   assert.equal(result.tasks[0].review.verdict, 'approve')
-  assert.match(p.state.prompts['review 1'], /diff integrate\/demo\.\.\.feat\/demo-task-1/)
+  assert.match(p.state.prompts[batch1], /diff integrate\/demo\.\.\.feat\/demo-task-1/)
 })
 
 await test('reviewer: blocking findings send the task back once, then it merges', async () => {
@@ -248,17 +256,27 @@ await test('reviewer: blocking findings send the task back once, then it merges'
   assert.ok(p.state.events.includes('task 1 revise 1'))
   assert.match(p.state.prompts['task 1 revise 1'], /contradicts design\.md/)
   assert.equal(p.state.opts['task 1 revise 1'].model, 'sonnet')
-  assert.ok(idx(p.state, 'review 1 round 2') < idx(p.state, 'land 1'))
+  // Story 4 (4.4, 4.5): the revision is re-reviewed individually after its wave merged;
+  // the re-review label shape is unchanged, only its position moved post-merge.
+  assert.ok(idx(p.state, 'review 1 round 2') > idx(p.state, 'task 1 revise 1 end'), 'the re-review runs after the revision')
+  assert.ok(idx(p.state, 'review 1 round 2') > idx(p.state, landOf(p.state, '1', true)), 'the re-review runs after its wave merged (4.1)')
   assert.deepEqual([result.tasks[0].review.verdict, result.tasks[0].review.rounds], ['approve', 1])
 })
 
 await test('reviewer: findings that survive the revisions fail the task and nothing merges', async () => {
   const p = project({ deps: { 1: [], 2: ['1'] }, reviews: { 1: ['changes', 'changes'] } })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })
-  assert.deepEqual(result.merged, [])
-  assert.match(result.failed[0].reason, /review: blocking findings remain after 1 revision/)
-  assert.ok(!landOf(p.state, '1'))
-  assert.ok(!p.state.events.includes('task 2'))  // its dependent never starts
+  // Story 4 (4.4): reviews run post-merge and a merged task stays merged
+  // (merged∩failed=∅), so both tasks merge; the flagged task records the failed
+  // review (verdict/rounds/revise all transfer to the batch shape) while the
+  // unflagged wave-mate merges untouched.
+  assert.deepEqual(result.merged.sort(), ['1', '2'])
+  assert.ok(p.state.events.includes('task 1 revise 1'), 'the flagged task was revised')
+  const t1 = result.tasks.find(t => t.task === '1')
+  assert.equal(t1.review.verdict, 'changes', 'the flagged task records the failed review')
+  assert.equal(t1.review.rounds, 1, 'the failed review follows one revision and re-review')
+  assert.ok(t1.review.findings.some(f => f.severity === 'blocking'), 'the blocking finding survives in the record')
+  assert.ok(result.merged.includes('2'), 'the unflagged wave-mate merged (4.4)')
 })
 
 await test('reviewer: enabled false skips review', async () => {
@@ -283,7 +301,10 @@ await test('roles: inherit means the session model; model/effort args override c
   const q = project({ deps: { 1: [] } })
   await runWorkflow(SCRIPT, { agent: q.agent, args: { ...baseArgs, agents: ROLES, model: 'haiku', effort: 'low' } })
   assert.deepEqual([q.state.opts['task 1'].model, q.state.opts['task 1'].effort], ['haiku', 'low'])
-  assert.equal(q.state.opts['review 1'].model, 'opus')  // the override does not touch the reviewer
+  // Story 4 (4.1): the review is the `review-wave` batch covering the task.
+  const qbatch1 = q.state.events.filter(e => !e.endsWith(' end')).find(l => (q.state.reviewTasks[l] || []).includes('1'))
+  assert.ok(qbatch1, 'task 1 was reviewed by its covering batch')
+  assert.equal(q.state.opts[qbatch1].model, 'opus')  // the override does not touch the reviewer
 })
 
 // --- escalation to bigger models ---------------------------------------------
@@ -456,7 +477,10 @@ await test('risk: a safety task starts at the top of the ladder and gets the ris
   const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: TIERED(), risk: { 1: 'safety', 2: 'normal' } } })
   assert.deepEqual([p.state.opts['task 1'].model, p.state.opts['task 1'].effort], ['opus', 'medium'])
   assert.deepEqual([p.state.opts['review 1'].model, p.state.opts['review 1'].effort], ['opus', 'high'])
-  assert.deepEqual([p.state.opts['task 2'].model, p.state.opts['review 2'].model, p.state.opts['review 2'].effort], ['haiku', 'sonnet', 'medium'])
+  // Story 4 (4.1): the normal task's review is the `review-wave` batch covering it.
+  const batch2 = p.state.events.filter(e => !e.endsWith(' end')).find(l => (p.state.reviewTasks[l] || []).includes('2'))
+  assert.ok(batch2, 'task 2 was reviewed by its covering batch')
+  assert.deepEqual([p.state.opts['task 2'].model, p.state.opts[batch2].model, p.state.opts[batch2].effort], ['haiku', 'sonnet', 'medium'])
   const t1 = result.tasks.find(t => t.task === '1')
   const t2 = result.tasks.find(t => t.task === '2')
   assert.deepEqual([t1.riskTag, t1.startModel, t1.reviewModel], ['safety', 'opus', 'opus'])
@@ -493,7 +517,10 @@ await test('risk: the risky reviewer never steps below the normal reviewer', asy
 await test('reviewer tiers: a normal task gets the cheaper reviewer.model', async () => {
   const p = project({ deps: { 1: [] } })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: TIERED() } })
-  assert.deepEqual([p.state.opts['review 1'].model, p.state.opts['review 1'].effort], ['sonnet', 'medium'])
+  // Story 4 (4.1): the normal task's review is the `review-wave` batch covering it.
+  const tierBatch1 = p.state.events.filter(e => !e.endsWith(' end')).find(l => (p.state.reviewTasks[l] || []).includes('1'))
+  assert.ok(tierBatch1, 'task 1 was reviewed by its covering batch')
+  assert.deepEqual([p.state.opts[tierBatch1].model, p.state.opts[tierBatch1].effort], ['sonnet', 'medium'])
   assert.equal(result.tasks[0].riskTag, 'normal')
   assert.equal(result.agents.reviewer, 'sonnet/medium')
   assert.equal(result.agents.reviewer_risky, 'opus/high')
@@ -612,7 +639,11 @@ await test('a long blocking finding reaches the reviser intact, and the failure 
   const p = project({ deps: { 1: [] }, reviews: { 1: ['changes', 'changes'] }, reviewIssue: issue })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: { reviewer: { model: 'opus', effort: 'high', enabled: true, rounds: 1 } } } })
   assert.ok(p.state.prompts['task 1 revise 1'].includes('END-OF-FINDING'), 'revise prompt has the whole finding')
-  assert.ok(result.failed[0].reason.includes('END-OF-FINDING'), 'failure reason has the whole finding')
+  // Story 4 (4.4): post-merge review records the verdict instead of failing the task;
+  // the recorded finding keeps the whole issue.
+  const longRec = result.tasks.find(t => t.task === '1')
+  assert.equal(longRec.review.verdict, 'changes', 'the failed review is recorded')
+  assert.ok(longRec.review.findings.some(f => String(f.issue).includes('END-OF-FINDING')), 'recorded finding has the whole finding')
 })
 
 await test('the brief path comes from args.brief (plugin), with the vendored path as fallback', async () => {
@@ -838,6 +869,7 @@ const SNAPSHOT_KEYS = [
   "blocked",
   "blockedOn",
   "crossTests",
+  "degraded",
   "escalated",
   "failed",
   "finalGate",
@@ -868,6 +900,11 @@ const SNAPSHOT_KEYS = [
   "notifications.notConfigured",
   "notifications.sent",
   "outcome",
+  "overhead",
+  "overhead.share",
+  "overhead.threshold",
+  "overhead.warned",
+  "planFallbacks",
   "reason",
   "reportSource",
   "stats",
@@ -879,6 +916,7 @@ const SNAPSHOT_KEYS = [
   "stats.merged",
   "stats.notStarted",
   "stats.planFailures",
+  "stats.planFallbacks",
   "stats.planSteps",
   "targetGreen",
   "taskAgents",
@@ -900,10 +938,12 @@ const SNAPSHOT_KEYS = [
   "tasks[].review",
   "tasks[].review.effort",
   "tasks[].review.findings",
+  "tasks[].review.fromBatch",
   "tasks[].review.model",
   "tasks[].review.riskTag",
   "tasks[].review.rounds",
   "tasks[].review.summary",
+  "tasks[].review.tasks",
   "tasks[].review.verdict",
   "tasks[].reviewModel",
   "tasks[].riskTag",
