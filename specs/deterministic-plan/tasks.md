@@ -660,7 +660,7 @@
 **Acceptance:**
 - [x] `review-wave <wave> tasks <ids>` parses to role reviewer with the wave number and covered task ids; no batched-review label parses as `other` (4.1)
 - [x] W + R bound and overhead reviewer share count `review-wave` labels as review agents (NFR-4, 5.2)
-- [ ] Tests exercise the real boundary named in the test plan (real script emission via emit_labels plus real `parse_label`)
+- [x] Tests exercise the real boundary named in the test plan (real script emission via emit_labels plus real `parse_label`)
 **Dependencies:** Task 18 (maps the batched-review label that code emits); Task 16 (its tests are the oracle)
 **Complexity:** Low
 **Risk:** normal
