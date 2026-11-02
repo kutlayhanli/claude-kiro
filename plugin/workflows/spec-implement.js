@@ -825,12 +825,16 @@ async function runPlan(trigger) {
       // and deps stay on the args-seeded view per D5: the fallback is computed
       // from the deps arg, never from a failed plan's graph.)
       for (const d of n.done) view.done.add(d)
-      // Nothing remaining: the ready list is vacuous (a bad answer may name unknown
-      // ids `normalizePlan` cannot filter without a remaining list). Adopt the done
-      // state, schedule nothing, count no fallback (1.4).
+      // A plan that names no runnable task is inconsistent even when normalization
+      // empties its ready list (1.1: a raw non-empty ready never follows from the
+      // graph); raw-empty + truth-empty still adopts via the check below (1.4).
+      const namesNothingRunnable = p.ready.length > 0 && n.ready.length === 0
+      // Nothing remaining: the ready list is vacuous. Adopt the done state,
+      // schedule nothing, count no fallback (1.4) — unless the answer lied
+      // (namesNothingRunnable), which retries instead.
       if (!n.remaining.length) n.ready = []
       // A task a plan reports as busy is left out of its ready list: it is not a mismatch.
-      if (planConsistent(n, [...exclude, ...n.busy.map(b => b.task)])) {
+      if (!namesNothingRunnable && planConsistent(n, [...exclude, ...n.busy.map(b => b.task)])) {
         if (p.error) log(`${label}: the planning agent left a note (not a failure): ${trim(p.error, 300)}`)
         current = n
         view = applyPlanView(n, mergedInRun)
@@ -871,19 +875,20 @@ async function runPlan(trigger) {
     if (!current) current = s
     return s
   }
-  if (!fb.ready.length) {
-    // No deterministic list right now. With dependency data present the frontier may
-    // simply be in flight (a later landing re-triggers and recomputes): wait instead
-    // of halting, recording nothing. Without dependency data there is nothing to wait
-    // on: halt via the existing PLAN_FAILED path (2.3).
-    if (SCRIPT_READINESS && trigger !== 'start') {
-      log(`plan ${refills}: twice inconsistent, nothing schedulable yet; waiting for running tasks`)
-      return synth()
-    }
-    return null  // neither layer has data: the existing PLAN_FAILED halt path in requestPlan (2.3)
+  if (!fb.ready.length && !SCRIPT_READINESS) {
+    return null  // neither dep-less layer has data: the existing PLAN_FAILED halt path in requestPlan (2.3). No entry, degraded untouched.
   }
+  // Every double-failure trigger with deterministic data records a fallback entry,
+  // even when the resulting ready list is empty (an empty entry records a fallback
+  // that scheduled nothing; 1.3 counts every trigger). The source is copied verbatim
+  // from the seam (null when neither layer had anything schedulable).
   planFallbacks.push({ planStep: refills, trigger, source: fb.source, ready: [...fb.ready] })
   degraded = true
+  if (!fb.ready.length) {
+    // Data present but nothing schedulable (frontier in flight): wait for landings.
+    log(`plan ${refills}: twice inconsistent, nothing schedulable yet; waiting for running tasks`)
+    return synth()
+  }
   log(`plan ${refills}: twice inconsistent, falling back to the deterministic ready list (${fb.source}): ${fb.ready.join(' ') || '(empty)'}`)
   if (!SCRIPT_READINESS) {
     lastPlanReady = [...fb.ready]  // the dep-less schedule path consumes this once

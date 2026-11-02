@@ -144,7 +144,9 @@ await test('TC-4 fallback excludes done/running tasks: always-inconsistent plan 
   assert.equal(fallbacks[0].planStep, 1, 'the fallback names the triggering plan step (1.3)')
   assert.equal(fallbacks[0].trigger, 'start', 'the fallback names its trigger (1.3)')
   for (const e of fallbacks) {
-    assert.equal(e.source, 'deps', 'every fallback came from the supplied deps layer (2.1)')
+    // Empty-window entries carry the seam's null source; non-empty ready still
+    // requires the deps layer (2.1).
+    assert.ok(e.source === 'deps' || (e.ready.length === 0 && e.source === null), 'every fallback came from the supplied deps layer (2.1), or is an empty-window entry with null source')
     assert.ok(!e.ready.includes('1'), 'no fallback list names the Done task')
   }
   assert.ok(logs.some(l => /plan 1/.test(l) && /inconsistent/.test(l)), 'the log names the triggering plan attempt')
@@ -184,7 +186,9 @@ await test('TC-5 fallback from deps: always-inconsistent plan schedules every ta
   const fallbacks = result.planFallbacks || []
   assert.ok(fallbacks.length >= 1, 'at least one fallback was recorded')
   for (const e of fallbacks) {
-    assert.equal(e.source, 'deps', 'every fallback came from the supplied deps layer (2.1)')
+    // Empty-window entries carry the seam's null source; non-empty ready still
+    // requires the deps layer (2.1).
+    assert.ok(e.source === 'deps' || (e.ready.length === 0 && e.source === null), 'every fallback came from the supplied deps layer (2.1), or is an empty-window entry with null source')
   }
 })
 
@@ -258,7 +262,9 @@ await test('TC-9 unknown dep never scheduled: deps {1:[],2:[99]} with always-inc
   const fallbacks = result.planFallbacks || []
   assert.ok(fallbacks.length >= 1, 'at least one fallback was recorded')
   for (const e of fallbacks) {
-    assert.equal(e.source, 'deps', 'every fallback came from the supplied deps layer')
+    // Empty-window entries carry the seam's null source; non-empty ready still
+    // requires the deps layer.
+    assert.ok(e.source === 'deps' || (e.ready.length === 0 && e.source === null), 'every fallback came from the supplied deps layer, or is an empty-window entry with null source')
     assert.ok(!e.ready.includes('2'), 'no fallback list names the unknown-dep task')
   }
   // The seam agrees on the same inputs: task 2 is never ready, even when 99 is Done.
