@@ -598,7 +598,7 @@
 **Risk:** normal
 ---
 ### Task 33: Stats show renders fallback counts and overhead share
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 5.2, 5.3, 5.4, 5.5, 5.6
 **Description:** In `src/claude_kiro/analytics/show.py`, add pure `overheadShare(byRoleMs) -> float | None` (plan/review/landing share of agent time: `(ms_plan + ms_reviewer + ms_land) / ms_total` over `byRole` ms cells; `None` when no ms recorded) and `overheadWarning(share) -> bool` (`share is not None and share > 0.5`, mirroring `OVERHEAD_WARN_THRESHOLD`; pure threshold compare, never halts). Owns Harness Contract seams 4 (`overheadShare`/`overheadWarning`, the `overhead_share`/`overhead_warning` role under final names): first task needing them, no server/HTTP dependency. Extend `run_breakdown` with `plan_fallbacks: { recorded, count, entries }` (from `counts`) and `overhead: { recorded, share, threshold: 0.5, warned }`; `render_run` prints a `plan fallbacks:` line (with steps/sources, or `not recorded` when absent) and an `overhead (plan/review/land share):` line (percent plus warn suffix only when over threshold, or `not recorded`); `run_json` adds `planFallbacks` and `overhead` with identical values to the text view. All reads use `.get` so pre-change records render `unknown`/`null` without re-collection.
@@ -607,8 +607,8 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_stats.py`
 **Verified by:** Task 29, Task 30, Task 31, Task 32 (its tests are the oracle)
 **Acceptance:**
-- [ ] Text view shows `plan fallbacks:` count next to the `overhead (plan/review/land share):` line; `--json` carries `planFallbacks` and `overhead` with identical values (5.2, 5.3)
-- [ ] Missing fallback/overhead data renders `not recorded` with every existing figure unchanged; over-threshold share warns only (5.4, 5.5, 5.6)
+- [x] Text view shows `plan fallbacks:` count next to the `overhead (plan/review/land share):` line; `--json` carries `planFallbacks` and `overhead` with identical values (5.2, 5.3)
+- [x] Missing fallback/overhead data renders `not recorded` with every existing figure unchanged; over-threshold share warns only (5.4, 5.5, 5.6)
 **Dependencies:** Task 28 (reads `counts.plan_fallbacks` produced there); Task 36 (reviewer share includes `review-wave` agents via that role mapping); Task 29 (its tests are the oracle); Task 30 (its tests are the oracle); Task 31 (its tests are the oracle); Task 32 (its tests are the oracle)
 **Complexity:** Medium
 **Risk:** normal
