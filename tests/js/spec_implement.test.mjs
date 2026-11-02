@@ -682,12 +682,20 @@ await test('task worktrees and handoff notes live in args.worktreeDir (default <
 await test('reviewer: a test-track task gets the contract check against design.md, an impl task does not', async () => {
   const p = project({ deps: { 1: [], 2: ['1'] } })
   await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, tracks: { 1: 'test', 2: 'impl' }, agents: ROLES } })
-  const testReview = p.state.prompts['review 1']
+  // Story 4 (4.1): reviews are wave-batched; the batch covering a task IS its
+  // review. Resolve via the review ledger (state.reviewTasks), never label text.
+  const batchLabels = p.state.events.filter(e => e.startsWith('review-wave') && !e.endsWith(' end'))
+  const covering = n => batchLabels.find(l => (p.state.reviewTasks[l] || []).includes(n))
+  const batch1 = covering('1')
+  assert.ok(batch1, 'task 1 was reviewed by its covering batch')
+  const testReview = p.state.prompts[batch1]
   assert.match(testReview, /ck -C \/repo\/\.ck\/worktrees\/demo-task-1 lint demo --contracts --task 1/)
   assert.match(testReview, /list every request field, response field and status value the new tests use/)
   assert.match(testReview, /Data Models and API tables/)
   assert.match(testReview, /is a blocking finding/)
-  assert.doesNotMatch(p.state.prompts['review 2'], /--contracts/)
+  const batch2 = covering('2')
+  assert.ok(batch2, 'task 2 was reviewed by its covering batch')
+  assert.doesNotMatch(p.state.prompts[batch2], /--contracts/)
 })
 
 await test('cross-test consistency: off by default', async () => {
@@ -845,12 +853,23 @@ await test('planning: a plan step that keeps failing halts only if it left a rea
   assert.match(a.result.reason, /^blocked on: Task 2 /)
   assert.ok(a.logs.some(l => l.includes('every remaining task was blocked anyway')))
 
-  // Task 2 became ready after Task 1 merged, but no plan step could start it: a real halt.
+  // Task 2 became ready after Task 1 merged, but no plan step could start it.
+  // Fallback continuation (1.2, 1.3) supersedes the old planning halt here: a good
+  // plan DID return (plan 1), so the 2.3 planning-halt path is inapplicable — the run
+  // continues on deterministic fallback, degraded and counted, and ends blocked.
   const readyRun = project({ deps: { 1: [], 2: ['1'] } })
   const b = await runWorkflow(SCRIPT, { agent: failLater(readyRun), args: baseArgs })
-  assert.equal(b.result.halted, true)
-  assert.equal(b.result.outcome, 'halted')
-  assert.equal(b.result.reason, 'planning step failed')
+  assert.equal(b.result.halted, false)
+  assert.equal(b.result.outcome, 'blocked')
+  assert.match(b.result.reason, /not started: Task 2/)
+  assert.equal(b.result.degraded, true)
+  assert.ok(b.result.planFallbacks.length >= 1, 'at least one deterministic fallback was recorded (1.3)')
+  for (const e of b.result.planFallbacks) {
+    assert.deepEqual(e.ready, [], 'fallback scheduled nothing (1.2)')
+    assert.equal(e.source, null, 'no deterministic source behind the failed plan step')
+    assert.ok(['start', 'landing', 'idle', 'freed', 'finished'].includes(e.trigger), `known plan trigger, saw: ${e.trigger}`)
+  }
+  assert.ok(b.result.notStarted.includes('2'))
   assert.deepEqual(b.result.notStarted, ['2'])
 })
 

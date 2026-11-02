@@ -625,7 +625,7 @@
 **Dependencies:** Task 22 (data: copies the result fields added there); Task 27 (its tests are the oracle)
 **Complexity:** Low
 **Risk:** normal
-**Migration log (land-gate fallout, 2026-11-02; test/docs-only, no src/ changes):**
+**Migration log (land-gate fallout, 2026-11-02; test/docs-only, no src/ changes except adjudicated STOP-1):**
 - landing_speed TC-11 → rewritten as the deps-mode continue twin: after plan-2 retry task 4 IS requested (fallback), `result.degraded is True`, `planFallbacks` entry `{planStep 2, source deps}` present, running tasks still landed, reason is not `planning step failed`. (1.2, 1.3)
 - landing_speed TC-4 → removed line-71 land-relative ordering only (finish-first deferral holds task 3 until land 1 takes its slot); line-70 plan ordering + merged asserts kept. (1.3 + finish-first deferral)
 - landing_speed TC-17/TC-21 → label-shape: batch covering the task resolved via `state.reviewTasks` (never label-text parsing); TC-21 asserts batch (1) + revision re-review (1). (4.1, 4.4, 4.5)
@@ -637,6 +637,9 @@
 - spec_implement planning-log test (:815, second half) + TC-23/TC-28 `assertLand2Queued` + contract-check test → NOT edited, STOP-and-report (see report): planning half-2 behavior changed (fallback now ends blocked, not halted); land-2 queueing structurally infeasible in the new flow (retiming attempted) and removal is guard-denied; batch prompt drops the test-track contract check (src/ off-limits).
 - spec_implement TC-73 → added only the spec'd keys (`degraded`, `overhead` + share/threshold/warned, `planFallbacks`, `stats.planFallbacks`, `tasks[].review.fromBatch/tasks`); no removals; `tasks[].reviewModel/riskTag/startModel/startedAt` already present. (5.1, 5.2)
 - landing_scheduler P-9 → scoped to non-review finish-type agents (land/full gate/fix/re-check): review/revise filtered from request side and ends walk-back (Story 4; review scheduling owned by the review-bound property + TC-17..22); land step additionally accepts the 3.1 plan-after-landing end, else land requests after a review cycle fail on the interleaved plan end — no land/fix/gate assertion changed. (3.1, Story 4)
+- STOP-1 (adjudicated 2026-11-02; minimal additive src/ change as Task 18's unfinished prompt coverage, not a scheduling/landing/review behavior change): `waveReviewPrompt` (plugin/workflows/spec-implement.js) now appends one `CONTRACT_REVIEW(n)` section per covered test-track task (`${TRACKS[n] === 'test' ? ... : ''}` idiom, same as `reviewPrompt`); nothing else in the prompt or flow changed; `.claude/workflows/spec-implement.js` vendored copy re-synced byte-identical. Contract-check test migrated to the batch shape: batch covering task 1 (resolved via `state.reviewTasks`, TC-21 idiom) matches all four contract regexes; batch covering task 2 doesNotMatch `--contracts`. Probe confirmed two separate batches (`review-wave 1 tasks 1`, `review-wave 2 tasks 2`), no merge. (4.1)
+- STOP-2 (adjudicated 2026-11-02): planning-test readyRun half migrated — halted false, outcome blocked, reason /not started: Task 2/, degraded true, planFallbacks ≥ 1 entry each with ready [] and source null and trigger in the plan-trigger vocabulary, notStarted pinned to ['2'] (empirical). Correct per 2.3 scope (a good plan DID return, planning-halt path inapplicable) + 1.2/1.3 (continue, degraded, counted). (2.3, 1.2, 1.3)
+- STOP-3 (adjudicated 2026-11-02; reaffirmed after retiming infeasibility): dropped ONLY the `assertLand2Queued` non-vacuity helper calls in finish_first TC-23/TC-28 (land-2 queueing structurally unhittable in the 3.1 flow); property asserts (`assertNoTaskRequestWhileFinishQueued`, merged sets, deferral log) kept and green. (3.1)
 ---
 
 ### Task 36: Review-wave label role mapping
