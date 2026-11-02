@@ -630,7 +630,7 @@
 **Risk:** normal
 ---
 ### Task 35: Bench summary carries degraded and overhead through
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 5.1, 6.3
 **Description:** In `src/claude_kiro/bench.py`, extend `summarize_report` to copy `degraded`, `planFallbacks`/`plan_fallbacks`, and `overhead` through from the workflow report so the equity re-run comparison (lower plan/review/landing share, no planning halt) can read them. Additive copies with `.get`; absent fields stay absent.
@@ -639,8 +639,8 @@
 **Verify:** `uv run pytest -q tests/test_bench.py -k degraded_passthrough`
 **Verified by:** Task 27 (its tests are the oracle)
 **Acceptance:**
-- [ ] `summarize_report` output includes the run's degraded flag, fallback counts, and overhead share when present and omits them when absent
-- [ ] Equity re-run comparison can read lower overhead share with no planning halt from the summary (6.3)
+- [x] `summarize_report` output includes the run's degraded flag, fallback counts, and overhead share when present and omits them when absent
+- [x] Equity re-run comparison can read lower overhead share with no planning halt from the summary (6.3)
 **Dependencies:** Task 22 (data: copies the result fields added there); Task 27 (its tests are the oracle)
 **Complexity:** Low
 **Risk:** normal
