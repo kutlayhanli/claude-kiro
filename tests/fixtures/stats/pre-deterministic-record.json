@@ -1,0 +1,362 @@
+{
+  "agents": [
+    {
+      "agentId": "a7676f15fb4bc5c36",
+      "attempt": 1,
+      "cacheCreation": 100,
+      "cacheRead": 2000,
+      "escalatedTo": null,
+      "input": 1000,
+      "label": "task 1",
+      "matched": true,
+      "model": "claude-sonnet-5-5",
+      "ms": 60000,
+      "output": 500,
+      "phase": "Wave 1",
+      "queueMs": null,
+      "queuedAtMs": null,
+      "requestedEffort": null,
+      "resolvedEffort": null,
+      "role": "implementer",
+      "round": null,
+      "startedAtMs": 1791795600000,
+      "state": "done",
+      "step": null,
+      "task": "1",
+      "transcript": "ok",
+      "usd": 0.00765,
+      "usdEstimate": null,
+      "variant": null
+    },
+    {
+      "agentId": "ad28a388c0da64407",
+      "attempt": null,
+      "cacheCreation": 100,
+      "cacheRead": 2000,
+      "escalatedTo": null,
+      "input": 1000,
+      "label": "review 1",
+      "matched": true,
+      "model": "claude-opus-5-5",
+      "ms": 60000,
+      "output": 500,
+      "phase": "Wave 1",
+      "queueMs": null,
+      "queuedAtMs": null,
+      "requestedEffort": null,
+      "resolvedEffort": null,
+      "role": "reviewer",
+      "round": 1,
+      "startedAtMs": 1791795601000,
+      "state": "done",
+      "step": null,
+      "task": "1",
+      "transcript": "ok",
+      "usd": 0.0149,
+      "usdEstimate": null,
+      "variant": null
+    },
+    {
+      "agentId": "a3aa5c6881bae7f76",
+      "attempt": null,
+      "cacheCreation": 100,
+      "cacheRead": 2000,
+      "escalatedTo": null,
+      "input": 1000,
+      "label": "land 1",
+      "matched": true,
+      "model": "claude-haiku-5-5",
+      "ms": 60000,
+      "output": 500,
+      "phase": "Wave 1",
+      "queueMs": null,
+      "queuedAtMs": null,
+      "requestedEffort": null,
+      "resolvedEffort": null,
+      "role": "land",
+      "round": null,
+      "startedAtMs": 1791795602000,
+      "state": "done",
+      "step": null,
+      "task": "1",
+      "transcript": "ok",
+      "usd": 0.0003825,
+      "usdEstimate": null,
+      "variant": null
+    }
+  ],
+  "agentsConfig": {
+    "fixer": {
+      "effort": "high",
+      "model": "opus"
+    },
+    "implementer": {
+      "effort": "medium",
+      "model": "sonnet"
+    },
+    "orchestrator": {
+      "effort": "low",
+      "model": "haiku"
+    },
+    "resolver": {
+      "effort": "medium",
+      "model": "sonnet"
+    },
+    "reviewer": {
+      "effort": "medium",
+      "model": "opus"
+    },
+    "reviewer_risky": {
+      "effort": "high",
+      "model": "opus"
+    },
+    "test_writer": {
+      "effort": "medium",
+      "model": "sonnet"
+    }
+  },
+  "byModel": {
+    "claude-haiku-5-5": {
+      "agents": 1,
+      "cacheCreation": 100,
+      "cacheRead": 2000,
+      "input": 1000,
+      "ms": 60000,
+      "output": 500,
+      "usd": 0.0003825
+    },
+    "claude-opus-5-5": {
+      "agents": 1,
+      "cacheCreation": 100,
+      "cacheRead": 2000,
+      "input": 1000,
+      "ms": 60000,
+      "output": 500,
+      "usd": 0.0149
+    },
+    "claude-sonnet-5-5": {
+      "agents": 1,
+      "cacheCreation": 100,
+      "cacheRead": 2000,
+      "input": 1000,
+      "ms": 60000,
+      "output": 500,
+      "usd": 0.00765
+    }
+  },
+  "byPhase": {
+    "Wave 1": {
+      "agents": 3,
+      "cacheCreation": 300,
+      "cacheRead": 6000,
+      "input": 3000,
+      "ms": 180000,
+      "output": 1500,
+      "usd": 0.0229325
+    }
+  },
+  "byRole": {
+    "implementer": {
+      "agents": 1,
+      "cacheCreation": 100,
+      "cacheRead": 2000,
+      "input": 1000,
+      "ms": 60000,
+      "output": 500,
+      "usd": 0.00765
+    },
+    "land": {
+      "agents": 1,
+      "cacheCreation": 100,
+      "cacheRead": 2000,
+      "input": 1000,
+      "ms": 60000,
+      "output": 500,
+      "usd": 0.0003825
+    },
+    "reviewer": {
+      "agents": 1,
+      "cacheCreation": 100,
+      "cacheRead": 2000,
+      "input": 1000,
+      "ms": 60000,
+      "output": 500,
+      "usd": 0.0149
+    }
+  },
+  "byTask": {
+    "1": {
+      "agents": 3,
+      "cacheCreation": 300,
+      "cacheRead": 6000,
+      "input": 3000,
+      "ms": 180000,
+      "output": 1500,
+      "usd": 0.0229325
+    }
+  },
+  "ckVersion": null,
+  "claudeCodeVersion": "2.1.80",
+  "collectorVersion": "0.11.0",
+  "costs": [
+    {
+      "pricingDate": "2026-10",
+      "scope": "run",
+      "source": "priced_from_transcripts",
+      "usd": 0.0229325
+    }
+  ],
+  "crossTests": [],
+  "finalGate": {
+    "fixAttempted": false,
+    "fixed": null,
+    "green": true
+  },
+  "fixerEscalations": [],
+  "fullGates": [],
+  "interruptions": {
+    "byRole": {},
+    "escalationModels": {},
+    "guardLog": {
+      "differences": {},
+      "events": 0,
+      "state": "ok"
+    },
+    "skippedLines": 0,
+    "totals": {
+      "autoModeDenials": 0,
+      "guardDenials": 0,
+      "guardEscalations": 0,
+      "headlessDenials": 0,
+      "isolationRefusals": 0,
+      "postCheckCatches": 0,
+      "prompts": 0,
+      "userRejects": 0,
+      "waitMs": 0
+    },
+    "v": 1,
+    "waitMsByRole": {}
+  },
+  "landings": [
+    {
+      "bisected": false,
+      "conflict": 0,
+      "merged": 2,
+      "minutes": 1.0,
+      "red": 0,
+      "size": 2
+    }
+  ],
+  "missing": [
+    {
+      "agentId": null,
+      "what": "ckVersion"
+    }
+  ],
+  "outcome": "complete",
+  "outcomeInferred": false,
+  "phases": [
+    {
+      "group": "Wave 1",
+      "minutes": 16.0,
+      "tasks": 1
+    },
+    {
+      "group": "Wave 2",
+      "minutes": 16.0,
+      "tasks": 1
+    }
+  ],
+  "project": {
+    "branch": "integrate/x",
+    "pseudonym": "f13386ee97c6896f",
+    "remote": "git@github.com:acme-corp/ledger-a.git",
+    "root": "/tmp/ck-fresh-a3tuhelr/proj",
+    "spec": "demo",
+    "stack": null
+  },
+  "projectPseudonym": "f13386ee97c6896f",
+  "reportSource": "git",
+  "runId": "wf_predet",
+  "schema": "ck-run-local/1",
+  "sessionId": "0e8598a0-c0a2-59bf-85c1-d4e4d918f58d",
+  "startTime": "2026-10-12T09:00:00.000Z",
+  "stats": {
+    "bisected": 0,
+    "failed": 0,
+    "fixes": 0,
+    "initiallyDone": 0,
+    "landings": 1,
+    "merged": 2,
+    "notStarted": 0,
+    "planFailures": 0,
+    "planSteps": 1
+  },
+  "status": "completed",
+  "taskSpanMinutes": 16.0,
+  "tasks": [
+    {
+      "agentMinutes": 5.0,
+      "attempts": 1,
+      "escalations": [],
+      "fixes": 0,
+      "idleBeforeMergeMs": 60000,
+      "landingWaitMs": 60000,
+      "ok": true,
+      "reason": null,
+      "resolves": 0,
+      "resolvesInferred": false,
+      "retries": 0,
+      "reviewRounds": 0,
+      "reviewWaitMs": 0,
+      "riskTag": "normal",
+      "task": "1",
+      "title": "Task 1 title",
+      "toMergedMinutes": 6.0,
+      "track": "impl",
+      "verdict": "approve",
+      "wave": 1
+    },
+    {
+      "agentMinutes": 5.0,
+      "attempts": 1,
+      "escalations": [],
+      "fixes": 0,
+      "idleBeforeMergeMs": 60000,
+      "landingWaitMs": 60000,
+      "ok": true,
+      "reason": null,
+      "resolves": 0,
+      "resolvesInferred": false,
+      "retries": 0,
+      "reviewRounds": 0,
+      "reviewWaitMs": 0,
+      "riskTag": "normal",
+      "task": "2",
+      "title": "Task 2 title",
+      "toMergedMinutes": 6.0,
+      "track": "unknown",
+      "verdict": "approve",
+      "wave": 2
+    }
+  ],
+  "terms": [
+    "/tmp/ck-fresh-a3tuhelr/proj",
+    "Implemented.",
+    "Task 1 title",
+    "Task 2 title",
+    "Wave 1",
+    "acme-corp",
+    "demo",
+    "git@github.com:acme-corp/ledger-a.git",
+    "github.com",
+    "integrate/x",
+    "land 1",
+    "ledger-a",
+    "review 1",
+    "task 1"
+  ],
+  "wallMs": 720000,
+  "workflow": "spec-implement",
+  "workflowName": "spec-implement"
+}

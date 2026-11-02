@@ -3,7 +3,8 @@
 // The scripts run for real through load_workflow.mjs; only `agent` is stubbed, by the small
 // scenario-driven fake below. The scenarios cover every label template family of the
 // roles grammar (design.md S5): retry, escalation, review rounds, conflict rounds, landing
-// fix, full and final gate, re-check, cross-test, plan retry, report, every spec-create phase.
+// fix, full and final gate, re-check, cross-test, plan retry, wave-batched review,
+// report, every spec-create phase.
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { runWorkflow, labelCorpus } from './load_workflow.mjs'
@@ -58,8 +59,13 @@ function fake({ deps, failUntil = {}, reviews = {}, conflictRounds = {}, redLand
     }
     if (l.startsWith('resolve')) return { resolved: true, conflicts: 'kept both' }
     if (l.startsWith('review')) {
-      const n = l.match(/review (\d+)/)[1]
-      reviewCount[n] = (reviewCount[n] || 0) + 1
+      // A review-wave label covers a merged wave: advance the count for every
+      // covered task, look the verdict up by the first covered task's entry,
+      // and return a verdict shaped like an individual review.
+      const w = l.match(/^review-wave (\d+) tasks ([\d ]+)$/)
+      const covered = w ? w[2].split(' ') : null
+      const n = covered ? covered[0] : l.match(/review (\d+)/)[1]
+      for (const t of (covered || [n])) reviewCount[t] = (reviewCount[t] || 0) + 1
       const verdict = (reviews[n] || [])[reviewCount[n] - 1] || 'approve'
       return { verdict, findings: verdict === 'changes' ? [{ severity: 'blocking', issue: 'contradicts design.md' }] : [], summary: verdict }
     }
@@ -82,6 +88,8 @@ const scenarios = [
   { deps: { 1: [], 2: ['1'] }, fullGateEvery: 1, fullRed: true, recheckRed: 1 },
   // a batch landing several tasks at once, final gate and report
   { deps: { 1: [], 2: [], 3: [] }, mergeBatch: 3, fullGateEvery: 0 },
+  // a merged wave of 4 non-risky tasks reviewed together in one review-wave agent
+  { deps: { 1: [], 2: [], 3: [], 4: [] }, mergeBatch: 4, fullGateEvery: 0 },
 ]
 
 for (const { tracks, fullGateEvery, mergeBatch, ...knobs } of scenarios) {

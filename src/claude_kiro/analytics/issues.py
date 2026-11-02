@@ -24,6 +24,7 @@ ISSUE_CODES = frozenset({
     "review_contract_mismatch",
     "cross_test_blocking",
     "planning_failed",
+    "planning_fallback",
     "plan_cycle",
     "retry_no_commits",
     "escalated_to_opus",
@@ -130,6 +131,8 @@ def derive_issue_codes(local: Mapping) -> Tuple[str, ...]:
     stats = get("stats")
     if isinstance(stats, Mapping) and _pos(stats.get("planFailures")):
         codes.add("planning_failed")
+    if isinstance(stats, Mapping) and _pos(stats.get("planFallbacks")):
+        codes.add("planning_fallback")
     if outcome == "refused":
         codes.add("plan_cycle")
     if outcome == "halted":

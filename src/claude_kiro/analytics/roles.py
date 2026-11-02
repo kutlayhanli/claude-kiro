@@ -51,6 +51,7 @@ _IMPL = [
                 rf"(?: (?P<kind>retry|revise|guard) (?P<k>{_NUM})(?: \((?P<m>{_MODEL})\))?)?")),
     ("park", _c(rf"park (?P<n>{_ID})")),
     ("review", _c(rf"review (?P<n>{_ID})(?: round (?P<r>{_NUM}))?")),
+    ("review_wave", _c(rf"review-wave (?P<w>{_NUM}) tasks (?P<ns>{_ID}(?: {_ID})*)")),
     ("resolve", _c(rf"resolve (?P<n>{_ID})(?: round (?P<r>{_NUM}))?")),
     ("fix_landing", _c(rf"fix (?P<k>{_NUM}) \(Task (?P<n>{_ID}) red on landing\)(?: \[(?P<m>{_MODEL})\])?")),
     ("fix", _c(rf"fix (?P<k>{_NUM}) \((?P<what>.+)\)(?: \[(?P<m>{_MODEL})\])?")),
@@ -118,6 +119,13 @@ def _implement(label: str) -> LabelMatch:
             return LabelMatch(
                 role="reviewer" if name == "review" else "resolver", matched=True, task=_task(n),
                 round=int(g["r"]) if g["r"] else 1, step="path_id" if _is_path(n) else None,
+            )
+        if name == "review_wave":
+            ids = tuple(g["ns"].split(" "))
+            paths = any(_is_path(i) for i in ids)
+            return LabelMatch(
+                role="reviewer", matched=True, task=None, tasks=() if paths else ids,
+                wave=int(g["w"]), step="path_id" if paths else None,
             )
         if name == "fix_landing":
             return LabelMatch(role="fixer", matched=True, task=_task(g["n"]), attempt=int(g["k"]),

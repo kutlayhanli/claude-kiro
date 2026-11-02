@@ -244,7 +244,8 @@ def _issue_world_runs(home: FakeClaudeHome) -> None:
         tasks, landings=landings, full_gates=[{"afterMerges": 1, "green": False}], final_gate={"green": False},
         cross_tests=[{"wave": 1, "tasks": 2, "verdict": "changes", "summary": "s",
                       "findings": [{"severity": "blocking", "issue": "x", "file": "f.py"}]}],
-        fixer_escalations=[{"model": "opus"}], outcome="blocked")
+        fixer_escalations=[{"model": "opus"}], outcome="blocked",
+        planFallbacks=[{"planStep": 2, "trigger": "start", "source": "deps", "ready": ["3"]}])
     result["reportSource"] = "agents"
     result["stats"]["planFailures"] = 1
     agents = [

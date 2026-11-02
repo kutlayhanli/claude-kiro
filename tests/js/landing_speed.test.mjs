@@ -68,7 +68,8 @@ await test('TC-4: a freed implementing slot starts the next ready task without a
   const otherPlan = reqs.findIndex(l => isPlan(l) && l !== 'plan 1')
   const firstLand = reqs.findIndex(l => l.startsWith('land '))
   assert.ok(otherPlan < 0 || t3 < otherPlan, `task 3 requested before any plan other than plan 1: ${reqs.join(' | ')}`)
-  assert.ok(firstLand < 0 || t3 < firstLand, `task 3 requested before any land: ${reqs.join(' | ')}`)
+  // No land-relative ordering asserted: finish-first deferral holds task 3's start until
+  // land 1 takes its runtime slot, so task 3 is requested after land 1 by design (3.1).
 })
 
 await test('TC-5: plan agents run only at start, after a landing, or when idle; fewer than one per task (1.4, NFR-1)', async () => {
@@ -185,16 +186,21 @@ await test('TC-10 (halt): no task starts after the plan that reports the cycle; 
   for (const n of started) assert.ok(result.merged.includes(n), `running task ${n} still landed`)
 })
 
-await test('TC-11: two failed plan attempts stop launching; running tasks still land (1.8)', async () => {
+await test('TC-11: two failed plan attempts fall back deterministically and continue; running tasks still land (1.2, 1.3)', async () => {
+  // Supersedes the pre-Story-1 halt expectation (old 1.8): with args.deps present the
+  // second failure continues from the deterministic ready list instead of halting (1.2),
+  // and the run is marked degraded with a recorded fallback (1.3).
   const p = project({ ...TC10, planFail: [2] })
   const { result, trace } = await runWorkflow(SCRIPT, { agent: p.agent, args: withGraph(TC10.deps, { maxConcurrent: 2 }) })
   const retry = at(trace, 'request', 'plan 2 retry')
   assert.ok(retry >= 0, 'plan 2 was retried')
   const late = trace.slice(retry).filter(e => e.ev === 'request' && /^task /.test(e.label))
-  assert.deepEqual(late.map(e => e.label), [], 'no task requested after plan 2 retry')
+  assert.ok(late.map(e => e.label).includes('task 4'), `fallback scheduled task 4 after plan 2 retry (saw: ${late.map(e => e.label).join(' | ')})`)
+  assert.equal(result.degraded, true, 'a fallback run is marked degraded (1.3)')
+  assert.ok(result.planFallbacks.some(e => e.planStep === 2 && e.source === 'deps'), `plan 2 fallback recorded with deps source: ${JSON.stringify(result.planFallbacks)}`)
   const started = requests(trace).map(firstTask).filter(Boolean)
   for (const n of started) assert.ok(result.merged.includes(n), `running task ${n} still landed`)
-  assert.equal(result.reason, 'planning step failed')
+  assert.notEqual(result.reason, 'planning step failed', 'no planning halt: the fallback continued the run')
 })
 
 await test('TC-12: without args.deps the run falls back to a plan agent per launch, and completes (1.9)', async () => {
@@ -254,7 +260,10 @@ await test('TC-17: a worktree that already EXISTS is used like a CREATED one (2.
   const deps = { 1: [], 2: [] }
   const p = project({ deps, worktree: { 1: { state: 'EXISTS', detail: 'feat/demo-task-1' } } })
   const { result, trace } = await runWorkflow(SCRIPT, { agent: p.agent, args: withGraph(deps, { agents: REVIEW_ON }) })
-  assert.ok(requests(trace).includes('review 1'), 'task 1 was reviewed')
+  // Story 4 (4.1): single waves emit `review-wave <n> tasks <ids>` (no single-task
+  // exception); the covering batch is the review, resolved via the review ledger.
+  const covering1 = requests(trace).filter(l => (p.state.reviewTasks[l] || []).includes('1'))
+  assert.deepEqual(covering1.length, 1, `task 1 was reviewed once, by its covering batch (saw: ${requests(trace).join(' | ')})`)
   assert.ok(result.merged.includes('1'))
   assert.equal(taskRec(result, '1').ok, true)
 })
@@ -305,6 +314,9 @@ await test('TC-21: retries, revisions and reviews use the existing worktree; non
   const { result, trace } = await runWorkflow(SCRIPT, { agent: p.agent, args: withGraph(deps, { agents: REVIEW_ON }) })
   assert.deepEqual(sorted(result.merged), ['1', '2'])
   const reqs = requests(trace)
+  // Story 4 (4.1, 4.4): the review of a task is its covering batch plus, for a flagged
+  // task, the revision re-review; resolved via the review ledger (state.reviewTasks).
+  const cover = n => reqs.filter(l => (p.state.reviewTasks[l] || []).includes(String(n)))
   const retry = reqs.find(l => /^task 1 retry\b/.test(l))
   assert.ok(retry, 'task 1 was retried')
   const rp = p.state.prompts[retry]
@@ -315,11 +327,12 @@ await test('TC-21: retries, revisions and reviews use the existing worktree; non
     for (const s of segments) assert.ok(/MISSING/.test(s), `the retry creates the worktree only when the claim reports MISSING: ${s}`)
   }
   const others = [
-    [1, reqs.filter(l => /^review 1\b/.test(l))],
-    [2, reqs.filter(l => /^review 2\b/.test(l) || /^task 2 revise\b/.test(l))],
+    [1, cover(1)],
+    [2, reqs.filter(l => /^task 2 revise\b/.test(l)).concat(cover(2))],
   ]
   assert.ok(others[1][1].some(l => /revise/.test(l)), 'task 2 was revised')
-  assert.ok(others[1][1].filter(l => /^review 2/.test(l)).length >= 2, 'task 2 was reviewed twice')
+  assert.deepEqual(cover(2).length, 2, 'task 2 was reviewed twice: the covering batch plus the revision re-review (4.4, 4.5)')
+  assert.deepEqual(cover(1).length, 1, 'unflagged task 1 was reviewed once: the covering batch only')
   for (const [n, labels] of others) {
     assert.ok(labels.length, `agents for task ${n}`)
     for (const l of labels) {

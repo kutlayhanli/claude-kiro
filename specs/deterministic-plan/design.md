@@ -40,12 +40,15 @@ How the PLAN.md decisions shape it:
     `tests/js/load_decisions.mjs`.
   - **`runPlan(trigger)`.** Keep two attempts with the same per-attempt exclude
     capture and `planConsistent` check. On second failure call
-    `fallbackReady(...)`: if it yields a non-empty list, append
-    `{ planStep, trigger, source, ready }` to `planFallbacks`, set
-    `degraded = true`, adopt the fallback as the scheduling ready list, and return
-    a synthetic plan view (`{ fromFallback: true, ... }`) instead of null. Only
-    when `fallbackReady` yields nothing does it return null (start-plan halt and
-    the existing `PLAN_FAILED` path, requirement 2.3).
+    `fallbackReady(...)`: append `{ planStep, trigger, source, ready }` to
+    `planFallbacks` for every double-failure trigger — even when the yielded
+    list is empty (an empty entry records a fallback that scheduled nothing) —
+    set `degraded = true`, adopt the fallback as the scheduling ready list, and
+    return a synthetic plan view (`{ fromFallback: true, ... }`) instead of null.
+    Only when there is no deterministic data at all (`!hasDeps` and no usable
+    last-good) does it return null (start-plan halt and the existing `PLAN_FAILED`
+    path, requirement 2.3); an empty list with data present yields an empty
+    synthetic view that waits for landings instead of halting.
   - **`planContext` / `schedule()`.** `planDecision` no longer runs a plan on
     `freed`/`finished` when `SCRIPT_READINESS` is true (requirements 3.2, 3.3);
     `schedule()` starts from script-side `readyTasks` directly. `idle` trigger
@@ -147,7 +150,7 @@ slot and the fallback uses the last good plan (2.2) or halts (2.3).
   planFallbacks: [                      // one entry per fallback (D6, 1.3, 5.1)
     { planStep: number,                 // 1-based plan counter (refills) that failed twice
       trigger: 'start'|'landing'|'idle'|'freed'|'finished',
-      source: 'deps'|'last-good',       // which D5 layer supplied the list
+      source: 'deps'|'last-good'|null,  // which D5 layer supplied the list (null: layers held data but nothing was schedulable)
       ready: string[] },                // the deterministic list actually scheduled
   ],
   overhead: { share: number|null,        // plan/review/land share of agent ms, null when unknown
@@ -363,7 +366,7 @@ existing dogfood byte-identity test.
 | 1.5 | `fallbackReady` subtracts running/failed/parked/merged/done; records untouched |
 | 2.1 | `fallbackReady` `deps` layer: script-side `readyTasks(deps arg, done ∪ running/failed/merged)` |
 | 2.2 | `fallbackReady` `last-good` layer from `lastGood.ready` minus excluded/done |
-| 2.3 | Both layers empty → `runPlan` null → `PLAN_FAILED` halt; running tasks finish/land |
+| 2.3 | No deterministic data (!hasDeps, no adopted plan with usable ready) → runPlan null ⟺ dep-less AND (no adopted plan with usable ready) → PLAN_FAILED halt; running tasks finish/land. Contentful lastGood with an empty window → empty synthetic view + entry {ready: [], source: null} + degraded, waits for landings/future plans. |
 | 2.4 | Both layers already in ck-plan order (`readyTasks` chain-then-numeric; stored `lastGood.ready`) |
 | 2.5 | `readyTasks` met = key-of-`deps` AND in `done`; `planConsistent` filters dangling-dep tasks |
 | 2.6 | `worktreeOutcome`/guard/park/fail paths shared for fallback- and plan-scheduled tasks |

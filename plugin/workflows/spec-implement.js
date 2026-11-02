@@ -306,6 +306,7 @@ const REVIEW_SCHEMA = {
       },
     },
     summary: { type: 'string' },
+    tasks: { type: 'array', items: { type: 'string' }, description: 'the wave tasks this verdict covers (batched reviews echo their coverage)' },
   },
   required: ['verdict', 'findings', 'summary'],
 }
@@ -396,6 +397,18 @@ Worktree: ${WT(n)} (branch ${BR(n)}), to merge into ${INTO}. ${GIT_NOTE}
 3. The task's gate already passed, so do not re-check what the tests check. Look for what tests miss: behaviour that contradicts design.md or a requirement, a public interface that differs from design.md, missing error handling the design specifies, edits outside the task's files, weakened or skipped tests, and security problems.
 ${TRACKS[n] === 'test' ? `${CONTRACT_REVIEW(n)}\n` : ''}The implementer reported: ${trim(r && { summary: r.summary, deviations: r.deviations, outsideFiles: r.outsideFiles }, 2000)}
 Mark a finding "blocking" only if it should stop the merge; style and taste are "minor". verdict is "changes" only if there is at least one blocking finding.`
+
+// Wave-batched review (4.1): one agent over the combined diff of the wave's
+// non-risky tasks. Names the wave, its tasks, the per-task diffs (and the
+// combined `git diff <merge-base>...<INTO>` range over their files), each
+// task's block/requirements, and design.md. The verdict echoes its coverage
+// in `tasks` and flags individual tasks via per-task findings.
+const waveReviewPrompt = (wave, tasks) => `Review Wave ${wave} of spec ${SPEC} before it is done: non-risky Tasks ${tasks.join(', ')} merged together into ${INTO}. You review; you do not edit, commit, or run the test suite.
+${GIT_NOTE}
+1. Read the combined change: ${tasks.map(n => `command git -C ${WT(n)} diff ${INTO}...${BR(n)}`).join('; ')} (and each file list with --stat), or the combined range \`git diff <merge-base>...${INTO}\` over their files.
+2. Read each task's block in specs/${SPEC}/tasks.md, the requirements it covers in requirements.md, and design.md (interfaces, file paths, error handling).
+3. The tasks' gates already passed, so do not re-check what the tests check. Look for what tests miss: behaviour that contradicts design.md or a requirement, a public interface that differs from design.md, missing error handling the design specifies, edits outside the tasks' files, weakened or skipped tests, and security problems.
+${tasks.map(n => TRACKS[n] === 'test' ? `${CONTRACT_REVIEW(n)}\n` : '').join('')}Return verdict ("approve" or "changes") with per-task findings [{ task, severity, file, issue, fix }] and name every covered task in "tasks". Mark a finding "blocking" only if it should stop the wave; style and taste are "minor". verdict is "changes" only if there is at least one blocking finding.`
 
 const crossTestPrompt = tasks => `Cross-test consistency check for spec ${SPEC}: test-track Tasks ${tasks.join(', ')} have merged into ${INTO}. You review; you do not edit, commit, or run the test suite. ${GIT_NOTE}
 Test tasks written in parallel drift apart: two test files can each look right on their own and still disagree about the same request, response or record (field names, which model a field lives on, status values, error codes, units). Each implementation can then satisfy only one of them.
@@ -636,6 +649,48 @@ function parkAction({ interactive } = {}) {
   return interactive ? 'ask' : 'park'
 }
 
+// Warn-only overhead budget (5.4, D8, NFR-5): the plan/review/land share of agent
+// ms above which the result/report warns without halting, failing or retrying.
+const OVERHEAD_WARN_THRESHOLD = 0.5
+
+// Warn-only overhead flag (5.4, D8, NFR-5): true when the plan/review/land
+// share of agent ms exceeds the published threshold. Pure: callers only copy
+// the flag into the result/report; it never halts, fails or retries the run.
+function overheadWarning(share) {
+  return share != null && share > OVERHEAD_WARN_THRESHOLD
+}
+
+// The D5 layered fallback source (1.2, 2.1-2.3): scriptReady minus excluded/done
+// when hasDeps and non-empty yields source 'deps'; else lastGoodReady minus
+// excluded/done when non-empty yields source 'last-good'; else empty/null for
+// the halt path. Ordering is the input's (already ck-plan order); never re-sorted.
+// Unknown-dep tasks never appear because scriptReady comes from readyTasks.
+function fallbackReady({ hasDeps, scriptReady, lastGoodReady, exclude, done } = {}) {
+  const skip = new Set([...decisionIds(exclude), ...decisionIds(done)])
+  const clean = list => decisionIds(list).filter(n => !skip.has(n))
+  if (hasDeps) {
+    const fromDeps = clean(scriptReady)
+    if (fromDeps.length > 0) return { ready: fromDeps, source: 'deps' }
+  }
+  const fromLastGood = clean(lastGoodReady)
+  if (fromLastGood.length > 0) return { ready: fromLastGood, source: 'last-good' }
+  return { ready: [], source: null }
+}
+
+// Wave review split (4.1-4.3, 4.6): individual = merged tasks whose risk tag is
+// `safety` (case-insensitive, same check as isSafety); batched = the rest.
+// Empty merged yields both empty (no review). Ordering is the input's.
+function reviewGroups({ merged, risk } = {}) {
+  const tags = risk && typeof risk === 'object' ? risk : {}
+  const batched = []
+  const individual = []
+  for (const n of decisionIds(merged)) {
+    if (String(tags[n] || '').toLowerCase() === 'safety') individual.push(n)
+    else batched.push(n)
+  }
+  return { batched, individual }
+}
+
 // --- end decisions ---
 
 // --- scheduler ---------------------------------------------------------------
@@ -663,6 +718,12 @@ let landingBusy = false
 let landingIdle = Promise.resolve()
 let batchWindow = MERGE_BATCH
 const landings = []
+// Wave-batched review (4.1-4.6): tasks whose implement step succeeded register
+// here before landing; the landBatch that merges them runs the wave review
+// (one review-wave agent for non-risky tasks, one review agent per risky task)
+// before resolving the batch, so rec.review is set when landTask returns.
+const pendingReview = new Map()  // n -> { rec, r } implement result awaiting its merge wave's review
+let reviewWaveCount = 0          // review-wave label counter (review-wave <n> tasks ...)
 const MAX_RESOLVES = 3
 // Cross-test consistency (reviewer.cross_test): one check per wave of test tasks,
 // started when its last test task finishes (or at the end, for a wave that never
@@ -728,6 +789,7 @@ function normalizePlan(p) {
 // is how the script estimates what waits for a runtime slot, and wakes the main loop when one settles.
 const inFlight = []   // { seq, kind }
 let callSeq = 0
+const agentMs = {}     // kind -> ms of agent time (wall clock around agent calls): the overhead-share input (5.4)
 let poked = false
 let wakeLoop = null
 function poke() {
@@ -738,10 +800,12 @@ const signal = () => (poked ? Promise.resolve() : new Promise(resolve => { wakeL
 function call(kind, prompt, opts) {
   const entry = { seq: ++callSeq, kind }
   inFlight.push(entry)
+  const t0 = Date.now()
   return (async () => {
     try {
       return await agent(prompt, opts)
     } finally {
+      agentMs[kind] = (agentMs[kind] || 0) + (Date.now() - t0)
       const i = inFlight.indexOf(entry)
       if (i >= 0) inFlight.splice(i, 1)
       poke()
@@ -752,7 +816,10 @@ function call(kind, prompt, opts) {
 // The scheduler's view of the plan (applyPlanView) and what runs now.
 let view = { order: [], deps: {}, done: new Set(), cycles: [], verifyCycles: [] }
 let current = null          // the last plan applied
-let fallbackReady = []      // without args.deps: the ready list of the plan that just returned, used once
+let lastPlanReady = []      // without args.deps: the ready list of the plan that just returned, used once
+let planFallbacks = []    // one entry per fallback: { planStep, trigger, source, ready }
+let degraded = false      // true once any fallback fired
+let lastGood = null       // { ready, deps, order } of the last consistent plan: the dep-less fallback layer
 let planRun = null          // the plan agent in flight, if any
 let queuedTrigger = null    // a trigger that arrived while one was in flight: one follow-up
 let idleArmed = true
@@ -782,11 +849,28 @@ async function runPlan(trigger) {
     // An "error" next to a usable plan is a remark, not a failure; an empty plan with an error is a failure.
     if (usablePlan(p) && !(p.error && !p.done.length && !p.remaining.length)) {
       const n = normalizePlan(p)
+      // Done is ground truth even when the ready list is not: fold it in so the
+      // fallback below never re-schedules an already-finished task (1.5). (Order
+      // and deps stay on the args-seeded view per D5: the fallback is computed
+      // from the deps arg, never from a failed plan's graph.)
+      for (const d of n.done) view.done.add(d)
+      // A plan that names no runnable task is inconsistent even when normalization
+      // empties its ready list (1.1: a raw non-empty ready never follows from the
+      // graph); raw-empty + truth-empty still adopts via the check below (1.4).
+      const namesNothingRunnable = p.ready.length > 0 && n.ready.length === 0
+      // Vacuous adoption is gated on raw-empty: a plan whose remaining is empty adopts
+      // without a consistency check ONLY when its raw ready was already empty; a
+      // non-empty claim against an empty remaining set is checked below (and fails:
+      // nothing matches an empty order).
+      if (!n.remaining.length && p.ready.length === 0) n.ready = []
       // A task a plan reports as busy is left out of its ready list: it is not a mismatch.
-      if (planConsistent(n, [...exclude, ...n.busy.map(b => b.task)])) {
+      if (!namesNothingRunnable && planConsistent(n, [...exclude, ...n.busy.map(b => b.task)])) {
         if (p.error) log(`${label}: the planning agent left a note (not a failure): ${trim(p.error, 300)}`)
         current = n
         view = applyPlanView(n, mergedInRun)
+        // The dep-less fallback layer: the last consistent plan's ready/deps/order.
+        // A consistent first attempt or retry success counts no fallback (1.4).
+        lastGood = { ready: [...n.ready], deps: n.deps || {}, order: [...n.remaining] }
         // Task agents own BUSY detection; a busy list from the plan agent is ignored in script-readiness mode.
         for (const b of SCRIPT_READINESS ? [] : n.busy) {
           if (!failed.has(b.task) && !running.has(b.task)) {
@@ -795,7 +879,7 @@ async function runPlan(trigger) {
           }
         }
         if (trigger !== 'start') applyLint(n)  // the start plan's cycle refusal is explicit, below
-        fallbackReady = n.ready
+        lastPlanReady = n.ready
         if (trigger === 'landing' && recordSeq === seqAtPrompt) idleArmed = false  // this plan just re-read tasks.md after a landing
         return n
       }
@@ -806,7 +890,43 @@ async function runPlan(trigger) {
     planFailures++
     log(`${label}: no usable plan (${(p && p.error && trim(p.error, 300)) || 'no result'})${attempt ? '' : ', retrying'}`)
   }
-  return null
+  // Both attempts failed: resolve the deterministic fallback (D5) instead of halting when data exists.
+  // scriptReady comes from script-side readyTasks, so unknown-dep tasks never appear (2.5); the fallback
+  // subtracts running/failed/parked/merged/done, leaving their records untouched (1.5).
+  const effOrder = view.order.length ? view.order : (Array.isArray(A.remaining) ? A.remaining.map(String) : Object.keys(A.deps || {}).map(String))
+  const effDeps = view.deps && Object.keys(view.deps).length ? view.deps : (A.deps || {})
+  const doneArr = [...view.done]
+  const exclArr = [...excluded()]
+  const scriptReady = SCRIPT_READINESS ? readyTasks({ order: effOrder, deps: effDeps, done: doneArr, exclude: exclArr, blocked: blockedOf(view) }) : []
+  const fb = fallbackReady({ hasDeps: SCRIPT_READINESS, scriptReady, lastGoodReady: lastGood ? lastGood.ready : [], exclude: exclArr, done: doneArr })
+  // A fallback view never overwrites lastGood.
+  const synth = extra => {
+    const s = { fromFallback: true, done: [...view.done], remaining: [...(view.order.length ? view.order : effOrder)], deps: (view.deps && Object.keys(view.deps).length ? view.deps : effDeps), ready: [], cycles: [], verifyCycles: [], busy: [], ...extra }
+    if (!current) current = s
+    return s
+  }
+  if (!fb.ready.length && !SCRIPT_READINESS && (!lastGood || !lastGood.ready.length)) {
+    return null  // Halt: no deterministic data ever (no deps arg, no adopted plan with usable ready): the existing PLAN_FAILED halt path (2.3). No entry, degraded untouched.
+  }
+  // Every double-failure trigger with deterministic data records a fallback entry,
+  // even when the resulting ready list is empty (an empty entry records a fallback
+  // that scheduled nothing; 1.3 counts every trigger). The source is copied verbatim
+  // from the seam (null when neither layer had anything schedulable).
+  planFallbacks.push({ planStep: refills, trigger, source: fb.source, ready: [...fb.ready] })
+  degraded = true
+  if (!fb.ready.length) {
+    // Data present but nothing schedulable (frontier in flight): wait for landings.
+    log(`plan ${refills}: twice inconsistent, nothing schedulable yet; waiting for running tasks`)
+    return synth()
+  }
+  log(`plan ${refills}: twice inconsistent, falling back to the deterministic ready list (${fb.source}): ${fb.ready.join(' ') || '(empty)'}`)
+  if (!SCRIPT_READINESS) {
+    lastPlanReady = [...fb.ready]  // the dep-less schedule path consumes this once
+  } else if (!view.order.length) {
+    // Seed the scheduling view from the run inputs so planContext/schedule sees the fallback list.
+    view = { order: effOrder.map(String), deps: { ...effDeps }, done: new Set(doneArr), cycles: [], verifyCycles: [] }
+  }
+  return synth({ ready: [...fb.ready] })
 }
 
 // At most one plan agent in flight; an eligible trigger arriving meanwhile coalesces into one follow-up.
@@ -870,8 +990,8 @@ function schedule() {
   let ready = ctx.ready
   if (!SCRIPT_READINESS) {
     // Without args.deps only the plan agent's ready list counts, and only once.
-    ready = fallbackReady.map(String).filter(n => !ctx.exclude.has(n) && !view.done.has(n))
-    fallbackReady = []
+    ready = lastPlanReady.map(String).filter(n => !ctx.exclude.has(n) && !view.done.has(n))
+    lastPlanReady = []
   }
   const d = startDecision({ finishFirst: FINISH_FIRST, inFlight, slots: AGENT_SLOTS, ready, working: working.size, maxConcurrent: MAX_CONCURRENT, stopLaunching })
   for (const n of d.start) if (!running.has(n)) startTask(n)
@@ -988,7 +1108,150 @@ async function landBatch(batch) {
     requestPlan('landing')
     poke()
   }
+  // Wave-batched review (4.1-4.6): the merged tasks of this batch are reviewed
+  // as a wave before the batch resolves — one review-wave agent for the
+  // non-risky tasks, one review agent per risky task, nothing when the wave
+  // merged nothing new. rec.review rows are fanned out before landTask returns.
+  if (REVIEW_ON && entry.merged.length) await reviewMergedWave(entry.merged)
   for (const [b, t] of outcomes) b.resolve(t)
+}
+
+// Which batched tasks a batched verdict flags for revision (4.4): findings
+// that name a covered task flag it; a `changes` verdict with no attributable
+// finding flags the whole wave (a blocking problem is re-verified, never
+// silently recorded). An `approve` (or no) verdict flags nobody.
+function flaggedOf(review, batched) {
+  if (!review || review.verdict !== 'changes') return []
+  const findings = Array.isArray(review.findings) ? review.findings : []
+  const named = [...new Set(findings.map(f => (f && f.task != null ? String(f.task) : null)).filter(t => t != null && batched.includes(t)))]
+  return named.length ? named : [...batched]
+}
+
+// Record a batched `approve` on one covered task (4.5): same reviewer
+// attribution as an individual approval, plus the fromBatch wave number.
+function setBatchApproval(n, review, waveNo, batched) {
+  const slot = pendingReview.get(n)
+  if (!slot) return
+  const by = { model: REVIEW.model || 'inherited', effort: REVIEW.effort || 'inherited', riskTag: slot.rec.riskTag }
+  slot.rec.review = review
+    ? { verdict: 'approve', rounds: 0, findings: review.findings || [], summary: review.summary, fromBatch: waveNo, tasks: [...batched], ...by }
+    : { verdict: 'unreviewed', rounds: 0, fromBatch: waveNo, tasks: [...batched], ...by }
+}
+
+// Guard-ladder climb for a post-merge revision that guard-stopped (S17,
+// preserved post-merge: the task already merged, so a stop exhausted through
+// the top records the verdict and keeps the merge instead of parking).
+async function climbTaskGuard(n, slot, attempted) {
+  slot.guard = slot.guard || { tried: new Set(), k: 0 }
+  const { rec } = slot
+  for (const model of guardLadder(attempted)) {
+    if (slot.guard.tried.has(model)) continue
+    slot.guard.tried.add(model)
+    slot.guard.k++
+    log(`Task ${n}: guard stop, trying ${model} (guard ${slot.guard.k})`)
+    let r = await call('task', retryPrompt(n, slot.r, rec.attempts - slot.guard.k), { label: `${label(n)} guard ${slot.guard.k} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
+    slot.r = r
+    rec.result = r
+    rec.finishedAt = r && r.finishedAt
+    rec.attempts++
+    rec.escalations.push({ stage: 'guard', model })
+    rec.startedAt = rec.startedAt || (r && r.startedAt)
+    if (!guardStopOf(r)) break
+  }
+  return slot.r
+}
+
+// Post-merge review/revise loop shared by wave-flagged tasks (4.4) and
+// risky-individual tasks (4.2): the first verdict (batch or individual) is
+// round 0, each `changes` routes the task alone to revision and re-review,
+// escalating surviving blocking findings up the ladder like the old pre-land
+// loop. A revision that guard-stops climbs the ladder before the review goes
+// on. Records rec.review; the task stays merged whatever the verdict.
+async function polishReview(n, first, opts) {
+  const slot = pendingReview.get(n)
+  if (!slot) return null
+  const { rec } = slot
+  let r = slot.r
+  let round = 0
+  let cur = first
+  const record = () => {
+    const by = { model: opts.model || 'inherited', effort: opts.effort || 'inherited', riskTag: rec.riskTag }
+    rec.review = cur
+      ? { verdict: cur.verdict, rounds: round, findings: cur.findings, summary: cur.summary, ...by }
+      : { verdict: 'unreviewed', rounds: round, ...by }
+  }
+  const revised = async (prompt, lbl, o) => {
+    working.add(n)  // a revision takes a slot but never waits for one: the task is nearly done
+    r = await call('revise', prompt, { label: lbl, phase: phaseOf(n), schema: RESULT, ...o })
+    slot.r = r
+    rec.result = r
+    rec.finishedAt = r && r.finishedAt
+    releaseSlot(n)
+  }
+  // Returns true when a guard stop exhausted the ladder (caller records).
+  const climbOnGuardStop = async model => {
+    if (!guardStopOf(r)) return false
+    await climbTaskGuard(n, slot, model)
+    r = slot.r
+    if (guardStopOf(r)) {
+      log(`Task ${n}: guard stop through the top of the ladder post-merge; keeping the merge and recording the verdict`)
+      record()
+      return true
+    }
+    return false
+  }
+  while (cur && cur.verdict === 'changes' && round < REVIEW_ROUNDS && ok(r)) {
+    round++
+    log(`Task ${n}: reviewer asked for changes, revision ${round}/${REVIEW_ROUNDS}`)
+    await revised(revisePrompt(n, cur, round), `${label(n)} revise ${round}`, codeOpts(n))
+    if (await climbOnGuardStop(codeOpts(n).model)) return cur
+    if (ok(r)) cur = await call('review', reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts })
+  }
+  for (const model of ladderOf(n)) {
+    if (!(cur && cur.verdict === 'changes' && ok(r))) break
+    round++
+    log(`Task ${n}: blocking findings remain, escalating the revision to ${model}`)
+    await revised(revisePrompt(n, cur, round), `${label(n)} revise ${round} (${model})`, escalated(codeOpts(n), model))
+    if (await climbOnGuardStop(model)) return cur
+    rec.escalations.push({ stage: 'revise', model })
+    if (ok(r)) cur = await call('review', reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts })
+  }
+  record()
+  return cur
+}
+
+// Review one merged wave (4.1-4.3, 4.6): non-risky tasks share a single
+// review-wave agent over the combined diff; each risky task is reviewed
+// individually with the risky reviewer settings. A risky-only wave gets no
+// combined review; an empty wave gets no review at all.
+async function reviewMergedWave(merged) {
+  const groups = reviewGroups({ merged, risk: RISK })
+  const batched = groups.batched.filter(n => pendingReview.has(n))
+  const individual = groups.individual.filter(n => pendingReview.has(n))
+  if (!batched.length && !individual.length) return
+  if (batched.length) {
+    const waveNo = ++reviewWaveCount
+    let review = null
+    try {
+      review = await call('review-wave', waveReviewPrompt(waveNo, batched), { label: `review-wave ${waveNo} tasks ${batched.join(' ')}`, phase: phaseOf(batched[0]), schema: REVIEW_SCHEMA, ...REVIEW })
+    } catch (e) {
+      review = null
+    }
+    const flagged = flaggedOf(review, batched)
+    for (const n of flagged) await polishReview(n, review, REVIEW)
+    for (const n of batched.filter(t => !flagged.includes(t))) setBatchApproval(n, review, waveNo, batched)
+  }
+  for (const n of individual) {
+    const slot = pendingReview.get(n)
+    if (!slot) continue
+    let review = null
+    try {
+      review = await call('review', reviewPrompt(n, slot.r), { label: `review ${n}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
+    } catch (e) {
+      review = null
+    }
+    await polishReview(n, review, reviewOpts(n))
+  }
 }
 
 // Land task n: queue it, then handle what the landing says. CONFLICT goes to the
@@ -1146,58 +1409,26 @@ async function runTask(n) {
       rec.reason = bo.reason
     }
     releaseSlot(n)
-    if (ok(r) && REVIEW_ON) {
-      let review = await call('review', reviewPrompt(n, r), { label: `review ${n}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
-      let round = 0
-      // A revision that guard-stops climbs the ladder before the review goes on.
-      const revised = async (prompt, lbl, opts, model) => {
-        working.add(n)  // a revision takes a slot but never waits for one: the task is nearly done
-        r = await call('revise', prompt, { label: lbl, phase: phaseOf(n), schema: RESULT, ...opts })
-        lastModel = model
-        stop = guardStopOf(r)
-        if (stop) await climbGuard(lastModel)
-        releaseSlot(n)
-      }
-      while (review && review.verdict === 'changes' && round < REVIEW_ROUNDS && ok(r)) {
-        round++
-        log(`Task ${n}: reviewer asked for changes, revision ${round}/${REVIEW_ROUNDS}`)
-        await revised(revisePrompt(n, review, round), `${label(n)} revise ${round}`, codeOpts(n), codeOpts(n).model)
-        if (stop) return await needInput()
-        if (ok(r)) review = await call('review', reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
-      }
-      for (const model of ladderOf(n)) {
-        if (!(review && review.verdict === 'changes' && ok(r))) break
-        round++
-        log(`Task ${n}: blocking findings remain, escalating the revision to ${model}`)
-        await revised(revisePrompt(n, review, round), `${label(n)} revise ${round} (${model})`, escalated(codeOpts(n), model), model)
-        if (stop) return await needInput()
-        rec.escalations.push({ stage: 'revise', model })
-        if (ok(r)) review = await call('review', reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
-      }
-      // model/effort: who judged the task, so an audit can count escapes (approved bugs) per reviewer tier.
-      const by = { model: reviewOpts(n).model || 'inherited', effort: reviewOpts(n).effort || 'inherited', riskTag: rec.riskTag }
-      rec.review = review ? { verdict: review.verdict, rounds: round, findings: review.findings, summary: review.summary, ...by } : { verdict: 'unreviewed', rounds: round, ...by }
-      if (!review) log(`Task ${n}: review agent returned nothing; merging unreviewed`)
-      else if (review.verdict === 'changes' && ok(r)) {
-        rec.result = r
-        rec.finishedAt = r && r.finishedAt
-        rec.reason = `review: blocking findings remain after ${round} revision(s): ${trim(review.findings.filter(f => f.severity === 'blocking').map(f => f.issue), FINDINGS_LIMIT)}`
-        return rec
-      }
-    }
+    // The review runs post-merge as a wave in landBatch (4.1-4.6), not here:
+    // register the implement result so the merge wave can review from it.
     rec.result = r
     rec.finishedAt = r && r.finishedAt
     if (!ok(r)) {
       if (!rec.busy) rec.reason = r ? r.blocker || `gate not passed (status ${r.status})` : 'agent died without a report'
       return rec
     }
+    if (REVIEW_ON) pendingReview.set(n, { rec, r })
     const m = await landTask(n, rec)
+    pendingReview.delete(n)
     rec.merge = m
     rec.mergedAt = m && m.mergedAt
     if (!m || !m.merged) {
       rec.reason = `merge failed: ${(m && m.error) || 'no result'}`
       return rec
     }
+    // rec.review was fanned out by the merge wave in landBatch (batch approval
+    // or the revise + re-review loop); without reviewers there is no review.
+    if (REVIEW_ON && !rec.review) log(`Task ${n}: merge wave left no review; merging unreviewed`)
     rec.ok = true
     log(`Task ${n}: done and merged into ${INTO}`)
     return rec
@@ -1208,8 +1439,19 @@ async function runTask(n) {
 }
 
 phase('Plan')
+// Overhead share (5.4): plan/review/land agent ms over all agent ms, from the
+// in-script wall-clock timing around agent calls. Reviewer time includes
+// `review-wave` agents (each counts as one review agent, consistent with the
+// role mapping). Null when no agent time is recorded yet. Warn-only: the flag
+// below never sets stopLaunching.
+function buildOverhead() {
+  const at = k => agentMs[k] || 0
+  const total = Object.values(agentMs).reduce((s, v) => s + v, 0)
+  const share = total > 0 ? (at('plan') + at('review') + at('review-wave') + at('land')) / total : null
+  return { share, threshold: OVERHEAD_WARN_THRESHOLD, warned: overheadWarning(share) }
+}
 const startPlan = await requestPlan('start')
-if (!startPlan) return { halted: true, refused: false, reason: PLAN_FAILED, into: INTO }
+if (!startPlan) return { halted: true, refused: false, reason: PLAN_FAILED, into: INTO, degraded, planFallbacks, overhead: buildOverhead() }
 if (startPlan.cycles.length || startPlan.verifyCycles.length) {
   log('Refusing to launch: the plan has a cycle. Fix tasks.md (see `ck lint`) and run again.')
   return {
@@ -1219,6 +1461,9 @@ if (startPlan.cycles.length || startPlan.verifyCycles.length) {
     cycles: startPlan.cycles,
     verifyCycles: startPlan.verifyCycles,
     into: INTO,
+    degraded,
+    planFallbacks,
+    overhead: buildOverhead(),
   }
 }
 const initialPlan = startPlan
@@ -1398,6 +1643,23 @@ else if (notStarted.length || failedList.length || needsInput.length) {
     : waiting || `not started: ${notStarted.map(n => `Task ${n}`).join(', ')}`
 } else if (planFailed) reason = null
 if (outcome === 'blocked') log(reason)
+// Deterministic-fallback report section (5.1, 6.1): degraded mark, fallback
+// count and the triggering plan attempts.
+if (planFallbacks.length) {
+  log(`Deterministic fallback: degraded, ${planFallbacks.length} fallback(s): ${planFallbacks.map(e => `plan ${e.planStep} (${e.trigger}, ${e.source || 'no data'})`).join('; ')}`)
+} else {
+  log('Deterministic fallback: clean run, no fallbacks')
+}
+// Overhead report line (5.4, warn-only): the flag is recorded and logged, and
+// never sets stopLaunching.
+const overhead = buildOverhead()
+if (overhead.share == null) {
+  log('Overhead (plan/review/land share): not recorded')
+} else {
+  const pct = `${(overhead.share * 100).toFixed(0)}%`
+  const thr = `${overhead.threshold * 100}%`
+  log(`Overhead (plan/review/land share): ${pct}${overhead.warned ? ` (warn: above ${thr} threshold)` : ''}`)
+}
 
 return {
   halted: outcome === 'halted',
@@ -1429,5 +1691,8 @@ return {
   fullGates,
   finalGate,
   crossTests,
-  stats: { initiallyDone, merged: merged.length, failed: failedList.length, notStarted: notStarted.length, planSteps: refills, planFailures, fixes: fixCount, landings: landings.length, bisected: landings.filter(l => l.bisected).length },
+  degraded,
+  planFallbacks,
+  overhead,
+  stats: { initiallyDone, merged: merged.length, failed: failedList.length, notStarted: notStarted.length, planSteps: refills, planFailures, planFallbacks: planFallbacks.length, fixes: fixCount, landings: landings.length, bisected: landings.filter(l => l.bisected).length },
 }

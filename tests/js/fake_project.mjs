@@ -22,6 +22,14 @@ function chainLengths(deps, done) {
 
 // Options beyond the scenario knobs:
 //   planDurations: {k: ms}                 plan call k takes that long
+//   planSeq: [{ready?, deps?, done?, remaining?, cycles?, verifyCycles?, error?}, ...]
+//                                          canned plan answers consumed in invocation order (call k gets
+//                                          planSeq[k-1]; exhausted or absent -> default `ck plan` semantics).
+//                                          Each entry is merged over the default answer, so {ready} overrides
+//                                          the ready list while keeping deps truthful and {} is a healthy answer.
+//   badReady: [ids]                        shorthand: every plan answer's ready is this bad list (deps stay
+//                                          truthful); a planSeq entry for the call takes precedence
+//   risk: {n: 'safety'|'normal'}            passed through as the plan answer's risk data
 //   externalDone: {atPlan: k, tasks}       from plan call k on, those tasks are Done on the target (never started here)
 //   planFail: [k, ...]                     plan call k and its retry answer {error: 'boom'} with empty arrays
 //   guardStops: {n: ceiling|'always'}      task n returns guardStop on every attempt whose model is at or below ceiling
@@ -29,11 +37,23 @@ function chainLengths(deps, done) {
 //   guardStopIn: {n: 'revise'}             the guard stop of task n happens in its first revise call, not its task call
 //   parkOutcome: {parked, notification, detail}  answer of the `park <N>` agent (default parked, sent, '')
 //   worktree: {n: {state, detail}}         the first task agent of n returns that worktree outcome (default CREATED)
-export function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [], gitReport = null, conflictRounds = {}, planDurations = {}, externalDone = null, planFail = [], worktree = {}, guardStops = {}, guardStopIn = {}, parkOutcome = null }) {
+export function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [], gitReport = null, conflictRounds = {}, planDurations = {}, externalDone = null, planFail = [], worktree = {}, guardStops = {}, guardStopIn = {}, parkOutcome = null, planSeq = null, badReady = null, risk = null }) {
   let rechecksLeftRed = recheckRed
+  let planCalls = 0  // plan agent invocations so far: call k consumes planSeq[k-1]
   // RED landings left per task: checkRed tasks are red on their first landing, redLands sets a count.
   const redLeft = { ...Object.fromEntries(checkRed.map(n => [n, 1])), ...redLands }
-  const state = { deps: { ...deps }, done: new Set(done), merged: new Set(), events: [], prompts: {}, opts: {}, reviewCount: {}, attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0, landings: [], parks: [], revises: {}, resolved: new Set(), conflictsHit: {} }
+  // Coverage of each review label: [n] for `review N [round k]`; the id list for
+  // `review-wave <wave> tasks <ids>`; the prompt's task list as a fallback.
+  const reviewTasksOf = (label, promptText) => {
+    let m = label.match(/^review-wave \d+ tasks ([\d ]+)$/)
+    if (m) return m[1].split(' ').filter(Boolean)
+    m = label.match(/^review (\d+)/)
+    if (m) return [m[1]]
+    m = String(promptText).match(/[Tt]asks ([\d, ]+)/)
+    if (m) return m[1].split(/[,\s]+/).filter(Boolean)
+    return []
+  }
+  const state = { deps: { ...deps }, done: new Set(done), merged: new Set(), events: [], prompts: {}, opts: {}, reviewCount: {}, reviewTasks: {}, attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0, landings: [], parks: [], revises: {}, resolved: new Set(), conflictsHit: {} }
   let clock = Date.parse('2026-10-04T10:00:00Z')
   const stamp = () => new Date((clock += 60000)).toISOString().replace('.000', '')
   const ready = exclude => {
@@ -70,6 +90,7 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
       let r = ready(exclude)
       if (slotsMatch && slotsMatch[1] !== 'all') r = r.slice(0, Number(slotsMatch[1]))
       // The answer is a snapshot taken when the call starts; planDurations lets the run move on meanwhile.
+      const startedAt = stamp()
       const answer = {
         done: [...state.done],
         ready: r.filter(n => !busy.includes(n)),
@@ -78,9 +99,21 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
         deps: Object.fromEntries(Object.entries(state.deps).map(([n, ds]) => [n, [...ds]])),
         cycles,
         verifyCycles: state.plans === 1 && !verifyCyclesFromStart ? [] : verifyCycles,
+        risk: { ...(risk ?? {}) },
+        startedAt,
       }
+      // Canned answers for the deterministic-plan harness: consumed in invocation order, each entry
+      // merged over the default answer. badReady is the shorthand for "every answer is inconsistent".
+      const entry = planSeq && planCalls < planSeq.length ? planSeq[planCalls] : null
+      planCalls++
+      if (entry && entry.error) {
+        if (planDurations[k]) await sleep(planDurations[k])
+        return { error: entry.error, done: [], ready: [], busy: [], remaining: [], cycles: [], verifyCycles: [], deps: {}, risk: answer.risk, startedAt, finishedAt: stamp() }
+      }
+      if (entry) Object.assign(answer, entry)
+      else if (badReady) answer.ready = [...badReady]
       if (planDurations[k]) await sleep(planDurations[k])
-      return answer
+      return { ...answer, finishedAt: stamp() }
     }
     if (l.startsWith('task')) {
       const n = l.match(/task (\d+)/)[1]
@@ -152,12 +185,28 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
       return { parked: true, notification: 'sent', detail: '', ...(parkOutcome ?? {}) }
     }
     if (l.startsWith('review')) {
-      const n = l.match(/review (\d+)/)[1]
-      state.reviewCount[n] = (state.reviewCount[n] || 0) + 1
-      await sleep(reviewDurations[n] ?? 0)
+      const covered = reviewTasksOf(l, prompt)
+      const n = covered[0]
+      const key = n ?? l
+      state.reviewTasks[l] = covered
+      // A batched review IS each covered task's review (single-wave contract):
+      // advance every covered task's counter while the verdict below is still
+      // looked up by the first covered task's entry, so a flagged task's
+      // single re-review reaches its second entry. Single-covered (individual)
+      // labels behave exactly as before.
+      for (const t of new Set(covered.length ? covered : [key])) state.reviewCount[t] = (state.reviewCount[t] || 0) + 1
+      const startedAt = stamp()
+      await sleep(n != null ? reviewDurations[n] ?? 0 : 0)
       state.events.push(`${l} end`)
-      const verdict = (reviews[n] || [])[state.reviewCount[n] - 1] || 'approve'
-      return { verdict, findings: verdict === 'changes' ? [{ severity: 'blocking', issue: reviewIssue || 'contradicts design.md' }] : [], summary: verdict }
+      // A reviews entry is a verdict string (as before) or { verdict, findings } for a
+      // batched verdict flagging individual tasks (design.md per-task findings shape
+      // { task, severity, file, issue, fix }); object entries pass findings through verbatim.
+      const spec = (n != null ? (reviews[n] || [])[state.reviewCount[key] - 1] : null) || 'approve'
+      const verdict = typeof spec === 'string' ? spec : (spec.verdict || 'approve')
+      const findings = typeof spec === 'string'
+        ? (verdict === 'changes' ? [{ severity: 'blocking', issue: reviewIssue || 'contradicts design.md' }] : [])
+        : (spec.findings || [])
+      return { verdict, findings, summary: typeof spec === 'string' ? verdict : (spec.summary || verdict), startedAt, finishedAt: stamp() }
     }
     if (l.startsWith('cross-test')) return { verdict: 'changes', findings: [{ severity: 'blocking', file: 'tests/test_b.py', issue: 'reads "state" where tests/test_a.py and design.md say "status"' }], summary: 'one drift' }
     if (l === 'report') {
