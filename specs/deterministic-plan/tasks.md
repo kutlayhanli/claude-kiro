@@ -476,7 +476,7 @@
 **Risk:** normal
 ---
 ### Task 26: OpenCode harness parity for the fallback script
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 1.2, 2.1, 2.2
 **Description:** Refresh `opencode/vendor/workflows/spec-implement.js` from the plugin source so the fallback code ships on the OpenCode path, and confirm `opencode/src/workflow-tool.ts:validateWorkflowArgs` still requires only `spec`+`root` for spec-implement (`deps` stays optional by design so dep-less runs take the last-good/halt path on both harnesses). `args` pass-through is unchanged. A stale vendored copy is the only allowed divergence, caught by the byte-identity test.
