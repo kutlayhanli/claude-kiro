@@ -200,10 +200,10 @@
 **Properties:** P-8, P-14
 **Verifies:** Task 14 (exercises the `planDecision` gating; fails until that code exists)
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the row (maxConcurrent sweep; slow-task timing; empty-ready idle draws)
-- [ ] Settings are deterministic (`@settings(derandomize=True, max_examples=60, database=None)`)
-- [ ] The tests call the decision seam, not a server (`planDecision` directly + trace predicates via bridge)
-- [ ] File declares `PROPERTIES = {"P-8": ..., "P-14": ...}` (merged map)
+- [x] The generators cover every surface form and negative listed in the row (maxConcurrent sweep; slow-task timing; empty-ready idle draws)
+- [x] Settings are deterministic (`@settings(derandomize=True, max_examples=60, database=None)`)
+- [x] The tests call the decision seam, not a server (`planDecision` directly + trace predicates via bridge)
+- [x] File declares `PROPERTIES = {"P-8": ..., "P-14": ...}` (merged map)
 **Dependencies:** Task 1 (needs label-grammar helpers + trace predicates)
 **Complexity:** High
 **Risk:** normal
