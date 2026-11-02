@@ -333,7 +333,7 @@
 **Risk:** normal
 ---
 ### Task 18: Wave-batched reviews with risky tasks kept individual
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 4.1, 4.2, 4.3, 4.4, 4.5, 4.6
 **Description:** Replace the per-task `review` call in `runTask` with wave batching in `plugin/workflows/spec-implement.js`: after a `landBatch` reports MERGED, call `reviewGroups(mergedTasks, RISK)`; non-risky tasks go in one `review-wave` agent (label `review-wave <wave> tasks <ids>`, e.g. `review-wave 2 tasks 4 5 7`) over the combined diff (prompt names the wave, its non-risky tasks, the combined `git diff <merge-base>...<INTO>` over their files, each task's block/requirements, and design.md), each safety/risky task in its own `review` agent with the existing risky reviewer settings (`reviewOpts`). Add optional `tasks: string[]` echo to `REVIEW_SCHEMA` so a batched verdict names its coverage. Fan out the verdict to per-task `rec.review` rows: a batched `changes` verdict routes only flagged tasks to revision (4.4), an `approve` records approval on every covered task with `fromBatch` attribution (4.5). No review agent when the wave merged nothing new (4.6); a risky-only wave runs only individual reviews with no combined review (4.3).
