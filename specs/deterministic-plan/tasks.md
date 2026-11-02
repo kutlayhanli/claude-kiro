@@ -542,7 +542,7 @@
 **Risk:** normal
 ---
 ### Task 31: Red-team warn-only budget
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.4
 **Description:** Try to break each SHALL NOT clause of Story 5 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test named `test_redteam_warn_only_*`. Targets 5.4 (SHALL NOT halt, fail or retry because of overhead): share exactly at threshold, share 100% with all-plan agents, `None`/missing share with threshold 0, threshold-shaped strings fed back as share values, overhead warning coinciding with a real failure (warning must not mask or rename the real stop reason). Needs the Task 22 workflow wiring plus Task 33 show rendering.
@@ -551,9 +551,9 @@
 **Verify:** `uv run pytest -q tests/test_deterministic_stats.py -k redteam_warn_only`
 **Verifies:** Task 33 (exercises workflow warn-only plus `ck stats show` over adversarial records; fails until that code exists)
 **Acceptance:**
-- [ ] Tests exercise the real boundary named in the test plan (real script scheduling + real `ck stats show` over adversarial records)
-- [ ] Tests fail before the implementation exists for the right reason (run halts/fails/retries naming overhead, or warning missing at 100%)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Tests exercise the real boundary named in the test plan (real script scheduling + real `ck stats show` over adversarial records)
+- [x] Tests fail before the implementation exists for the right reason (run halts/fails/retries naming overhead, or warning missing at 100%)
+- [x] No mocks of the project's own code in integration tests
 **Dependencies:** Task 1 (needs FakeClaudeHome + overhead table harness)
 **Complexity:** Medium
 **Risk:** normal
