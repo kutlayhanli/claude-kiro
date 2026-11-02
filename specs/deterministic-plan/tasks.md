@@ -647,7 +647,7 @@
 ---
 
 ### Task 36: Review-wave label role mapping
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 4.1, NFR-4, 5.2
 **Description:** In `src/claude_kiro/analytics/roles.py`, add a `review-wave` pattern to the spec-implement grammar: the batched-review label `review-wave <wave> tasks <ids>` emitted by Task 18 maps to role `reviewer` with `matched=True`, `wave=<wave>`, and `tasks` set to the covered task ids (criterion 4.1: the batched review is a review agent, never `other`). This is what the W + R review-count bound (NFR-4, counted over role-`reviewer` labels) and the overhead reviewer share (5.2, Task 33) count. Extend the `tests/js/emit_labels.mjs` review branch to answer `review-wave ...` labels (parse covered ids from the label, return a verdict shaped like an individual review) and add a wave-merge scenario so the emitted corpus includes a `review-wave` label; assert the mapping directly in `tests/test_stats_label_corpus.py` (role reviewer, wave number, covered tasks, `matched=True`).
