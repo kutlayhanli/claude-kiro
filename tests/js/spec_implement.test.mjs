@@ -851,7 +851,9 @@ await test('planning: a plan step that keeps failing halts only if it left a rea
   assert.equal(a.result.halted, false)
   assert.equal(a.result.outcome, 'blocked')
   assert.match(a.result.reason, /^blocked on: Task 2 /)
-  assert.ok(a.logs.some(l => l.includes('every remaining task was blocked anyway')))
+  // Task 10/22 report work reworded the old 'every remaining task was blocked anyway'
+  // line: the blocked stop now goes through the deterministic-fallback report section.
+  assert.ok(a.logs.some(l => l.includes('Deterministic fallback: degraded')), 'the fallback path was recorded on the blocked run')
 
   // Task 2 became ready after Task 1 merged, but no plan step could start it.
   // Fallback continuation (1.2, 1.3) supersedes the old planning halt here: a good
