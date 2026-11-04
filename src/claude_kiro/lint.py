@@ -267,7 +267,8 @@ def verify_file_cycles(tasks: Dict[str, SpecTask], config: dict) -> List[Dict]:
                                 f"Task {x_num}'s Verify runs {path}, which Task {t_num} (test track) owns and which "
                                 f"verifies Task {y_num}; Task {y_num} depends on Task {x_num} ({' -> '.join(chain)}), "
                                 f"so Task {x_num}'s gate can't pass before Task {y_num} lands. "
-                                f"Narrow Task {x_num}'s Verify to test files that don't need Task {y_num}."
+                                f"Narrow Task {x_num}'s Verify to test files that don't need Task {y_num}, or, if "
+                                f"{path} is Task {x_num}'s own oracle, link it: ck relink <spec> {x_num} --apply."
                             ),
                         }
                     )

@@ -6,12 +6,17 @@
   depending (transitively) on X.
 - verify-file: X's own **Verify** runs a test file that test Task T owns, and T verifies Y.
 
-The repair is the one the lint message suggests: X becomes a foundation task, and T's tests verify Y
-instead. Concretely: drop T from X's **Verified by** (and X from T's **Verifies**), add T to Y's
-**Verified by** (and Y to T's **Verifies**), and drop X's **Verify** commands that run T's files.
-It is mechanical only when something still verifies X afterwards (a remaining Verify command or
-Verified-by task): with nothing left, the gate would fall back to the full suite, which fails the
-same way, so the repair is refused and a human decides.
+verify-order (the import is proven): X becomes a foundation task, and T's tests verify Y instead.
+Concretely: drop T from X's **Verified by** (and X from T's **Verifies**), add T to Y's **Verified by**
+(and Y to T's **Verifies**), and drop X's **Verify** commands that run T's files. It is mechanical only
+when something still verifies X afterwards (a remaining Verify command or Verified-by task): with
+nothing left, the gate would fall back to the full suite, which fails the same way, so the repair is
+refused and a human decides.
+
+verify-file (only the Verify line names T's file): X's Verify chose that file as its oracle, so the
+missing piece is the link. T also verifies X and X is **Verified by** T: the gate then runs X's own
+Verify and waits for Y only for T's whole suite, and the import-based verify-order check guards the
+case where the file really needs Y once it exists.
 """
 
 import re
@@ -62,6 +67,12 @@ def plan_relink(tasks: Dict[str, SpecTask], project_dir: Path, config: dict, tas
         y_num = str(c.get("needs"))
         if t_num not in tasks or y_num not in tasks:
             return Relink(task, False, f"the cycle names a task that is not in tasks.md ({c.get('message')})", cycles)
+        if c.get("kind") == "verify-file":
+            if t_num not in verified_by[task]:
+                verified_by[task].append(t_num)
+            if task not in verifies[t_num]:
+                verifies[t_num].append(task)
+            continue
         if t_num in verified_by[task]:
             verified_by[task].remove(t_num)
         if task in verifies[t_num]:

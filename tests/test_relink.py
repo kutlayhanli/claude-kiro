@@ -103,7 +103,7 @@ def test_relink_of_a_task_without_a_cycle_is_a_no_op(equity):
     assert unknown.exit_code == 1 and "not in tasks.md" in json.loads(unknown.output)["reason"]
 
 
-def test_relink_fixes_a_verify_file_cycle(tmp_path):
+def test_relink_fixes_a_verify_file_cycle_by_linking_the_oracle(tmp_path):
     """TC-77 shape: Task 8's Verify runs Task 9's file, Task 9 verifies Task 13, 13 depends on 8."""
     write_spec(tmp_path, block(8, "Perf core", files=["src/perf.py"], verify="uv run pytest -q tests/test_core.py` `uv run pytest -q tests/test_perf.py")
                + block(9, "Perf tests", track="test", files=["tests/test_perf.py"], verifies="Task 13")
@@ -113,6 +113,21 @@ def test_relink_fixes_a_verify_file_cycle(tmp_path):
     res = ck(tmp_path, "relink", "sim", "8", "--apply", "--json")
     assert res.exit_code == 0, res.output
     out = json.loads(res.output)
-    assert out["verify"] == {"8": ["uv run pytest -q tests/test_core.py"]}
-    assert out["verifiedBy"] == {"13": ["9"]}
+    # Task 8's Verify chose Task 9's file as its oracle: the missing piece is the link, not the command.
+    assert out["verify"] == {}
+    assert out["verifiedBy"] == {"8": ["9"]}
+    assert out["verifies"] == {"9": ["13", "8"]}
     assert cycles_at(tmp_path, "8") == []
+
+
+def test_relink_links_an_oracle_even_when_it_is_the_only_verify(tmp_path):
+    """The equity Task 75 shape: X's whole Verify is T's files; linking keeps it verified."""
+    write_spec(tmp_path, block(75, "Decay", files=["src/decay.py"], verify="uv run pytest -q tests/test_decay_golden.py", deps="Task 23 (tests first)")
+               + block(23, "Decay and option tests", track="test", files=["tests/test_decay_golden.py", "tests/test_option_golden.py"], verifies="Task 76")
+               + block(76, "Options", files=["src/options.py"], deps="Task 75 (uses decay)", vby="Task 23"))
+    res = ck(tmp_path, "relink", "sim", "75", "--apply", "--json")
+    assert res.exit_code == 0, res.output
+    text = (tmp_path / "specs/sim/tasks.md").read_text()
+    assert "**Verify:** `uv run pytest -q tests/test_decay_golden.py`" in text
+    assert "**Verifies:** Task 76, Task 75" in text
+    assert cycles_at(tmp_path, "75") == []
