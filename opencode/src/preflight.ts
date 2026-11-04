@@ -61,7 +61,7 @@ export interface PreflightResult {
 }
 
 export const MIN_NODE_MAJOR = 20;
-export const MIN_CK_VERSION = "0.10.3";
+export const MIN_CK_VERSION = "0.11.0";
 
 export const VENDOR_GROUPS = [
   "workflows",
@@ -104,7 +104,7 @@ interface Outcome {
 const CK_FIX =
   'Install or upgrade the ck CLI: uv tool install --force "git+https://github.com/kutlayhanli/claude-kiro"';
 
-const MIN_CK: Version = { major: 0, minor: 10, patch: 3 };
+const MIN_CK: Version = { major: 0, minor: 11, patch: 0 };
 
 export async function runPreflight(options: PreflightOptions): Promise<PreflightResult> {
   const env = options.env ?? process.env;

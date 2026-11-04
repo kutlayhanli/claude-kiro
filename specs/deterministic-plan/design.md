@@ -19,7 +19,7 @@ How the PLAN.md decisions shape it:
 - **D5 (layered fallback source).** Script-local `readyTasks` from the `deps` arg
   when present; else the last good plan's `ready`; halt only when neither exists.
 - **D7 (wave-batched review, risky always individual).** One `review` agent per
-  merged wave for all non-risky tasks; each safety/risky task keeps its own review.
+  landing batch for all non-risky tasks, before it merges; each safety/risky task keeps its own review.
 - **D3/D8/D6 (batching in scope, warn-only budget, full degraded marking).**
   Fewer plan triggers, batched reviews/landings, `degraded: true` + fallback count
   in the result, a report section, and `plan_fallbacks` next to the overhead share
@@ -60,15 +60,20 @@ How the PLAN.md decisions shape it:
     `lastGood = { ready, deps, order }` for the dep-less fallback (2.2). A
     fallback view never overwrites `lastGood`. First-attempt or retry success
     counts no fallback (1.4); `planFailures` still increments per failed attempt.
-  - **Review path in `runTask`.** Replace per-task `review` with wave batching:
-    finished tasks wait for the land batch; after `landBatch` reports MERGED, call
-    `reviewGroups(mergedTasks, RISK)` — non-risky tasks go in one `review-wave`
-    agent over the combined diff (label `review-wave <wave> tasks <ids>`, e.g.
-    `review-wave 2 tasks 4 5 7`, mapped to role `reviewer` by `roles.py` per 4.1),
-    each risky task in its own `review` agent (4.1–4.3). A batched `changes` verdict routes only its flagged tasks to
-    revision (4.4); an `approve` records approval on every covered task (4.5). No
-    review agent when the wave merged nothing new (4.6). `REVIEW_SCHEMA` gains an
-    optional `tasks: string[]` echo field so a batched verdict names its coverage.
+  - **Review path (before landing).** `reviewGroups([n], RISK)` decides per task.
+    A risky (`safety`) task keeps the per-task `review` + revise loop in `runTask`,
+    before it lands (4.2). A non-risky task registers in `pendingReview` and queues
+    for landing; `landBatch` first calls `reviewBatch`, which runs one `review-wave`
+    agent over the combined diff of the batch's not-yet-reviewed tasks (label
+    `review-wave <wave> tasks <ids>`, e.g. `review-wave 2 tasks 4 5 7`, mapped to
+    role `reviewer` by `roles.py` per 4.1) before the land step. Approved tasks stay
+    in the batch and land (4.5). Each flagged task leaves the batch unmerged
+    (`REVIEW_CHANGES`, with its own findings); its `runTask` runs the same revise +
+    re-review loop as a risky task and lands it only once approved; blocking
+    findings that survive fail it unmerged (4.4, 4.6). A task re-queued after a
+    conflict, red landing or deferral is not reviewed again, and a batch with no
+    unreviewed task gets no combined review (4.3). `REVIEW_SCHEMA` gains an optional
+    `tasks: string[]` echo field so a batched verdict names its coverage.
   - **Report / return shape.** Result gains `degraded: boolean`,
     `planFallbacks: FallbackEntry[]`, `stats.planFallbacks: number`,
     `stats.planSteps/planFailures` unchanged, and `overhead: { share, threshold,
@@ -199,9 +204,11 @@ covered task ids, so the NFR-4 review count and the overhead reviewer share
 count it as a review agent (4.1).
 
 `REVIEW_SCHEMA` gains `tasks?: string[]` (coverage echo). The scheduler fans a
-batched verdict out to per-task `rec.review` rows: flagged tasks keep their
-blocking findings and go to revision (4.4); unflagged tasks record
-`{ verdict: 'approve', fromBatch: <wave> }` (4.5).
+batched verdict out to per-task `rec.review` rows before the batch lands: flagged
+tasks keep their blocking findings, leave the batch unmerged and go to revision
+(4.4); unflagged tasks record `{ verdict: 'approve', fromBatch: <wave> }` (4.5).
+The review never runs after a merge: a revision is made on the task branch and
+only reaches the target when that branch lands again.
 
 ### Decision Seams
 
@@ -282,10 +289,11 @@ sequenceDiagram
     end
     S->>T: start ready tasks (freed slot + deterministic ready: no plan agent) (3.2, 3.3)
     T-->>S: RESULT (busy/blocked handled as for plan-scheduled tasks) (2.6)
-    L-->>S: MERGED wave
-    S->>S: reviewGroups(merged, risk)
-    S->>R: one review-wave (non-risky combined) + one review per risky task (4.1, 4.2)
-    R-->>S: verdict; flagged tasks -> revision only (4.4); approve -> all covered approved (4.5)
+    S->>R: risky task: its own review + revise loop before it queues (4.2)
+    S->>R: landing batch: one review-wave over its unreviewed non-risky tasks, before landing (4.1, 4.3)
+    R-->>S: verdict; flagged tasks leave the batch -> revise + re-review, then land (4.4, 4.6); approve -> covered approved (4.5)
+    S->>L: land the approved tasks of the batch
+    L-->>S: MERGED
     S->>S: overheadShare(byRole ms) -> overheadWarning (warn-only) (5.4)
 ```
 
@@ -316,8 +324,10 @@ must retry once (1.1), fall back (1.2), complete and report degraded (1.3, 6.1).
   fallback replaces only the ready list, never task-level checks.
 - **3.4 Idle re-read with nothing ready.** One `idle` plan while `idleArmed`;
   disarm after; no re-trigger until a landing completes or a task record arrives.
-- **4.4 Batched `changes`.** Only flagged tasks revise; unflagged tasks of the
-  same wave keep their approval path. Batched `approve` (4.5) approves all covered.
+- **4.4 Batched `changes`.** Only flagged tasks revise, outside the landing
+  queue, and land after their re-review; unflagged tasks of the same batch land at
+  once. Batched `approve` (4.5) approves all covered. Findings that survive the
+  revisions fail the task unmerged (4.6).
 - **5.4 Overhead above threshold.** `overhead.warned = true` in result + report
   warning line; never halts, fails or retries (NFR-5).
 - **Cycles / red target / guards / protected paths.** Unchanged from
@@ -378,10 +388,10 @@ existing dogfood byte-identity test.
 | 3.6 | `SCRIPT_READINESS` false → plan on `freed`/`finished` (landing-speed fallback path) |
 | 4.1 | `reviewGroups` batched set → one `review-wave <wave> tasks ...` agent over the combined diff; `roles.py` maps that label to `reviewer` |
 | 4.2 | `reviewGroups` risky (`safety`) → always individual review |
-| 4.3 | Risky-only wave → `batched` empty → no combined review |
-| 4.4 | Batched `changes` → only flagged tasks revise; rest unaffected |
+| 4.3 | Batch with no unreviewed non-risky task (risky only, or re-queued) → no combined review |
+| 4.4 | Batched `changes` → flagged tasks leave the batch, revise and re-review, then land; rest land unaffected |
 | 4.5 | Batched `approve` → approval recorded for every covered task |
-| 4.6 | Empty merged wave → no review agent |
+| 4.6 | Blocking findings after the revisions → task fails, never merges |
 | 5.1 | Result `degraded` + `planFallbacks[]`; report fallback section |
 | 5.2 | `show.run_breakdown`/`render_run`: `plan_fallbacks` + overhead share lines |
 | 5.3 | `show.run_json`: `planFallbacks` + `overhead` with identical values |

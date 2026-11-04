@@ -487,9 +487,9 @@ await test('TC-19 risky-only wave: each risky task reviewed individually, no com
     assert.equal(individualLabels(p.state.events).filter(l => l === `review ${n}`).length, 1, `risky task ${n} gets exactly one individual review`)
   }
   assert.ok(!batchLabels(p.state.events).some(l => covers(p, l).some(n => n === '2' || n === '3')), 'no combined review covers the risky-only wave')
-  // Reviews happen after the wave merges, not per task before landing.
+  // A risky task is reviewed alone before it lands (4.2).
   for (const n of ['2', '3']) {
-    assert.ok(idx(p.state, `review ${n}`) > idx(p.state, landEndOf(p, n)), `review ${n} runs after its wave merged`)
+    assert.ok(idx(p.state, `review ${n} end`) < idx(p.state, landEndOf(p, n)), `review ${n} ends before its landing`)
   }
 })
 
@@ -511,6 +511,11 @@ await test('TC-20 batched changes flags one task: only task 3 revises, 2/4 appro
   }
   const covering = n => reviewLabels(p.state.events).filter(l => (p.state.reviewTasks[l] || []).includes(n))
   assert.equal(covering('3').length, 2, 'only the flagged task is re-reviewed (batch + re-review)')
+  // The flagged task left the batch unmerged and lands only after its revision and
+  // re-review, so the revision is what merges (4.4).
+  assert.notEqual(landEndOf(p, '3'), landEndOf(p, '2'), 'the flagged task did not land with its batch')
+  assert.ok(idx(p.state, 'task 3 revise 1 end') < idx(p.state, landEndOf(p, '3')), 'task 3 lands after its revision')
+  assert.ok(idx(p.state, 'review 3 round 2 end') < idx(p.state, landEndOf(p, '3')), 'task 3 lands after its re-review')
   for (const n of ['2', '4']) {
     assert.equal(covering(n).length, 1, `unflagged task ${n} is reviewed once (the batch only)`)
   }
@@ -537,17 +542,19 @@ await test('TC-21 batched approve records approval for every covered task (4.5)'
   }
 })
 
-await test('TC-22 no wave merged: an unmerged task gets no review (4.6)', async () => {
+await test('TC-22 a task that never lands is reviewed once, and no batch review is empty (4.3)', async () => {
   const deps = { 1: [], 2: [] }
-  // Task 2 is protected: its landing never merges, so no wave containing it merges.
+  // Task 2 is protected: its landing never merges. It is reviewed before it lands, like
+  // every task, but only once, and no batch review runs without an unreviewed task.
   const p = project({ deps, durations: { 1: 10, 2: 50 }, mergeDurations: { 1: 300 }, protectedTasks: ['2'] })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: reviewArgs(deps) })
   assert.deepEqual(result.merged.sort(), ['1'], 'only the unprotected task merged')
   assert.ok(!result.merged.includes('2'), 'the protected task never merged')
   const covering2 = reviewLabels(p.state.events).filter(l => (p.state.reviewTasks[l] || []).includes('2'))
-  assert.deepEqual(covering2, [], 'no review agent is requested for the unmerged task (no empty batched review)')
-  // The reviews are on: the merged wave was reviewed.
-  assert.equal(batchesCovering(p, ['1']).length, 1, 'the merged wave still gets its batched review')
+  assert.equal(covering2.length, 1, `the unmerged task is reviewed once, before its landing (saw: ${covering2})`)
+  assert.ok(idx(p.state, `${covering2[0]} end`) < idx(p.state, p.state.events.find(e => e.startsWith('land ') && e.slice(5).split(' ').includes('2'))), 'its review ends before its landing starts')
+  for (const l of batchLabels(p.state.events)) assert.ok(covers(p, l).length > 0, `batch review ${l} covers at least one task`)
+  assert.equal(batchesCovering(p, ['1']).length, 1, 'the merged task got its batched review')
 })
 
 await test('TC-26 overhead above threshold warns without halting/failing/retrying (5.4)', async () => {

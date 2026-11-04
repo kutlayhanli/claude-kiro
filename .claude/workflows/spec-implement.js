@@ -66,6 +66,10 @@ const MAX_CONCURRENT = A.maxConcurrent && A.maxConcurrent > 0 ? A.maxConcurrent 
 const FULL_EVERY = Number.isInteger(A.fullGateEvery) ? A.fullGateEvery : 10
 const MERGE_BATCH = Number.isInteger(A.mergeBatch) && A.mergeBatch > 0 ? A.mergeBatch : 4
 const INTERACTIVE = A.interactive === true || A.interactive === 'true'
+// Progress and ETA (run-followups): the skill runs `ck progress begin` and passes its run key and start line. Without
+// a run key no prompt carries a progress flag and nothing else changes. No clock or timer code here.
+const PROGRESS_RUN = typeof A.progressRun === 'string' && A.progressRun ? A.progressRun : null
+const ETA_LINE = typeof A.etaLine === 'string' && A.etaLine ? A.etaLine : null
 const BRIEF = !A.brief
   ? `${ROOT}/.claude/workflows/spec-implement-brief.md`
   : String(A.brief).startsWith('/') ? String(A.brief) : `${ROOT}/${String(A.brief).replace(/^\.\//, '')}`
@@ -273,6 +277,7 @@ const LAND = {
       items: { type: 'object', properties: { tasks: { type: 'array', items: { type: 'string' } }, green: { type: 'boolean' }, seconds: { type: 'number' } }, required: ['tasks', 'green'] },
     },
     bisected: { type: 'boolean' },
+    eta: { type: 'string', description: 'the eta field from the JSON, copied as is' },
     startedAt: { type: 'string' },
     finishedAt: { type: 'string' },
     error: { type: 'string', description: 'only if the command printed no JSON (or was refused): what happened' },
@@ -342,8 +347,12 @@ const MANDATE = `MANDATE: The user ran /spec:implement ${SPEC}, which instructs 
 
 // --- prompts -----------------------------------------------------------------
 
+// The progress flags a claim command carries: event is task-start, retry, escalation, revision, landfix or resolve.
+const claimFlags = (event, opts, attempt) => (PROGRESS_RUN ? ` --progress-run ${PROGRESS_RUN} --progress-event ${event} --progress-model ${(opts && opts.model) || 'inherit'} --attempt ${attempt}` : '')
+const planFlags = () => (PROGRESS_RUN ? ` --progress-run ${PROGRESS_RUN}${failed.size ? ` --failed ${[...failed.keys()].join(',')}` : ''}` : '')
+
 const planPrompt = exclude => `Mechanical planning step for spec ${SPEC}. Do exactly this, nothing else. ${GIT_NOTE}
-Run:  ck -C ${TARGET} plan ${SPEC} --json${exclude.length ? ` --exclude ${exclude.join(',')}` : ''}
+Run:  ck -C ${TARGET} plan ${SPEC} --json${exclude.length ? ` --exclude ${exclude.join(',')}` : ''}${planFlags()}
 Copy into your answer: "done", "remaining", "deps", "ready", "cycles", and for "verifyCycles" only each entry's task and message. "ready", "done" and "remaining" hold task numbers (e.g. "12"), never worktree paths.
 Return the fields. Put a message in error only if the command itself failed to run; no notes or remarks anywhere.`
 
@@ -361,24 +370,24 @@ const GUARD_NOTE = 'If a hook denies a command or edit with a "[ck guard]" messa
 const DECISION = n => `${WT(n)}.decision.md`
 const READ_DECISION = n => `Before anything else, read ${DECISION(n)} if it exists: my decision on this task's guard conflict. Follow it.\n`
 
-const taskPrompt = n => `${MANDATE}${READ_DECISION(n)}Your task: Task ${n} of spec ${SPEC}${TITLES[n] ? ` ("${TITLES[n]}")` : ''}.
+const taskPrompt = (n, cf = '') => `${MANDATE}${READ_DECISION(n)}Your task: Task ${n} of spec ${SPEC}${TITLES[n] ? ` ("${TITLES[n]}")` : ''}.
 Worktree: ${WT(n)} (branch ${BR(n)}). Target branch for the final merge: ${INTO}.
 First run "${NOW}" and keep the output as startedAt. Then read your operating brief at ${BRIEF} and follow it exactly: create and claim the worktree, implement per your track, get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" passing, merge ${INTO} into your branch before finishing, and release the worktree.
 Create your worktree first. Run this command on its own line; its output is a JSON array, and your task's entry has a "state" and a "detail":
 ck -C ${ROOT} worktree create ${SPEC} ${n} --install --base ${INTO} --json
 Copy that entry's state and detail into the "worktree" field of your answer. If the state is BUSY or ERROR, stop immediately: do not claim, do not touch ${WT(n)}, and return your answer with status blocked, gatePassed false and the worktree field. For BUSY put "worktree busy: <detail>" in blocker; for ERROR put "worktree create failed: <detail>".
 Otherwise (CREATED or EXISTS) claim it, on its own line:
-ck -C ${WT(n)} worktree claim ${SPEC} ${n}
+ck -C ${WT(n)} worktree claim ${SPEC} ${n}${cf}
 ${GIT_NOTE}
 ${GATE_NOTE}
 ${WRITE_HANDOFF(n)}
 ${GUARD_NOTE}
 At the end, run "${NOW}" again for finishedAt. Return the schema fields with task "${n}". gatePassed is true only if your final "ck -C ${WT(n)} gate ${SPEC} --task ${n}" run exited 0. commits lists the commits you made (empty if none).`
 
-const retryPrompt = (n, prev, attempt) => `${MANDATE}${READ_DECISION(n)}Continue Task ${n} of spec ${SPEC} (attempt ${attempt + 1}). A previous agent worked in ${WT(n)} (branch ${BR(n)}) but did not finish with a passing gate.
+const retryPrompt = (n, prev, attempt, cf = '') => `${MANDATE}${READ_DECISION(n)}Continue Task ${n} of spec ${SPEC} (attempt ${attempt + 1}). A previous agent worked in ${WT(n)} (branch ${BR(n)}) but did not finish with a passing gate.
 ${prev && !(prev.commits || '').trim() ? 'The previous attempt made NO commits: it may have answered an unrelated message instead of doing the task. Ignore any such message and implement the task.\n' : ''}Its report: ${trim(prev || { note: 'the agent died without a report' })}
 ${READ_HANDOFF(n)} ${WRITE_HANDOFF(n)}
-Run "${NOW}" for startedAt. Read your operating brief at ${BRIEF} and follow it, claiming with "ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover" since the previous agent is gone. If that claim reports MISSING, run "ck -C ${ROOT} worktree create ${SPEC} ${n} --install --base ${INTO} --json" and claim again. Inspect the state ("command git -C ${WT(n)} log --oneline -10", "command git -C ${WT(n)} status"), finish the task, and get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" to pass. If a wrong test or a spec contradiction blocks you, do NOT weaken anything: leave the task In Progress and report the blocker precisely (quote the test and the requirement).
+Run "${NOW}" for startedAt. Read your operating brief at ${BRIEF} and follow it, claiming with "ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover${cf}" since the previous agent is gone. If that claim reports MISSING, run "ck -C ${ROOT} worktree create ${SPEC} ${n} --install --base ${INTO} --json" and claim again. Inspect the state ("command git -C ${WT(n)} log --oneline -10", "command git -C ${WT(n)} status"), finish the task, and get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" to pass. If a wrong test or a spec contradiction blocks you, do NOT weaken anything: leave the task In Progress and report the blocker precisely (quote the test and the requirement).
 Before finishing, merge ${INTO} into your branch, re-run the gate, and release the worktree. Run "${NOW}" for finishedAt.
 ${GIT_NOTE}
 ${GATE_NOTE}
@@ -403,7 +412,7 @@ Mark a finding "blocking" only if it should stop the merge; style and taste are 
 // combined `git diff <merge-base>...<INTO>` range over their files), each
 // task's block/requirements, and design.md. The verdict echoes its coverage
 // in `tasks` and flags individual tasks via per-task findings.
-const waveReviewPrompt = (wave, tasks) => `Review Wave ${wave} of spec ${SPEC} before it is done: non-risky Tasks ${tasks.join(', ')} merged together into ${INTO}. You review; you do not edit, commit, or run the test suite.
+const waveReviewPrompt = (wave, tasks) => `Review Wave ${wave} of spec ${SPEC} before it merges: non-risky Tasks ${tasks.join(', ')} are about to land together into ${INTO}. You review; you do not edit, commit, or run the test suite.
 ${GIT_NOTE}
 1. Read the combined change: ${tasks.map(n => `command git -C ${WT(n)} diff ${INTO}...${BR(n)}`).join('; ')} (and each file list with --stat), or the combined range \`git diff <merge-base>...${INTO}\` over their files.
 2. Read each task's block in specs/${SPEC}/tasks.md, the requirements it covers in requirements.md, and design.md (interfaces, file paths, error handling).
@@ -417,10 +426,10 @@ Test tasks written in parallel drift apart: two test files can each look right o
 3. For each model, endpoint and status set those tests touch, compare how every test file uses it, with each other and with design.md.
 Report each disagreement with both files and lines and the design text. It is "blocking" when two tests (or a test and design.md) cannot both be satisfied by one implementation; otherwise "minor". verdict is "changes" only if there is at least one blocking finding. In summary, list the models and endpoints you compared.`
 
-const revisePrompt = (n, review, round) => `${MANDATE}${READ_DECISION(n)}Revise Task ${n} of spec ${SPEC} (review round ${round}). The task's gate passed, but the reviewer found blocking problems:
+const revisePrompt = (n, review, round, cf = '') => `${MANDATE}${READ_DECISION(n)}Revise Task ${n} of spec ${SPEC} (review round ${round}). The task's gate passed, but the reviewer found blocking problems:
 ${trim(review && review.findings, FINDINGS_LIMIT)}
 ${READ_HANDOFF(n)} ${WRITE_HANDOFF(n)}
-Worktree: ${WT(n)} (branch ${BR(n)}). Run "${NOW}" for startedAt. Claim with "ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover", fix each blocking finding without weakening any test or editing requirements.md or existing test-plan.md rows, get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" passing again, merge ${INTO} into your branch, re-run the gate, and release the worktree. If a finding is wrong (it contradicts the spec), do not change the code for it: say why in deviations. Run "${NOW}" for finishedAt.
+Worktree: ${WT(n)} (branch ${BR(n)}). Run "${NOW}" for startedAt. Claim with "ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover${cf}", fix each blocking finding without weakening any test or editing requirements.md or existing test-plan.md rows, get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" passing again, merge ${INTO} into your branch, re-run the gate, and release the worktree. If a finding is wrong (it contradicts the spec), do not change the code for it: say why in deviations. Run "${NOW}" for finishedAt.
 ${GIT_NOTE}
 ${GATE_NOTE}
 ${GUARD_NOTE}
@@ -437,23 +446,23 @@ Copy "parked", "notification" and "detail" exactly as printed. A non-zero exit i
 // Landing is one ck command: it prechecks with git merge-tree, merges the batch,
 // gates it in-process, and bisects a red batch by itself. The agent only runs it.
 const landPrompt = tasks => `Landing step for spec ${SPEC}: run ONE command and copy its JSON output. Nothing else: no git commands, no fixes, no retries, no edits. ${GIT_NOTE}
-Command:  ck -C ${ROOT} worktree land ${SPEC} ${tasks.join(' ')} --into ${INTO} --gate --install --release --json
+Command:  ck -C ${ROOT} worktree land ${SPEC} ${tasks.join(' ')} --into ${INTO} --gate --install --release${PROGRESS_RUN ? ` --progress-run ${PROGRESS_RUN}` : ''} --json
 It merges the tasks into ${INTO}, gates them, and bisects a red batch itself. ${GATE_NOTE} The same holds for this command, which runs the gate: wait for its EXIT line.
-A non-zero exit is normal (1: a task is RED, 2: a CONFLICT, 3: busy, missing or PROTECTED); still copy the JSON. Copy "tasks" (every entry: task, state, detail, files, checkGreen, checkTail, mergedAt), "gates", "bisected", "startedAt" and "finishedAt" exactly as printed. Put a message in error only if the command printed no JSON (say what it printed, or that it was refused).`
+A non-zero exit is normal (1: a task is RED, 2: a CONFLICT, 3: busy, missing or PROTECTED); still copy the JSON. Copy "tasks" (every entry: task, state, detail, files, checkGreen, checkTail, mergedAt), "gates", "bisected", "startedAt" and "finishedAt" exactly as printed.${PROGRESS_RUN ? ' Copy "eta", the eta field from the JSON, as is (leave it out if the JSON has none).' : ''} Put a message in error only if the command printed no JSON (say what it printed, or that it was refused).`
 
-const resolvePrompt = (n, files) => `Merge conflict for Task ${n} of spec ${SPEC}: ${BR(n)} conflicts with ${INTO}${files ? ` (${files})` : ''}. ${INTO} was not touched. ${GIT_NOTE} ${GATE_NOTE}
+const resolvePrompt = (n, files, cf = '') => `Merge conflict for Task ${n} of spec ${SPEC}: ${BR(n)} conflicts with ${INTO}${files ? ` (${files})` : ''}. ${INTO} was not touched. ${GIT_NOTE} ${GATE_NOTE}
 1. Resolve it in the TASK WORKTREE, never in ${TARGET}:
-     ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover
+     ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover${cf}
      command git -C ${WT(n)} merge ${INTO}
    Resolve each conflicted file keeping both sides' intent: tasks.md, keep both sides' task sections; dependency manifests, take the union and re-lock (e.g. "uv lock"); test files, keep every test and assertion from both sides and never weaken one. Read the spec (specs/${SPEC}/design.md, requirements.md) when the two sides disagree about behaviour.
 2. In the worktree, "ck -C ${WT(n)} gate ${SPEC} --task ${n}" must pass. Commit the merge, then run "ck -C ${WT(n)} worktree release ${SPEC} ${n}".
 3. Do NOT merge into ${INTO} yourself: the workflow lands the task again.
 Return resolved, conflicts (the files and how you resolved them), and error if it is not resolved.`
 
-const landFixPrompt = (k, n, tail) => `${MANDATE}Task ${n} of spec ${SPEC} passed its own gate, but landing it on ${INTO} turns the gate red, so it was NOT merged (${INTO} stays green without it). Failure: ${trim(tail, 4000)}
+const landFixPrompt = (k, n, tail, cf = '') => `${MANDATE}Task ${n} of spec ${SPEC} passed its own gate, but landing it on ${INTO} turns the gate red, so it was NOT merged (${INTO} stays green without it). Failure: ${trim(tail, 4000)}
 ${READ_HANDOFF(n)} ${WRITE_HANDOFF(n)}
 Fix it without weakening any test and without editing requirements.md or existing test-plan.md rows. ${GIT_NOTE} ${GATE_NOTE}
-1. Work only in the task worktree ${WT(n)} (branch ${BR(n)}). Claim it: ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover
+1. Work only in the task worktree ${WT(n)} (branch ${BR(n)}). Claim it: ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover${cf}
 2. Bring in the target: command git -C ${WT(n)} merge ${INTO}  (resolve any conflict keeping both sides' tests).
 3. Reproduce the failing check in the worktree, fix the code (or a clearly broken fixture or harness), commit with a message starting "fix:", and get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" passing.
 4. Release: ck -C ${WT(n)} worktree release ${SPEC} ${n}. Do NOT merge into ${INTO}: the workflow lands the task again (fix number ${k}).
@@ -718,11 +727,10 @@ let landingBusy = false
 let landingIdle = Promise.resolve()
 let batchWindow = MERGE_BATCH
 const landings = []
-// Wave-batched review (4.1-4.6): tasks whose implement step succeeded register
-// here before landing; the landBatch that merges them runs the wave review
-// (one review-wave agent for non-risky tasks, one review agent per risky task)
-// before resolving the batch, so rec.review is set when landTask returns.
-const pendingReview = new Map()  // n -> { rec, r } implement result awaiting its merge wave's review
+// Batch review before landing (4.1-4.6): non-risky tasks whose implement step
+// succeeded register here; the landBatch they join reviews them together before
+// it merges (reviewBatch). Safety tasks are reviewed individually in runTask.
+const pendingReview = new Map()  // n -> { rec, reviewed } awaiting (or past) its batch review
 let reviewWaveCount = 0          // review-wave label counter (review-wave <n> tasks ...)
 const MAX_RESOLVES = 3
 // Cross-test consistency (reviewer.cross_test): one check per wave of test tasks,
@@ -1057,6 +1065,10 @@ function pumpLandings() {
 }
 
 async function landBatch(batch) {
+  if (REVIEW_ON) {
+    batch = await reviewBatch(batch)
+    if (!batch.length) return
+  }
   const tasks = batch.map(b => b.n)
   const used = batchWindow
   let res = null
@@ -1065,6 +1077,7 @@ async function landBatch(batch) {
   } catch (e) {
     res = { tasks: [], error: e && e.message }
   }
+  if (PROGRESS_RUN) log(res && typeof res.eta === 'string' && res.eta ? res.eta : 'ETA unavailable')
   const byTask = {}
   for (const t of (res && res.tasks) || []) byTask[String(t.task)] = t
   const entry = { tasks, size: tasks.length, window: used, merged: [], red: [], conflict: [], deferred: [], other: [], gates: ((res && res.gates) || []).length, bisected: !!(res && res.bisected), minutes: minutes(res && res.startedAt, res && res.finishedAt) }
@@ -1108,12 +1121,38 @@ async function landBatch(batch) {
     requestPlan('landing')
     poke()
   }
-  // Wave-batched review (4.1-4.6): the merged tasks of this batch are reviewed
-  // as a wave before the batch resolves — one review-wave agent for the
-  // non-risky tasks, one review agent per risky task, nothing when the wave
-  // merged nothing new. rec.review rows are fanned out before landTask returns.
-  if (REVIEW_ON && entry.merged.length) await reviewMergedWave(entry.merged)
   for (const [b, t] of outcomes) b.resolve(t)
+}
+
+// Batch review before landing (4.1, 4.3-4.6): one review-wave agent reads the
+// combined change of the batch's not-yet-reviewed non-risky tasks before any
+// of them merges. Approved tasks stay in the batch; each flagged task leaves it
+// unmerged with state REVIEW_CHANGES and its own findings, and its runTask
+// revises and re-reviews it alone (in parallel, not in the landing queue).
+// Safety tasks were reviewed individually in runTask and are not in
+// pendingReview; re-queued tasks (conflict, red, deferred) are not reviewed twice.
+async function reviewBatch(batch) {
+  const ids = batch.map(b => b.n).filter(n => pendingReview.has(n) && !pendingReview.get(n).reviewed)
+  if (!ids.length) return batch
+  const waveNo = ++reviewWaveCount
+  let review = null
+  try {
+    review = await call('review-wave', waveReviewPrompt(waveNo, ids), { label: `review-wave ${waveNo} tasks ${ids.join(' ')}`, phase: phaseOf(ids[0]), schema: REVIEW_SCHEMA, ...REVIEW })
+  } catch (e) {
+    review = null
+  }
+  for (const n of ids) pendingReview.get(n).reviewed = true
+  const flagged = flaggedOf(review, ids)
+  for (const n of ids.filter(t => !flagged.includes(t))) setBatchApproval(n, review, waveNo, ids)
+  if (!review) log(`Review wave ${waveNo}: the review agent returned nothing; landing Tasks ${ids.join(', ')} unreviewed`)
+  const keep = []
+  for (const b of batch) {
+    if (!flagged.includes(b.n)) { keep.push(b); continue }
+    const findings = (review.findings || []).filter(f => f && (f.task == null || String(f.task) === b.n))
+    log(`Task ${b.n}: review wave ${waveNo} asked for changes; revising before it lands`)
+    b.resolve({ task: b.n, state: 'REVIEW_CHANGES', review: { ...review, findings, fromBatch: waveNo } })
+  }
+  return keep
 }
 
 // Which batched tasks a batched verdict flags for revision (4.4): findings
@@ -1138,122 +1177,6 @@ function setBatchApproval(n, review, waveNo, batched) {
     : { verdict: 'unreviewed', rounds: 0, fromBatch: waveNo, tasks: [...batched], ...by }
 }
 
-// Guard-ladder climb for a post-merge revision that guard-stopped (S17,
-// preserved post-merge: the task already merged, so a stop exhausted through
-// the top records the verdict and keeps the merge instead of parking).
-async function climbTaskGuard(n, slot, attempted) {
-  slot.guard = slot.guard || { tried: new Set(), k: 0 }
-  const { rec } = slot
-  for (const model of guardLadder(attempted)) {
-    if (slot.guard.tried.has(model)) continue
-    slot.guard.tried.add(model)
-    slot.guard.k++
-    log(`Task ${n}: guard stop, trying ${model} (guard ${slot.guard.k})`)
-    let r = await call('task', retryPrompt(n, slot.r, rec.attempts - slot.guard.k), { label: `${label(n)} guard ${slot.guard.k} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
-    slot.r = r
-    rec.result = r
-    rec.finishedAt = r && r.finishedAt
-    rec.attempts++
-    rec.escalations.push({ stage: 'guard', model })
-    rec.startedAt = rec.startedAt || (r && r.startedAt)
-    if (!guardStopOf(r)) break
-  }
-  return slot.r
-}
-
-// Post-merge review/revise loop shared by wave-flagged tasks (4.4) and
-// risky-individual tasks (4.2): the first verdict (batch or individual) is
-// round 0, each `changes` routes the task alone to revision and re-review,
-// escalating surviving blocking findings up the ladder like the old pre-land
-// loop. A revision that guard-stops climbs the ladder before the review goes
-// on. Records rec.review; the task stays merged whatever the verdict.
-async function polishReview(n, first, opts) {
-  const slot = pendingReview.get(n)
-  if (!slot) return null
-  const { rec } = slot
-  let r = slot.r
-  let round = 0
-  let cur = first
-  const record = () => {
-    const by = { model: opts.model || 'inherited', effort: opts.effort || 'inherited', riskTag: rec.riskTag }
-    rec.review = cur
-      ? { verdict: cur.verdict, rounds: round, findings: cur.findings, summary: cur.summary, ...by }
-      : { verdict: 'unreviewed', rounds: round, ...by }
-  }
-  const revised = async (prompt, lbl, o) => {
-    working.add(n)  // a revision takes a slot but never waits for one: the task is nearly done
-    r = await call('revise', prompt, { label: lbl, phase: phaseOf(n), schema: RESULT, ...o })
-    slot.r = r
-    rec.result = r
-    rec.finishedAt = r && r.finishedAt
-    releaseSlot(n)
-  }
-  // Returns true when a guard stop exhausted the ladder (caller records).
-  const climbOnGuardStop = async model => {
-    if (!guardStopOf(r)) return false
-    await climbTaskGuard(n, slot, model)
-    r = slot.r
-    if (guardStopOf(r)) {
-      log(`Task ${n}: guard stop through the top of the ladder post-merge; keeping the merge and recording the verdict`)
-      record()
-      return true
-    }
-    return false
-  }
-  while (cur && cur.verdict === 'changes' && round < REVIEW_ROUNDS && ok(r)) {
-    round++
-    log(`Task ${n}: reviewer asked for changes, revision ${round}/${REVIEW_ROUNDS}`)
-    await revised(revisePrompt(n, cur, round), `${label(n)} revise ${round}`, codeOpts(n))
-    if (await climbOnGuardStop(codeOpts(n).model)) return cur
-    if (ok(r)) cur = await call('review', reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts })
-  }
-  for (const model of ladderOf(n)) {
-    if (!(cur && cur.verdict === 'changes' && ok(r))) break
-    round++
-    log(`Task ${n}: blocking findings remain, escalating the revision to ${model}`)
-    await revised(revisePrompt(n, cur, round), `${label(n)} revise ${round} (${model})`, escalated(codeOpts(n), model))
-    if (await climbOnGuardStop(model)) return cur
-    rec.escalations.push({ stage: 'revise', model })
-    if (ok(r)) cur = await call('review', reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts })
-  }
-  record()
-  return cur
-}
-
-// Review one merged wave (4.1-4.3, 4.6): non-risky tasks share a single
-// review-wave agent over the combined diff; each risky task is reviewed
-// individually with the risky reviewer settings. A risky-only wave gets no
-// combined review; an empty wave gets no review at all.
-async function reviewMergedWave(merged) {
-  const groups = reviewGroups({ merged, risk: RISK })
-  const batched = groups.batched.filter(n => pendingReview.has(n))
-  const individual = groups.individual.filter(n => pendingReview.has(n))
-  if (!batched.length && !individual.length) return
-  if (batched.length) {
-    const waveNo = ++reviewWaveCount
-    let review = null
-    try {
-      review = await call('review-wave', waveReviewPrompt(waveNo, batched), { label: `review-wave ${waveNo} tasks ${batched.join(' ')}`, phase: phaseOf(batched[0]), schema: REVIEW_SCHEMA, ...REVIEW })
-    } catch (e) {
-      review = null
-    }
-    const flagged = flaggedOf(review, batched)
-    for (const n of flagged) await polishReview(n, review, REVIEW)
-    for (const n of batched.filter(t => !flagged.includes(t))) setBatchApproval(n, review, waveNo, batched)
-  }
-  for (const n of individual) {
-    const slot = pendingReview.get(n)
-    if (!slot) continue
-    let review = null
-    try {
-      review = await call('review', reviewPrompt(n, slot.r), { label: `review ${n}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
-    } catch (e) {
-      review = null
-    }
-    await polishReview(n, review, reviewOpts(n))
-  }
-}
-
 // Land task n: queue it, then handle what the landing says. CONFLICT goes to the
 // resolver and RED to the fixer (then up its ladder); both re-queue the task.
 async function landTask(n, rec) {
@@ -1267,12 +1190,13 @@ async function landTask(n, rec) {
       if (lastEscalation) lastEscalation.green = true
       return { merged: true, mergedAt: t.mergedAt, checkGreen: t.checkGreen }
     }
+    if (t.state === 'REVIEW_CHANGES') return { merged: false, review: t.review }
     if (t.state === 'CONFLICT') {
       if (resolves >= MAX_RESOLVES) return { merged: false, error: `still conflicting after ${resolves} resolution(s): ${(t.files || []).join(', ')}` }
       resolves++
       rec.resolves = resolves
       log(`Task ${n}: conflicts with ${INTO}, handing it to the resolver`)
-      const r = await call('resolve', resolvePrompt(n, (t.files || []).join(', ') || t.detail), { label: `resolve ${n}${resolves > 1 ? ` round ${resolves}` : ''}`, phase: phaseOf(n), schema: RESOLVED, ...RESOLVE })
+      const r = await call('resolve', resolvePrompt(n, (t.files || []).join(', ') || t.detail, claimFlags('resolve', RESOLVE, resolves)), { label: `resolve ${n}${resolves > 1 ? ` round ${resolves}` : ''}`, phase: phaseOf(n), schema: RESOLVED, ...RESOLVE })
       if (!r || !r.resolved) return { merged: false, error: `conflict not resolved: ${(r && r.error) || 'no result'}` }
       continue
     }
@@ -1286,7 +1210,7 @@ async function landTask(n, rec) {
         fixCount++
         rec.fixes = fixes
         log(`Task ${n}: red on landing (not merged; ${INTO} stays green), fix ${fixes}${model ? ` on ${model}` : ''}`)
-        const f = await call('fix', landFixPrompt(fixCount, n, failure), { label: `fix ${fixCount} (Task ${n} red on landing)${model ? ` [${model}]` : ''}`, phase: phaseOf(n), schema: VERIFY, ...(model ? escalated(FIX, model) : FIX) })
+        const f = await call('fix', landFixPrompt(fixCount, n, failure, claimFlags(model ? 'escalation' : 'landfix', model ? escalated(FIX, model) : FIX, fixes)), { label: `fix ${fixCount} (Task ${n} red on landing)${model ? ` [${model}]` : ''}`, phase: phaseOf(n), schema: VERIFY, ...(model ? escalated(FIX, model) : FIX) })
         if (model) { lastEscalation = { what: `landing Task ${n}`, model, green: false }; fixerEscalations.push(lastEscalation) }
         fixedGreen = !!(f && f.green)
         if (!fixedGreen) failure = (f && f.failing) || failure
@@ -1310,7 +1234,7 @@ async function runTask(n) {
     log(`Task ${n}: risk ${rec.riskTag}${COMPLEXITY[n] ? `, complexity ${String(COMPLEXITY[n]).toLowerCase()}` : ''}, start ${desc(codeOpts(n))}${routed ? ' (routed)' : ''}${up(ladderOf(n))}, review ${REVIEW_ON ? desc(reviewOpts(n)) : 'off'}`)
   }
   try {
-    let r = await call('task', taskPrompt(n), { label: label(n), phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
+    let r = await call('task', taskPrompt(n, claimFlags('task-start', codeOpts(n), 1)), { label: label(n), phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
     let lastModel = codeOpts(n).model
     let stop = guardStopOf(r)   // set after every call; a guard stop leaves the retry, escalate and revise loops at once
     let guardK = 0
@@ -1324,7 +1248,7 @@ async function runTask(n) {
         triedGuard.add(model)
         guardK++
         log(`Task ${n}: guard stop, trying ${model} (guard ${guardK})`)
-        r = await call('task', retryPrompt(n, r, retryNo()), { label: `${label(n)} guard ${guardK} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
+        r = await call('task', retryPrompt(n, r, retryNo(), claimFlags('escalation', escalated(codeOpts(n), model), rec.attempts + 1)), { label: `${label(n)} guard ${guardK} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
         rec.attempts++
         rec.escalations.push({ stage: 'guard', model })
         rec.startedAt = rec.startedAt || (r && r.startedAt)
@@ -1382,7 +1306,7 @@ async function runTask(n) {
     for (;;) {
       while (!ok(r) && !stop && retryNo() <= MAX_RETRIES && !busy(r)) {
         log(`Task ${n}: ${r && !(r.commits || '').trim() ? 'no commits' : 'gate not passed'}, retry ${retryNo()}/${MAX_RETRIES}`)
-        r = await call('task', retryPrompt(n, r, retryNo()), { label: `${label(n)} retry ${retryNo()}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
+        r = await call('task', retryPrompt(n, r, retryNo(), claimFlags('retry', codeOpts(n), retryNo() + 1)), { label: `${label(n)} retry ${retryNo()}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
         rec.attempts++
         lastModel = codeOpts(n).model
         stop = guardStopOf(r)
@@ -1391,7 +1315,7 @@ async function runTask(n) {
       while (escIdx < rungs.length && !ok(r) && !stop && !busy(r)) {
         const model = rungs[escIdx++]
         log(`Task ${n}: still failing after ${retryNo()} attempt(s), escalating to ${model}`)
-        r = await call('task', retryPrompt(n, r, retryNo()), { label: `${label(n)} retry ${retryNo()} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
+        r = await call('task', retryPrompt(n, r, retryNo(), claimFlags('escalation', escalated(codeOpts(n), model), retryNo() + 1)), { label: `${label(n)} retry ${retryNo()} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
         rec.attempts++
         rec.escalations.push({ stage: 'retry', model })
         lastModel = model
@@ -1409,16 +1333,84 @@ async function runTask(n) {
       rec.reason = bo.reason
     }
     releaseSlot(n)
-    // The review runs post-merge as a wave in landBatch (4.1-4.6), not here:
-    // register the implement result so the merge wave can review from it.
+    // Review before landing (4.1-4.6). A safety task is reviewed alone, here. A
+    // non-risky task is reviewed with the other unreviewed tasks of its landing
+    // batch (reviewBatch, in landBatch) before that batch merges; one it flags
+    // comes back here (m.review) and goes through the same revise loop. A task
+    // whose blocking findings survive the loop never merges.
+    // reviewLoop returns { exit } when runTask must return that value, else null.
+    const reviewLoop = async (first, opts) => {
+      let review = first
+      let round = 0
+      // A revision that guard-stops climbs the ladder before the review goes on.
+      const revised = async (prompt, lbl, o, model) => {
+        working.add(n)  // a revision takes a slot but never waits for one: the task is nearly done
+        r = await call('revise', prompt, { label: lbl, phase: phaseOf(n), schema: RESULT, ...o })
+        lastModel = model
+        stop = guardStopOf(r)
+        if (stop) await climbGuard(lastModel)
+        releaseSlot(n)
+      }
+      while (review && review.verdict === 'changes' && round < REVIEW_ROUNDS && ok(r)) {
+        round++
+        log(`Task ${n}: reviewer asked for changes, revision ${round}/${REVIEW_ROUNDS}`)
+        await revised(revisePrompt(n, review, round, claimFlags('revision', codeOpts(n), round + 1)), `${label(n)} revise ${round}`, codeOpts(n), codeOpts(n).model)
+        if (stop) return { exit: await needInput() }
+        if (ok(r)) review = await call('review', reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts })
+      }
+      for (const model of ladderOf(n)) {
+        if (!(review && review.verdict === 'changes' && ok(r))) break
+        round++
+        log(`Task ${n}: blocking findings remain, escalating the revision to ${model}`)
+        await revised(revisePrompt(n, review, round, claimFlags('escalation', escalated(codeOpts(n), model), round + 1)), `${label(n)} revise ${round} (${model})`, escalated(codeOpts(n), model), model)
+        if (stop) return { exit: await needInput() }
+        rec.escalations.push({ stage: 'revise', model })
+        if (ok(r)) review = await call('review', reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts })
+      }
+      // model/effort: who judged the task, so an audit can count escapes (approved bugs) per reviewer tier.
+      const by = { model: opts.model || 'inherited', effort: opts.effort || 'inherited', riskTag: rec.riskTag }
+      const fromBatch = first && first.fromBatch != null ? { fromBatch: first.fromBatch } : {}
+      rec.review = review ? { verdict: review.verdict, rounds: round, findings: review.findings, summary: review.summary, ...fromBatch, ...by } : { verdict: 'unreviewed', rounds: round, ...fromBatch, ...by }
+      if (!review) log(`Task ${n}: review agent returned nothing; merging unreviewed`)
+      else if (review.verdict === 'changes' && ok(r)) {
+        rec.result = r
+        rec.finishedAt = r && r.finishedAt
+        rec.reason = `review: blocking findings remain after ${round} revision(s): ${trim(review.findings.filter(f => f.severity === 'blocking').map(f => f.issue), FINDINGS_LIMIT)}`
+        return { exit: rec }
+      }
+      return null
+    }
+    const individualReview = REVIEW_ON && reviewGroups({ merged: [n], risk: RISK }).individual.length > 0
+    if (ok(r) && individualReview) {
+      const first = await call('review', reviewPrompt(n, r), { label: `review ${n}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
+      const out = await reviewLoop(first, reviewOpts(n))
+      if (out) return out.exit
+    }
     rec.result = r
     rec.finishedAt = r && r.finishedAt
     if (!ok(r)) {
       if (!rec.busy) rec.reason = r ? r.blocker || `gate not passed (status ${r.status})` : 'agent died without a report'
       return rec
     }
-    if (REVIEW_ON) pendingReview.set(n, { rec, r })
-    const m = await landTask(n, rec)
+    if (REVIEW_ON && !individualReview) pendingReview.set(n, { rec, reviewed: false })
+    let m = await landTask(n, rec)
+    if (m && m.review) {
+      // The batch review flagged this task: it left the batch unmerged. Revise and
+      // re-review it alone, then land it (its batch review is done, so it skips the next).
+      const out = await reviewLoop(m.review, REVIEW)
+      if (out) {
+        pendingReview.delete(n)
+        return out.exit
+      }
+      rec.result = r
+      rec.finishedAt = r && r.finishedAt
+      if (!ok(r)) {
+        pendingReview.delete(n)
+        if (!rec.busy) rec.reason = r ? r.blocker || `gate not passed after revision (status ${r.status})` : 'revision agent died without a report'
+        return rec
+      }
+      m = await landTask(n, rec)
+    }
     pendingReview.delete(n)
     rec.merge = m
     rec.mergedAt = m && m.mergedAt
@@ -1426,9 +1418,7 @@ async function runTask(n) {
       rec.reason = `merge failed: ${(m && m.error) || 'no result'}`
       return rec
     }
-    // rec.review was fanned out by the merge wave in landBatch (batch approval
-    // or the revise + re-review loop); without reviewers there is no review.
-    if (REVIEW_ON && !rec.review) log(`Task ${n}: merge wave left no review; merging unreviewed`)
+    if (REVIEW_ON && !rec.review) log(`Task ${n}: merged without a recorded review`)
     rec.ok = true
     log(`Task ${n}: done and merged into ${INTO}`)
     return rec
@@ -1470,6 +1460,7 @@ const initialPlan = startPlan
 const initiallyDone = startPlan.done.length
 doneAtStart = new Set(startPlan.done.map(String))
 log(`${startPlan.remaining.length} task(s) remaining, ${initiallyDone} already Done; starting ${Math.min(startPlan.ready.length, MAX_CONCURRENT)}`)
+if (PROGRESS_RUN) log(ETA_LINE || 'ETA unavailable')
 schedule()
 poked = false
 

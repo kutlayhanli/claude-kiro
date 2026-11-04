@@ -1319,7 +1319,7 @@ def test_review_bound_tc30(bridge):  # noqa: F811
     for n in ("2", "3"):
         assert any(l == f"review {n}" for l in individual_review_labels(out["events"])), out["events"]
 
-    # Case D (4.6): an unmerged task gets no review; the merged wave is batched.
+    # Case D (4.3): a task that never lands is reviewed once, before its landing; no review is empty.
     deps = {"1": [], "2": []}
     project = {
         "deps": dict(deps),
@@ -1337,7 +1337,8 @@ def test_review_bound_tc30(bridge):  # noqa: F811
     out = bridge.run(project, args, slots=4)
     assert out["result"]["merged"] == ["1"], out["result"]
     covering2 = [l for l in review_events(out["events"]) if "2" in covers_of(out, l)]
-    assert covering2 == [], (covering2, "an empty batched review ran for the unmerged task")
+    assert len(covering2) == 1, (covering2, "the never-landing task is reviewed exactly once, before its landing")
+    assert all(covers_of(out, l) for l in review_events(out["events"])), "a review covered no task"
     assert len(batches_covering(out, ["1"])) == 1, batch_review_labels(out["events"])
 
 
@@ -1383,10 +1384,20 @@ def test_batch_verdict_fanout(bridge, data):  # noqa: F811
     assert result.get("halted") is False, result.get("reason")
     assert set(result["merged"]) == set(ids), (result["merged"], ids)
 
-    # The wave merged together and gets exactly one batched review (fails
-    # pre-Task-18: reviews are one-per-task, no review-wave label exists).
-    assert merged_waves(out["events"], ids)[-1] == sorted(wave), merged_waves(out["events"], ids)
+    # The wave gets exactly one batched review, before it lands (fails pre-Task-18:
+    # reviews are one-per-task, no review-wave label exists). The unflagged tasks land
+    # together; each flagged task leaves the batch and lands only after its re-review (4.4).
     assert len(batches_covering(out, wave)) == 1, batch_review_labels(out["events"])
+    events = out["events"]
+    batch = batches_covering(out, wave)[0]
+    unflagged = [n for n in wave if n not in flagged]
+    if unflagged:
+        assert sorted(unflagged, key=lambda x: (len(x), x)) in merged_waves(events, unflagged), merged_waves(events, ids)
+    for n in wave:
+        land_end = next(i for i, e in enumerate(events) if e.startswith("land ") and e.endswith(" end") and n in e[5:-4].split())
+        assert events.index(f"{batch} end") < land_end, (n, "the batch review ends before the task lands")
+        if n in flagged:
+            assert events.index(f"review {n} round 2 end") < land_end, (n, "a flagged task lands only after its re-review")
 
     covering = {n: [l for l in review_events(out["events"]) if n in covers_of(out, l)] for n in wave}
     for n in wave:
@@ -2068,14 +2079,13 @@ def test_redteam_review_batching_risk_tag_mutations(bridge):  # noqa: F811
 
 
 def test_redteam_review_batching_empty_wave_no_review(bridge):  # noqa: F811
-    """4.6 red-team: an empty merged wave runs no (batched) review.
+    """4.3 red-team: no batched review runs empty, and none re-covers a task.
 
-    Task 2 is protected, so it never merges: the "wave" of unmerged work is
-    empty. A batcher that fires per landing or per wave slot instead of per
-    merged set would emit an empty `review-wave` label or review the
-    unmerged task; the contract says no review agent runs. The merged wave
-    is still batched exactly once, and no already-reviewed task is
-    re-covered by a stale second batch (fails pre-Task-18: no batch labels).
+    Task 2 is protected, so its landing never merges. It is reviewed before
+    its landing like any task (review runs before the merge), but exactly
+    once: a batcher that fired again on each re-queued landing would review
+    it twice, and one that fired per landing slot would emit an empty
+    `review-wave` label. Task 1 is batched exactly once and never re-covered.
     """
     # Seam first: empty merged yields no review groups (the 4.6 unit oracle).
     empty = seam_review_groups([], {"1": "safety"})
@@ -2097,13 +2107,13 @@ def test_redteam_review_batching_empty_wave_no_review(bridge):  # noqa: F811
     }
     out = bridge.run(project, args, slots=4)
     assert out["result"]["merged"] == ["1"], out["result"]
-    # Nothing covers the unmerged task, and no review ran empty.
+    # The unmerged task is reviewed once, and no review ran empty.
     covering2 = [l for l in review_events(out["events"]) if "2" in covers_of(out, l)]
-    assert covering2 == [], (covering2, "an empty batched review ran for the unmerged task")
+    assert len(covering2) == 1, (covering2, "the never-landing task is reviewed exactly once")
     for label in review_events(out["events"]):
         covered = covers_of(out, label)
         assert covered, (label, "an empty review ran")
-        assert set(covered) <= {"1"}, (label, covered)
+        assert len(covered) == 1, (label, covered)  # tasks 1 and 2 finish apart: no batch holds both
     # The merged wave is batched exactly once; it is never re-covered.
     assert len(batches_covering(out, ["1"])) == 1, batch_review_labels(out["events"])
     covering1 = [l for l in review_events(out["events"]) if "1" in covers_of(out, l)]

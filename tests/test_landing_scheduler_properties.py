@@ -13,6 +13,8 @@ also passes `args.agentSlots = slots`, so the script's presumed queue matches th
 
 import copy
 import re
+
+import pytest
 from collections import Counter
 from typing import Any, Dict, List, Optional, Set
 
@@ -31,6 +33,7 @@ PROPERTIES = {
     "P-21": "test_p21_busy_worktrees_are_recorded_and_left_alone",
     "P-22": "test_p22_each_start_is_the_head_of_ready_tasks",
     "P-23": "test_p23_a_new_task_start_never_queues",
+    "P-26": "test_p10_finish_first_changes_nothing_when_nothing_queues",
 }
 
 SETTINGS = settings(derandomize=True, max_examples=60, database=None, deadline=None)
@@ -69,6 +72,8 @@ def kind(label: str) -> str:
         return "review"
     if label.startswith("land "):
         return "land"
+    if REVIEW_WAVE.match(label):
+        return "review-wave"
     if PLAN.match(label):
         return "plan"
     if label.startswith("full gate @"):
@@ -96,14 +101,12 @@ def is_instant(label: str) -> bool:
     return kind(label) in INSTANT or label.startswith("cross-test")
 
 
-def is_review_or_revise(label: str) -> bool:
-    """Review-shape agents (individual, re-review round, or wave batch) and revisions.
+REVIEW_WAVE = re.compile(r"^review-wave \d+ tasks ([\w ]+)$")
 
-    Story 4 retired the pre-merge review/revise trigger model: reviews now run post-merge
-    in waves owned by the review-bound property and TC-17..TC-22, so P-9 scopes to the
-    non-review finish-type agents (land/fix/gate/re-check) and walks past review/revise ends.
-    """
-    return kind(label) in ("review", "revise") or label.startswith("review-wave ")
+
+def wave_tasks(label: str) -> Set[str]:
+    m = REVIEW_WAVE.match(label)
+    return set(m.group(1).split()) if m else set()
 
 
 def first_task(label: str) -> Optional[str]:
@@ -159,7 +162,7 @@ def prepare(sc: Dict[str, Any], slots: Any = _KEEP, drop_relink: bool = False, *
 
 
 def run(bridge, sc: Dict[str, Any]) -> Dict[str, Any]:  # noqa: F811
-    return bridge.run(sc["project"], sc["args"], slots=sc["slots"])
+    return bridge.run(sc["project"], sc["args"], slots=sc["slots"], clock="virtual")
 
 
 def events(out: Dict[str, Any]) -> List[tuple]:
@@ -196,6 +199,15 @@ def outstanding_walk(trace: List[Dict[str, Any]]):
 
 @SETTINGS
 @given(scenarios())
+# Found when another module's constants entered Hypothesis's pool: task 3 waits on task 1 at the start and is
+# relinked free at plan 2, so the idle plan at t=3 is legitimate and the graph is not all-independent.
+@example(
+    sc={"project": {"deps": {"1": [], "2": [], "3": ["1"]}, "durations": {"1": 1, "2": 1, "3": 1},
+                    "reviewDurations": {}, "mergeDurations": {}, "reviews": {}, "checkRed": [], "failUntil": {},
+                    "relink": {"atPlan": 2, "deps": {"3": []}}},
+        "args": {"mergeBatch": 1, "fullGateEvery": 1, "wave": {"1": 1, "2": 1, "3": 1}, "maxConcurrent": 1},
+        "slots": 2},
+)
 def test_p6_plan_agents_only_at_start_after_landings_and_when_idle(bridge, sc):  # noqa: F811
     """1.4, 1.5, NFR-1: a non-retry plan request is the start plan, the first plan after a `land … end`, or idle;
     idle plans after the first need a landing end or a task end since the previous idle plan; an all-independent
@@ -232,9 +244,11 @@ def test_p6_plan_agents_only_at_start_after_landings_and_when_idle(bridge, sc): 
             rearmed = False
         land_ended = False
 
-    final_deps = dict(sc["project"]["deps"])
+    start_deps = dict(sc["project"]["deps"])
+    final_deps = dict(start_deps)
     final_deps.update((sc["project"].get("relink") or {}).get("deps", {}))
-    if all(not ds for ds in final_deps.values()):
+    # All-independent means independent from the start: a dependency relinked away later can make an idle plan legitimate.
+    if all(not ds for ds in start_deps.values()) and all(not ds for ds in final_deps.values()):
         lands = sum(1 for e in trace if e["ev"] == "request" and kind(e["label"]) == "land")
         assert plans <= 1 + lands, f"{plans} plan agents for {lands} landing attempt(s) in an all-independent graph: {requests}"
 
@@ -298,14 +312,24 @@ def trigger_ok(request: str, trigger: Optional[str]) -> bool:
             return tk in ("task", "retry") and implementer_task(trigger) == n
         return tk == "revise" and implementer_task(trigger) == n
     if k == "revise":
-        return tk == "review" and REVIEW.match(trigger).group(1) == implementer_task(request)
+        n = implementer_task(request)
+        if tk == "review-wave":  # Story 4 (4.4): the batch review flagged it before it landed
+            return n in wave_tasks(trigger)
+        return tk == "review" and REVIEW.match(trigger).group(1) == n
+    # The in-flight landing step's last agent: the next land (or its batch review) runs after the
+    # 3.1 plan that follows a landing, or after a batch review that left nothing to land.
+    step = ("land", "full gate", "fix", "re-check", "resolve", "plan", "review-wave")
+    if k == "review-wave":  # Story 4 (4.1): before the batch lands, when the landing step takes it
+        if tk in ("task", "retry"):
+            return implementer_task(trigger) in wave_tasks(request)
+        return tk in step
     if k == "land":
         members = set(land_tasks(request))
         if tk in ("task", "retry", "revise", "review"):  # an approval (or a passing gate without reviews)
             return bool(tasks_named(trigger) & members)
-        # The in-flight landing step's last agent: the next land runs after the 3.1 plan
-        # that follows the landing (review-cycle ends are walked past, Story 4).
-        return tk in ("land", "full gate", "fix", "re-check", "resolve", "plan")
+        if tk == "review-wave":  # a batch review just ended:
+            return True  # it approved some of this batch, or flagged all of the previous one
+        return tk in step
     if k == "full gate":
         return tk == "land"
     if k == "fix":
@@ -329,14 +353,11 @@ def test_p9_finish_type_agents_are_requested_at_their_trigger(bridge, sc, slots)
     for i, e in enumerate(out["trace"]):
         if e["ev"] == "end":
             ends.append(e["label"])
-        elif e["ev"] == "request" and kind(e["label"]) in ("land", "full gate", "fix", "re-check"):
+        elif e["ev"] == "request" and kind(e["label"]) in ("review", "review-wave", "revise", "land", "full gate", "fix", "re-check"):
             # Walk back to the trigger. Only ends of INSTANT agents may lie between it and the request (they end
             # inside the trigger's own microtask flush); any other end means the request waited for an agent.
-            # Review/revise ends are walked past (see is_review_or_revise): Story 4 owns review scheduling.
             between = []
             for label in reversed(ends):
-                if is_review_or_revise(label):
-                    continue
                 if trigger_ok(e["label"], label):
                     break
                 assert is_instant(label), f"request {e['label']} at event {i} comes after end of {label}, past its trigger (ends since: {between}): {events(out)}"
@@ -350,32 +371,26 @@ def test_p9_finish_type_agents_are_requested_at_their_trigger(bridge, sc, slots)
 @SETTINGS
 @given(scenarios(), st.sampled_from([1000, None]))
 def test_p10_finish_first_changes_nothing_when_nothing_queues(bridge, sc, agent_slots):  # noqa: F811
-    """3.3, 3.5, NFR-6: without `slots` (nothing ever queues) and with `agentSlots` above any in-flight count or
-    omitted, the request/start/end sequence (by label, in order) and the result are identical with finish-first on
-    and off.
-
-    Each run uses real timers, so two runs of one configuration can differ when two timers fall due in the same
-    millisecond (about 1 example in 13 here, more on a loaded machine). So a mismatch is re-run: the relation holds
-    when some on-run is identical to some off-run (up to six of each). A difference the setting causes shows in
-    every on-run, so no pair can match."""
+    """3.3, 3.5, NFR-6 (TC-74, P-26): without `slots` (nothing ever queues) and with `agentSlots` above any
+    in-flight count or omitted, the request/start/end sequence (by label, in order) and the result are identical
+    with finish-first on and off. One run each on the virtual clock: timers fire in simulated-time order, so no
+    re-run is needed and load cannot reorder anything."""
     base = prepare(sc, slots=None)
     if agent_slots is not None:
         base["args"]["agentSlots"] = agent_slots
-    ons: List[Dict[str, Any]] = []
-    offs: List[Dict[str, Any]] = []
-    key = lambda out: (events(out), out["result"])  # noqa: E731
-    for _ in range(6):
-        ons.append(run(bridge, with_finish_first(base, True)))
-        offs.append(run(bridge, with_finish_first(base, False)))
-        if any(key(a) == key(b) for a in ons for b in offs):
-            return
-    assert events(ons[0]) == events(offs[0])
-    # overhead is a measured observation (real Date.now() agent ms per run), not schedule state;
-    # finish-first's contract covers scheduling/merging, so exclude it from the exact-equality check.
-    for r in (ons[0]["result"], offs[0]["result"]):
-        if isinstance(r, dict) and isinstance(r.get("overhead"), dict):
-            r.pop("overhead")
-    assert ons[0]["result"] == offs[0]["result"]
+    on = run(bridge, with_finish_first(base, True))
+    off = run(bridge, with_finish_first(base, False))
+    assert events(on) == events(off)
+    assert on["result"] == off["result"]
+
+
+def test_p10_source_has_two_runs_and_no_loop():
+    import inspect
+
+    src = inspect.getsource(test_p10_finish_first_changes_nothing_when_nothing_queues)
+    body = src.split('"""', 2)[2]
+    assert len(re.findall(r"\brun\(", body)) == 2, body
+    assert not re.search(r"^\s*(for|while)\b", body, re.M), body
 
 
 # --- P-11 ------------------------------------------------------------------------------------------------------

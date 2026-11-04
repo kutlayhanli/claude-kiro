@@ -27,6 +27,7 @@ Issues = "https://github.com/angelsen/claude-kiro/issues"
 [project.scripts]
 # Main CLI
 ck = "claude_kiro.cli:cli"
+ck-status-line = "claude_kiro.statusline:main"
 
 [build-system]
 requires = ["hatchling>=1.26"]

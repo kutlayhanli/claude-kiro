@@ -90,7 +90,7 @@ function fakeExec(overrides: Record<string, Responder> = {}): FakeExec {
       return typeof override === "function" ? override() : override;
     }
     if (key === "node --version") return { status: 0, stdout: "v22.22.3\n", stderr: "" };
-    if (key === "ck --version") return { status: 0, stdout: "ck, version 0.10.3\n", stderr: "" };
+    if (key === "ck --version") return { status: 0, stdout: "ck, version 0.11.0\n", stderr: "" };
     if (key === "ck --hook stop-verify --plugin-hook") {
       return { status: 0, stdout: "", stderr: "" };
     }
@@ -211,7 +211,7 @@ test("an old ck is an error", async (t) => {
   const fixture = createFixture();
   t.after(fixture.cleanup);
   const fake = fakeExec({
-    "ck --version": { status: 0, stdout: "ck, version 0.10.2\n", stderr: "" },
+    "ck --version": { status: 0, stdout: "ck, version 0.10.4\n", stderr: "" },
   });
 
   const result = await runPreflight(optionsFor(fixture, fake.exec));
@@ -219,8 +219,8 @@ test("an old ck is an error", async (t) => {
 
   assert.equal(result.ok, false);
   assert.equal(check.ok, false);
-  assert.match(check.detail, /0\.10\.2/);
-  assert.match(check.detail, /0\.10\.3/);
+  assert.match(check.detail, /0\.10\.4/);
+  assert.match(check.detail, /0\.11\.0/);
 });
 
 test("an unreadable ck version is an error", async (t) => {
@@ -253,13 +253,13 @@ test("a wrapper that prints a bare version is accepted", async (t) => {
   const fixture = createFixture();
   t.after(fixture.cleanup);
   const fake = fakeExec({
-    "ck --version": { status: 0, stdout: "0.10.4\n", stderr: "" },
+    "ck --version": { status: 0, stdout: "0.11.2\n", stderr: "" },
   });
 
   const result = await runPreflight(optionsFor(fixture, fake.exec));
 
   assert.equal(result.ok, true);
-  assert.match(findCheck(result, "ck").detail, /0\.10\.4/);
+  assert.match(findCheck(result, "ck").detail, /0\.11\.2/);
 });
 
 test("missing and empty vendor groups are errors", async (t) => {
@@ -519,11 +519,11 @@ test("ck --version output may carry a build suffix", async (t) => {
   const fixture = createFixture();
   t.after(fixture.cleanup);
   const fake = fakeExec({
-    "ck --version": { status: 0, stdout: "ck, version 0.10.10 (3cdc751)\n", stderr: "" },
+    "ck --version": { status: 0, stdout: "ck, version 0.11.10 (3cdc751)\n", stderr: "" },
   });
 
   const result = await runPreflight(optionsFor(fixture, fake.exec));
 
   assert.equal(result.ok, true);
-  assert.match(findCheck(result, "ck").detail, /0\.10\.10/);
+  assert.match(findCheck(result, "ck").detail, /0\.11\.10/);
 });

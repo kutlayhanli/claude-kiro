@@ -24,6 +24,10 @@ def _isolated_data_home(tmp_path_factory, monkeypatch):
     monkeypatch.delenv("CK_DATA_HOME", raising=False)
     monkeypatch.delenv("CK_RUN_SANDBOXED", raising=False)
     monkeypatch.delenv("CK_STATS_DRAFTER", raising=False)
+    # A suite run inside `ck run` inherits its child markers: CK_RUN_NOTIFY=parent would queue every notification
+    # for an outer `ck run` instead of sending it, and CK_PROGRESS_DIR would point progress at the outer spool.
+    monkeypatch.delenv("CK_RUN_NOTIFY", raising=False)
+    monkeypatch.delenv("CK_PROGRESS_DIR", raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -218,3 +222,7 @@ def write_tasks(root: Path, t1="Not Started", t2="Not Started", a1=" ", a2=" ") 
 @pytest.fixture
 def session() -> str:
     return f"test-{uuid.uuid4().hex}"
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "serial: timing-sensitive; specs/ck.json runs these in a separate, non-parallel verify step")

@@ -68,8 +68,24 @@ class Bridge:
         req["order"] = list(order) if order is not None else list(deps)
         return self._ok(req)["ready"]
 
-    def run(self, project: Dict[str, Any], args: Optional[Dict[str, Any]] = None, slots: Optional[int] = None) -> Dict[str, Any]:
-        out = self._ok({"op": "run", "project": project, "args": args or {}, "slots": slots})
+    def run(self, project: Dict[str, Any], args: Optional[Dict[str, Any]] = None, slots: Optional[int] = None, clock: Optional[str] = None, exec_ck: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """clock: "virtual" (exact virtual-time sleeps and trace `t`), "real", or None (the bridge default).
+        exec_ck: {"cmd": [...], "env": {...}, "cwd": ..., "dry": bool}; fake agents record progress events through the real CLI."""
+        req: Dict[str, Any] = {"op": "run", "project": project, "args": args or {}, "slots": slots}
+        if clock is not None:
+            req["clock"] = clock
+        if exec_ck is not None:
+            req["execCk"] = exec_ck
+        out = self._ok(req)
+        out.pop("ok")
+        return out
+
+    def create(self, args: Optional[Dict[str, Any]] = None, overrides: Optional[Dict[str, Any]] = None, exec_ck: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Run plugin/workflows/spec-create.js with the shared stub agent; returns result, logs, trace, prompts, execLog."""
+        req: Dict[str, Any] = {"op": "create", "args": args or {}, "overrides": overrides or {}}
+        if exec_ck is not None:
+            req["execCk"] = exec_ck
+        out = self._ok(req)
         out.pop("ok")
         return out
 

@@ -211,18 +211,19 @@ function triggerOf(label) {
   }
   if ((m = label.match(/^review-wave \d+ tasks (.+)$/))) {
     const ids = m[1].split(' ')
-    // Story 4 (4.1): a wave is reviewed after its land-batch merge step completes;
-    // the step's completion is the covering land end, or the full gate (and its
-    // fix/re-check repair) that ran on the merged batch before its review.
-    const stepDone = l => /^full gate @/.test(l) || /^fix /.test(l) || /^re-check /.test(l)
-    return l => (/^land /.test(l) && l.slice(5).split(' ').some(n => ids.includes(n))) || stepDone(l)
+    // Story 4 (4.1): a batch is reviewed before it lands, when the landing step
+    // takes it: right after a covered task's implementer ends (the landing queue
+    // was idle), or when the previous landing step (land, its full gate and
+    // fix/re-check, its plan, or a review wave that left nothing to land) completes.
+    const stepDone = l => /^land /.test(l) || /^full gate @/.test(l) || /^fix /.test(l) || /^re-check /.test(l) || /^plan /.test(l) || /^review-wave /.test(l)
+    return l => ids.some(n => new RegExp(`^task ${esc(n)}( |$)`).test(l)) || stepDone(l)
   }
   if ((m = label.match(/^land (.+)$/))) {
     const tasks = m[1].split(' ')
     const own = l => tasks.some(n => new RegExp(`^(task|review|resolve) ${esc(n)}( |$)`).test(l) || l.includes(`(Task ${n} red on landing)`))
     // Story 4 + 3.1: the in-flight landing step's last agent may be the 3.1 plan that
-    // runs after the landing, or the post-merge review cycle (batch, revision
-    // re-review) whose completion releases the next land.
+    // runs after the landing, or the batch review before this land (a flagged task
+    // lands after its own re-review, `review N round k`).
     const step = l => /^land /.test(l) || /^full gate @/.test(l) || /^fix \d+ \(full gate /.test(l) || /^re-check /.test(l) || /^plan /.test(l) || /^review-wave \d+ tasks /.test(l) || /^review \d+ round \d+$/.test(l)
     return l => own(l) || step(l)  // approval (or fix/resolve) of a task in the batch, or the in-flight landing step's last agent
   }

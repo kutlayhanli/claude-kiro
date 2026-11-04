@@ -4,6 +4,7 @@ import json
 import os
 import re
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
@@ -150,6 +151,56 @@ def load_records_counted(env: Optional[Mapping[str, str]] = None) -> Tuple[List[
             continue
         records.append(data)
     return records, bad
+
+
+@dataclass(frozen=True)
+class StoreRead:
+    records: List[dict]
+    malformed: List[str]      # file names of unreadable, non-object or schema-less record files
+    error: Optional[str]      # "<path>: <OSError text>" when the store could not be listed
+
+
+def _unreadable(d: Path, e: OSError) -> str:
+    return f"record store unreadable: {d}: {e.strerror or e}"
+
+
+def load_records_checked(env: Optional[Mapping[str, str]] = None) -> StoreRead:
+    """Like load_records_counted, but an unreadable store is an error, never an empty store."""
+    d = runs_dir(env)
+    try:
+        os.stat(d)
+    except FileNotFoundError:
+        try:
+            os.lstat(d)
+        except FileNotFoundError:
+            return StoreRead([], [], None)
+        except OSError as e:
+            return StoreRead([], [], _unreadable(d, e))
+        return StoreRead([], [], _unreadable(d, FileNotFoundError("dangling link")))
+    except OSError as e:
+        return StoreRead([], [], _unreadable(d, e))
+    try:
+        with os.scandir(d) as it:
+            names = sorted(e.name for e in it if e.name.endswith(".json"))
+    except OSError as e:
+        return StoreRead([], [], _unreadable(d, e))
+    records: List[dict] = []
+    malformed: List[str] = []
+    for name in names:
+        p = d / name
+        try:
+            if not os.path.isfile(p):
+                raise OSError("not a regular file")
+            data = json.loads(p.read_text())
+        except (OSError, ValueError, RecursionError, UnicodeDecodeError):
+            malformed.append(name)
+            continue
+        schema = data.get("schema") if isinstance(data, dict) else None
+        if not isinstance(schema, str) or not _SCHEMA_RE.match(schema):
+            malformed.append(name)
+            continue
+        records.append(data)
+    return StoreRead(records, malformed, None)
 
 
 def load_records(env: Optional[Mapping[str, str]] = None) -> List[dict]:

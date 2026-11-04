@@ -20,8 +20,7 @@ The same `/spec/*` workflow is available for [OpenCode](https://opencode.ai) fro
 `opencode-claude-kiro` npm package (source in `opencode/`). It registers the five commands, writes
 the flat `ck-*` agents and `AGENTS.md`, runs the vendored workflows through a `workflow` tool, and
 translates OpenCode tool events into the same `ck` guard hooks. It needs Node.js 20+ and `ck`
-0.10.3+ (0.11.0+ for `ck stats record`, `ck doctor --harness opencode` and the OpenCode bench
-harness).
+0.11.0+.
 
 ```jsonc
 // opencode.json

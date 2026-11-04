@@ -244,7 +244,7 @@ await test('reviewer: approves, then the task merges; review runs at the reviewe
   const batch1 = p.state.events.filter(e => !e.endsWith(' end')).find(l => (p.state.reviewTasks[l] || []).includes('1'))
   assert.ok(batch1, 'task 1 was reviewed by its covering batch')
   assert.deepEqual([p.state.opts[batch1].model, p.state.opts[batch1].effort], ['opus', 'high'])
-  assert.ok(idx(p.state, batch1) > idx(p.state, landOf(p.state, '1', true)), 'the batch review runs after its wave merged (4.1)')
+  assert.ok(idx(p.state, batch1) < idx(p.state, landOf(p.state, '1', true)), 'the batch review runs before its batch lands (4.1)')
   assert.equal(result.tasks[0].review.verdict, 'approve')
   assert.match(p.state.prompts[batch1], /diff integrate\/demo\.\.\.feat\/demo-task-1/)
 })
@@ -256,27 +256,21 @@ await test('reviewer: blocking findings send the task back once, then it merges'
   assert.ok(p.state.events.includes('task 1 revise 1'))
   assert.match(p.state.prompts['task 1 revise 1'], /contradicts design\.md/)
   assert.equal(p.state.opts['task 1 revise 1'].model, 'sonnet')
-  // Story 4 (4.4, 4.5): the revision is re-reviewed individually after its wave merged;
-  // the re-review label shape is unchanged, only its position moved post-merge.
+  // Story 4 (4.4): the flagged task leaves its batch unmerged, is revised and
+  // re-reviewed alone, and only then lands.
   assert.ok(idx(p.state, 'review 1 round 2') > idx(p.state, 'task 1 revise 1 end'), 'the re-review runs after the revision')
-  assert.ok(idx(p.state, 'review 1 round 2') > idx(p.state, landOf(p.state, '1', true)), 'the re-review runs after its wave merged (4.1)')
+  assert.ok(idx(p.state, 'review 1 round 2') < idx(p.state, landOf(p.state, '1', true)), 'the task lands only after its re-review (4.4)')
   assert.deepEqual([result.tasks[0].review.verdict, result.tasks[0].review.rounds], ['approve', 1])
 })
 
 await test('reviewer: findings that survive the revisions fail the task and nothing merges', async () => {
   const p = project({ deps: { 1: [], 2: ['1'] }, reviews: { 1: ['changes', 'changes'] } })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })
-  // Story 4 (4.4): reviews run post-merge and a merged task stays merged
-  // (merged∩failed=∅), so both tasks merge; the flagged task records the failed
-  // review (verdict/rounds/revise all transfer to the batch shape) while the
-  // unflagged wave-mate merges untouched.
-  assert.deepEqual(result.merged.sort(), ['1', '2'])
-  assert.ok(p.state.events.includes('task 1 revise 1'), 'the flagged task was revised')
-  const t1 = result.tasks.find(t => t.task === '1')
-  assert.equal(t1.review.verdict, 'changes', 'the flagged task records the failed review')
-  assert.equal(t1.review.rounds, 1, 'the failed review follows one revision and re-review')
-  assert.ok(t1.review.findings.some(f => f.severity === 'blocking'), 'the blocking finding survives in the record')
-  assert.ok(result.merged.includes('2'), 'the unflagged wave-mate merged (4.4)')
+  // Story 4 (4.6): a task whose blocking findings survive its revisions never merges.
+  assert.deepEqual(result.merged, [])
+  assert.match(result.failed[0].reason, /review: blocking findings remain after 1 revision/)
+  assert.ok(!landOf(p.state, '1'))
+  assert.ok(!p.state.events.includes('task 2'))  // its dependent never starts
 })
 
 await test('reviewer: enabled false skips review', async () => {
@@ -639,11 +633,7 @@ await test('a long blocking finding reaches the reviser intact, and the failure 
   const p = project({ deps: { 1: [] }, reviews: { 1: ['changes', 'changes'] }, reviewIssue: issue })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: { reviewer: { model: 'opus', effort: 'high', enabled: true, rounds: 1 } } } })
   assert.ok(p.state.prompts['task 1 revise 1'].includes('END-OF-FINDING'), 'revise prompt has the whole finding')
-  // Story 4 (4.4): post-merge review records the verdict instead of failing the task;
-  // the recorded finding keeps the whole issue.
-  const longRec = result.tasks.find(t => t.task === '1')
-  assert.equal(longRec.review.verdict, 'changes', 'the failed review is recorded')
-  assert.ok(longRec.review.findings.some(f => String(f.issue).includes('END-OF-FINDING')), 'recorded finding has the whole finding')
+  assert.ok(result.failed[0].reason.includes('END-OF-FINDING'), 'failure reason has the whole finding')
 })
 
 await test('the brief path comes from args.brief (plugin), with the vendored path as fallback', async () => {

@@ -16,28 +16,9 @@ from typing import Dict, List, Optional
 
 import pytest
 
-from guard_helpers import (CK, ck_run_cmd, fake_sandbox_tools, notify_script, parking_fake_claude, set_notify)
+from guard_helpers import (CK, NOTE, QUOTED_REQ, QUOTED_TEST, ck_run_cmd, clean_env, fake_sandbox_tools, notify_script,  # noqa: F401
+                           park, parking_fake_claude, set_notify)
 from stats_helpers import spec_repo
-
-QUOTED_TEST = "test_zebra_quartz_invariant must hold across the ledger boundary"
-QUOTED_REQ = "The ledger SHALL reject negative balances within one transaction"
-NOTE = {"file": "tests/test_ledger.py", "kind": "test", "test": QUOTED_TEST, "requirement": QUOTED_REQ,
-        "decision": "The test contradicts the requirement; which one wins?"}
-
-
-def clean_env(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-    env = os.environ.copy()
-    env.pop("CK_RUN_NOTIFY", None)
-    env.pop("CK_NOTIFY_MESSAGE", None)
-    env.update(extra or {})
-    return env
-
-
-def park(repo: Path, task: str, note: object = NOTE, *flags: str, spec: str = "demo", env: Optional[dict] = None,
-         raw: Optional[str] = None) -> subprocess.CompletedProcess:
-    stdin = raw if raw is not None else json.dumps(note)
-    return ck_run_cmd(repo, "worktree", "park", spec, str(task), *flags, "--json", env=env or clean_env(), stdin=stdin)
-
 
 def resolve(repo: Path, task: str, answer: object, spec: str = "demo", raw: Optional[str] = None) -> subprocess.CompletedProcess:
     stdin = raw if raw is not None else json.dumps({"answer": answer})

@@ -1,7 +1,8 @@
 # Upgrading
 
-- **From 0.10.3 to 0.11.0:** see the next section.
-- **From 0.10.2 to 0.10.3:** see [0.10.2 → 0.10.3](#0102--0103), then the 0.11.0 notes.
+- **From 0.10.4 to 0.11.0:** see the next section.
+- **From 0.10.3 to 0.10.4:** see [0.10.3 → 0.10.4](#0103--0104), then the 0.11.0 notes.
+- **From 0.10.2 to 0.10.3:** see [0.10.2 → 0.10.3](#0102--0103), then the 0.10.4 and 0.11.0 notes.
 - **From 0.10.1 to 0.10.2:** see [0.10.1 → 0.10.2](#0101--0102), then the 0.10.3 notes.
 - **From 0.10 to 0.10.1:** see [0.10 → 0.10.1](#010--0101), then the 0.10.2 and 0.10.3 notes.
 - **From 0.9.1 to 0.10:** see [0.9.1 → 0.10](#091--010), then the 0.10.1, 0.10.2 and 0.10.3 notes.
@@ -15,7 +16,7 @@
 - **From 0.2:** apply the 0.3 notes below as well; the steps are the same.
 - **From 0.1:** skip to [Upgrading to 0.2](#upgrading-to-02), then come back for the 0.3 and 0.4 notes (same commands).
 
-## 0.10.3 → 0.11.0
+## 0.10.4 → 0.11.0
 
 OpenCode support. The Claude Code plugin and `ck` behavior are unchanged; the new surface is the
 `opencode-claude-kiro` npm package and two `ck` commands it uses.
@@ -29,7 +30,7 @@ ck doctor --harness opencode    # optional: node/ck/vendor/model/agent/hook/git 
 
 - **OpenCode package.** `opencode-claude-kiro@0.11.0` registers the five `/spec/*` commands, writes
   the flat `ck-*` agents and `AGENTS.md`, runs the vendored workflows through a `workflow` tool, and
-  translates OpenCode tool events into the same `ck` guard hooks. It needs Node.js 20+ and `ck` 0.10.3+.
+  translates OpenCode tool events into the same `ck` guard hooks. It needs Node.js 20+ and `ck` 0.11.0.
 - **Native run records.** The package writes `<state>/runs/<runId>/record.json`
   (`ck-opencode-run/1`), including requested/resolved model and effort, tokens, cost, peak context,
   guard counts and throttles. `ck stats record <record.json>` ingests it into the same local
@@ -39,6 +40,25 @@ ck doctor --harness opencode    # optional: node/ck/vendor/model/agent/hook/git 
   `ck bench score` is unchanged. The launcher sets `CK_RUN_HEADLESS=1` and marks guard denials,
   timeouts and non-`done` records fail-closed.
 - **Doctor.** `ck doctor --harness opencode` runs the plugin's preflight without starting a server.
+## 0.10.3 → 0.10.4
+
+Run ETA, analytics hardening and a stricter plan lint. On each machine:
+
+```bash
+ck update                                   # ck itself and the spec plugin
+ck eta <spec>                               # optional: try the estimate on a spec you're about to run
+```
+
+Then restart Claude Code sessions, and run `ck upgrade` (or `ck update --project`) in vendored projects so their `.claude/` copies get the new workflow and skills.
+
+- **Run ETA.** `/spec:implement` and `/spec:create` now print a finish time and cost range at launch (p10, median, p90), from a seeded Monte Carlo over the task graph (implement: under the agent-slot cap and finish-first) or over the create phases, using this machine's `ck stats` history; task durations scale with each task's Files and acceptance counts. The workflows log an ETA line at start and after each landing, and every run keeps one content-free progress file under ck's data dir.
+- **`ck eta <spec> [--watch|--json]`** shows the live estimate: what's done, running and waiting, the critical path, and states `on-track`, `slipping`, `waiting on you N min` (an open approval or hand landing holds the estimate), `blocked: <reason>` (a parked task or a cycle) and `stale` (no events for 120 min).
+- **Status line.** `ck-status-line` (or `ck status-line`) prints one line from the progress file without simulating; point Claude Code's `statusLine` setting at it.
+- **Notifications.** `run.notify_command` (from 0.10.3) also gets slip (`run.eta_slip_minutes`, default 15 min past the launch p90), blocked and done notices, with `notification_type` `ck_eta_slip`, `ck_eta_blocked` and `ck_run_done` (needs-input stays `ck_needs_input`), so the command can route them quietly. `ck run`'s watcher and `ck eta --watch` re-check slip about once a minute.
+- **Cold start.** With no local history, estimates use bundled aggregate defaults and say "low confidence: no local history".
+- **Lint: Verify cycles.** `ck lint` reports an error, and `/spec:implement` refuses to start, when a task's Verify runs a test file owned by a test task that verifies a task depending on it (the gate could never pass). A file that is the task's own oracle, and Verify lines narrowed with `-k` or `::`, are exempt.
+- **Analytics fixes.** Backfill refuses to write when the record store can't be read (no double counting); a session with no readable transcript gets an `outcome` entry in `missing`; `collect --agents --json` prints its JSON failure object in the sandbox and an invalid `--auto` id is logged to collect.log; `collect --all` reports open-run sweep errors and picks the writer by record source.
+- **Tests.** The scheduler property P-10 runs on a virtual clock (exact, no re-runs). This repo's `verify` now runs timing-sensitive tests (`@pytest.mark.serial`) in a separate, non-parallel step.
 
 ## 0.10.2 → 0.10.3
 

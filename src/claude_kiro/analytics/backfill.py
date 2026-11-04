@@ -167,3 +167,20 @@ def group_backfill(agents: Sequence[Dict[str, object]], gap_minutes: int = DEFAU
         for g in plan.groups
     ]
     return {"groups": groups, "excluded": sorted(excluded, key=lambda e: e["agentId"])}
+
+
+@dataclass(frozen=True)
+class GuardDecision:
+    write: bool
+    exit_code: Optional[int]   # None: leave the exit code to the caller
+    note: Optional[str]
+
+
+def overlap_guard(store_error: Optional[str], malformed: Sequence[str], dry_run: bool) -> GuardDecision:
+    """S15: backfill may write only when the store was fully read and every record file parsed."""
+    if not store_error and not malformed:
+        return GuardDecision(True, None, None)
+    cause = store_error if store_error else f"malformed record {malformed[0]}"
+    if dry_run:
+        return GuardDecision(False, 1, f"overlaps not checked: {cause}")
+    return GuardDecision(False, 1, f"cannot check backfill overlaps: {cause}; nothing written")

@@ -93,6 +93,12 @@ How we'll know it worked: a fixture spec with an injected bad ready list runs to
 **Rejected:** test-track-only batching (leaves most reviews in place); per-landing-batch review (more reviewers than wave batching).
 **Decided by:** user
 
+### D9: Batched review runs before the batch lands (fix after PR #13 review)
+**Choice:** One `review-wave` agent per landing batch, run before the land step over the batch's not-yet-reviewed non-risky tasks. Safety tasks keep the per-task review before landing. A flagged task leaves the batch unmerged, is revised and re-reviewed alone, and lands only once approved; findings that survive fail it unmerged, as before this spec.
+**Why:** The first implementation reviewed waves after they merged. A revision then sat on the task branch and never reached the target (nothing landed it again), and a task with surviving blocking findings, risky ones included, stayed merged. That changed gate semantics, which Scope lists as out. D7's saving (one reviewer per batch instead of one per task) is kept.
+**Rejected:** post-merge review plus a re-land of revised branches (blocked code still reaches the target between merge and revision); reverting to per-task review (drops D7's saving).
+**Decided by:** Claude, delegated by the user ("fix the PR and get it ready to merge", 2026-11-04)
+
 ## Research Notes
 ### Codebase
 - `plugin/workflows/spec-implement.js:774-833` - `runPlan` (2 attempts, null on failure) and `requestPlan` (null → `stopLaunching`, `PLAN_FAILED` halt); line 798 keeps `fallbackReady` from the last good plan.

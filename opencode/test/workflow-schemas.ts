@@ -4,7 +4,8 @@
  * The point is coverage: if a future workflow grows a keyword the validator does not implement, the
  * test fails on the actual source, not on a hand-copied sample. The schemas are plain data, but some
  * descriptions interpolate constants (`${NOW}`), so they are evaluated with a proxy that answers any
- * free identifier with a placeholder.
+ * free identifier with a placeholder. A free identifier naming an object constant defined earlier in
+ * the same file (a shared field schema, e.g. `eta: ETA`) resolves to that constant's value.
  */
 
 import { readFileSync } from "node:fs";
@@ -25,13 +26,15 @@ export function workflowSchemas(): WorkflowSchema[] {
   const found: WorkflowSchema[] = [];
   for (const file of WORKFLOWS) {
     const source = readFileSync(join(root, file), "utf8");
+    const known = new Map<string, unknown>();
     for (const candidate of candidates(source)) {
       let value: unknown;
       try {
-        value = evaluate(candidate.literal);
+        value = evaluate(candidate.literal, known);
       } catch (error) {
         throw new Error(`could not evaluate schema ${candidate.name} in ${file}:${candidate.line}: ${message(error)}`);
       }
+      if (!candidate.name.startsWith("inline@")) known.set(candidate.name, value);
       if (!isSchemaObject(value)) continue;
       found.push({ file, name: candidate.name, line: candidate.line, schema: value });
     }
@@ -150,12 +153,12 @@ function skipBlockComment(source: string, start: number): number {
   return close === -1 ? source.length : close + 1;
 }
 
-function evaluate(literal: string): unknown {
+function evaluate(literal: string, known: Map<string, unknown> = new Map()): unknown {
   const script = new vm.Script(`(function (__stub) { with (__stub) { return (${literal}); } })`);
   const wrapper = script.runInNewContext({}) as (stub: unknown) => unknown;
   const stub = new Proxy(Object.create(null), {
     has: () => true,
-    get: (_target, key) => (key === Symbol.unscopables ? undefined : "stub"),
+    get: (_target, key) => (key === Symbol.unscopables ? undefined : typeof key === "string" && known.has(key) ? known.get(key) : "stub"),
   });
   return wrapper(stub);
 }

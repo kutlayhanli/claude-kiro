@@ -48,16 +48,16 @@ Decision record: [PLAN.md](PLAN.md) (Decisions D1–D8 are binding). This spec e
 
 ### Story 4: Wave-batched reviews with risky tasks kept individual
 
-**As a** developer **I want** non-risky tasks reviewed together per merged wave **So that** review-agent cost and queue wait fall without weakening review of risky work.
+**As a** developer **I want** non-risky tasks reviewed together per landing batch, before it merges **So that** review-agent cost and queue wait fall without weakening review of risky work, and nothing a reviewer blocks reaches the target branch.
 
 **Acceptance Criteria:**
 
-- 4.1 WHEN a wave of tasks merges, THE SYSTEM SHALL review all non-risky tasks of that wave together in one review covering their combined changes.
-- 4.2 WHEN a task is marked risky or safety-relevant, THE SYSTEM SHALL always review it individually, even when it merged as part of a larger wave.
-- 4.3 WHEN a wave contains only risky tasks, THE SYSTEM SHALL review each of them individually and SHALL NOT run an additional combined review for that wave.
-- 4.4 WHEN a batched review requests changes on some tasks of the wave, THE SYSTEM SHALL route each flagged task to revision individually and leave unflagged tasks of the same wave unaffected.
-- 4.5 WHEN a batched review approves the wave, THE SYSTEM SHALL record approval for every task covered by that review.
-- 4.6 WHEN no wave merged since the last review, THE SYSTEM SHALL NOT run an empty batched review.
+- 4.1 WHEN a landing batch is about to merge, THE SYSTEM SHALL review its not-yet-reviewed non-risky tasks together in one review covering their combined changes, before any of them merges.
+- 4.2 WHEN a task is marked risky or safety-relevant, THE SYSTEM SHALL review it individually before it merges, and SHALL NOT include it in a combined review.
+- 4.3 WHEN a landing batch holds no task that still needs a combined review (only risky tasks, or tasks already reviewed and re-queued after a conflict, a red landing or a deferral), THE SYSTEM SHALL NOT run a combined review for it.
+- 4.4 WHEN a batched review requests changes on some tasks of the batch, THE SYSTEM SHALL take each flagged task out of the batch unmerged, revise and re-review it individually, and land it only after its re-review approves; the unflagged tasks of that batch SHALL land unaffected.
+- 4.5 WHEN a batched review approves, THE SYSTEM SHALL record approval for every task covered by that review.
+- 4.6 WHEN blocking findings remain after a task's revisions (batched or individual review), THE SYSTEM SHALL NOT merge the task and SHALL record it as failed with the remaining findings.
 
 ### Story 5: Overhead visibility with a warn-only budget
 
