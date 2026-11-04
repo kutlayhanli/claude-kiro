@@ -1,6 +1,7 @@
 # Upgrading
 
-- **From 0.10.4 to 0.11.0:** see the next section.
+- **From 0.11.0 to 0.11.1:** see the next section.
+- **From 0.10.4 to 0.11.0:** see [0.10.4 → 0.11.0](#0104--0110), then the 0.11.1 notes.
 - **From 0.10.3 to 0.10.4:** see [0.10.3 → 0.10.4](#0103--0104), then the 0.11.0 notes.
 - **From 0.10.2 to 0.10.3:** see [0.10.2 → 0.10.3](#0102--0103), then the 0.10.4 and 0.11.0 notes.
 - **From 0.10.1 to 0.10.2:** see [0.10.1 → 0.10.2](#0101--0102), then the 0.10.3 notes.
@@ -15,6 +16,23 @@
 - **From 0.3 to 0.4:** see [0.3 → 0.4](#03--04).
 - **From 0.2:** apply the 0.3 notes below as well; the steps are the same.
 - **From 0.1:** skip to [Upgrading to 0.2](#upgrading-to-02), then come back for the 0.3 and 0.4 notes (same commands).
+
+## 0.11.0 → 0.11.1
+
+Fixes from the OpenCode equity E2E run (claude-kiro #6–#11). On each machine:
+
+```bash
+ck update                       # ck itself and the spec plugin (Claude Code)
+# OpenCode: bump the package to opencode-claude-kiro@0.11.1 in opencode.json
+```
+
+Then restart Claude Code sessions, and run `ck upgrade` in vendored projects so their `.claude/` copies get the new workflow and brief.
+
+- **Verify-order cycles mid-run (#6).** A cycle that appears once a test task's files exist is repaired with the new `ck relink` and the task runs, instead of being skipped. `ck relink <spec> <task> [--apply]` also works by hand; a verify-file cycle is repaired by linking the task to the test task that owns its oracle file. A start-plan cycle still refuses to launch.
+- **Generated artifacts (#7).** The worktree busy check matches `__pycache__`, `.pytest_cache`, `node_modules`, `.venv` and a top-level `target/` by whole path segment, and only for untracked entries: a tracked change, or real source in a directory that merely looks like one, still blocks a merge.
+- **Tests that can never pass (#8).** A task agent reports `testConflict` (file, test, criterion, reason, fix) instead of retrying; one confirmation on the strongest rung, then the task is `blocked: test`. Its dependents wait, everything else continues, and it never halts the run. The report lists the fixes under "Test-track fixes" (the result under `testFixes`); the test itself is never edited by the workflow.
+- **Pricing (#9).** OpenCode rates come from a models.dev snapshot (`ck pricing refresh [--check]`, `ck pricing show <model>`); every usage key has a rate or is unknown, never a silent $0.
+- **Fewer agents under OpenCode (#11).** The OpenCode runner gives the workflow a `ck` global; the plan, land and relink steps run `ck` directly instead of through an agent. The result gains `directCk`. `args.directCk: false` keeps the agents.
 
 ## 0.10.4 → 0.11.0
 
