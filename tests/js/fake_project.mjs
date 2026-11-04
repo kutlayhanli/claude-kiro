@@ -95,11 +95,13 @@ function chainLengths(deps, done) {
 //                                          (haiku < sonnet < opus < fable); 'always' never resolves
 //   guardStopIn: {n: 'revise'}             the guard stop of task n happens in its first revise call, not its task call
 //   parkOutcome: {parked, notification, detail}  answer of the `park <N>` agent (default parked, sent, '')
+//   testConflicts: {n: {conflict, attempts}}  task n's first `attempts` agents (default all) return status blocked
+//                                          with that testConflict; later ones pass
 //   relinkOutcome: {fixable, applied, committed, reason}  answer of the `relink <N>` agent (default refused:
 //                                          not mechanical); a fixable+applied answer drops N's verify cycle from
 //                                          later plans, as the relinked tasks.md would
 //   worktree: {n: {state, detail}}         the first task agent of n returns that worktree outcome (default CREATED)
-export function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [], gitReport = null, conflictRounds = {}, planDurations = {}, externalDone = null, planFail = [], worktree = {}, guardStops = {}, guardStopIn = {}, parkOutcome = null, relinkOutcome = null, execCk = null, etaAnswer = null, sleep = realSleep, external = p => p, planSeq = null, badReady = null, risk = null }) {
+export function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [], gitReport = null, conflictRounds = {}, planDurations = {}, externalDone = null, planFail = [], worktree = {}, guardStops = {}, guardStopIn = {}, parkOutcome = null, relinkOutcome = null, testConflicts = {}, execCk = null, etaAnswer = null, sleep = realSleep, external = p => p, planSeq = null, badReady = null, risk = null }) {
   let rechecksLeftRed = recheckRed
   let planCalls = 0  // plan agent invocations so far: call k consumes planSeq[k-1]
   // RED landings left per task: checkRed tasks are red on their first landing, redLands sets a count.
@@ -235,6 +237,10 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
       if (n in guardStops && (guardStopIn[n] === 'revise') === isRevise && (!isRevise || state.revises[n] === 1)) {
         const gs = guardStopFor(n, opts)
         if (gs) return { task: n, status: 'blocked', gatePassed: false, summary: 'guard stop', commits: '', blocker: 'guard stop', startedAt, finishedAt: stamp(), guardStop: gs, ...wtField }
+      }
+      const tc = testConflicts[n]
+      if (tc && !isRevise && state.attempts[n] <= (tc.attempts ?? Infinity)) {
+        return { task: n, status: 'blocked', gatePassed: false, summary: 'a test can never pass', commits: 'abc123', blocker: 'test conflict', testConflict: tc.conflict, startedAt, finishedAt: stamp(), ...wtField }
       }
       const pass = state.attempts[n] > (failUntil[n] || 0)
       return { task: n, status: pass ? 'done' : 'in_progress', gatePassed: pass, summary: `attempt ${state.attempts[n]}`, commits: 'abc123', startedAt, finishedAt: stamp(), ...wtField }

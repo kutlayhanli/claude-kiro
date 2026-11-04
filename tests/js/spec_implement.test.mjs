@@ -96,6 +96,38 @@ await test('issue #6: a refused relink skips the task as before, and relink: fal
   assert.ok(off.result.failed.some(x => x.task === '3' && x.reason.startsWith('verify-order cycle')))
 })
 
+const CONFLICT = { file: 'tests/unit/test_decay_golden.py', test: 'test_decay_printed', criterion: '14.6', reason: 'rel_tol 1e-12 on a rounded input', fix: 'rel_tol 1e-5 for the printed input' }
+
+await test('issue #8: a confirmed test conflict blocks only that task (blocked: test) and lists the test-track fix', async () => {
+  const p = project({ deps: { 1: [], 2: [], 3: ['2'], 4: [] }, testConflicts: { 2: { conflict: CONFLICT } } })
+  const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, onFailure: 'halt' } })
+  const t2 = p.state.events.filter(e => /^task 2( |$)/.test(e) && !e.endsWith(' end'))
+  assert.deepEqual(t2, ['task 2', 'task 2 retry 1'], 'one report plus one confirmation, no further retries')
+  assert.match(p.state.prompts['task 2 retry 1'], /Check that claim yourself/)
+  assert.equal(result.halted, false, 'a test conflict never halts the run, even with onFailure halt')
+  assert.deepEqual(result.merged.sort(), ['1', '4'])
+  assert.ok(!p.state.events.includes('task 3'), 'its dependent waits')
+  const f = result.failed.find(x => x.task === '2')
+  assert.ok(f && f.reason.startsWith('blocked: test (tests/unit/test_decay_golden.py test_decay_printed)'), f && f.reason)
+  assert.deepEqual(result.testFixes, [{ task: '2', file: CONFLICT.file, test: CONFLICT.test, criterion: '14.6', reason: CONFLICT.reason, fix: CONFLICT.fix }])
+  assert.ok(logs.some(l => l.startsWith('Test-track fixes (1)')))
+  assert.ok(logs.some(l => l.includes('Task 2: tests/unit/test_decay_golden.py test_decay_printed vs 14.6')))
+})
+
+await test('issue #8: the confirmation runs on the strongest rung, and an agent that passes the gate wins', async () => {
+  const roles = { implementer: { model: 'sonnet', effort: 'medium', escalate: ['opus'] } }
+  const p = project({ deps: { 1: [] }, testConflicts: { 1: { conflict: CONFLICT } } })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: roles } })
+  assert.ok(p.state.events.includes('task 1 retry 1 (opus)'), p.state.events.join(', '))
+  assert.equal(p.state.opts['task 1 retry 1 (opus)'].model, 'opus')
+  assert.equal(result.testFixes.length, 1)
+
+  const q = project({ deps: { 1: [] }, testConflicts: { 1: { conflict: CONFLICT, attempts: 1 } } })
+  const won = await runWorkflow(SCRIPT, { agent: q.agent, args: { ...baseArgs, agents: roles } })
+  assert.deepEqual(won.result.merged, ['1'], 'the confirming agent passed the gate: the task merges')
+  assert.deepEqual(won.result.testFixes, [])
+})
+
 await test('relinks in tasks.md apply without a restart', async () => {
   // 3 spuriously depends on 2 (slow); a relink after the first task removes the edge.
   const p = project({ deps: { 1: [], 2: ['1'], 3: ['2'] }, durations: { 2: 80 }, relink: { atPlan: 2, deps: { 3: ['1'] } } })
@@ -1000,10 +1032,12 @@ const SNAPSHOT_KEYS = [
   "tasks[].startedAt",
   "tasks[].summary",
   "tasks[].task",
+  "tasks[].testConflict",
   "tasks[].title",
   "tasks[].toMergedMinutes",
   "tasks[].wave",
   "tasks[].wrongTests",
+  "testFixes",
   "timing",
   "timing.end",
   "timing.minutes",

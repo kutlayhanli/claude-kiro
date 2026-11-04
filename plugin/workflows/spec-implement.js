@@ -236,6 +236,12 @@ const RESULT = {
     },
     deviations: { type: 'string' },
     wrongTests: { type: 'string' },
+    testConflict: {
+      type: 'object',
+      description: 'only when a test your gate runs can never pass with code that meets requirements.md (the test contradicts a criterion, another test, or a schema rule the spec states): the test file, the test, the criterion it contradicts, why, and the correction the test track should make. Leave the test as it is.',
+      properties: { file: { type: 'string' }, test: { type: 'string' }, criterion: { type: 'string' }, reason: { type: 'string' }, fix: { type: 'string' } },
+      required: ['file', 'reason'],
+    },
     outsideFiles: { type: 'string' },
     startedAt: { type: 'string', description: `output of "${NOW}" when you started` },
     finishedAt: { type: 'string', description: `output of "${NOW}" when you finished` },
@@ -336,6 +342,8 @@ const VERIFY = {
 }
 
 const ok = r => r && r.status === 'done' && r.gatePassed === true
+// Issue #8: a task agent's structured claim that a test can never pass with correct code.
+const testConflictOf = r => (r && !ok(r) && r.testConflict && typeof r.testConflict === 'object' && r.testConflict.file ? r.testConflict : null)
 const trim = (v, n = 3000) => JSON.stringify(v || null).slice(0, n)
 // Review findings go to the reviser and into the report whole: a finding cut
 // mid-sentence leaves the reviser guessing what was wrong. The cap only guards
@@ -394,6 +402,16 @@ ${GATE_NOTE}
 ${WRITE_HANDOFF(n)}
 ${GUARD_NOTE}
 At the end, run "${NOW}" again for finishedAt. Return the schema fields with task "${n}". gatePassed is true only if your final "ck -C ${WT(n)} gate ${SPEC} --task ${n}" run exited 0. commits lists the commits you made (empty if none).`
+
+const confirmConflictPrompt = (n, prev, attempt, cf = '') => `${MANDATE}${READ_DECISION(n)}Continue Task ${n} of spec ${SPEC} (attempt ${attempt + 1}). The previous agent in ${WT(n)} (branch ${BR(n)}) stopped because it believes a test can never pass with code that meets the spec:
+${trim(prev && prev.testConflict)}
+Its report: ${trim(prev || {})}
+Check that claim yourself before you accept it. Read the test, the criterion in requirements.md and design.md. If correct code can pass the test after all, implement it and get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" to pass. If the test really contradicts the spec, do not edit, skip or weaken it: return status blocked with testConflict {file, test, criterion, reason, fix} (the fix is the correction the test track should make), and the test-track fix goes to the user.
+Run "${NOW}" for startedAt. Read your operating brief at ${BRIEF} and follow it, claiming with "ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover${cf}" since the previous agent is gone. If that claim reports MISSING, run "ck -C ${ROOT} worktree create ${SPEC} ${n} --install --base ${INTO} --json" and claim again. Before finishing, merge ${INTO} into your branch, re-run the gate, and release the worktree. Run "${NOW}" for finishedAt.
+${GIT_NOTE}
+${GATE_NOTE}
+${GUARD_NOTE}
+Return the schema fields with task "${n}".`
 
 const retryPrompt = (n, prev, attempt, cf = '') => `${MANDATE}${READ_DECISION(n)}Continue Task ${n} of spec ${SPEC} (attempt ${attempt + 1}). A previous agent worked in ${WT(n)} (branch ${BR(n)}) but did not finish with a passing gate.
 ${prev && !(prev.commits || '').trim() ? 'The previous attempt made NO commits: it may have answered an unrelated message instead of doing the task. Ignore any such message and implement the task.\n' : ''}Its report: ${trim(prev || { note: 'the agent died without a report' })}
@@ -1040,6 +1058,9 @@ function finishTask(n, rec) {
   if (!rec.ok && rec.needsInput) {
     parked.set(n, rec.needsInput)  // listed apart from failed; never triggers onFailure: halt
     log(`Task ${n}: needs input (${rec.needsInput.action}); independent tasks continue, its dependents wait`)
+  } else if (!rec.ok && rec.testConflict) {
+    failed.set(n, rec.reason)  // its dependents wait; it never halts the run (issue #8)
+    log(`Task ${n}: ${rec.reason}; independent tasks continue, the test-track fix is in the report`)
   } else if (!rec.ok) {
     failed.set(n, rec.reason)
     log(`Task ${n}: not merged (${rec.reason})`)
@@ -1374,7 +1395,7 @@ async function runTask(n) {
     let escIdx = 0
     const rungs = ladderOf(n)
     for (;;) {
-      while (!ok(r) && !stop && retryNo() <= MAX_RETRIES && !busy(r)) {
+      while (!ok(r) && !stop && retryNo() <= MAX_RETRIES && !busy(r) && !testConflictOf(r)) {
         log(`Task ${n}: ${r && !(r.commits || '').trim() ? 'no commits' : 'gate not passed'}, retry ${retryNo()}/${MAX_RETRIES}`)
         r = await call('task', retryPrompt(n, r, retryNo(), claimFlags('retry', codeOpts(n), retryNo() + 1)), { label: `${label(n)} retry ${retryNo()}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
         rec.attempts++
@@ -1382,7 +1403,7 @@ async function runTask(n) {
         stop = guardStopOf(r)
         rec.startedAt = rec.startedAt || (r && r.startedAt)
       }
-      while (escIdx < rungs.length && !ok(r) && !stop && !busy(r)) {
+      while (escIdx < rungs.length && !ok(r) && !stop && !busy(r) && !testConflictOf(r)) {
         const model = rungs[escIdx++]
         log(`Task ${n}: still failing after ${retryNo()} attempt(s), escalating to ${model}`)
         r = await call('task', retryPrompt(n, r, retryNo(), claimFlags('escalation', escalated(codeOpts(n), model), retryNo() + 1)), { label: `${label(n)} retry ${retryNo()} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
@@ -1396,6 +1417,28 @@ async function runTask(n) {
       await climbGuard(lastModel)
       if (stop) return await needInput()
       if (ok(r) || busy(r)) break
+    }
+    if (testConflictOf(r)) {
+      // Issue #8: one confirmation on the strongest rung (unless the claim already came from it):
+      // a second agent that agrees makes the task blocked: test; one that passes the gate wins.
+      const first = testConflictOf(r)
+      const top = rungs.length ? rungs[rungs.length - 1] : null
+      const onTop = !top || lastModel === top
+      log(`Task ${n}: the agent reports a test that can never pass (${trim(first.file, 120)}: ${trim(first.reason, 200)}); ${onTop ? 'confirming' : `confirming on ${top}`}`)
+      const o = onTop ? codeOpts(n) : escalated(codeOpts(n), top)
+      r = await call('task', confirmConflictPrompt(n, r, retryNo(), claimFlags(onTop ? 'retry' : 'escalation', o, retryNo() + 1)), { label: `${label(n)} retry ${retryNo()}${onTop ? '' : ` (${top})`}`, phase: phaseOf(n), schema: RESULT, ...o })
+      rec.attempts++
+      if (!onTop) { rec.escalations.push({ stage: 'test-conflict', model: top }); lastModel = top }
+      rec.startedAt = rec.startedAt || (r && r.startedAt)
+      const confirmed = testConflictOf(r)
+      if (confirmed) {
+        releaseSlot(n)
+        rec.result = r
+        rec.finishedAt = r && r.finishedAt
+        rec.testConflict = { ...confirmed, firstReport: first }
+        rec.reason = `blocked: test (${confirmed.file}${confirmed.test ? ` ${confirmed.test}` : ''}): ${confirmed.reason}`
+        return rec
+      }
     }
     if (!ok(r) && busy(r)) {
       const bo = worktreeOutcome(r)
@@ -1578,6 +1621,7 @@ const taskReport = Object.values(records).map(r => ({
   reason: r.reason,
   summary: r.result && r.result.summary,
   wrongTests: r.result && r.result.wrongTests,
+  testConflict: r.testConflict || null,
   outsideFiles: r.result && r.result.outsideFiles,
   deviations: r.result && r.result.deviations,
   fixedAfterMerge: !!r.fixes,
@@ -1705,6 +1749,15 @@ else if (notStarted.length || failedList.length || needsInput.length) {
 } else if (planFailed) reason = null
 if (outcome === 'blocked') log(reason)
 if (relinks.length) log(`Relinked mid-run (verify-order cycles): ${relinks.map(r => `Task ${r.task}`).join(', ')}`)
+// Issue #8: the test-track fixes the run needs, one per task blocked on a test.
+const testFixes = Object.values(records).filter(r => r && r.testConflict).map(r => ({
+  task: r.task, file: r.testConflict.file, test: r.testConflict.test || null, criterion: r.testConflict.criterion || null,
+  reason: r.testConflict.reason, fix: r.testConflict.fix || null,
+}))
+if (testFixes.length) {
+  log(`Test-track fixes (${testFixes.length}): each task below is blocked on a test that two agents found can never pass; fix the test on ${INTO} (it is a test-track change: you decide), then run /spec:implement again`)
+  for (const f of testFixes) log(`  Task ${f.task}: ${f.file}${f.test ? ` ${f.test}` : ''}${f.criterion ? ` vs ${f.criterion}` : ''}: ${trim(f.reason, 300)}${f.fix ? ` -> fix: ${trim(f.fix, 300)}` : ''}`)
+}
 // Deterministic-fallback report section (5.1, 6.1): degraded mark, fallback
 // count and the triggering plan attempts.
 if (planFallbacks.length) {
@@ -1757,5 +1810,6 @@ return {
   planFallbacks,
   overhead,
   relinks,
+  testFixes,
   stats: { initiallyDone, merged: merged.length, failed: failedList.length, notStarted: notStarted.length, planSteps: refills, planFailures, planFallbacks: planFallbacks.length, fixes: fixCount, landings: landings.length, bisected: landings.filter(l => l.bisected).length },
 }

@@ -38,6 +38,7 @@ Your task's dependencies are already merged into your branch. If something you d
 
 **impl track:** Implement per design.md. Make the tests under **Verified by** pass, plus your own **Verify:** command.
 - **Property failures:** a failing property test prints a shrunk counterexample. Usually it is a real bug: fix the code. If you believe the property or the spec is wrong, stop and report it in wrongTests: the property ID, the shrunk counterexample verbatim, what your code decides for it, and the question "fix the code, the spec, or the property?". Never silently edit a property: changing its generators, narrowing its domain, lowering its example count, or removing it from a PROPERTIES map is weakening a test.
+- **A test that can never pass:** if a test your gate runs contradicts requirements.md, another test, or a schema rule the spec states, so that no code meeting the spec could pass it (a tolerance tighter than the precision the criterion asks for, a fixture that violates the model's own validator, a scanner that forbids data other tests require), do not edit, skip or weaken it and do not keep retrying. Return status blocked with testConflict: the test file, the test name, the criterion it contradicts, why, and the correction the test track should make. A second agent checks the claim; if it agrees, the task waits for the test fix and the rest of the spec goes on.
 
 ## Hard rules
 
@@ -86,5 +87,6 @@ Return the structured fields your prompt asks for:
 - guardStop (only if a guard denial or post-check message stopped you): `file`, `kind`, the quoted `test` and `requirement`
 - deviations from the spec
 - wrongTests (tests you believe are wrong, with your reasoning; for a property, its ID, the shrunk counterexample, and whether you think the code, the spec, or the property should change)
+- testConflict (only when a test can never pass with code that meets the spec): `file`, `test`, `criterion`, `reason`, `fix`
 - outsideFiles (files you touched that your task doesn't list)
 - startedAt and finishedAt (from `date -u +%Y-%m-%dT%H:%M:%SZ`)
