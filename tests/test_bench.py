@@ -146,10 +146,15 @@ def test_unknown_cache_read_rate_is_unknown_not_zero():
     # Issue #9: a paid entry without a cacheRead rate must not silently price
     # cache reads at $0. No cache reads: priced normally; with cache reads:
     # cost unknown.
+    # The rule is checked on an explicit paid entry with no cacheRead rate (the catalog
+    # snapshot now gives deepseek-v4.1-flash one, so it no longer exercises the rule).
+    paid = {"acme/paid-model": {"input": 0.30, "output": 1.20}}
     plain = {"input": 1_000_000, "output": 0, "cacheRead": 0, "cacheCreation": 0}
-    assert abs(bench.price_usage("opencode/deepseek-v4.1-flash", plain) - 0.30) < 1e-9
+    assert abs(bench.price_usage("acme/paid-model", plain, paid) - 0.30) < 1e-9
     cached = {"input": 1_000_000, "output": 0, "cacheRead": 5_000_000, "cacheCreation": 0}
-    assert bench.price_usage("opencode/deepseek-v4.1-flash", cached) is None
+    assert bench.price_usage("acme/paid-model", cached, paid) is None
+    # The catalog's own cacheRead rate prices deepseek-v4.1-flash's cache reads.
+    assert abs(bench.price_usage("opencode/deepseek-v4.1-flash", cached) - (0.30 + 5 * 0.006)) < 1e-9
     # A known cacheRead rate still prices cache reads.
     spark = {"input": 1_000_000, "output": 0, "cacheRead": 1_000_000, "cacheCreation": 0}
     assert abs(bench.price_usage("opencode-go/muse-spark-1.3-contributor", spark) - (0.10 + 0.002)) < 1e-9
