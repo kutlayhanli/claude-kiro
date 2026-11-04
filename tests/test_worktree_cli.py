@@ -256,6 +256,40 @@ def test_merge_ignores_generated_artifacts_only(repo):
     assert merged.exit_code == 0, merged.output
 
 
+@pytest.mark.parametrize("rel", ["src/retarget/new.py", "src/mtr/target/new.py", "docs/node_modules_notes.md", "pycache.py"])
+def test_merge_still_refuses_real_work_named_like_generated_dirs(repo, rel):
+    # Issue #7 follow-up: names are matched by whole path segment (target only at the top
+    # level), so real uncommitted source that merely resembles a generated path still blocks.
+    ck(repo, "worktree", "create", "demo", "1")
+    commit_in(wt(repo, "1"), "one.txt", "1\n", "task 1")
+    f = wt(repo, "1") / rel
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("real work\n")
+    merged = ck(repo, "worktree", "merge", "demo", "1")
+    assert merged.exit_code != 0 and "uncommitted" in merged.output, merged.output
+
+
+def test_merge_ignores_a_top_level_target_dir_and_nested_venv(repo):
+    ck(repo, "worktree", "create", "demo", "1")
+    commit_in(wt(repo, "1"), "one.txt", "1\n", "task 1")
+    (wt(repo, "1") / "target" / "debug").mkdir(parents=True)
+    (wt(repo, "1") / "target" / "debug" / "app").write_bytes(b"\x7fELF")
+    (wt(repo, "1") / "sub" / ".venv" / "bin").mkdir(parents=True)
+    (wt(repo, "1") / "sub" / ".venv" / "bin" / "python").write_text("#!\n")
+    merged = ck(repo, "worktree", "merge", "demo", "1")
+    assert merged.exit_code == 0, merged.output
+
+
+def test_merge_counts_a_tracked_change_under_a_generated_name(repo):
+    # A tracked file is real work wherever it lives.
+    ck(repo, "worktree", "create", "demo", "1")
+    (wt(repo, "1") / "node_modules").mkdir()
+    commit_in(wt(repo, "1"), "node_modules/vendored.js", "v1\n", "task 1 vendors a file")
+    (wt(repo, "1") / "node_modules" / "vendored.js").write_text("v2\n")
+    merged = ck(repo, "worktree", "merge", "demo", "1")
+    assert merged.exit_code != 0 and "uncommitted" in merged.output, merged.output
+
+
 def test_merge_into_integration_branch_leaves_main_untouched(repo):
     assert "CREATED integration" in ck(repo, "worktree", "integration", "demo").output
     ck(repo, "worktree", "create", "demo", "1", "--base", "integrate/demo")
