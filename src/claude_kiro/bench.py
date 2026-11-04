@@ -875,6 +875,9 @@ def run_arm_opencode(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[s
     results_dir, bench_dir = Path(cfg["results_dir"]), Path(cfg["bench_dir"])
     clone = bench_dir / arm["id"]
     env = {**os.environ, **cfg["env"]}
+    # subprocess(cwd=...) does not update PWD; OpenCode uses PWD to pick the project location, so
+    # without this its plugin set up in the directory `ck bench run` started in, never the clone.
+    env["PWD"] = str(clone)
     ck = cfg["ck"]
     opencode_cfg = cfg.get("opencode") or {}
     package_root = Path(os.path.expanduser(str(opencode_cfg.get("plugin") or os.environ.get("CK_OPENCODE_PLUGIN") or "")))

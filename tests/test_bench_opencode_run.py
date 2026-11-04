@@ -27,7 +27,8 @@ ROOT = Path(__file__).resolve().parents[1]
 FAKE_OPENCODE = """#!/usr/bin/env python3
 import json, os, pathlib, time
 
-cwd = pathlib.Path.cwd()
+# Like OpenCode, the project location is $PWD, not the process cwd (subprocess cwd= leaves PWD stale).
+cwd = pathlib.Path(os.environ.get("PWD") or os.getcwd())
 agents = cwd / ".opencode" / "agents"
 agents.mkdir(parents=True, exist_ok=True)
 (agents / "ck-worker.md").write_text("---\\nmode: subagent\\n---\\n")
