@@ -184,16 +184,22 @@ _GLOB_CHARS = ("*", "?", "[")
 def verify_paths(command: str, config: dict) -> List[Tuple[str, bool]]:
     """(path, narrowed) pairs for the test-file tokens of one Verify command.
 
-    narrowed is True when the token carried a `::` selector, or when the command
-    holds a `-k` option (which narrows every file in it)."""
+    narrowed is True when the token carried a `::` selector, when the command
+    holds a `-k` option (which narrows every file in it), or when a `node <test
+    file>` command names test cases after the file (`node t.test.mjs TC-1 TC-3`,
+    the JS harness's own selector)."""
     try:
         tokens = shlex.split(command)
     except ValueError:
         tokens = command.split()
     command_narrowed = any(tok == "-k" or (tok.startswith("-k") and len(tok) > 2) for tok in tokens)
+    node_selected = False
+    if tokens and PurePosixPath(tokens[0]).name == "node":
+        rest = [t for t in tokens[1:] if not t.startswith("-")]
+        node_selected = len(rest) > 1 and all("/" not in t and "." not in t for t in rest[1:])
     out: List[Tuple[str, bool]] = []
     for tok in tokens:
-        selected = "::" in tok
+        selected = "::" in tok or node_selected
         path = tok.split("::")[0].removeprefix("./")
         if not path or path.endswith("/") or any(c in path for c in _GLOB_CHARS):
             continue

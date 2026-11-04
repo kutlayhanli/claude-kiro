@@ -366,7 +366,10 @@ def test_p24_claim_and_land_prompts_carry_the_progress_flags(bridge, sc, slots, 
             if ck_kind == "task":
                 assert event == "task-start" and f["--attempt"] == "1", (label, f)
             else:
-                assert event == ("escalation" if model == LADDER_MODEL else CLAIM_KINDS[ck_kind][0]), (label, f, model)
+                # An escalation names its model in the label ("(opus)" / "[opus]"); a safety task starts on the
+                # strong model, so a plain retry of it runs on the ladder model without being an escalation.
+                escalated = label.endswith((f"({LADDER_MODEL})", f"[{LADDER_MODEL}]"))
+                assert event == ("escalation" if escalated else CLAIM_KINDS[ck_kind][0]), (label, f, model)
                 n = claim["task"]
                 assert n in first_idx and first_idx[n] < i, (label, "retry/escalation before the task-start")
                 if ck_kind == "retry":

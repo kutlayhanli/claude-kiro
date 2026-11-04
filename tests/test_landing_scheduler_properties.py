@@ -72,6 +72,8 @@ def kind(label: str) -> str:
         return "review"
     if label.startswith("land "):
         return "land"
+    if REVIEW_WAVE.match(label):
+        return "review-wave"
     if PLAN.match(label):
         return "plan"
     if label.startswith("full gate @"):
@@ -97,6 +99,14 @@ PLAN_MS = {str(k): 1 for k in range(1, 400)}  # plan k takes 1 ms, as a real pla
 
 def is_instant(label: str) -> bool:
     return kind(label) in INSTANT or label.startswith("cross-test")
+
+
+REVIEW_WAVE = re.compile(r"^review-wave \d+ tasks ([\w ]+)$")
+
+
+def wave_tasks(label: str) -> Set[str]:
+    m = REVIEW_WAVE.match(label)
+    return set(m.group(1).split()) if m else set()
 
 
 def first_task(label: str) -> Optional[str]:
@@ -302,12 +312,24 @@ def trigger_ok(request: str, trigger: Optional[str]) -> bool:
             return tk in ("task", "retry") and implementer_task(trigger) == n
         return tk == "revise" and implementer_task(trigger) == n
     if k == "revise":
-        return tk == "review" and REVIEW.match(trigger).group(1) == implementer_task(request)
+        n = implementer_task(request)
+        if tk == "review-wave":  # Story 4 (4.4): the batch review flagged it before it landed
+            return n in wave_tasks(trigger)
+        return tk == "review" and REVIEW.match(trigger).group(1) == n
+    # The in-flight landing step's last agent: the next land (or its batch review) runs after the
+    # 3.1 plan that follows a landing, or after a batch review that left nothing to land.
+    step = ("land", "full gate", "fix", "re-check", "resolve", "plan", "review-wave")
+    if k == "review-wave":  # Story 4 (4.1): before the batch lands, when the landing step takes it
+        if tk in ("task", "retry"):
+            return implementer_task(trigger) in wave_tasks(request)
+        return tk in step
     if k == "land":
         members = set(land_tasks(request))
         if tk in ("task", "retry", "revise", "review"):  # an approval (or a passing gate without reviews)
             return bool(tasks_named(trigger) & members)
-        return tk in ("land", "full gate", "fix", "re-check", "resolve")  # the in-flight landing step's last agent
+        if tk == "review-wave":  # a batch review just ended:
+            return True  # it approved some of this batch, or flagged all of the previous one
+        return tk in step
     if k == "full gate":
         return tk == "land"
     if k == "fix":
@@ -331,7 +353,7 @@ def test_p9_finish_type_agents_are_requested_at_their_trigger(bridge, sc, slots)
     for i, e in enumerate(out["trace"]):
         if e["ev"] == "end":
             ends.append(e["label"])
-        elif e["ev"] == "request" and kind(e["label"]) in ("review", "revise", "land", "full gate", "fix", "re-check"):
+        elif e["ev"] == "request" and kind(e["label"]) in ("review", "review-wave", "revise", "land", "full gate", "fix", "re-check"):
             # Walk back to the trigger. Only ends of INSTANT agents may lie between it and the request (they end
             # inside the trigger's own microtask flush); any other end means the request waited for an agent.
             between = []

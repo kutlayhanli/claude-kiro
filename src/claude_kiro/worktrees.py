@@ -176,9 +176,26 @@ def branch_exists(root: Path, branch: str) -> bool:
     return git(root, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}", check=False).returncode == 0
 
 
+GENERATED_PATH_PARTS = ("__pycache__/", ".pytest_cache/", "node_modules/", ".venv/", "target/")
+GENERATED_PATH_SUFFIXES = (".pyc", ".pyo")
+
+
+def _is_generated_status_path(path: str) -> bool:
+    """True when a `git status` path is a generated artifact, not real work."""
+    p = path.strip().strip('"')
+    return (
+        any(part in p for part in GENERATED_PATH_PARTS)
+        or any(p.endswith(s) for s in GENERATED_PATH_SUFFIXES)
+        or p.endswith(".pytest_cache")
+    )
+
+
 def dirty_files(path: Path, tracked_only: bool = False) -> List[str]:
     args = ["status", "--porcelain"] + (["--untracked-files=no"] if tracked_only else [])
-    return [line for line in git(path, *args).stdout.splitlines() if line.strip()]
+    lines = [line for line in git(path, *args).stdout.splitlines() if line.strip()]
+    # Generated test artifacts (__pycache__/, *.pyc, .pytest_cache/, ...) never
+    # count as real work: a task worktree containing only those merges cleanly.
+    return [line for line in lines if not _is_generated_status_path(line[3:] if len(line) > 3 else line)]
 
 
 def lock_reason(root: Path, path: Path) -> Optional[str]:

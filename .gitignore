@@ -14,3 +14,10 @@ _resources/
 
 # Git worktrees (created by /spawn-worktree)
 worktrees/
+
+# OpenCode plugin package (opencode/)
+opencode/vendor/
+opencode/node_modules/
+opencode/dist/
+opencode/test/.tmp/
+opencode/*.tgz

@@ -1,7 +1,8 @@
 # Upgrading
 
-- **From 0.10.3 to 0.10.4:** see the next section.
-- **From 0.10.2 to 0.10.3:** see [0.10.2 → 0.10.3](#0102--0103), then the 0.10.4 notes.
+- **From 0.10.4 to 0.11.0:** see the next section.
+- **From 0.10.3 to 0.10.4:** see [0.10.3 → 0.10.4](#0103--0104), then the 0.11.0 notes.
+- **From 0.10.2 to 0.10.3:** see [0.10.2 → 0.10.3](#0102--0103), then the 0.10.4 and 0.11.0 notes.
 - **From 0.10.1 to 0.10.2:** see [0.10.1 → 0.10.2](#0101--0102), then the 0.10.3 notes.
 - **From 0.10 to 0.10.1:** see [0.10 → 0.10.1](#010--0101), then the 0.10.2 and 0.10.3 notes.
 - **From 0.9.1 to 0.10:** see [0.9.1 → 0.10](#091--010), then the 0.10.1, 0.10.2 and 0.10.3 notes.
@@ -15,6 +16,30 @@
 - **From 0.2:** apply the 0.3 notes below as well; the steps are the same.
 - **From 0.1:** skip to [Upgrading to 0.2](#upgrading-to-02), then come back for the 0.3 and 0.4 notes (same commands).
 
+## 0.10.4 → 0.11.0
+
+OpenCode support. The Claude Code plugin and `ck` behavior are unchanged; the new surface is the
+`opencode-claude-kiro` npm package and two `ck` commands it uses.
+
+```bash
+ck update                       # ck itself and the spec plugin (Claude Code)
+# OpenCode: add the package to opencode.json
+# { "plugins": ["opencode-claude-kiro@0.11.0"] }
+ck doctor --harness opencode    # optional: node/ck/vendor/model/agent/hook/git preflight
+```
+
+- **OpenCode package.** `opencode-claude-kiro@0.11.0` registers the five `/spec/*` commands, writes
+  the flat `ck-*` agents and `AGENTS.md`, runs the vendored workflows through a `workflow` tool, and
+  translates OpenCode tool events into the same `ck` guard hooks. It needs Node.js 20+ and `ck` 0.11.0.
+- **Native run records.** The package writes `<state>/runs/<runId>/record.json`
+  (`ck-opencode-run/1`), including requested/resolved model and effort, tokens, cost, peak context,
+  guard counts and throttles. `ck stats record <record.json>` ingests it into the same local
+  `ck-run-local/1` record as `ck stats collect`; `ck stats show <runId>` and `ck cost --run <runId>`
+  work unchanged. Free OpenCode models are explicitly $0.00; unknown paid models stay unknown.
+- **Bench.** `ck bench run --harness opencode` runs the same arms through the workflow bridge;
+  `ck bench score` is unchanged. The launcher sets `CK_RUN_HEADLESS=1` and marks guard denials,
+  timeouts and non-`done` records fail-closed.
+- **Doctor.** `ck doctor --harness opencode` runs the plugin's preflight without starting a server.
 ## 0.10.3 → 0.10.4
 
 Run ETA, analytics hardening and a stricter plan lint. On each machine:

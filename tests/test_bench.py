@@ -142,6 +142,19 @@ def test_price_usage_uses_list_prices_and_overrides():
     assert bench.price_usage("gpt-x", u) is None
 
 
+def test_unknown_cache_read_rate_is_unknown_not_zero():
+    # Issue #9: a paid entry without a cacheRead rate must not silently price
+    # cache reads at $0. No cache reads: priced normally; with cache reads:
+    # cost unknown.
+    plain = {"input": 1_000_000, "output": 0, "cacheRead": 0, "cacheCreation": 0}
+    assert abs(bench.price_usage("opencode/deepseek-v4.1-flash", plain) - 0.30) < 1e-9
+    cached = {"input": 1_000_000, "output": 0, "cacheRead": 5_000_000, "cacheCreation": 0}
+    assert bench.price_usage("opencode/deepseek-v4.1-flash", cached) is None
+    # A known cacheRead rate still prices cache reads.
+    spark = {"input": 1_000_000, "output": 0, "cacheRead": 1_000_000, "cacheCreation": 0}
+    assert abs(bench.price_usage("opencode-go/muse-spark-1.3-contributor", spark) - (0.10 + 0.002)) < 1e-9
+
+
 IMPORT_FIXTURE = {
     "summary": "Implement a spec",
     "agentCount": 3,
@@ -208,3 +221,41 @@ def test_import_prices_transcripts_when_given(tmp_path):
     # cache read 0.01 + cache write 1.25 x input 0.10 per 1M
     assert abs(by["t3"]["cost_usd"] - (0.01 + 0.125)) < 1e-9 and by["t3"]["cost_basis"] == "transcript"
     assert by["p1"]["cost_basis"] == "context-tokens-as-input"
+
+
+def _fallback_report():
+    return {
+        **IMPORT_FIXTURE["result"],
+        "degraded": True,
+        "planFallbacks": [
+            {"planStep": 2, "trigger": "start", "source": "deps", "ready": ["3"]},
+            {"planStep": 3, "trigger": "landing", "source": "deps", "ready": ["4"]},
+        ],
+        "overhead": {"share": 0.61, "threshold": 0.5, "warned": True},
+    }
+
+
+def test_degraded_passthrough_present():
+    """summarize_report carries degraded, fallback counts and overhead share through."""
+    from claude_kiro import bench
+
+    summary = bench.summarize_report(_fallback_report())
+    assert summary["degraded"] is True
+    fallbacks = summary.get("planFallbacks", summary.get("plan_fallbacks"))
+    assert fallbacks is not None
+    count = len(fallbacks) if isinstance(fallbacks, list) else fallbacks.get("count", fallbacks)
+    assert count == 2
+    overhead = summary.get("overhead")
+    assert overhead is not None
+    share = overhead.get("share") if isinstance(overhead, dict) else overhead
+    assert abs(share - 0.61) < 1e-9
+
+
+def test_degraded_passthrough_absent():
+    """summarize_report omits degraded/fallback/overhead when the report lacks them."""
+    from claude_kiro import bench
+
+    summary = bench.summarize_report(IMPORT_FIXTURE["result"])
+    assert "degraded" not in summary
+    assert "planFallbacks" not in summary and "plan_fallbacks" not in summary
+    assert "overhead" not in summary

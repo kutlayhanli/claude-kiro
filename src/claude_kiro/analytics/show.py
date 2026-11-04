@@ -9,6 +9,8 @@ from statistics import median
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 from datetime import datetime, timezone
 
+from .. import bench
+
 COVERAGE: Dict[str, str] = {
     "task_minutes": (
         "task started to finished (elapsed); includes waits between its agents; "
@@ -31,6 +33,10 @@ COVERAGE: Dict[str, str] = {
 UNKNOWN = "unknown"
 TOP_N = 5
 QUEUE_ORDER = ("task", "review", "revise", "plan", "land", "gate")
+# Plan/review/landing share of agent time warns at this fraction (mirrors the
+# in-script OVERHEAD_WARN_THRESHOLD in plugin/workflows/spec-implement.js).
+OVERHEAD_WARN_THRESHOLD = 0.5
+OVERHEAD_ROLES = ("plan", "reviewer", "land")
 # per-row and per-task fields that the record keeps for the queue sections but the JSON view does not repeat
 ROW_WAIT_KEYS = ("queuedAtMs", "queueMs")
 TASK_WAIT_KEYS = ("reviewWaitMs", "landingWaitMs")
@@ -185,6 +191,71 @@ def _div(a: Optional[float], b: Optional[float]) -> Optional[float]:
 
 def _is_int(v: Any) -> bool:
     return isinstance(v, int) and not isinstance(v, bool)
+
+
+# ------------------------------------------------------- overhead (Story 5)
+
+def overheadShare(byRoleMs: Any) -> Optional[float]:
+    """Plan/review/landing share of agent time: `(ms_plan + ms_reviewer + ms_land) / ms_total`.
+
+    Pure seam over `byRole` ms cells; `None` when no ms is recorded (old runs
+    render `not recorded`). Non-numeric cells are ignored, never coerced.
+    """
+    if not isinstance(byRoleMs, Mapping):
+        return None
+    vals: Dict[str, float] = {}
+    for role, ms in byRoleMs.items():
+        if isinstance(ms, bool) or not isinstance(ms, (int, float)):
+            continue
+        if ms != ms:  # NaN: not a recorded duration
+            continue
+        vals[role] = float(ms)
+    total = sum(vals.values())
+    if total <= 0:
+        return None
+    return sum(v for r, v in vals.items() if r in OVERHEAD_ROLES) / total
+
+
+def overheadWarning(share: Any) -> bool:
+    """Warn-only threshold compare: true only for a real numeric share above the threshold.
+
+    Never halts, fails or retries; threshold-shaped strings, bools and None never warn.
+    """
+    if isinstance(share, bool) or not isinstance(share, (int, float)):
+        return False
+    return share > OVERHEAD_WARN_THRESHOLD
+
+
+def _by_role_ms(record: Mapping[str, Any]) -> Dict[str, Any]:
+    """The raw `byRole` ms cells of a record (numeric filtering happens in the seam)."""
+    roles = record.get("byRole")
+    if not isinstance(roles, Mapping):
+        return {}
+    return {r: c.get("ms") for r, c in roles.items() if isinstance(c, Mapping)}
+
+
+def _plan_fallbacks_view(record: Mapping[str, Any]) -> Dict[str, Any]:
+    """`plan_fallbacks: { recorded, count, entries }`; unrecorded when the run file
+    carried no `result.planFallbacks` (pre-change records). All reads use `.get`."""
+    result = record.get("result")
+    entries = result.get("planFallbacks") if isinstance(result, Mapping) else None
+    if isinstance(entries, list):
+        return {"recorded": True, "count": len(entries), "entries": list(entries)}
+    return {"recorded": False, "count": None, "entries": None}
+
+
+def _overhead_view(record: Mapping[str, Any], fb_recorded: bool) -> Dict[str, Any]:
+    """`overhead: { recorded, share, threshold, warned }`; share is the seam value
+    over the record's `byRole` ms cells, shown only alongside recorded fallback
+    data (`not recorded` otherwise). Warn-only: `warned` never halts anything."""
+    share = overheadShare(_by_role_ms(record)) if fb_recorded else None
+    recorded = fb_recorded and share is not None
+    return {
+        "recorded": recorded,
+        "share": share if recorded else None,
+        "threshold": OVERHEAD_WARN_THRESHOLD,
+        "warned": overheadWarning(share) if recorded else False,
+    }
 
 
 # ------------------------------------------------------------ queue wait
@@ -477,6 +548,10 @@ def run_breakdown(record: Mapping[str, Any]) -> Dict[str, Any]:
     counts = _task_counts(record)
     cost = _cost(record)
     impl_span = _task_span_minutes(record)
+    plan_fallbacks = _plan_fallbacks_view(record)
+    overhead = _overhead_view(record, plan_fallbacks["recorded"])
+    result = record.get("result")
+    degraded = result.get("degraded") if isinstance(result, Mapping) else record.get("degraded")
     return {
         "record": record,
         "interruptions": interruptions_view(record),
@@ -511,6 +586,9 @@ def run_breakdown(record: Mapping[str, Any]) -> Dict[str, Any]:
         "other_role": other,
         "queue_wait": queue,  # ms per kind; None when no agent has a queue time
         "wait_split": wait_split_summary(tasks),  # ms; {"review": None, "landing": None} when not recorded
+        "plan_fallbacks": plan_fallbacks,
+        "overhead": overhead,
+        "degraded": degraded if isinstance(degraded, bool) else None,
         "coverage": dict(COVERAGE),
         "missing": list(record.get("missing") or []),
     }
@@ -583,10 +661,61 @@ def _bucket_lines(title: str, buckets: Mapping[str, Mapping[str, Any]]) -> List[
     return lines
 
 
+def _cost_basis(buckets: Mapping[str, Mapping[str, Any]]) -> str:
+    """Show the exact model id and the in/out token arithmetic behind each model's cost."""
+    parts = []
+    for model, b in buckets.items():
+        rate = bench.rates(model)
+        if rate is None or rate.get("free") is True:
+            continue
+        input_tokens = b.get("input") or 0
+        output_tokens = b.get("output") or 0
+        cache_read = b.get("cacheRead") or 0
+        cache_write = b.get("cacheCreation") or 0
+        input_usd = input_tokens * rate.get("input", 0.0) / 1e6
+        output_usd = output_tokens * rate.get("output", 0.0) / 1e6
+        cache_read_rate = rate.get("cacheRead")
+        cache_usd = (cache_read * (cache_read_rate or 0.0) + cache_write * (rate.get("cacheCreation") or 0.0)) / 1e6
+        cache_part = (
+            f"{cache_read / 1e6:.1f}M×${cache_read_rate:.3f}/M"
+            if cache_read_rate is not None
+            else f"{cache_read / 1e6:.1f}M×unknown rate"
+        )
+        parts.append(
+            f"{model}: in {input_tokens / 1e6:.2f}M×${rate.get('input', 0.0):.2f}/M"
+            f" + out {output_tokens / 1e6:.2f}M×${rate.get('output', 0.0):.2f}/M"
+            f" = ${input_usd + output_usd:.2f}; cache {cache_part}"
+            f" = ${cache_usd:.2f}"
+        )
+    return "; ".join(parts)
+
+
 def _missing_text(m: Any) -> str:
     if isinstance(m, Mapping):
         return f"{m.get('what')} ({m.get('agentId')})" if m.get("agentId") else str(m.get("what"))
     return str(m)
+
+
+def _fallback_line(view: Mapping[str, Any]) -> str:
+    pf = view.get("plan_fallbacks") or {}
+    if not pf.get("recorded"):
+        return "plan fallbacks: not recorded"
+    entries = pf.get("entries") or []
+    steps = [str(e.get("planStep")) for e in entries if isinstance(e, Mapping) and e.get("planStep") is not None]
+    sources = [str(e.get("source")) for e in entries if isinstance(e, Mapping) and e.get("source") is not None]
+    detail = f" (steps {', '.join(steps) if steps else 'none'}; sources {', '.join(sources) if sources else 'none'})"
+    return f"plan fallbacks: {pf.get('count')}{detail}"
+
+
+def _overhead_line(view: Mapping[str, Any]) -> str:
+    oh = view.get("overhead") or {}
+    if not oh.get("recorded") or oh.get("share") is None:
+        return "overhead (plan/review/land share): not recorded"
+    pct = f"{oh['share'] * 100:.0f}%"
+    if oh.get("warned"):
+        thr = oh.get("threshold", OVERHEAD_WARN_THRESHOLD)
+        return f"overhead (plan/review/land share): {pct} (warn: above {thr * 100:.0f}% threshold)"
+    return f"overhead (plan/review/land share): {pct}"
 
 
 def _queue_lines(summary: Optional[Mapping[str, Any]]) -> List[str]:
@@ -626,6 +755,11 @@ def render_run(view: Mapping[str, Any]) -> List[str]:
         f"wall: {_min(run.get('wall_minutes'))}  [{COVERAGE['wall']}]",
         f"task span: {_min(run.get('task_span_minutes'))}  [{COVERAGE['task_span']}]",
         f"cost: {_usd(run.get('cost_usd'))}" + (f" ({src})" if src else f" ({UNKNOWN} source)"),
+    ]
+    basis = _cost_basis(view.get("by_model") or {})
+    if basis:
+        lines.append(f"cost basis: {basis}")
+    lines += [
         f"tasks: {_fmt(run.get('tasks_merged'))} merged, {_fmt(run.get('tasks_failed'))} failed, "
         f"{_fmt(run.get('tasks_total'))} total",
         interruptions_line(view.get("interruptions")),
@@ -662,6 +796,10 @@ def render_run(view: Mapping[str, Any]) -> List[str]:
     lines += _queue_lines(view.get("queue_wait"))
     o = view.get("other_role") or {}
     lines.append(f"other: {_fmt(o.get('agents'))} agents, {_min(o.get('minutes'))}, {_usd(o.get('usd'))}")
+    lines.append(_fallback_line(view))
+    lines.append(_overhead_line(view))
+    if view.get("degraded") is True:
+        lines.append("degraded: true (planning fallback; run continued from a deterministic ready list)")
     miss = view.get("missing") or []
     if miss:
         lines.append("missing: " + ", ".join(_missing_text(m) for m in miss))
@@ -738,6 +876,10 @@ def run_json(view: Mapping[str, Any]) -> Dict[str, Any]:
                 "review": _pair(split.get("review")),
                 "landing": _pair(split.get("landing")),
             },
+            "planFallbacks": dict(view.get("plan_fallbacks") or {"recorded": False, "count": None, "entries": None}),
+            "overhead": dict(view.get("overhead") or {"recorded": False, "share": None,
+                                                      "threshold": OVERHEAD_WARN_THRESHOLD, "warned": False}),
+            "degraded": view.get("degraded"),
         }
     )
     out.update(

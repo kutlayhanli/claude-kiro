@@ -204,7 +204,11 @@ def _iso(ms: Optional[int]) -> Optional[str]:
 
 
 def _kind_of(name: str) -> str:
-    return "spec-create" if name == "spec-create" else "spec-implement"
+    if name == "spec-create":
+        return "spec-create"
+    if name in ("spec-implement", "spec-implement-iso"):
+        return "spec-implement"
+    return "other"
 
 
 def _head(path: Path) -> Dict[str, Optional[str]]:
@@ -424,6 +428,42 @@ def _add_task_sizes(record: dict, root: Optional[str], spec: Optional[str]) -> N
         t["filesCount"], t["criteriaCount"] = size if size is not None else (None, None)
 
 
+@dataclass
+class _RecordSource:
+    """Pre-built agent rows and run metadata for `_build_record`.
+
+    The transcript collectors fill this from `_build_agent`; the OpenCode ingester fills it from a
+    `ck-opencode-run/1` file. Everything after the rows (pricing, aggregation, workflow metrics and the
+    final `ck-run-local/1` assembly) is shared.
+    """
+
+    rows: List[dict]
+    infos: List[dict]
+    missing: List[dict] = field(default_factory=list)
+    start_ms: Optional[int] = None
+    wall_ms: Optional[int] = None
+    status: Optional[str] = None
+    session_id: Optional[str] = None
+    session_usd: Optional[float] = None
+    session_jsonl: Optional[Path] = None
+    root: Optional[str] = None
+    spec: Optional[str] = None
+    branch: Optional[str] = None
+    ck_version: Optional[str] = None
+    collector_version: Optional[str] = None
+    claude_code_version: Optional[str] = None
+    harness: Optional[str] = None
+    source: Optional[str] = None
+    partial: bool = False
+    cost_source: str = "priced_from_transcripts"
+    interruptions: Optional[dict] = None
+    interruptions_from_agents: bool = True
+    interruption_agents: Sequence[Any] = field(default_factory=tuple)
+    terms: Sequence[str] = field(default_factory=tuple)
+    extra: Mapping[str, Any] = field(default_factory=dict)
+    agent_run: Any = None
+
+
 def _build_agent(a: _Agent, workflow_name: str, pricing: dict, missing: List[dict],
                  versions: Counter, timing_from_transcript: bool,
                  matcher: Optional[Callable[[Any, Any], Any]] = None) -> Tuple[dict, dict]:
@@ -503,6 +543,7 @@ def _build_agent(a: _Agent, workflow_name: str, pricing: dict, missing: List[dic
         "usd": usd, "usdEstimate": estimate,
         "input": usage["input"] if usage else None, "output": usage["output"] if usage else None,
         "cacheRead": usage["cacheRead"] if usage else None, "cacheCreation": usage["cacheCreation"] if usage else None,
+        "requestedEffort": None, "resolvedEffort": None, "variant": None,
         "transcript": status,
         "queuedAtMs": a.queued_ms, "queueMs": queue_ms(a.queued_ms, a.started_ms),
     }
@@ -549,6 +590,12 @@ def _costs(rows: List[dict], infos: List[dict], pricing: dict, session_usd: Opti
         if total is None:
             known = [r["usd"] for r in rows if r["usd"] is not None]
             total = sum(known) if known else None
+    else:
+        # Native rows carry usage but no transcript scan: sum their priced figures. An all-free
+        # run is a real 0.0; an unknown paid model leaves every row None and the run unknown.
+        known = [r["usd"] for r in rows if r["usd"] is not None]
+        if known:
+            total = sum(known)
     estimates = [r["usdEstimate"] for r in rows if r["usd"] is None and r["usdEstimate"] is not None]
     if estimates:
         total = (total or 0.0) + sum(estimates)
@@ -704,7 +751,13 @@ def _implement_metrics(result: Mapping, rows: List[dict], workflow_name: str, tr
     config = None
     if agents is not None:
         config = {k: c for k, c in ((k, _split_config(v)) for k, v in agents.items()) if c is not None}
-    return {
+    local_result: Dict[str, Any] = {}
+    if isinstance(result.get("degraded"), bool):
+        local_result["degraded"] = result["degraded"]
+    fallbacks = result.get("planFallbacks")
+    if isinstance(fallbacks, list):
+        local_result["planFallbacks"] = list(fallbacks)
+    metrics: Dict[str, Any] = {
         "reportSource": result.get("reportSource") if isinstance(result.get("reportSource"), str) else None,
         "taskSpanMinutes": _num(timing.get("minutes")),
         "tasks": tasks, "landings": landings, "fullGates": full_gates, "finalGate": final_gate, "crossTests": cross,
@@ -712,6 +765,9 @@ def _implement_metrics(result: Mapping, rows: List[dict], workflow_name: str, tr
         "stats": {k: _int(v) for k, v in stats.items()} if isinstance(stats, dict) else None,
         "agentsConfig": config,
     }
+    if local_result:
+        metrics["result"] = local_result
+    return metrics
 
 
 def _create_metrics(result: Mapping, rows: List[dict]) -> dict:
@@ -812,7 +868,7 @@ def _workflow_metrics(kind: str, workflow_name: str, result: Any, rows: List[dic
     if kind == "spec-create":
         out.update({"mode": None, "reviewResult": None, "openQuestions": None, "review": None,
                     "consistency": None, "phases": None})
-    else:
+    elif kind == "spec-implement":
         out.update({"reportSource": None, "taskSpanMinutes": None, "tasks": None, "landings": None, "fullGates": None, "finalGate": None, "crossTests": None,
                     "fixerEscalations": None, "phases": None, "stats": None})
     if not isinstance(result, Mapping):
@@ -821,11 +877,13 @@ def _workflow_metrics(kind: str, workflow_name: str, result: Any, rows: List[dic
         out.update(_create_metrics(result, rows))
         out["outcome"] = out["reviewResult"]
         out["outcomeInferred"] = False
-    else:
+    elif kind == "spec-implement":
         out["outcome"], out["outcomeInferred"] = derive_outcome(result)
         args = run_data.get("args") if run_data else None
         tracks = args.get("tracks") if isinstance(args, dict) and isinstance(args.get("tracks"), dict) else {}
         out.update(_implement_metrics(result, rows, workflow_name, {str(k): v for k, v in tracks.items()}))
+    else:
+        out["outcome"], out["outcomeInferred"] = derive_outcome(result)
     return out
 
 
@@ -838,19 +896,21 @@ def _previous_ck_version(run_id: str) -> Optional[str]:
     return v if isinstance(v, str) and v else None
 
 
-def _build_record(*, run_id: str, workflow_name: str, run_data: Optional[Mapping], session_dir: Path,
-                  agent_dir: Path, session_jsonl: Optional[Path], agents: List[_Agent], missing: List[dict],
-                  start_ms: Optional[int], wall_ms: Optional[int], status: Optional[str], pricing: dict,
-                  fresh: bool, partial: bool, agent_run: Any = None) -> dict:
+def _transcript_source(*, run_id: str, workflow_name: str, run_data: Optional[Mapping], session_id: str,
+                       session_jsonl: Optional[Path], agents: List[_Agent], missing: List[dict],
+                       start_ms: Optional[int], wall_ms: Optional[int], status: Optional[str], pricing: dict,
+                       fresh: bool, partial: bool, agent_run: Any = None) -> _RecordSource:
+    """Build agent rows and run metadata from Claude transcripts; the shared assembler does the rest."""
     ctx = agent_run
-    kind = _kind_of(workflow_name)
+    supplied = bool(getattr(ctx, "supplied", False))
     versions: Counter = Counter()
     rows: List[dict] = []
     infos: List[dict] = []
     matcher = ctx.matcher if ctx is not None else None
+    timing_from_transcript = (True if ctx is not None else partial) and not supplied
     for a in agents:
         row, info = _build_agent(a, workflow_name, pricing, missing, versions,
-                                 True if ctx is not None else partial, matcher)
+                                 timing_from_transcript, matcher)
         rows.append(row)
         infos.append(info)
 
@@ -892,8 +952,6 @@ def _build_record(*, run_id: str, workflow_name: str, run_data: Optional[Mapping
         root = args.get("root") if isinstance(args.get("root"), str) and args.get("root") else head.get("cwd")
         spec = next((args[k] for k in ("spec", "feature") if isinstance(args.get(k), str) and args[k]), None)
         branch = head.get("gitBranch")
-    remote = _git_remote(root)
-    pseudo = pseudonym(remote, _get_salt()) if remote else None
 
     installed = manifest.ck_version()
     mv: Optional[str] = None
@@ -914,6 +972,28 @@ def _build_record(*, run_id: str, workflow_name: str, run_data: Optional[Mapping
     if ctx is None and not partial and not isinstance(result, dict):
         missing.append({"agentId": None, "what": "result"})
 
+    return _RecordSource(
+        rows=rows, infos=infos, missing=missing, start_ms=start_ms, wall_ms=wall_ms, status=status,
+        session_id=session_id, session_usd=session_usd, session_jsonl=session_jsonl, root=root, spec=spec,
+        branch=branch, ck_version=ck_version, collector_version=installed,
+        claude_code_version=versions.most_common(1)[0][0] if versions else None,
+        cost_source=("supplied_rows" if supplied else "agent_transcripts") if ctx is not None else "priced_from_transcripts",
+        interruption_agents=agents, partial=partial, agent_run=ctx,
+    )
+
+
+def _build_record(*, run_id: str, workflow_name: str, run_data: Optional[Mapping], source: _RecordSource,
+                  pricing: dict) -> dict:
+    """Assemble `ck-run-local/1` from pre-built agent rows (D7: one assembler, two sources)."""
+    ctx = source.agent_run
+    kind = _kind_of(workflow_name)
+    rows, infos = source.rows, source.infos
+    missing = source.missing
+    root, spec, branch = source.root, source.spec, source.branch
+    remote = _git_remote(root)
+    pseudo = pseudonym(remote, _get_salt()) if remote else None
+
+    result = run_data.get("result") if run_data else None
     terms = {t for t in (root, spec, branch, remote) if isinstance(t, str) and t}
     if remote:
         terms.update(s for s in re.split(r"[/:@]", _normalise_remote(remote)) if len(s) > 2)
@@ -922,39 +1002,49 @@ def _build_record(*, run_id: str, workflow_name: str, run_data: Optional[Mapping
     terms.update(_result_terms(result))
     for info in infos:
         terms.update(info.get("terms") or ())
+    terms.update(t for t in source.terms if isinstance(t, str) and t)
     if ctx is not None:
         terms.add(ctx.run_id)
 
     record: Dict[str, Any] = {
         "schema": SCHEMA_LOCAL,
         "runId": run_id,
-        "sessionId": session_dir.name,
+        "sessionId": source.session_id,
         "workflow": kind,
         "workflowName": workflow_name,
-        "status": status,
-        "ckVersion": ck_version,
-        "collectorVersion": installed,
-        "claudeCodeVersion": versions.most_common(1)[0][0] if versions else None,
-        "startTime": _iso(start_ms),
-        "wallMs": wall_ms,
+        "status": source.status,
+        "ckVersion": source.ck_version,
+        "collectorVersion": source.collector_version,
+        "claudeCodeVersion": source.claude_code_version,
+        "startTime": _iso(source.start_ms),
+        "wallMs": source.wall_ms,
         "project": {"root": root, "spec": spec, "branch": branch, "remote": remote, "pseudonym": pseudo,
                     "stack": _stack_hint(root)},
         "projectPseudonym": pseudo,
         "terms": sorted(terms),
-        "costs": _costs(rows, infos, pricing, session_usd,
-                        "agent_transcripts" if ctx is not None else "priced_from_transcripts"),
+        "costs": _costs(rows, infos, pricing, source.session_usd, source.cost_source),
         **_aggregate(rows, infos, pricing),
         "agents": rows,
         "missing": missing,
     }
+    if source.source is not None:
+        record["source"] = source.source
+    if source.harness is not None:
+        record["harness"] = source.harness
+    record.update(source.extra)
+
     from claude_kiro.analytics import interruptions
 
-    try:
-        block, log_missing = interruptions.collect_run_interruptions(
-            agents=agents, rows=rows, session_jsonl=session_jsonl, start_ms=start_ms, wall_ms=wall_ms,
-            open_end=ctx is not None, session_ids=[session_dir.name])
-    except Exception:  # noqa: BLE001 - counting interruptions must never stop a record from being built
-        block, log_missing = None, False
+    if source.interruptions is not None or not source.interruptions_from_agents:
+        block, log_missing = source.interruptions, False
+    else:
+        try:
+            block, log_missing = interruptions.collect_run_interruptions(
+                agents=source.interruption_agents, rows=rows, session_jsonl=source.session_jsonl,
+                start_ms=source.start_ms, wall_ms=source.wall_ms, open_end=ctx is not None,
+                session_ids=[source.session_id] if source.session_id is not None else [])
+        except Exception:  # noqa: BLE001 - counting interruptions must never stop a record from being built
+            block, log_missing = None, False
     if block is not None:
         record["interruptions"] = block
     if log_missing:
@@ -1018,11 +1108,12 @@ def _collect_file(path: Path, run_id: str, name: Optional[str], pricing: dict, f
             tokens=_int(entry.get("tokens")), transcript=tx, meta_path=meta,
             queued_ms=_int(entry.get("queuedAt")),
         ))
-    record = _build_record(
-        run_id=run_id, workflow_name=name, run_data=data, session_dir=session_dir, agent_dir=agent_dir,
+    source = _transcript_source(
+        run_id=run_id, workflow_name=name, run_data=data, session_id=session_dir.name,
         session_jsonl=session_jsonl, agents=agents, missing=missing, start_ms=_to_ms(data.get("startTime")),
         wall_ms=_int(data.get("durationMs")), status=data.get("status") if isinstance(data.get("status"), str) else None,
         pricing=pricing, fresh=fresh, partial=False)
+    record = _build_record(run_id=run_id, workflow_name=name, run_data=data, source=source, pricing=pricing)
     return CollectOutcome(run_id, "collected", record=record)
 
 
@@ -1042,10 +1133,11 @@ def _collect_orphan(home: Path, run_id: str, pricing: dict, fresh: bool) -> Coll
                              meta_path=orphan.agent_dir / f"agent-{aid}.meta.json"))
     missing = [{"agentId": None, "what": "runfile"}, {"agentId": None, "what": "result"}]
     session_dir = orphan.agent_dir.parent.parent.parent
-    record = _build_record(
-        run_id=run_id, workflow_name=name, run_data=None, session_dir=session_dir, agent_dir=orphan.agent_dir,
+    source = _transcript_source(
+        run_id=run_id, workflow_name=name, run_data=None, session_id=session_dir.name,
         session_jsonl=orphan.session_jsonl, agents=agents, missing=missing, start_ms=None, wall_ms=None,
         status=None, pricing=pricing, fresh=fresh, partial=True)
+    record = _build_record(run_id=run_id, workflow_name=name, run_data=None, source=source, pricing=pricing)
     return CollectOutcome(run_id, "collected", record=record)
 
 

@@ -230,13 +230,15 @@ def begin_cmd(kind: str, spec: Optional[str], into: Optional[str], session_id: O
 @click.option("--run", "run_id", default=None, metavar="RUN_ID", help="Collect one run")
 @click.option("--all", "collect_everything", is_flag=True, help="Collect every ck run under the Claude home")
 @click.option("--agents", "agents_id", default=None, metavar="RUN_ID", help="Collect one agent-mode run (ag_...)")
+@click.option("--from-json", "from_json", default=None, metavar="FILE",
+              help="With --agents: collect from orchestrator-supplied agent rows (JSON list) instead of transcripts")
 @click.option("--agents-backfill", "backfill_flag", is_flag=True, help="Recover old unmarked implement-mode runs")
 @click.option("--dry-run", "dry_run", is_flag=True, help="With --agents-backfill: list, write nothing")
 @click.option("--gap", default=None, metavar="MINUTES", help="With --agents-backfill: idle gap that splits a run")
 @click.option("--auto", is_flag=True, help="Quiet mode for ck run and the skills: always exits 0")
 @click.option("--json", "as_json", is_flag=True)
 def collect_cmd(run_id: Optional[str], collect_everything: bool, agents_id: Optional[str], backfill_flag: bool,
-                dry_run: bool, gap: Optional[str], auto: bool, as_json: bool):
+                dry_run: bool, gap: Optional[str], auto: bool, as_json: bool, from_json: Optional[str]):
     """Collect a finished run into a local record (never leaves this machine)."""
     decision = agentrun.decide_collect_args(run_id, collect_everything, agents_id, backfill_flag, auto, dry_run, gap)
     if not decision.ok:
@@ -254,6 +256,11 @@ def collect_cmd(run_id: Optional[str], collect_everything: bool, agents_id: Opti
             click.echo(f"❌ {decision.message}")
         sys.exit(decision.exit_code)
     if decision.mode == "agents":
+        if from_json is not None:
+            if agents_id is None:
+                click.echo("❌ --from-json needs --agents RUN_ID")
+                sys.exit(2)
+            sys.exit(_collect_agents_supplied(agents_id, from_json, as_json, auto))
         if auto:
             sys.exit(collect_agents_auto(agents_id))
         home = bench.claude_home()
@@ -280,6 +287,76 @@ def collect_cmd(run_id: Optional[str], collect_everything: bool, agents_id: Opti
         _collect_one(home, run_id, as_json)
     else:
         _collect_all(home, as_json)
+
+
+@stats.command("record")
+@click.argument("record_file", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--json", "as_json", is_flag=True)
+def record_cmd(record_file: Path, as_json: bool):
+    """Ingest an OpenCode `ck-opencode-run/1` record.json into a local run record.
+
+    \b
+    The bridge writes <state>/runs/<runId>/record.json; this reads it, validates it and writes
+    the same `ck-run-local/1` record `ck stats collect` writes. No Claude transcript is read.
+    Malformed input never writes an empty record.
+    """
+    from ..analytics import opencode_record
+
+    try:
+        outcome = opencode_record.ingest_file(record_file)
+    except opencode_record.RecordError as e:
+        click.echo(json.dumps({"result": "failed", "error": str(e)}) if as_json else f"❌ {e}")
+        sys.exit(1)
+    try:
+        path, kind = col.write_outcome_result(outcome)
+    except OSError as e:
+        click.echo(json.dumps({"run_id": outcome.run_id, "result": "failed", "error": str(e)}) if as_json
+                   else f"❌ {outcome.run_id}: could not write the record: {e}")
+        sys.exit(1)
+    partial = bool((outcome.record or {}).get("partial"))
+    if as_json:
+        click.echo(json.dumps({"run_id": outcome.run_id, "result": kind, "path": str(path), "partial": partial}))
+    elif kind == "unchanged":
+        click.echo(f"✓ {outcome.run_id}: unchanged {path}")
+    else:
+        click.echo(f"✓ {outcome.run_id}: wrote {path}" + (" (partial)" if partial else ""))
+
+
+def _collect_agents_supplied(run_id: str, path: str, as_json: bool, auto: bool) -> int:
+    """Collect one agent-mode run from orchestrator-supplied rows (no transcripts)."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            rows = json.load(fh)
+    except (OSError, ValueError) as e:
+        msg = f"could not read supplied rows from {path}: {e}"
+        if as_json:
+            click.echo(json.dumps({"run_id": run_id, "result": "failed", "error": msg}))
+        else:
+            click.echo(f"❌ {msg}" if not auto else f"⚠ could not collect {run_id}: {msg}")
+        return 0 if auto else 1
+    try:
+        outcome = agentcollect.collect_supplied_run(bench.claude_home(), run_id, rows, now=_now())
+    except Exception as e:  # noqa: BLE001
+        outcome = col.CollectOutcome(run_id, "failed", reason=f"{type(e).__name__}: {str(e)[:200]}", error="error")
+    if outcome.kind != "collected":
+        reason = outcome.reason or "could not be collected"
+        if as_json:
+            click.echo(json.dumps({"run_id": run_id, "result": "failed", "error": outcome.error or reason}))
+        else:
+            click.echo(f"⚠ could not collect {run_id}: {reason}" if auto else f"❌ {reason}")
+        return 0 if auto else 1
+    try:
+        out_path, kind = agentcollect.finish_collected(outcome)
+    except Exception as e:  # noqa: BLE001
+        reason = f"{type(e).__name__}: {str(e)[:200]}"
+        click.echo(json.dumps({"run_id": run_id, "result": "failed", "error": reason}) if as_json else f"❌ {reason}")
+        return 0 if auto else 1
+    partial = _is_partial(outcome.record)
+    if as_json:
+        click.echo(json.dumps({"run_id": run_id, "result": kind, "path": str(out_path), "partial": partial}))
+    else:
+        click.echo(f"✓ {run_id}: wrote {out_path}" + (" (partial)" if partial else ""))
+    return 0
 
 
 def _collect_agents_one(home: Path, run_id: str, as_json: bool) -> None:

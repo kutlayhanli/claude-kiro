@@ -171,6 +171,8 @@ MATCHED = {
     "bare python -m pytest": f"python -m pytest {PERF}",
     "bare narrowed in one, bare in another": f"pytest {PERF}::test_a` `pytest -q {PERF}",
     "-k in one, bare in another": f"pytest {PERF} -k slow` `pytest -q {PERF}",
+    "bare node": f"node {PERF}",
+    "node with a second file, not a case name": f"node {PERF} tests/b.mjs",
 }
 
 UNMATCHED = {
@@ -184,6 +186,7 @@ UNMATCHED = {
     "prefix of a longer name": f"pytest -q {PERF}x",
     "suffix of another path": f"pytest -q other/{PERF}",
     "bak": f"pytest -q {PERF}.bak",
+    "node naming test cases": f"node {PERF} TC-1 TC-3",
 }
 
 

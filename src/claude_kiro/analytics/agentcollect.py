@@ -1,7 +1,8 @@
 """The I/O side of agent-mode analytics: begin, marked-agent discovery, record building, open-manifest sweep.
 
-This module never prices or aggregates on its own: it builds `collect._Agent` lists and calls
-`collect._build_record(..., agent_run=ctx)`. The pure rules live in `agentrun` and `roles`.
+This module never prices or aggregates on its own: it builds `collect._Agent` lists, turns them into a
+`collect._RecordSource` with `agent_run=ctx`, and calls `collect._build_record`. The pure rules live in
+`agentrun` and `roles`.
 """
 
 import json
@@ -48,6 +49,7 @@ class AgentRunContext:
     backfill: bool
     gap_minutes: Optional[int]
     spec_agent_ids: Optional[FrozenSet[str]] = None
+    supplied: bool = False  # agent rows came from the orchestrator, not from transcripts
 
 
 # ---------------------------------------------------------------- begin
@@ -338,11 +340,108 @@ def collect_agent_run(home: Path, run_id: str, *, now: datetime, pricing: Option
         missing.append({"agentId": None, "what": "manifest"})
     if bad:
         missing.append({"agentId": None, "what": "meta"})
-    record = collect._build_record(
-        run_id=run_id, workflow_name=ctx.workflow_name, run_data=None, session_dir=session_dir,
-        agent_dir=agent_dir, session_jsonl=session_jsonl, agents=[_to_agent(f, spans.get(f.meta.agent_id), heads.get(f.meta.agent_id)) for f in files],
+    source = collect._transcript_source(
+        run_id=run_id, workflow_name=ctx.workflow_name, run_data=None, session_id=session_dir.name,
+        session_jsonl=session_jsonl, agents=[_to_agent(f, spans.get(f.meta.agent_id), heads.get(f.meta.agent_id)) for f in files],
         missing=missing, start_ms=None, wall_ms=None, status=None, pricing=pricing, fresh=fresh, partial=ctx.partial,
         agent_run=ctx)
+    record = collect._build_record(
+        run_id=run_id, workflow_name=ctx.workflow_name, run_data=None, source=source, pricing=pricing)
+    return collect.CollectOutcome(run_id, "collected", record=record)
+
+
+_SUPPLIED_INT_FIELDS = ("tokens", "startedMs", "ms")
+
+
+def _supplied_error(run_id: str, reason: str) -> collect.CollectOutcome:
+    return collect.CollectOutcome(run_id, "failed", reason=reason, error="rows_invalid")
+
+
+def _validate_supplied_rows(run_id: str, rows: object) -> Tuple[List[dict], Optional[collect.CollectOutcome]]:
+    """Validated orchestrator-supplied agent rows, or the failure outcome. Fail-closed:
+    the file must be a non-empty list of objects whose labels carry this run's marker."""
+    if not isinstance(rows, list) or not rows:
+        return [], _supplied_error(run_id, "supplied file must hold a non-empty list of agent rows")
+    prefix = f"[ck:{run_id}]"
+    valid: List[dict] = []
+    for n, row in enumerate(rows):
+        where = f"row {n}"
+        if not isinstance(row, dict):
+            return [], _supplied_error(run_id, f"{where} is not an object")
+        label = row.get("label")
+        if not isinstance(label, str) or not label:
+            return [], _supplied_error(run_id, f"{where} needs a string label")
+        if label != prefix and not label.startswith(prefix + " "):
+            return [], _supplied_error(run_id, f"{where} label does not carry the marker {prefix}")
+        clean: Dict[str, Any] = {"label": label}
+        for key in ("model", "state", "agentType"):
+            value = row.get(key)
+            if value is not None and not isinstance(value, str):
+                return [], _supplied_error(run_id, f"{where} field {key} must be a string")
+            clean[key] = value
+        for key in _SUPPLIED_INT_FIELDS:
+            value = row.get(key)
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+                return [], _supplied_error(run_id, f"{where} field {key} must be an integer >= 0")
+            clean[key] = value
+        valid.append(clean)
+    return valid, None
+
+
+def collect_supplied_run(home: Path, run_id: str, rows: object, *, now: datetime,
+                         pricing: Optional[dict] = None, env: Optional[Mapping[str, str]] = None
+                         ) -> collect.CollectOutcome:
+    """Build the local record of an agent-mode run from orchestrator-supplied agent rows.
+
+    For harnesses with no readable transcripts (API-orchestrated runs): the rows carry the
+    `[ck:<run_id>]` labels, and known model/token/timing figures when the orchestrator has them.
+    Unknown figures stay unknown; every row is transcript-less, so the record is partial.
+    """
+    pricing = pricing or {}
+    valid, error = _validate_supplied_rows(run_id, rows)
+    if error is not None:
+        return error
+    home = Path(home)
+    data, state = store.read_manifest(run_id, env)
+    check = None
+    if state == "malformed" or (data is not None and not (check := agentrun.check_manifest(data, run_id)).ok):
+        return _failed(run_id, "malformed", "run manifest not recognised")
+    has_manifest = data is not None
+
+    agents = [
+        collect._Agent(agent_id=f"supplied-{n}", label=r["label"],
+                       phase=_phase_of(r["label"]), model_hint=r["model"], state=r["state"],
+                       started_ms=r["startedMs"], duration_ms=r["ms"], tokens=r["tokens"],
+                       transcript=None, meta_path=None, agent_type=r["agentType"])
+        for n, r in enumerate(valid)
+    ]
+    if has_manifest:
+        kind = data["kind"]
+        spec, root, into = data["spec"], data["root"], data.get("into") if isinstance(data.get("into"), str) else None
+        start_ms = check.start_ms if check is not None else None
+        agents_cfg = data.get("agents") if isinstance(data.get("agents"), dict) else None
+        das = data.get("doneAtStart")
+        done = frozenset(str(x) for x in das) if isinstance(das, list) else None
+    else:
+        kind = "create" if all(_is_create_step(r["label"]) for r in valid) else "implement"
+        spec, root, into = None, None, None
+        start_ms, agents_cfg, done = None, None, None
+
+    ctx = AgentRunContext(
+        run_id=run_id, kind=kind, workflow_name="spec-implement" if kind == "implement" else "spec-create",
+        matcher=_marker_matcher, spec=spec, root=root, into=into, start_ms=start_ms, end_ms=None,
+        roles=agents_cfg, done_at_start=done, manifest="present" if has_manifest else "missing",
+        partial=True, backfill=False, gap_minutes=None, supplied=True)
+    missing: List[dict] = [{"agentId": None, "what": "transcripts-supplied"}]
+    if not has_manifest:
+        missing.append({"agentId": None, "what": "manifest"})
+    source = collect._transcript_source(
+        run_id=run_id, workflow_name=ctx.workflow_name, run_data=None, session_id=None,
+        session_jsonl=None, agents=agents, missing=missing,
+        start_ms=None, wall_ms=None, status=None, pricing=pricing, fresh=False, partial=ctx.partial,
+        agent_run=ctx)
+    record = collect._build_record(
+        run_id=run_id, workflow_name=ctx.workflow_name, run_data=None, source=source, pricing=pricing)
     return collect.CollectOutcome(run_id, "collected", record=record)
 
 
@@ -580,10 +679,12 @@ def _collect_group(g: backfill.BackfillGroup, plan: BackfillPlan, pricing: dict,
         manifest="missing", partial=True, backfill=True, gap_minutes=plan.gap_minutes,
         spec_agent_ids=frozenset(g.spec_agent_ids))
     missing: List[dict] = [{"agentId": None, "what": "manifest"}]
-    record = collect._build_record(
-        run_id=g.record_id, workflow_name="spec-implement", run_data=None, session_dir=session_dir,
-        agent_dir=agent_dir, session_jsonl=session_jsonl, agents=[_to_agent(f) for f in files], missing=missing,
+    source = collect._transcript_source(
+        run_id=g.record_id, workflow_name="spec-implement", run_data=None, session_id=session_dir.name,
+        session_jsonl=session_jsonl, agents=[_to_agent(f) for f in files], missing=missing,
         start_ms=None, wall_ms=None, status=None, pricing=pricing, fresh=False, partial=True, agent_run=ctx)
+    record = collect._build_record(
+        run_id=g.record_id, workflow_name="spec-implement", run_data=None, source=source, pricing=pricing)
     if not _readable(session_jsonl) and not any(m.get("what") == "outcome" for m in record["missing"]):
         record["missing"].append({"agentId": None, "what": "outcome"})
     _, kind = collect.write_outcome_result(collect.CollectOutcome(g.record_id, "collected", record=record), env)

@@ -42,7 +42,7 @@ async function handle(req) {
     const slots = req.slots ?? undefined
     const args = { ...baseArgs, ...req.args, ...(slots ? { agentSlots: slots } : {}) }
     const { result, logs, trace } = await runWorkflow(SCRIPT, { agent: p.agent, args, slots, clock })
-    return { result, logs, trace, prompts: p.state.prompts, opts: p.state.opts, events: p.state.events, execLog: p.state.execLog, execResults: p.state.execResults }
+    return { result, logs, trace, prompts: p.state.prompts, opts: p.state.opts, events: p.state.events, execLog: p.state.execLog, execResults: p.state.execResults, reviewTasks: p.state.reviewTasks }
   }
   if (req.op === 'create') {
     const clock = new VirtualClock()

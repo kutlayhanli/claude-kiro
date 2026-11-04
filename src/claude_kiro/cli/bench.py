@@ -1,6 +1,7 @@
 """`ck bench`: compare agent configurations by running whole specs and scoring them on hidden tests."""
 
 import json
+import os
 import shlex
 import sys
 from pathlib import Path
@@ -33,7 +34,9 @@ def bench():
 @click.option("--force", is_flag=True, help="Re-run arms that already have a result")
 @click.option("--only", multiple=True, metavar="ARM_ID", help="Run only these arms (repeatable), e.g. calc--haiku--r1")
 @click.option("--runner", default=None, help="Command used instead of `ck` to launch `run` (testing; e.g. a fake)")
-def run_cmd(config: str, dry_run: bool, force: bool, only: tuple, runner: str):
+@click.option("--harness", type=click.Choice(["claude", "opencode"]), default="claude", show_default=True,
+              help="Run the arms through Claude Code (`ck run`) or OpenCode (the workflow bridge)")
+def run_cmd(config: str, dry_run: bool, force: bool, only: tuple, runner: str, harness: str):
     """Run every arm in CONFIG sequentially, each in a fresh clone at the pinned base.
 
     Arms run in a seeded random order. An arm with a results/<arm>.json is
@@ -44,11 +47,15 @@ def run_cmd(config: str, dry_run: bool, force: bool, only: tuple, runner: str):
     except b.BenchError as e:
         _fail(e)
     if runner:
+        if harness == "opencode":
+            _fail(b.BenchError("--runner is only for the Claude harness; OpenCode arms use opencode.bin in the config"))
         cfg["runner"] = shlex.split(runner)
+    if harness == "opencode" and not cfg.get("opencode", {}).get("plugin") and not os.environ.get("CK_OPENCODE_PLUGIN"):
+        _fail(b.BenchError("opencode arms need opencode.plugin in the bench config (or CK_OPENCODE_PLUGIN)"))
     arms = [a for a in b.plan_arms(cfg) if not only or a["id"] in only]
     results = Path(cfg["results_dir"])
     if dry_run:
-        click.echo(f"{len(arms)} arm(s), seed {cfg['seed']}, clones in {cfg['bench_dir']}, results in {results}:")
+        click.echo(f"{len(arms)} arm(s), {harness} harness, seed {cfg['seed']}, clones in {cfg['bench_dir']}, results in {results}:")
         for i, a in enumerate(arms, 1):
             done = " (done)" if (results / f"{a['id']}.json").exists() else ""
             click.echo(f"  {i:3}. {a['id']}{done}")
@@ -60,7 +67,7 @@ def run_cmd(config: str, dry_run: bool, force: bool, only: tuple, runner: str):
             continue
         click.echo(f"[{i}/{len(arms)}] {a['id']}")
         try:
-            r = b.run_arm(cfg, a, echo=click.echo)
+            r = b.run_arm_opencode(cfg, a, echo=click.echo) if harness == "opencode" else b.run_arm(cfg, a, echo=click.echo)
         except b.BenchError as e:
             failed += 1
             click.echo(f"❌ {a['id']}: {e}")
@@ -138,7 +145,7 @@ def import_cmd(output: str, spec: str, config_name: str, rep: int, out: str, tra
 @click.option("--run", "run_id", default=None, help="Workflow run id (wf_...): count only that run's agents")
 @click.option("--json", "as_json", is_flag=True, help="Print the numbers as JSON")
 def cost(session_id: str, run_id: str, as_json: bool):
-    """Real spend of a session or workflow run, from its transcripts.
+    """Real spend of a session, a workflow run, or a native run record.
 
     \b
     Reports Claude Code's own running total (when the session had a budget,
@@ -147,10 +154,18 @@ def cost(session_id: str, run_id: str, as_json: bool):
     agent's final context size and run 7-14x low on a whole-spec run.
     Transcripts live under $CLAUDE_CONFIG_DIR (default ~/.claude), which a
     sandboxed shell command cannot read; run this outside the sandbox.
+    An OpenCode run has no Claude transcript: `--run <runId>` falls back to
+    the local `ck-run-local/1` record written by `ck stats record`.
     """
     home = b.claude_home()
     if run_id and not session_id:
         session_id = b.find_run_session(home, run_id)
+    if not session_id and run_id:
+        record = _local_record(run_id)
+        if record is not None:
+            s = b.spend_from_record(record)
+            click.echo(json.dumps(s, indent=2) if as_json else "\n".join(b.spend_lines(s)))
+            return
     if not session_id:
         session_id = b.latest_session(home, Path.cwd())
     if not session_id:
@@ -161,3 +176,14 @@ def cost(session_id: str, run_id: str, as_json: bool):
         click.echo(f"❌ No transcripts found for session {session_id}{' run ' + run_id if run_id else ''} under {home}")
         sys.exit(1)
     click.echo(json.dumps(s, indent=2) if as_json else "\n".join(b.spend_lines(s)))
+
+
+def _local_record(run_id: str) -> dict:
+    """The local run record of RUN_ID, or None when it is absent or unreadable."""
+    from ..analytics import store
+
+    try:
+        data = json.loads(store.record_path(run_id).read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None

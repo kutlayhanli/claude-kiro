@@ -55,8 +55,17 @@ export async function runWorkflow(scriptPath, { agent, args, slots, clock }) {
       }
       return r
     }))
-  const fn = new Function('agent', 'pipeline', 'parallel', 'phase', 'log', 'args', `return (async () => {${src}})()`)
-  const running = fn(recordingAgent, pipeline, parallel, () => {}, m => logs.push(m), args)
+  // On a virtual clock the script's own Date reads the clock too, so what it measures with
+  // Date.now() (agent ms, the overhead share) replays identically, like the trace.
+  const base = Date.parse('2026-10-04T10:00:00Z')
+  const ScriptDate = clock
+    ? class extends Date {
+        constructor(...a) { if (a.length) super(...a); else super(base + clock.now()) }
+        static now() { return base + clock.now() }
+      }
+    : Date
+  const fn = new Function('agent', 'pipeline', 'parallel', 'phase', 'log', 'args', 'Date', `return (async () => {${src}})()`)
+  const running = fn(recordingAgent, pipeline, parallel, () => {}, m => logs.push(m), args, ScriptDate)
   const result = await (clock ? clock.drive(running) : running)
   return { result, logs, trace }
 }

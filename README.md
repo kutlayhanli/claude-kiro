@@ -14,6 +14,23 @@ Claude Kiro `ck` provides:
 
 **Prompt → Plan → Requirements → Design → Tasks → Implementation**
 
+## OpenCode
+
+The same `/spec/*` workflow is available for [OpenCode](https://opencode.ai) from the
+`opencode-claude-kiro` npm package (source in `opencode/`). It registers the five commands, writes
+the flat `ck-*` agents and `AGENTS.md`, runs the vendored workflows through a `workflow` tool, and
+translates OpenCode tool events into the same `ck` guard hooks. It needs Node.js 20+ and `ck`
+0.11.0+.
+
+```jsonc
+// opencode.json
+{ "plugins": ["opencode-claude-kiro@0.11.0"] }
+```
+
+See [`opencode/README.md`](opencode/README.md) for configuration, the live TUI workflow status line,
+the `ck-progress` terminal checker, the native `ck-opencode-run/1` telemetry,
+`ck doctor --harness opencode`, and the benchmark arm tooling.
+
 ## Repository Structure
 
 ```
@@ -237,6 +254,19 @@ Relative paths are relative to the config file. Optional keys: `bench_dir` (clon
 ck bench run bench.json --dry-run     # the arms, in run order
 ck bench run bench.json               # hours; re-run to resume (finished arms are skipped)
 ck bench score bench-results --config bench.json
+```
+
+**OpenCode harness.** `ck bench run --harness opencode` runs the same arms through the
+`opencode-claude-kiro` plugin instead of `ck run`. Add an `opencode` object to the config with the
+package directory (or a published install) and an optional `bin`; each config needs a full
+`model` ref such as `opencode/claude-sonnet-5-5`. Roles still use ck aliases; the runner writes
+`opencode.models.<alias> = <arm model>` into the clone, so every role is pinned to the arm for the
+first pass. Cost and tokens come from the native `ck-opencode-run/1` record
+(`session.get().cost`), not a transcript, and free models are priced $0.00. See
+`notes/opencode-experiment-config.md` for a template and `opencode/README.md` for the package.
+
+```bash
+ck bench run bench-opencode.json --harness opencode
 ```
 
 **Where the results come from.** `ck bench` launches `ck run <spec> --output-format json --session-id <uuid> --log <results>/logs/<arm>.json`. Knowing the session id, it reads what Claude Code persists for that session under `$CLAUDE_CONFIG_DIR` (default `~/.claude`): `projects/*/<session>/workflows/wf_*.json`, whose `result` is the `/spec:implement` report (merged, failed, notStarted, tasks with attempts, review rounds and escalations, timing, final gate), and the session and subagent transcripts (`projects/*/<session>.jsonl`, `projects/*/<session>/subagents/**/agent-*.jsonl`) for per-request token usage, `AskUserQuestion` calls and permission refusals. Each arm's `results/<arm>.json` holds that plus wall time, base and setup commits, the final integration commit, the ck version and the exact command.

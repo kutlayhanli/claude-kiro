@@ -25,6 +25,7 @@ import random
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -39,10 +40,39 @@ SCHEMA = "ck-bench-result/1"
 # "pricing" in the bench config, e.g. {"opus": {"input": 5, "output": 25}}.
 # Cache writes (5-minute TTL) cost 1.25x input unless "cacheCreation" is set.
 PRICING_DATE = "2026-10"
-PRICING: Dict[str, Dict[str, float]] = {
+# OpenCode refs are exact `provider/model` keys (not families): "opencode" is also a provider
+# prefix of paid refs, so substring matching would price every paid model as free.
+_FREE_OPENCODE = (
+    "opencode/deepseek-v4.1-flash-free",
+    "opencode-go/beam-free",
+    "opencode/beam-free",
+    "opencode/flint-40b-free",
+    "opencode/glm-5.3-flash-free",
+    "opencode/mimo-v2.6-flash-free",
+    "opencode/nemotron-3.5-lightning-free",
+    "opencode/nemotron-3.5-super-vl-free",
+    "opencode-go/iceman-contributor-free",
+    # Kept for older records; the catalog later renamed/removed this id.
+    "opencode/muse-spark-1.3-contributor-free",
+)
+_FREE_RATES = {"input": 0.0, "output": 0.0, "cacheRead": 0.0, "cacheCreation": 0.0, "free": True}
+OPENCODE_PRICING: Dict[str, Dict[str, Any]] = {
+    # Free tiers: explicit zero rates, so a free run is $0.00 rather than "cost unknown".
+    ref: dict(_FREE_RATES) for ref in _FREE_OPENCODE
+}
+OPENCODE_PRICING.update({
+    # Known paid refs (models.dev, 2026-10). Anything else stays unknown (None), never $0.
+    "opencode/deepseek-v4.1-flash": {"input": 0.30, "output": 1.20},
+    "opencode-go/deepseek-v4.1-flash": {"input": 0.15, "output": 0.60},
+    "opencode/deepseek-v4-pro": {"input": 1.74, "output": 3.48, "cacheRead": 0.145},
+    "opencode-go/deepseek-v4-pro": {"input": 0.66, "output": 1.98, "cacheRead": 0.022},
+    "opencode-go/muse-spark-1.3-contributor": {"input": 0.10, "output": 0.20, "cacheRead": 0.002},
+})
+PRICING: Dict[str, Dict[str, Any]] = {
     "haiku": {"input": 0.10, "output": 0.50, "cacheRead": 0.01},
     "sonnet": {"input": 2.0, "output": 10.0, "cacheRead": 0.20},
     "opus": {"input": 4.0, "output": 20.0, "cacheRead": 0.20},
+    **OPENCODE_PRICING,
 }
 CACHE_WRITE_FACTOR = 1.25
 USAGE_KEYS = ("input", "output", "cacheRead", "cacheCreation")
@@ -68,13 +98,17 @@ def normalize_model(model: Optional[str]) -> str:
 
 def model_family(model: Optional[str], pricing: Optional[dict] = None) -> Optional[str]:
     m = (model or "").lower()
-    for fam in list((pricing or {}).keys()) + list(PRICING):
-        if fam in m:
+    keys = list((pricing or {}).keys()) + list(PRICING)
+    for fam in keys:  # an exact provider/model ref wins over family substrings
+        if fam.lower() == m:
+            return fam
+    for fam in keys:
+        if fam.lower() in m:
             return fam
     return None
 
 
-def rates(model: Optional[str], pricing: Optional[dict] = None) -> Optional[Dict[str, float]]:
+def rates(model: Optional[str], pricing: Optional[dict] = None) -> Optional[Dict[str, Any]]:
     fam = model_family(model, pricing)
     if fam is None:
         return None
@@ -82,17 +116,29 @@ def rates(model: Optional[str], pricing: Optional[dict] = None) -> Optional[Dict
     if "input" not in r:
         return None
     r.setdefault("output", 0.0)
-    r.setdefault("cacheRead", 0.0)
+    # A missing cacheRead rate means unknown, never $0: price_usage returns None
+    # (cost unknown) when the model actually used cache reads.
+    r.setdefault("cacheRead", None)
     r.setdefault("cacheCreation", r["input"] * CACHE_WRITE_FACTOR)
     return r
 
 
 def price_usage(model: Optional[str], usage: Dict[str, int], pricing: Optional[dict] = None) -> Optional[float]:
-    """USD for a usage dict {input, output, cacheRead, cacheCreation}; None for an unknown model."""
+    """USD for a usage dict {input, output, cacheRead, cacheCreation}; None for an unknown model
+    or when a used key's rate is unknown."""
     r = rates(model, pricing)
     if r is None:
         return None
-    return sum((usage.get(k) or 0) * r[k] for k in USAGE_KEYS) / 1e6
+    if r.get("free") is True:
+        return 0.0
+    total = 0.0
+    for k in USAGE_KEYS:
+        used = usage.get(k) or 0
+        rate = r.get(k)
+        if used and rate is None:
+            return None
+        total += used * (rate or 0.0)
+    return total / 1e6
 
 
 # ---------------------------------------------------------------- config
@@ -418,10 +464,48 @@ def session_spend(home: Path, session_id: str, run_id: Optional[str] = None, pri
     }
 
 
+def spend_from_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    """A `session_spend`-shaped report for a native run that has no Claude transcripts (D7)."""
+    run = next((c for c in record.get("costs") or []
+                if isinstance(c, dict) and c.get("scope") == "run"), {})
+    by_model: Dict[str, Dict[str, Optional[float]]] = {}
+    for model, cell in (record.get("byModel") or {}).items():
+        if not isinstance(cell, dict):
+            continue
+        row: Dict[str, Optional[float]] = {k: cell.get(k) for k in USAGE_KEYS}
+        row["usd"] = cell.get("usd")
+        by_model[str(model)] = row
+    tokens = sum(v for row in by_model.values() for v in (row.get(k) or 0 for k in USAGE_KEYS))
+    return {
+        "session_id": record.get("sessionId"),
+        "run_id": record.get("runId"),
+        "transcripts": 0,
+        "claude_usd": None,
+        "budget_usd": None,
+        "priced_usd": run.get("usd"),
+        "by_model": by_model,
+        "transcript_tokens": tokens,
+        "workflow_tokens": 0,
+        "workflow_transcript_tokens": 0,
+        "pricing_date": run.get("pricingDate") or PRICING_DATE,
+        "from_record": True,
+    }
+
+
 def spend_lines(s: Dict[str, Any]) -> List[str]:
     """A short human report of session_spend()."""
     what = f"workflow run {s['run_id']} (session {s['session_id']})" if s.get("run_id") else f"session {s['session_id']}"
     lines = [f"Spend for {what}:"]
+    if s.get("from_record"):
+        if s.get("priced_usd") is not None:
+            per = ", ".join(f"{m} ${u['usd']:.2f}" for m, u in sorted(s["by_model"].items())
+                            if u.get("usd") is not None)
+            lines.append(f"  ${s['priced_usd']:.2f} from the local run record at {s['pricing_date']} list prices"
+                         + (f" ({per})" if per else ""))
+        else:
+            models = ", ".join(sorted(s["by_model"])) or "the run models"
+            lines.append(f"  cost unknown: no list price for {models}")
+        return lines
     if s.get("claude_usd") is not None:
         cap = f" of the ${s['budget_usd']:.2f} budget" if s.get("budget_usd") else ""
         scope = " (whole session)" if s.get("run_id") else ""
@@ -452,7 +536,7 @@ def summarize_report(report: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         })
     failed = r.get("failed") or []
     final_gate = r.get("finalGate")
-    return {
+    out = {
         "found": bool(r),
         "into": r.get("into"),
         "merged": [str(x) for x in r.get("merged") or []],
@@ -470,6 +554,16 @@ def summarize_report(report: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "agents": r.get("agents"),
         "tasks": tasks,
     }
+    # Degraded/fallback/overhead passthrough (5.1, 6.3): additive .get copies so the
+    # equity re-run comparison can read them; absent fields stay absent.
+    if "degraded" in r:
+        out["degraded"] = r.get("degraded")
+    for key in ("planFallbacks", "plan_fallbacks"):
+        if key in r:
+            out[key] = r.get(key)
+    if "overhead" in r:
+        out["overhead"] = r.get("overhead")
+    return out
 
 
 def collect_agents(progress: Iterable[dict], transcripts: Dict[str, Path], pricing: dict) -> Tuple[List[dict], List[str], int]:
@@ -595,6 +689,90 @@ def _sh(argv: Sequence[str], cwd: Path, env: Dict[str, str], timeout: Optional[f
     return subprocess.run(list(argv), cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout)
 
 
+def _terminal_record(runs: Path, since: float) -> bool:
+    """Whether a run record written after SINCE has reached a terminal status."""
+    if not runs.is_dir():
+        return False
+    for path in runs.glob("*/record.json"):
+        try:
+            if path.stat().st_mtime < since:
+                continue
+            data = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and data.get("status") in ("done", "failed", "partial"):
+            # The plugin finishes the record just before writing bench-output.json. Waiting for the
+            # companion file avoids terminating the CLI between the two writes.
+            if data.get("status") == "done" and not (path.parent / "bench-output.json").is_file():
+                continue
+            return True
+    return False
+
+
+def _run_opencode(
+    argv: Sequence[str], cwd: Path, env: Dict[str, str], state: Path, timeout: Optional[float], log: Path
+) -> tuple[Optional[int], bool, bool]:
+    """Run an OpenCode session until its workflow record closes, not until the CLI stops talking.
+
+    Returns (exit_code, timed_out, stopped_for_record). A model can keep the CLI busy after the
+    probe returned; the record is the authority, so terminate once it is terminal.
+    """
+    runs = state / "runs"
+    started = time.time()
+    deadline = started + (timeout or 2 * 60 * 60)
+    timed_out = False
+    stopped_for_record = False
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("w", encoding="utf-8") as fh:
+        try:
+            # A new session lets the cleanup kill OpenCode's `serve --stdio` child too; otherwise a
+            # terminated CLI can leave a server behind for the next arm.
+            proc = subprocess.Popen(
+                list(argv), cwd=str(cwd), env=dict(env), stdout=fh, stderr=subprocess.STDOUT,
+                text=True, start_new_session=True,
+            )
+        except OSError as e:
+            raise BenchError(f"could not run {argv[0]}: {e}") from e
+
+        def stop(sig: int) -> None:
+            if hasattr(os, "killpg"):
+                try:
+                    os.killpg(proc.pid, sig)
+                    return
+                except ProcessLookupError:
+                    return
+                except OSError:
+                    pass
+            if sig == signal.SIGTERM:
+                proc.terminate()
+            else:
+                proc.kill()
+
+        try:
+            while time.time() < deadline:
+                if proc.poll() is not None:
+                    break
+                if _terminal_record(runs, started):
+                    stopped_for_record = True
+                    time.sleep(1)  # let the plugin flush result/bench-output/record
+                    break
+                time.sleep(1)
+            if proc.poll() is None:
+                if not stopped_for_record:
+                    timed_out = True
+                stop(signal.SIGTERM)
+                try:
+                    proc.wait(10)
+                except subprocess.TimeoutExpired:
+                    stop(signal.SIGKILL)
+                    proc.wait()
+        finally:
+            if proc.poll() is None:
+                stop(signal.SIGKILL)
+                proc.wait()
+    return proc.returncode, timed_out, stopped_for_record
+
+
 def run_arm(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[str], None] = print) -> Dict[str, Any]:
     """Clone, set up, launch and collect one arm; writes and returns results/<id>.json."""
     spec = next(s for s in cfg["specs"] if s["name"] == arm["spec"])
@@ -602,6 +780,8 @@ def run_arm(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[str], None
     results_dir, bench_dir = Path(cfg["results_dir"]), Path(cfg["bench_dir"])
     clone = bench_dir / arm["id"]
     env = {**os.environ, **cfg["env"]}
+    # subprocess(cwd=...) does not update PWD; OpenCode uses PWD to pick the project location.
+    env["PWD"] = str(clone)
     ck = cfg["ck"]
     if clone.exists():
         shutil.rmtree(clone)  # a half-finished earlier attempt
@@ -677,6 +857,252 @@ def run_arm(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[str], None
     if exit_code is None:
         result["fail_closed"] = True
         result["fail_closed_reasons"].append("timed out")
+    results_dir.mkdir(parents=True, exist_ok=True)
+    (results_dir / f"{arm['id']}.json").write_text(json.dumps(result, indent=2))
+    return result
+
+
+def run_arm_opencode(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[str], None] = print) -> Dict[str, Any]:
+    """Clone, configure and run one OpenCode arm through the workflow bridge.
+
+    The harness writes a probe plugin into the clone; `opencode run --standalone` calls it, and the
+    probe calls the `workflow` tool with the same args `/spec/implement` would assemble. The probe
+    blocks until the run record closes, so the process exit is a completion signal. Results come from
+    the native `ck-opencode-run/1` record and its `bench-output.json` (`ck bench import` shape).
+    """
+    from .bench_opencode import prepare_probe, workflow_args
+
+    spec = next(s for s in cfg["specs"] if s["name"] == arm["spec"])
+    conf = next(c for c in cfg["configs"] if c["name"] == arm["config"])
+    results_dir, bench_dir = Path(cfg["results_dir"]), Path(cfg["bench_dir"])
+    clone = bench_dir / arm["id"]
+    env = {**os.environ, **cfg["env"]}
+    ck = cfg["ck"]
+    opencode_cfg = cfg.get("opencode") or {}
+    package_root = Path(os.path.expanduser(str(opencode_cfg.get("plugin") or os.environ.get("CK_OPENCODE_PLUGIN") or "")))
+    if not package_root.is_dir() or not (package_root / "src" / "index.ts").is_file():
+        raise BenchError(
+            "opencode.plugin (or CK_OPENCODE_PLUGIN) must point at the opencode-claude-kiro package directory"
+        )
+    package_root = package_root.resolve()
+    opencode_bin = str(opencode_cfg.get("bin") or "opencode")
+    arm_model = conf.get("model") or opencode_cfg.get("model")
+    if not isinstance(arm_model, str) or "/" not in arm_model:
+        raise BenchError(f"{arm['config']}: opencode arms need a full `model` like provider/model[#variant]")
+
+    if clone.exists():
+        shutil.rmtree(clone)  # a half-finished earlier attempt
+    bench_dir.mkdir(parents=True, exist_ok=True)
+    p = subprocess.run(["git", "clone", "-q", "--no-hardlinks", cfg["repo"], str(clone)], capture_output=True, text=True)
+    if p.returncode != 0:
+        raise BenchError(f"git clone failed: {p.stderr.strip()}")
+    base_sha = _git(clone, "rev-parse", "--verify", "-q", f"{cfg['base']}^{{commit}}", check=False) or \
+        _git(clone, "rev-parse", "--verify", f"origin/{cfg['base']}^{{commit}}")
+    branch = f"bench/{arm['config']}-{arm['rep']}"
+    _git(clone, "checkout", "-q", "-b", branch, base_sha)
+
+    version = _sh([*ck, "--version"], clone, env)
+    ck_version = (version.stdout or version.stderr).strip().splitlines()[-1] if (version.stdout or version.stderr).strip() else None
+    for key, value in conf["agents"].items():
+        s = _sh([*ck, "agents", "set", key, str(value), "--project"], clone, env)
+        if s.returncode != 0:
+            raise BenchError(f"ck agents set {key} {value} failed:\n{s.stdout}{s.stderr}")
+
+    # The ck aliases are what the workflow passes; the plugin maps them to the arm's OpenCode ref.
+    config_path = clone / "specs" / "ck.json"
+    data = json.loads(config_path.read_text()) if config_path.is_file() else {}
+    if not isinstance(data, dict):
+        data = {}
+    aliases = {name: arm_model for name in ("haiku", "sonnet", "opus", "fable")}
+    aliases.update({str(k): str(v) for k, v in (opencode_cfg.get("models") or {}).items()})
+    data["opencode"] = {"models": aliases}
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps(data, indent=2) + "\n")
+
+    if _git(clone, "status", "--porcelain"):
+        _git(clone, "add", "-A")
+        _git(clone, "-c", "user.name=ck-bench", "-c", "user.email=ck-bench@localhost", "commit", "-qm",
+             f"bench: set up {arm['config']}")
+    setup_sha = _git(clone, "rev-parse", "HEAD")
+
+    # Each arm gets a private OpenCode state directory, outside the clone.
+    state_root = bench_dir / "opencode-state" / arm["id"]
+    shutil.rmtree(state_root, ignore_errors=True)
+    state = state_root / "claude-kiro" / "opencode"
+    state.mkdir(parents=True, exist_ok=True)
+    # A shell exec shim makes OpenCode's async plugin setup reliable under a pipe-spawned parent;
+    # a bare `opencode` command raced it and the warmup model could start before tools registered.
+    if "/" not in opencode_bin:
+        shim_dir = state_root / "bin"
+        shim_dir.mkdir(parents=True, exist_ok=True)
+        shim = shim_dir / "opencode"
+        shim.write_text(f'#!/bin/sh\nexec {shlex.quote(opencode_bin)} "$@"\n')
+        shim.chmod(0o755)
+        opencode_bin = str(shim)
+    env["XDG_STATE_HOME"] = str(state_root)
+    env["CK_RUN_HEADLESS"] = "1"
+    env["CK_BENCH_STATE"] = str(state)
+    if len(ck) == 1:
+        env.setdefault("CK_BIN", ck[0])
+
+    args = workflow_args(clone, arm["spec"], ck, env, interactive=False)
+    prepare_probe(clone, package_root, args, state)
+    exclude = clone / ".git" / "info" / "exclude"
+    if exclude.is_file():
+        text = exclude.read_text()
+        if ".ck/" not in text:
+            exclude.write_text(text + ("\n" if text and not text.endswith("\n") else "") + ".ck/\n")
+
+    logs = results_dir / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    log = logs / f"{arm['id']}.opencode.txt"
+    timeout = float(cfg["timeout_minutes"]) * 60 if cfg.get("timeout_minutes") else None
+    # OpenCode can start the model before an async plugin setup has materialized the agents and
+    # registered tools. Warm the location once, then require the setup marker before the real prompt.
+    warm_argv = [opencode_bin, "run", "--standalone", "--model", arm_model, "--format", "json",
+                 "Use the shell tool to run exactly this command: sleep 30. Then reply READY."]
+    echo(f"▶ {arm['id']}: warming the plugin in {clone}")
+    try:
+        warm = _sh(warm_argv, clone, env, min(120.0, timeout) if timeout else 120.0)
+        warm_out = warm.stdout + warm.stderr
+        warm_code = warm.returncode
+    except FileNotFoundError:
+        raise BenchError(f"opencode binary not found: {opencode_bin}") from None
+    except subprocess.TimeoutExpired as e:
+        warm_out, warm_code = f"warmup timed out\n{e.stdout or ''}{e.stderr or ''}", None
+    worker = clone / ".opencode" / "agents" / "ck-worker.md"
+    if not worker.is_file():
+        log.write_text(warm_out if isinstance(warm_out, str) else str(warm_out))
+        raise BenchError(f"the OpenCode plugin did not materialize its agents during warmup; see {log}\n{warm_out[-2000:]}")
+
+    prompt = "First use the shell tool to run exactly this command: sleep 2. Then call bench_run exactly once. It blocks until the workflow finishes; report its JSON result verbatim."
+    argv = [opencode_bin, "run", "--standalone", "--model", arm_model, "--format", "json", prompt]
+    echo(f"▶ {arm['id']}: {' '.join(shlex.quote(a) for a in argv)}  (in {clone})")
+    started = time.time()
+    exit_code, timed_out, stopped_for_record = _run_opencode(argv, clone, env, state, timeout, log)
+    finished = time.time()
+    if stopped_for_record:
+        exit_code = 0  # the record is the deliverable; the model's final prose is not
+    if timed_out:
+        exit_code = None
+    launch_out = log.read_text() if log.is_file() else ""
+    combined = f"--- warmup (exit {warm_code}) ---\n{warm_out}\n--- run (exit {exit_code}) ---\n{launch_out}"
+    log.write_text(combined)
+
+    runs = state / "runs"
+    records = [p for p in runs.glob("*/record.json")] if runs.is_dir() else []
+    if not records:
+        raise BenchError(f"no OpenCode run record under {runs}; see {log}")
+    record_path = max(records, key=lambda p: p.stat().st_mtime)
+    record = json.loads(record_path.read_text())
+    bench_path = record_path.parent / "bench-output.json"
+    into = record.get("into") or f"integrate/{arm['spec']}"
+
+    if bench_path.is_file():
+        imported = import_output(bench_path, arm["spec"], arm["config"], arm["rep"], cfg.get("pricing") or {},
+                                 None, clone, into)
+    else:
+        imported = {
+            "id": arm_id(arm["spec"], arm["config"], arm["rep"]),
+            "spec": arm["spec"], "config": arm["config"], "rep": arm["rep"],
+            "report": summarize_report(None), "agents": [], "tokens_by_model": {},
+            "cost": _cost_summary([], None), "fail_closed": True,
+            "fail_closed_reasons": ["the workflow left no bench-output.json"],
+            "wall_minutes": round((finished - started) / 60, 3), "workflow_status": record.get("status"),
+        }
+
+    final_sha = _git(clone, "rev-parse", "--verify", "-q", f"{into}^{{commit}}", check=False) or None
+    started_at = record.get("startedAt")
+    ended_at = record.get("endedAt")
+    wall_minutes = round((ended_at - started_at) / 60000, 3) if isinstance(started_at, int) and isinstance(ended_at, int) else round((finished - started) / 60, 3)
+    guard = record.get("guard") or {}
+    result = {
+        **imported,
+        "schema": SCHEMA,
+        "source": "opencode",
+        "harness": "opencode",
+        **arm,
+        "config_order": [c["name"] for c in cfg["configs"]],
+        "spec_settings": {k: spec.get(k) for k in ("hidden_tests", "invariants", "hidden_dest", "invariants_dest", "test_cmd", "task_map")},
+        "agents_settings": conf["agents"],
+        "run_args": [],
+        "ck_version": record.get("ckVersion") or ck_version,
+        "repo": cfg["repo"], "base": cfg["base"], "base_sha": base_sha, "setup_sha": setup_sha,
+        "clone": str(clone), "branch": branch, "into": into, "final_sha": final_sha,
+        "argv": argv, "session_id": record.get("runId"), "log": str(log),
+        "exit_code": exit_code,
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started)),
+        "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(finished)),
+        "wall_minutes": wall_minutes,
+        "record": str(record_path), "run_id": record.get("runId"),
+        "throttles": record.get("throttles", 0), "retries": record.get("retries", 0),
+        "degraded": record.get("degraded", []), "failure_label": record.get("failureLabel"),
+        "guard": {k: guard.get(k, 0) for k in ("denials", "postCheckCatches", "guardEscalations", "headlessDenials", "prompts")},
+    }
+
+    # Native token totals and costs are exact; the imported context-token estimate is the fallback.
+    native_agents = record.get("agents") or []
+    if native_agents:
+        by_model: Dict[str, Dict[str, int]] = {}
+        for agent in native_agents:
+            resolved = agent.get("resolved") or {}
+            model = f"{resolved.get('providerID')}/{resolved.get('id')}" if resolved.get("providerID") and resolved.get("id") else (agent.get("requested") or {}).get("model", "?")
+            tokens = agent.get("tokens") or {}
+            acc = by_model.setdefault(model, dict.fromkeys(USAGE_KEYS, 0))
+            acc["input"] += int(tokens.get("input") or 0)
+            acc["output"] += int(tokens.get("output") or 0)
+            acc["cacheRead"] += int((tokens.get("cache") or {}).get("read") or 0)
+            acc["cacheCreation"] += int((tokens.get("cache") or {}).get("write") or 0)
+        result["tokens_by_model"] = by_model
+        native_by_session = {agent.get("sessionID"): agent for agent in native_agents if agent.get("sessionID")}
+        native_by_label = {agent.get("label"): agent for agent in native_agents if agent.get("label")}
+        for row in result.get("agents") or []:
+            native = native_by_session.get(row.get("agent_id")) or native_by_label.get(row.get("label"))
+            if not native:
+                continue
+            row["peak_context"] = native.get("peakContext")
+            if native.get("cost") is not None:
+                row["native_cost_usd"] = native.get("cost")
+            if native.get("tokens") is not None:
+                row["native_tokens"] = native.get("tokens")
+        peaks = [int(agent.get("peakContext") or 0) for agent in native_agents]
+        if peaks:
+            result["peak_context"] = max(peaks)
+        if all(agent.get("cost") is not None for agent in native_agents):
+            native_usd = round(sum(float(agent.get("cost") or 0) for agent in native_agents), 6)
+            priced = _price_by_model(by_model, cfg.get("pricing") or {})
+            free = bool(by_model) and all(bool((rates(model) or {}).get("free")) for model in by_model)
+            if native_usd > 0:
+                result["cost"] = {**result.get("cost", {}), "usd": native_usd, "source": "opencode sessions",
+                                  "basis": "session.get().cost", "estimated": False}
+            elif priced is not None:
+                # A zero native cost is exact for known free models; for a known paid ref it means
+                # the provider did not bill (subscription), so report the list-price equivalent.
+                result["cost"] = {**result.get("cost", {}), "usd": priced, "source": "priced tokens",
+                                  "basis": "free model ($0.00)" if free else f"list prices ({PRICING_DATE})",
+                                  "estimated": not free}
+            else:
+                # Never turn an unpriced paid model into $0.00 just because the provider reported 0.
+                result["cost"] = {**result.get("cost", {}), "usd": None, "source": "unknown",
+                                  "basis": "native cost reported 0 for an unpriced model", "estimated": False}
+
+    reasons = result.setdefault("fail_closed_reasons", [])
+    if exit_code is None:
+        result["fail_closed"] = True
+        reasons.append("timed out")
+    elif exit_code != 0:
+        result["fail_closed"] = True
+        reasons.append(f"opencode exited {exit_code}")
+    if record.get("status") != "done":
+        result["fail_closed"] = True
+        reasons.append(f"opencode run status {record.get('status')}")
+    if guard.get("denials") or guard.get("postCheckCatches"):
+        result["fail_closed"] = True
+        reasons.append(f"{guard.get('denials', 0)} guard denial(s), {guard.get('postCheckCatches', 0)} post-check(s)")
+    if record.get("failureLabel"):
+        result["fail_closed"] = True
+        reasons.append(f"failure label: {record.get('failureLabel')}")
+
     results_dir.mkdir(parents=True, exist_ok=True)
     (results_dir / f"{arm['id']}.json").write_text(json.dumps(result, indent=2))
     return result

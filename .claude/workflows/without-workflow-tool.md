@@ -63,6 +63,7 @@ If `begin` failed or printed no id, use the same descriptions without the `[ck:<
 
 When the report is composed, the last step of the run is the collect, outside the sandbox: run `ck stats collect --agents <run_id> --auto` and quote the line it prints (where the record went, or why it was skipped; if it failed, quote the retry command it gives). Never let its result change what you report about the run. If `begin` failed, there is no collect: end the report with this line in place of the collect step: `⚠ ck stats begin failed: this run is not recorded in ck stats`
 
+No readable transcripts (this harness): the Agent tool here leaves no transcript home for `ck` to scan, so a plain `--agents` collect finds nothing. Supply the rows yourself: write a JSON list to a file, one object per agent — `label` (with the `[ck:<run_id>]` marker exactly as the description template above), plus `model`, `tokens`, `startedMs`, `ms`, `state`, `agentType` when known, and run `ck stats collect --agents <run_id> --from-json <file> --auto`. Unknown figures stay unknown (omit the key); the record is partial, with `transcripts-supplied` in its missing list and cost from estimates where model and tokens are known.
 ## Progress and ETA
 
 Run the progress commands yourself, with the same events and fields the Workflow scripts' prompts carry (`<spec>` is the spec or feature name, `<key>` the run key). Progress never holds the run up: a command that fails or prints no JSON is ignored, and a missing `eta` shows as `ETA unavailable`.
