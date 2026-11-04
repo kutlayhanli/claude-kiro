@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { runWorkflow, sleep } from './load_workflow.mjs'
-import { project } from './fake_project.mjs'
+import { directCk, project } from './fake_project.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const SCRIPT = path.join(here, '../../plugin/workflows/spec-implement.js')
@@ -126,6 +126,43 @@ await test('issue #8: the confirmation runs on the strongest rung, and an agent 
   const won = await runWorkflow(SCRIPT, { agent: q.agent, args: { ...baseArgs, agents: roles } })
   assert.deepEqual(won.result.merged, ['1'], 'the confirming agent passed the gate: the task merges')
   assert.deepEqual(won.result.testFixes, [])
+})
+
+await test('issue #11: with a direct ck global, plan, land and relink run as ck calls, not agents', async () => {
+  const p = project({ deps: { 1: [], 2: ['1'], 3: ['1'], 4: ['2', '3'] }, verifyCycles: [{ task: '4', message: 'Task 4 is verified by Task 9, whose tests import x (Task 5)' }],
+    relinkOutcome: { fixable: true, applied: true, committed: true } })
+  const d = directCk(p)
+  const { result, trace, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, progressRun: 'demo--key' }, ck: d.fn })
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3', '4'])
+  const agentLabels = trace.filter(e => e.ev === 'request').map(e => e.label)
+  assert.ok(!agentLabels.some(l => /^(plan|land|relink) /.test(l)), `no plan/land/relink agents: ${agentLabels}`)
+  assert.ok(result.directCk.plan >= 1 && result.directCk.land >= 1 && result.directCk.relink === 1, JSON.stringify(result.directCk))
+  const land = d.calls.find(a => a.includes('land'))
+  assert.deepEqual(land.slice(0, 5), ['-C', '/repo', 'worktree', 'land', 'demo'])
+  assert.ok(land.includes('--gate') && land.includes('--release') && land.includes('--json') && land.includes('--progress-run'))
+  const plan = d.calls.find(a => a.includes('plan'))
+  assert.equal(plan[plan.indexOf('plan') + 1], 'demo')
+  assert.ok(plan.includes('--json'))
+  assert.ok(logs.some(l => l.startsWith('Direct ck steps (no agent):')))
+})
+
+await test('issue #11: a direct ck call that prints no JSON is a failed step, like an agent that returned nothing', async () => {
+  const p = project({ deps: { 1: [] } })
+  const broken = async () => ({ code: 127, stdout: '', stderr: 'ck: not found', json: null })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: baseArgs, ck: broken })
+  assert.equal(result.halted, true)
+  assert.match(result.reason, /planning step failed/)
+  assert.equal(result.directCk.failures, 2, 'the plan and its retry')
+})
+
+await test('issue #11: directCk false keeps the agents even when a ck global exists', async () => {
+  const p = project({ deps: { 1: [] } })
+  const d = directCk(p)
+  const { result, trace } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, directCk: false }, ck: d.fn })
+  assert.deepEqual(result.merged, ['1'])
+  assert.deepEqual(d.calls, [])
+  assert.ok(trace.some(e => e.ev === 'request' && /^land /.test(e.label)))
+  assert.equal(result.directCk, null)
 })
 
 await test('relinks in tasks.md apply without a restart', async () => {
@@ -950,6 +987,7 @@ const SNAPSHOT_KEYS = [
   "blockedOn",
   "crossTests",
   "degraded",
+  "directCk",
   "escalated",
   "failed",
   "finalGate",

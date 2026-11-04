@@ -6,7 +6,10 @@
  *
  * The workflow sources are function bodies, not modules: they open with `export const meta = {…}`
  * and close with a top-level `return {…}`. This runner strips and evaluates `meta`, then compiles
- * the remainder with `AsyncFunction` and supplies the six workflow globals.
+ * the remainder with `AsyncFunction` and supplies the six workflow globals, plus `ck`: it runs the
+ * ck CLI ($CK_BIN, default `ck`) with an argument list (never a shell) and resolves to
+ * {code, stdout, stderr, json}. The workflows use it for their mechanical plan and land steps,
+ * which in Claude Code's Workflow runtime (no exec) need an agent that copies the command's JSON.
  *
  * IPC, one object per message:
  *   child -> parent  {t:"ready", meta} {t:"agent", id, prompt, opts} {t:"phase", name}
@@ -16,6 +19,7 @@
  * When there is no IPC channel (running the runner by hand), the result is printed as JSON.
  */
 
+import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,6 +78,48 @@ function agent(prompt, options = {}) {
       pending.delete(id);
       reject(error);
     });
+  });
+}
+
+const CK_TIMEOUT_MS = 4 * 60 * 60 * 1000; // a land step runs the gate: hours on a large suite
+
+/** The JSON a `ck ... --json` command printed: the whole stdout, else its last top-level object. */
+export function parseCkJson(stdout) {
+  const text = String(stdout ?? "").trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start === -1 || end <= start) return null;
+    try {
+      return JSON.parse(text.slice(start, end + 1));
+    } catch {
+      return null;
+    }
+  }
+}
+
+export function ck(argv, options = {}) {
+  const bin = process.env.CK_BIN || "ck";
+  const args = Array.isArray(argv) ? argv.map(String) : [];
+  return new Promise((resolve) => {
+    execFile(
+      bin,
+      args,
+      { cwd: options.cwd, env: process.env, maxBuffer: 64 * 1024 * 1024, timeout: options.timeoutMs ?? CK_TIMEOUT_MS },
+      (error, stdout, stderr) => {
+        const code = error ? (typeof error.code === "number" ? error.code : 1) : 0;
+        const spawnError = error && typeof error.code === "string" ? `${error.code}: ${error.message}` : null;
+        resolve({
+          code,
+          stdout: String(stdout ?? ""),
+          stderr: (spawnError ? `${spawnError}\n` : "") + String(stderr ?? "").slice(-4000),
+          json: parseCkJson(stdout),
+        });
+      },
+    );
   });
 }
 
@@ -187,8 +233,8 @@ async function main() {
   const args = JSON.parse(readFileSync(argsPath, "utf8"));
 
   await send({ t: "ready", meta });
-  const run = new AsyncFunction("args", "agent", "phase", "parallel", "pipeline", "log", body);
-  const result = await run(args, agent, phase, parallel, pipeline, log);
+  const run = new AsyncFunction("args", "agent", "phase", "parallel", "pipeline", "log", "ck", body);
+  const result = await run(args, agent, phase, parallel, pipeline, log, ck);
   const value = result === undefined ? null : result;
   await send({ t: "done", result: value });
   if (typeof process.send !== "function") {

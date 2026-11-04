@@ -368,6 +368,37 @@ const MANDATE = `MANDATE: The user ran /spec:implement ${SPEC}, which instructs 
 
 // The progress flags a claim command carries: event is task-start, retry, escalation, revision, landfix or resolve.
 const claimFlags = (event, opts, attempt) => (PROGRESS_RUN ? ` --progress-run ${PROGRESS_RUN} --progress-event ${event} --progress-model ${(opts && opts.model) || 'inherit'} --attempt ${attempt}` : '')
+// Issue #11: a harness that can run ck itself (the OpenCode runner passes a `ck` global) runs the
+// mechanical plan, land and relink steps directly instead of through an agent that copies the
+// command's JSON. Claude Code's Workflow runtime has no such global: there the agents run them.
+const DIRECT_CK = A.directCk !== false && typeof ck === 'function' ? ck : null
+const directCk = { plan: 0, land: 0, relink: 0, ms: 0, failures: 0 }
+async function runCk(kind, argv, cwd) {
+  const t0 = Date.now()
+  let out = null
+  try {
+    out = await DIRECT_CK(argv, { cwd })
+  } catch (e) {
+    out = { code: -1, stdout: '', stderr: String(e && e.message), json: null }
+  }
+  directCk[kind] = (directCk[kind] || 0) + 1
+  directCk.ms += Date.now() - t0
+  if (!out || !out.json || typeof out.json !== 'object') directCk.failures++
+  return out || { code: -1, json: null, stderr: 'no result' }
+}
+const directCkOut = () => (DIRECT_CK ? { ...directCk, minutes: Math.round(directCk.ms / 600) / 100 } : null)
+const ckError = out => `ck exited ${out && out.code} with no JSON: ${trim((out && (out.stderr || out.stdout)) || '', 400)}`
+const planArgv = exclude => {
+  const argv = ['-C', TARGET, 'plan', SPEC, '--json']
+  if (exclude.length) argv.push('--exclude', exclude.join(','))
+  if (PROGRESS_RUN) {
+    argv.push('--progress-run', PROGRESS_RUN)
+    if (failed.size) argv.push('--failed', [...failed.keys()].join(','))
+  }
+  return argv
+}
+const landArgv = tasks => ['-C', ROOT, 'worktree', 'land', SPEC, ...tasks, '--into', INTO, '--gate', '--install', '--release', ...(PROGRESS_RUN ? ['--progress-run', PROGRESS_RUN] : []), '--json']
+
 const planFlags = () => (PROGRESS_RUN ? ` --progress-run ${PROGRESS_RUN}${failed.size ? ` --failed ${[...failed.keys()].join(',')}` : ''}` : '')
 
 const planPrompt = exclude => `Mechanical planning step for spec ${SPEC}. Do exactly this, nothing else. ${GIT_NOTE}
@@ -892,7 +923,13 @@ async function runPlan(trigger) {
     const label = `plan ${refills}${attempt ? ' retry' : ''}`
     const exclude = [...excluded()]
     let p = null
-    try { p = await call('plan', planPrompt(exclude), { label, phase: 'Plan', schema: PLAN, ...LOW }) } catch (e) { p = { error: e && e.message } }
+    if (DIRECT_CK) {
+      const out = await runCk('plan', planArgv(exclude), ROOT)
+      p = out.json && typeof out.json === 'object' ? { ...out.json } : { error: ckError(out) }
+      if (p.error === undefined || p.error === null) delete p.error
+    } else {
+      try { p = await call('plan', planPrompt(exclude), { label, phase: 'Plan', schema: PLAN, ...LOW }) } catch (e) { p = { error: e && e.message } }
+    }
     // An "error" next to a usable plan is a remark, not a failure; an empty plan with an error is a failure.
     if (usablePlan(p) && !(p.error && !p.done.length && !p.remaining.length)) {
       const n = normalizePlan(p)
@@ -992,7 +1029,11 @@ async function withLandingLock(fn) {
 async function relinkTask(n, vc) {
   let r = null
   try {
-    r = await withLandingLock(() => call('relink', relinkPrompt(n), { label: `relink ${n}`, phase: phaseOf(n), schema: RELINKED, ...LOW }))
+    r = await withLandingLock(async () => {
+      if (!DIRECT_CK) return call('relink', relinkPrompt(n), { label: `relink ${n}`, phase: phaseOf(n), schema: RELINKED, ...LOW })
+      const out = await runCk('relink', ['-C', TARGET, 'relink', SPEC, n, '--apply', '--commit', '--json'], TARGET)
+      return out.json && typeof out.json === 'object' ? out.json : { fixable: false, applied: false, reason: ckError(out) }
+    })
   } catch (e) {
     r = null
   }
@@ -1164,7 +1205,12 @@ async function landBatch(batch) {
   const used = batchWindow
   let res = null
   try {
-    res = await call('land', landPrompt(tasks), { label: `land ${tasks.join(' ')}`, phase: phaseOf(tasks[0]), schema: LAND, ...LOW })
+    if (DIRECT_CK) {
+      const out = await runCk('land', landArgv(tasks), ROOT)
+      res = out.json && typeof out.json === 'object' && Array.isArray(out.json.tasks) ? out.json : { tasks: [], error: ckError(out) }
+    } else {
+      res = await call('land', landPrompt(tasks), { label: `land ${tasks.join(' ')}`, phase: phaseOf(tasks[0]), schema: LAND, ...LOW })
+    }
   } catch (e) {
     res = { tasks: [], error: e && e.message }
   }
@@ -1554,7 +1600,7 @@ function buildOverhead() {
   return { share, threshold: OVERHEAD_WARN_THRESHOLD, warned: overheadWarning(share) }
 }
 const startPlan = await requestPlan('start')
-if (!startPlan) return { halted: true, refused: false, reason: PLAN_FAILED, into: INTO, degraded, planFallbacks, overhead: buildOverhead() }
+if (!startPlan) return { halted: true, refused: false, reason: PLAN_FAILED, into: INTO, degraded, planFallbacks, overhead: buildOverhead(), directCk: directCkOut() }
 if (startPlan.cycles.length || startPlan.verifyCycles.length) {
   log('Refusing to launch: the plan has a cycle. Fix tasks.md (see `ck lint`; `ck relink <spec> <task> --apply` repairs a verify-order cycle when it can) and run again.')
   return {
@@ -1567,6 +1613,7 @@ if (startPlan.cycles.length || startPlan.verifyCycles.length) {
     degraded,
     planFallbacks,
     overhead: buildOverhead(),
+    directCk: directCkOut(),
   }
 }
 const initialPlan = startPlan
@@ -1749,6 +1796,7 @@ else if (notStarted.length || failedList.length || needsInput.length) {
 } else if (planFailed) reason = null
 if (outcome === 'blocked') log(reason)
 if (relinks.length) log(`Relinked mid-run (verify-order cycles): ${relinks.map(r => `Task ${r.task}`).join(', ')}`)
+if (DIRECT_CK) log(`Direct ck steps (no agent): ${directCk.plan} plan, ${directCk.land} land, ${directCk.relink} relink, ${(directCk.ms / 60000).toFixed(1)} min${directCk.failures ? `, ${directCk.failures} without JSON` : ''}`)
 // Issue #8: the test-track fixes the run needs, one per task blocked on a test.
 const testFixes = Object.values(records).filter(r => r && r.testConflict).map(r => ({
   task: r.task, file: r.testConflict.file, test: r.testConflict.test || null, criterion: r.testConflict.criterion || null,
@@ -1811,5 +1859,6 @@ return {
   overhead,
   relinks,
   testFixes,
+  directCk: directCkOut(),
   stats: { initiallyDone, merged: merged.length, failed: failedList.length, notStarted: notStarted.length, planSteps: refills, planFailures, planFallbacks: planFallbacks.length, fixes: fixCount, landings: landings.length, bisected: landings.filter(l => l.bisected).length },
 }

@@ -348,3 +348,23 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
   }
   return { agent, state }
 }
+
+// The OpenCode runner's `ck` global over a fake project: plan, land and relink commands are answered
+// by the project's own plan/land/relink handlers (the JSON a real `ck ... --json` would print), and
+// recorded in `calls` (argv lists). Anything else answers code 2 with no JSON.
+export function directCk(p) {
+  const calls = []
+  let plans = 0
+  const fn = async argv => {
+    calls.push(argv)
+    const rest = argv[0] === '-C' ? argv.slice(2) : argv
+    let label = null
+    if (rest[0] === 'plan') label = `plan ${++plans}`
+    else if (rest[0] === 'worktree' && rest[1] === 'land') label = `land ${rest.slice(3, rest.indexOf('--into')).join(' ')}`
+    else if (rest[0] === 'relink') label = `relink ${rest[2]}`
+    if (!label) return { code: 2, stdout: '', stderr: `unknown ck command: ${argv.join(' ')}`, json: null }
+    const json = await p.agent(`ck ${argv.join(' ')}`, { label })
+    return { code: 0, stdout: JSON.stringify(json), stderr: '', json }
+  }
+  return { fn, calls }
+}

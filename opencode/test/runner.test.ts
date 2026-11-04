@@ -24,6 +24,7 @@ async function runWorkflow(
   source: string,
   args: Record<string, unknown>,
   answer: (prompt: string, opts: Record<string, unknown>) => unknown,
+  env: Record<string, string> = {},
 ): Promise<RunOutcome> {
   const dir = mkdtempSync(join(tmpdir(), "ck-runner-"));
   const workflowPath = join(dir, "workflow.js");
@@ -34,6 +35,7 @@ async function runWorkflow(
   try {
     return await new Promise<RunOutcome>((resolve, reject) => {
       const child = spawn(process.execPath, [RUNNER, workflowPath, argsPath], {
+        env: { ...process.env, ...env },
         stdio: ["ignore", "ignore", "pipe", "ipc"],
       });
       const messages: Message[] = [];
@@ -262,6 +264,73 @@ test("runner rejects an agent call when the parent reports an error", async () =
       child.on("error", reject);
     });
     assert.deepEqual(outcome.result, { caught: "child failed on purpose" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** A fake ck: prints {argv, cwd} as JSON (or a canned plan for `plan`), exits with $FAKE_CK_EXIT. */
+function fakeCk(dir: string): string {
+  const bin = join(dir, "fake-ck.mjs");
+  writeFileSync(
+    bin,
+    `#!${process.execPath}\n` +
+      `const argv = process.argv.slice(2);\n` +
+      `if (argv.includes("plan")) { process.stdout.write(JSON.stringify({ done: [], remaining: [], ready: [], deps: {}, cycles: [], verifyCycles: [] })); process.exit(0); }\n` +
+      `process.stderr.write("fake stderr\\n");\n` +
+      `process.stdout.write("note: a log line first\\n" + JSON.stringify({ argv, cwd: process.cwd() }));\n` +
+      `process.exit(Number(process.env.FAKE_CK_EXIT || 0));\n`,
+    { mode: 0o755 },
+  );
+  return bin;
+}
+
+test("the ck global runs $CK_BIN with an argument list and parses the JSON it prints", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ck-runner-ck-"));
+  try {
+    const bin = fakeCk(dir);
+    const outcome = await runWorkflow(
+      "const r = await ck(['worktree', 'land', 'demo', '1', '--json', 'a b; rm -rf /'], { cwd: args.dir })\nreturn r",
+      { dir },
+      () => null,
+      { CK_BIN: bin, FAKE_CK_EXIT: "2" },
+    );
+    const r = outcome.result as { code: number; json: { argv: string[]; cwd: string }; stderr: string };
+    assert.equal(r.code, 2);
+    assert.deepEqual(r.json.argv, ["worktree", "land", "demo", "1", "--json", "a b; rm -rf /"], "one argument, never a shell");
+    assert.equal(r.json.cwd, dir);
+    assert.match(r.stderr, /fake stderr/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the ck global reports a missing binary as a failed call with no JSON", async () => {
+  const outcome = await runWorkflow("return await ck(['plan', 'x', '--json'])", {}, () => null, { CK_BIN: "/nonexistent/ck-binary" });
+  const r = outcome.result as { code: number; json: unknown; stderr: string };
+  assert.notEqual(r.code, 0);
+  assert.equal(r.json, null);
+  assert.match(r.stderr, /ENOENT/);
+});
+
+test("the real spec-implement workflow plans through ck directly, with no plan agent", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ck-runner-direct-"));
+  try {
+    const bin = fakeCk(dir);
+    const source = readFileSync(join(import.meta.dirname, "..", "..", "plugin", "workflows", "spec-implement.js"), "utf8");
+    const labels: string[] = [];
+    const outcome = await runWorkflow(
+      source,
+      { spec: "fixture", root: dir, into: "main", targetDir: dir, deps: {}, remaining: [], wave: {}, titles: {}, tracks: {}, risk: {}, complexity: {} },
+      (_prompt, opts) => {
+        labels.push(String(opts.label));
+        return { merged: [], failed: [], blocked: [], unstarted: [], done: [], needsInput: [] };
+      },
+      { CK_BIN: bin },
+    );
+    assert.ok(!labels.some((l) => l.startsWith("plan")), `no plan agent: ${labels.join(", ")}`);
+    const result = outcome.result as { directCk: { plan: number } };
+    assert.ok(result.directCk.plan >= 1, JSON.stringify(result.directCk));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

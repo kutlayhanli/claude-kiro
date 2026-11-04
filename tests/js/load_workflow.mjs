@@ -20,7 +20,7 @@ function hookDump() {
 
 // With a positive integer `slots`, at most `slots` agent calls run at once and the rest wait FIFO,
 // like the runtime queue. `trace` records request/start/end per call (performance.now()).
-export async function runWorkflow(scriptPath, { agent, args, slots, clock }) {
+export async function runWorkflow(scriptPath, { agent, args, slots, clock, ck }) {
   hookDump()
   const nowT = clock ? () => clock.now() : () => performance.now()  // a clock replaces the trace's real time
   const workflow = path.basename(scriptPath).replace(/\.js$/, '')
@@ -64,8 +64,9 @@ export async function runWorkflow(scriptPath, { agent, args, slots, clock }) {
         static now() { return base + clock.now() }
       }
     : Date
-  const fn = new Function('agent', 'pipeline', 'parallel', 'phase', 'log', 'args', 'Date', `return (async () => {${src}})()`)
-  const running = fn(recordingAgent, pipeline, parallel, () => {}, m => logs.push(m), args, ScriptDate)
+  // `ck` (optional): the OpenCode runner's direct ck global; absent, as in Claude Code's Workflow runtime.
+  const fn = new Function('agent', 'pipeline', 'parallel', 'phase', 'log', 'args', 'Date', 'ck', `return (async () => {${src}})()`)
+  const running = fn(recordingAgent, pipeline, parallel, () => {}, m => logs.push(m), args, ScriptDate, ck)
   const result = await (clock ? clock.drive(running) : running)
   return { result, logs, trace }
 }
