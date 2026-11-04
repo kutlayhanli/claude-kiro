@@ -945,6 +945,9 @@ def run_arm_opencode(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[s
     env["CK_BENCH_STATE"] = str(state)
     if len(ck) == 1:
         env.setdefault("CK_BIN", ck[0])
+    # The probe has its own run cap (default 2 hours): it must not stop a run the bench still allows.
+    if cfg.get("timeout_minutes"):
+        env.setdefault("CK_BENCH_RUN_CAP_MS", str(int(float(cfg["timeout_minutes"]) * 60_000)))
 
     args = workflow_args(clone, arm["spec"], ck, env, interactive=False)
     prepare_probe(clone, package_root, args, state)
