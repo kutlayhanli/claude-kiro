@@ -876,6 +876,11 @@ def test_unknown_dep_never_ready(bridge, data):  # noqa: F811
     # stays off so the unknown dep is never rewritten into a known one.
     sc = prepare_retry_sc(data.draw(scenarios(plan_seq="always-bad"), label="scenario"))
     sc["project"].pop("relink", None)  # relink rewrites deps mid-run; the unknown dep must stay unknown
+    # The scenario's per-task fault injections name its own task ids, which this graph reuses:
+    # a gate that fails until attempt 2 on a safety task (no rung above its strong start) fails
+    # that task for a reason unrelated to the unknown dep, so drop them with the scenario's graph.
+    for key in ("failUntil", "checkRed", "conflicts", "noCommitsFirst", "busy", "guardStops", "guardStopIn"):
+        sc["project"].pop(key, None)
     sc["project"]["deps"] = {k: list(v) for k, v in deps2.items()}
     sc["project"]["done"] = list(done)
     sc["project"]["badReady"] = [str(present_max + 9)]  # inconsistent, keeps deps truthful
