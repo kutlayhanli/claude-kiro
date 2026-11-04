@@ -34,12 +34,14 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from claude_kiro.model_catalog import catalog_pricing
+
 SCHEMA = "ck-bench-result/1"
 
 # List prices in USD per 1M tokens, dated 2026-10. Override per family with
 # "pricing" in the bench config, e.g. {"opus": {"input": 5, "output": 25}}.
 # Cache writes (5-minute TTL) cost 1.25x input unless "cacheCreation" is set.
-PRICING_DATE = "2026-10"
+PRICING_DATE = "2026-10"  # Claude families; OpenCode rates carry the snapshot date (model_catalog)
 # OpenCode refs are exact `provider/model` keys (not families): "opencode" is also a provider
 # prefix of paid refs, so substring matching would price every paid model as free.
 _FREE_OPENCODE = (
@@ -57,17 +59,13 @@ _FREE_OPENCODE = (
 )
 _FREE_RATES = {"input": 0.0, "output": 0.0, "cacheRead": 0.0, "cacheCreation": 0.0, "free": True}
 OPENCODE_PRICING: Dict[str, Dict[str, Any]] = {
-    # Free tiers: explicit zero rates, so a free run is $0.00 rather than "cost unknown".
+    # Free tiers named in older records, kept even if the catalog later drops the id:
+    # explicit zero rates, so a free run is $0.00 rather than "cost unknown".
     ref: dict(_FREE_RATES) for ref in _FREE_OPENCODE
 }
-OPENCODE_PRICING.update({
-    # Known paid refs (models.dev, 2026-10). Anything else stays unknown (None), never $0.
-    "opencode/deepseek-v4.1-flash": {"input": 0.30, "output": 1.20},
-    "opencode-go/deepseek-v4.1-flash": {"input": 0.15, "output": 0.60},
-    "opencode/deepseek-v4-pro": {"input": 1.74, "output": 3.48, "cacheRead": 0.145},
-    "opencode-go/deepseek-v4-pro": {"input": 0.66, "output": 1.98, "cacheRead": 0.022},
-    "opencode-go/muse-spark-1.3-contributor": {"input": 0.10, "output": 0.20, "cacheRead": 0.002},
-})
+# Every other OpenCode rate comes from the models.dev snapshot (`ck pricing refresh`, issue #9):
+# all four usage rates per model, None where the catalog lists none (unknown, never $0).
+OPENCODE_PRICING.update(catalog_pricing())
 PRICING: Dict[str, Dict[str, Any]] = {
     "haiku": {"input": 0.10, "output": 0.50, "cacheRead": 0.01},
     "sonnet": {"input": 2.0, "output": 10.0, "cacheRead": 0.20},

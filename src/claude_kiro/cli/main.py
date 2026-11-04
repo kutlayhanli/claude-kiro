@@ -23,7 +23,7 @@ from .update import update
 from .hooks import hook
 from .run import run
 from .handoff import handoff
-from .bench import bench, cost
+from .bench import bench, cost, pricing
 from .stats import stats
 from .eta import eta, eta_backtest, eta_defaults, progress_group, status_line
 from .worktree import lint, plan, waves, worktree
@@ -1175,6 +1175,7 @@ cli.add_command(update)
 cli.add_command(run)
 cli.add_command(bench)
 cli.add_command(cost)
+cli.add_command(pricing)
 cli.add_command(stats)
 stats.add_command(eta_defaults)
 stats.add_command(eta_backtest)

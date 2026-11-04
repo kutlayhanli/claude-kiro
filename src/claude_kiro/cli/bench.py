@@ -187,3 +187,68 @@ def _local_record(run_id: str) -> dict:
     except (OSError, ValueError):
         return None
     return data if isinstance(data, dict) else None
+
+
+@click.group()
+def pricing():
+    """Model rates used to price runs.
+
+    \b
+      ck pricing refresh            regenerate the OpenCode rates snapshot from models.dev
+      ck pricing refresh --check    report drift between the snapshot and the catalog, write nothing
+      ck pricing show <provider/model>
+    """
+
+
+@pricing.command("refresh")
+@click.option("--source", default=None, help="models.dev api.json URL or file (default: https://models.dev/api.json)")
+@click.option("--out", "out_path", default=None, type=click.Path(dir_okay=False), help="Snapshot to write (default: the packaged snapshot)")
+@click.option("--check", is_flag=True, help="Compare only: exit 1 when the snapshot differs from the catalog")
+@click.option("--date", "fetched", default=None, help="Snapshot date (default: today, UTC)")
+def pricing_refresh(source: str, out_path: str, check: bool, fetched: str):
+    """Regenerate the OpenCode rates snapshot from the models.dev catalog."""
+    import datetime
+    import urllib.request
+
+    from .. import model_catalog as mc
+
+    src = source or mc.SOURCE_URL
+    try:
+        if src.startswith(("http://", "https://")):
+            with urllib.request.urlopen(src, timeout=60) as resp:  # noqa: S310 - fixed catalog URL or one the user names
+                api = json.loads(resp.read().decode("utf-8"))
+        else:
+            api = json.loads(Path(src).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        _fail(Exception(f"could not read the catalog from {src}: {e}"))
+    day = fetched or datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+    new = mc.snapshot_from_api(api, day)
+    if not new["models"]:
+        _fail(Exception(f"{src} lists no models for {', '.join(mc.PROVIDERS)}; snapshot left unchanged"))
+    target = Path(out_path) if out_path else mc.snapshot_path()
+    try:
+        old = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        old = {"models": {}}
+    d = mc.drift(old, new)
+    summary = f"{len(new['models'])} models; {len(d['added'])} added, {len(d['removed'])} removed, {len(d['changed'])} re-priced"
+    for key in ("added", "removed", "changed"):
+        for ref in d[key][:20]:
+            click.echo(f"  {key}: {ref}")
+    if check:
+        click.echo(f"{'snapshot is current' if not any(d.values()) else 'snapshot differs from the catalog'}: {summary}")
+        sys.exit(1 if any(d.values()) else 0)
+    target.write_text(json.dumps(new, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    click.echo(f"wrote {target}: {summary}")
+
+
+@pricing.command("show")
+@click.argument("model")
+def pricing_show(model: str):
+    """The rates a model prices at (USD per 1M tokens); 'unknown' rates make a run's cost unknown."""
+    r = b.rates(model)
+    if r is None:
+        click.echo(f"{model}: no rates (cost unknown)")
+        sys.exit(1)
+    shown = ", ".join(f"{k} {'unknown' if r.get(k) is None else r[k]}" for k in b.USAGE_KEYS)
+    click.echo(f"{model}: {'free' if r.get('free') else shown}")
