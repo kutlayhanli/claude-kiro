@@ -293,6 +293,17 @@ const RESOLVED = {
   },
   required: ['resolved'],
 }
+const RELINKED = {
+  type: 'object',
+  properties: {
+    fixable: { type: 'boolean', description: 'the relink was possible' },
+    applied: { type: 'boolean', description: 'tasks.md was written' },
+    committed: { type: 'boolean', description: 'tasks.md was committed on the target branch' },
+    reason: { type: 'string', description: 'what ck relink said' },
+  },
+  required: ['fixable', 'applied'],
+}
+
 const REVIEW_SCHEMA = {
   type: 'object',
   properties: {
@@ -418,6 +429,11 @@ ${GIT_NOTE}
 2. Read each task's block in specs/${SPEC}/tasks.md, the requirements it covers in requirements.md, and design.md (interfaces, file paths, error handling).
 3. The tasks' gates already passed, so do not re-check what the tests check. Look for what tests miss: behaviour that contradicts design.md or a requirement, a public interface that differs from design.md, missing error handling the design specifies, edits outside the tasks' files, weakened or skipped tests, and security problems.
 ${tasks.map(n => TRACKS[n] === 'test' ? `${CONTRACT_REVIEW(n)}\n` : '').join('')}Return verdict ("approve" or "changes") with per-task findings [{ task, severity, file, issue, fix }] and name every covered task in "tasks". Mark a finding "blocking" only if it should stop the wave; style and taste are "minor". verdict is "changes" only if there is at least one blocking finding.`
+
+const relinkPrompt = n => `Break a verify-order cycle at Task ${n} of spec ${SPEC} in tasks.md on ${INTO}. You run one command; you do not edit any file yourself.
+${GIT_NOTE}
+Run "ck -C ${TARGET} relink ${SPEC} ${n} --apply --commit --json". It rewrites only Task ${n}'s and its linked tasks' Verify / Verified by / Verifies lines the way \`ck lint\` suggests, and commits tasks.md on the checked-out ${INTO}; it refuses when the repair is not mechanical.
+Copy "fixable", "applied", "committed" and "reason" from its JSON exactly. If it printed no JSON, set fixable false and put what it printed in reason.`
 
 const crossTestPrompt = tasks => `Cross-test consistency check for spec ${SPEC}: test-track Tasks ${tasks.join(', ')} have merged into ${INTO}. You review; you do not edit, commit, or run the test suite. ${GIT_NOTE}
 Test tasks written in parallel drift apart: two test files can each look right on their own and still disagree about the same request, response or record (field names, which model a field lives on, status values, error codes, units). Each implementation can then satisfy only one of them.
@@ -732,6 +748,11 @@ const landings = []
 // it merges (reviewBatch). Safety tasks are reviewed individually in runTask.
 const pendingReview = new Map()  // n -> { rec, reviewed } awaiting (or past) its batch review
 let reviewWaveCount = 0          // review-wave label counter (review-wave <n> tasks ...)
+// Mid-run verify-order cycle repair (issue #6): agents.relink.auto (default on) or args.relink false.
+const AUTO_RELINK = A.relink !== false && !(A.agents && A.agents.relink && A.agents.relink.auto === false)
+const relinkTried = new Set()  // tasks a relink was attempted for (at most once each)
+const relinks = []             // { task, cycle, reason } for every applied relink
+const relinkedOk = new Set()   // relinked tasks whose next stale cycle report is ignored once
 const MAX_RESOLVES = 3
 // Cross-test consistency (reviewer.cross_test): one check per wave of test tasks,
 // started when its last test task finishes (or at the end, for a wave that never
@@ -937,6 +958,43 @@ async function runPlan(trigger) {
   return synth({ ready: [...fb.ready] })
 }
 
+// Run fn while no landing step runs (and keep new landings queued until it returns): a relink
+// commits tasks.md on INTO, so it must never interleave with a merge into it.
+async function withLandingLock(fn) {
+  while (landingBusy) await landingIdle
+  landingBusy = true
+  try {
+    return await fn()
+  } finally {
+    landingBusy = false
+    if (landQueue.length) pumpLandings()
+  }
+}
+
+async function relinkTask(n, vc) {
+  let r = null
+  try {
+    r = await withLandingLock(() => call('relink', relinkPrompt(n), { label: `relink ${n}`, phase: phaseOf(n), schema: RELINKED, ...LOW }))
+  } catch (e) {
+    r = null
+  }
+  running.delete(n)
+  if (r && r.fixable && r.applied && r.committed !== false) {
+    relinks.push({ task: n, cycle: vc.message, reason: r.reason || 'relinked' })
+    relinkedOk.add(n)
+    log(`Task ${n}: relinked (${trim(r.reason || 'relinked', 200)}); it runs against the relinked tasks.md`)
+  } else {
+    const why = r ? (r.reason || 'relink refused') : 'the relink agent returned nothing'
+    failed.set(n, `verify-order cycle: ${vc.message} (relink: ${why})`)
+    records[n] = { task: n, wave: waveOf(n), ok: false, reason: `verify-order cycle: ${vc.message} (relink: ${why})` }
+    log(`Task ${n}: skipped, verify-order cycle; relink not possible (${trim(why, 200)}): fix tasks.md`)
+    if (!CONTINUE) { stopLaunching = true; stopReason = stopReason || `verify-order cycle at Task ${n}` }
+  }
+  idleArmed = true
+  requestPlan('landing')  // re-read tasks.md: the relinked plan, or the skipped task's dependents
+  poke()
+}
+
 // At most one plan agent in flight; an eligible trigger arriving meanwhile coalesces into one follow-up.
 function requestPlan(trigger) {
   const ctx = planContext()
@@ -1016,7 +1074,19 @@ function schedule() {
 function applyLint(p) {
   for (const vc of p.verifyCycles || []) {
     const n = String(vc.task)
-    if (!failed.has(n) && !running.has(n)) {
+    if (failed.has(n) || running.has(n)) continue
+    // A plan that was already in flight when the relink committed still reports the old cycle once.
+    if (relinkedOk.has(n)) { relinkedOk.delete(n); continue }
+    // Issue #6: a cycle that only shows once a test task's files exist is repaired in place
+    // (`ck relink`, once per task) instead of skipping the task; tracked in `running` so the run
+    // waits for it, without holding an agent slot.
+    if (AUTO_RELINK && !relinkTried.has(n)) {
+      relinkTried.add(n)
+      log(`Task ${n}: verify-order cycle found mid-run (${trim(vc.message, 300)}); relinking tasks.md on ${INTO}`)
+      running.set(n, relinkTask(n, vc))
+      continue
+    }
+    {
       failed.set(n, `verify-order cycle: ${vc.message}`)
       records[n] = { task: n, wave: waveOf(n), ok: false, reason: `verify-order cycle: ${vc.message}` }
       log(`Task ${n}: skipped, verify-order cycle (fix tasks.md; the next plan step picks it up)`)
@@ -1443,7 +1513,7 @@ function buildOverhead() {
 const startPlan = await requestPlan('start')
 if (!startPlan) return { halted: true, refused: false, reason: PLAN_FAILED, into: INTO, degraded, planFallbacks, overhead: buildOverhead() }
 if (startPlan.cycles.length || startPlan.verifyCycles.length) {
-  log('Refusing to launch: the plan has a cycle. Fix tasks.md (see `ck lint`) and run again.')
+  log('Refusing to launch: the plan has a cycle. Fix tasks.md (see `ck lint`; `ck relink <spec> <task> --apply` repairs a verify-order cycle when it can) and run again.')
   return {
     halted: true,
     refused: true,
@@ -1634,6 +1704,7 @@ else if (notStarted.length || failedList.length || needsInput.length) {
     : waiting || `not started: ${notStarted.map(n => `Task ${n}`).join(', ')}`
 } else if (planFailed) reason = null
 if (outcome === 'blocked') log(reason)
+if (relinks.length) log(`Relinked mid-run (verify-order cycles): ${relinks.map(r => `Task ${r.task}`).join(', ')}`)
 // Deterministic-fallback report section (5.1, 6.1): degraded mark, fallback
 // count and the triggering plan attempts.
 if (planFallbacks.length) {
@@ -1685,5 +1756,6 @@ return {
   degraded,
   planFallbacks,
   overhead,
+  relinks,
   stats: { initiallyDone, merged: merged.length, failed: failedList.length, notStarted: notStarted.length, planSteps: refills, planFailures, planFallbacks: planFallbacks.length, fixes: fixCount, landings: landings.length, bisected: landings.filter(l => l.bisected).length },
 }

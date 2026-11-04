@@ -50,6 +50,7 @@ _IMPL = [
     ("task", _c(rf"task (?P<n>{_ID})(?P<t> \[test\])?"
                 rf"(?: (?P<kind>retry|revise|guard) (?P<k>{_NUM})(?: \((?P<m>{_MODEL})\))?)?")),
     ("park", _c(rf"park (?P<n>{_ID})")),
+    ("relink", _c(rf"relink (?P<n>{_ID})")),
     ("review", _c(rf"review (?P<n>{_ID})(?: round (?P<r>{_NUM}))?")),
     ("review_wave", _c(rf"review-wave (?P<w>{_NUM}) tasks (?P<ns>{_ID}(?: {_ID})*)")),
     ("resolve", _c(rf"resolve (?P<n>{_ID})(?: round (?P<r>{_NUM}))?")),
@@ -110,6 +111,9 @@ def _implement(label: str) -> LabelMatch:
             elif g["kind"] == "guard":
                 kw.update(attempt=None, step="guard", escalated_to=g["m"])
             return LabelMatch(**kw)
+        if name == "relink":  # issue #6: the mid-run verify-order cycle repair (one ck command)
+            n = g["n"]
+            return LabelMatch(role="plan", matched=True, task=_task(n), step="relink")
         if name == "park":
             n = g["n"]
             return LabelMatch(role="orchestrator", matched=True, task=_task(n),

@@ -671,3 +671,67 @@ def resolve_cmd(spec, task, as_json):
         click.echo(json.dumps(result, indent=2))
     else:
         click.echo(f"resolved {name} task {task}: {path}")
+
+
+@click.command()
+@click.argument("spec")
+@click.argument("task")
+@click.option("--apply", "do_apply", is_flag=True, help="Write the relinked tasks.md (default: show the edits only)")
+@click.option("--commit", is_flag=True, help="With --apply: commit tasks.md on the current branch")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable result")
+def relink(spec: str, task: str, do_apply: bool, commit: bool, as_json: bool):
+    """Break TASK's verify-order cycle in SPEC's tasks.md, the way `ck lint` suggests.
+
+    TASK becomes a foundation task: the test task whose tests need a later task verifies that later
+    task instead, and TASK's Verify commands that run those tests are dropped. Refused (exit 1) when
+    nothing would verify TASK afterwards, or when the relinked plan still has a cycle at TASK.
+    Exit 0 when relinked (or, without --apply, when a relink is possible).
+    """
+    import subprocess
+
+    from .. import relink as rl
+    from ..lint import verify_file_cycles, verify_order_cycles
+    from ..hooks._shared.spec_parser import parse_tasks_text
+
+    project = Path.cwd()
+    tasks_md = _spec_dir(project, spec) / "tasks.md"
+    try:
+        text = tasks_md.read_text(encoding="utf-8")
+    except OSError as e:
+        click.echo(f"❌ cannot read {tasks_md}: {e}")
+        sys.exit(2)
+    config = load_config(project)
+    new_text, r = rl.relink_text(text, project, config, task)
+    out = r.to_dict()
+    if r.fixable:
+        after = {t.num: t for t in parse_tasks_text(new_text)}
+        left = [c for c in verify_order_cycles(after, project, config) + verify_file_cycles(after, config) if str(c.get("task")) == str(task)]
+        if left:
+            r.fixable = False
+            out.update(fixable=False, reason=f"the relinked plan still has a cycle at Task {task}: {left[0].get('message')}")
+    out["applied"] = False
+    if r.fixable and do_apply:
+        tasks_md.write_text(new_text, encoding="utf-8")
+        out["applied"] = True
+        if commit:
+            rel = os.path.relpath(tasks_md, project)
+            msg = f"relink: break Task {task}'s verify-order cycle ({spec})"
+            res = subprocess.run(["git", "-C", str(project), "commit", "-q", "-m", msg, "--", rel], capture_output=True, text=True)
+            out["committed"] = res.returncode == 0
+            if res.returncode != 0:
+                out["commitError"] = (res.stderr or res.stdout).strip()[-400:]
+    if as_json:
+        click.echo(json.dumps(out, indent=2))
+    else:
+        click.echo(f"Task {task}: {out['reason']}")
+        for c in out["cycles"]:
+            click.echo(f"  cycle: {c['message']}")
+        if out["fixable"]:
+            for n, v in out["verifiedBy"].items():
+                click.echo(f"  Task {n} Verified by: {', '.join('Task ' + x for x in v) or 'None'}")
+            for n, v in out["verifies"].items():
+                click.echo(f"  Task {n} Verifies: {', '.join('Task ' + x for x in v) or 'None'}")
+            for n, v in out["verify"].items():
+                click.echo(f"  Task {n} Verify: {' '.join('`' + c + '`' for c in v)}")
+            click.echo("  written to tasks.md" + (" and committed" if out.get("committed") else "") if out["applied"] else "  (dry run: add --apply to write it)")
+    sys.exit(0 if out["fixable"] and (out["applied"] or not do_apply) and not out.get("commitError") else 1)

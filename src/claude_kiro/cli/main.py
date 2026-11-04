@@ -26,7 +26,7 @@ from .handoff import handoff
 from .bench import bench, cost, pricing
 from .stats import stats
 from .eta import eta, eta_backtest, eta_defaults, progress_group, status_line
-from .worktree import lint, plan, waves, worktree
+from .worktree import lint, plan, relink, waves, worktree
 from .runner import HOOK_SETTINGS, configured_hooks, execute_hook, install_hook_settings
 
 
@@ -1169,6 +1169,7 @@ cli.add_command(worktree)
 cli.add_command(waves)
 cli.add_command(plan)
 cli.add_command(lint)
+cli.add_command(relink)
 cli.add_command(agents)
 cli.add_command(handoff)
 cli.add_command(update)

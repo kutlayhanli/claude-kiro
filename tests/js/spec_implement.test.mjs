@@ -59,6 +59,43 @@ await test('a verify-order cycle found mid-run skips that task and keeps going',
   assert.ok(logs.some(l => l.includes('verify-order cycle')))
 })
 
+await test('issue #6: a mid-run verify-order cycle is relinked once, and the task then runs and merges', async () => {
+  const p = project({ deps: { 1: [], 2: ['1'], 3: ['1'] }, verifyCycles: [{ task: '3', message: 'Task 3 is verified by Task 9, whose tests import runner (Task 4)' }],
+    relinkOutcome: { fixable: true, applied: true, committed: true, reason: 'relinked' } })
+  const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: baseArgs })
+  assert.deepEqual(p.state.relinks, ['3'], 'one relink agent, for the cycling task only')
+  assert.match(p.state.prompts['relink 3'], /ck -C \S+ relink demo 3 --apply --commit --json/)
+  assert.ok(idx(p.state, 'relink 3 end') < idx(p.state, 'task 3'), 'the task starts only after its relink')
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3'])
+  assert.deepEqual(result.failed, [])
+  assert.deepEqual(result.relinks.map(r => r.task), ['3'])
+  assert.ok(logs.some(l => l.includes('Relinked mid-run') && l.includes('Task 3')))
+  // The relink runs while no landing step does: it commits tasks.md on the target branch.
+  const landOpen = []
+  let open = 0
+  for (const e of p.state.events) {
+    if (/^land /.test(e)) open += e.endsWith(' end') ? -1 : 1
+    if (e === 'relink 3') landOpen.push(open)
+  }
+  assert.deepEqual(landOpen, [0], 'no landing was in flight when the relink started')
+})
+
+await test('issue #6: a refused relink skips the task as before, and relink: false never tries', async () => {
+  const cyc = [{ task: '3', message: 'Task 3 is verified by Task 9, whose tests import runner (Task 4)' }]
+  const p = project({ deps: { 1: [], 2: ['1'], 3: ['1'] }, verifyCycles: cyc })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: baseArgs })
+  assert.deepEqual(p.state.relinks, ['3'])
+  assert.ok(!p.state.events.includes('task 3'))
+  const f = result.failed.find(x => x.task === '3')
+  assert.ok(f && f.reason.startsWith('verify-order cycle') && f.reason.includes('relink:'), f && f.reason)
+  assert.deepEqual(result.relinks, [])
+
+  const q = project({ deps: { 1: [], 2: ['1'], 3: ['1'] }, verifyCycles: cyc, relinkOutcome: { fixable: true, applied: true } })
+  const off = await runWorkflow(SCRIPT, { agent: q.agent, args: { ...baseArgs, relink: false } })
+  assert.deepEqual(q.state.relinks, [], 'relink: false runs no relink agent')
+  assert.ok(off.result.failed.some(x => x.task === '3' && x.reason.startsWith('verify-order cycle')))
+})
+
 await test('relinks in tasks.md apply without a restart', async () => {
   // 3 spuriously depends on 2 (slow); a relink after the first task removes the edge.
   const p = project({ deps: { 1: [], 2: ['1'], 3: ['2'] }, durations: { 2: 80 }, relink: { atPlan: 2, deps: { 3: ['1'] } } })
@@ -917,6 +954,7 @@ const SNAPSHOT_KEYS = [
   "overhead.warned",
   "planFallbacks",
   "reason",
+  "relinks",
   "reportSource",
   "stats",
   "stats.bisected",

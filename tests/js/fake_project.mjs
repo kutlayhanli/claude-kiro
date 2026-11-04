@@ -95,8 +95,11 @@ function chainLengths(deps, done) {
 //                                          (haiku < sonnet < opus < fable); 'always' never resolves
 //   guardStopIn: {n: 'revise'}             the guard stop of task n happens in its first revise call, not its task call
 //   parkOutcome: {parked, notification, detail}  answer of the `park <N>` agent (default parked, sent, '')
+//   relinkOutcome: {fixable, applied, committed, reason}  answer of the `relink <N>` agent (default refused:
+//                                          not mechanical); a fixable+applied answer drops N's verify cycle from
+//                                          later plans, as the relinked tasks.md would
 //   worktree: {n: {state, detail}}         the first task agent of n returns that worktree outcome (default CREATED)
-export function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [], gitReport = null, conflictRounds = {}, planDurations = {}, externalDone = null, planFail = [], worktree = {}, guardStops = {}, guardStopIn = {}, parkOutcome = null, execCk = null, etaAnswer = null, sleep = realSleep, external = p => p, planSeq = null, badReady = null, risk = null }) {
+export function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [], gitReport = null, conflictRounds = {}, planDurations = {}, externalDone = null, planFail = [], worktree = {}, guardStops = {}, guardStopIn = {}, parkOutcome = null, relinkOutcome = null, execCk = null, etaAnswer = null, sleep = realSleep, external = p => p, planSeq = null, badReady = null, risk = null }) {
   let rechecksLeftRed = recheckRed
   let planCalls = 0  // plan agent invocations so far: call k consumes planSeq[k-1]
   // RED landings left per task: checkRed tasks are red on their first landing, redLands sets a count.
@@ -112,13 +115,13 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
     if (m) return m[1].split(/[,\s]+/).filter(Boolean)
     return []
   }
-  const state = { execResults: [], deps: { ...deps }, done: new Set(done), merged: new Set(), events: [], prompts: {}, opts: {}, reviewCount: {}, reviewTasks: {}, attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0, landings: [], parks: [], revises: {}, resolved: new Set(), conflictsHit: {}, execLog: [] }
+  const state = { execResults: [], deps: { ...deps }, done: new Set(done), merged: new Set(), events: [], prompts: {}, opts: {}, reviewCount: {}, reviewTasks: {}, relinked: new Set(), relinks: [], attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0, landings: [], parks: [], revises: {}, resolved: new Set(), conflictsHit: {}, execLog: [] }
   let clock = Date.parse('2026-10-04T10:00:00Z')
   const stamp = () => new Date((clock += 60000)).toISOString().replace('.000', '')
   const ready = exclude => {
     const chain = chainLengths(state.deps, state.done)
     return Object.keys(state.deps)
-      .filter(n => !state.done.has(n) && !exclude.includes(n) && !verifyCycles.some(v => v.task === n) && state.deps[n].every(d => state.done.has(d) || !(d in state.deps)))  // dangling ids are dropped, as `ck plan` does
+      .filter(n => !state.done.has(n) && !exclude.includes(n) && !verifyCycles.some(v => v.task === n && !state.relinked.has(n)) && state.deps[n].every(d => state.done.has(d) || !(d in state.deps)))  // dangling ids are dropped, as `ck plan` does
       // Longest remaining chain first, then numeric id: what `ck plan` prints.
       .sort((a, b) => (chain[b] ?? 1) - (chain[a] ?? 1) || Number(a) - Number(b))
   }
@@ -190,7 +193,7 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
         remaining: Object.keys(state.deps).filter(n => !state.done.has(n)),
         deps: Object.fromEntries(Object.entries(state.deps).map(([n, ds]) => [n, [...ds]])),
         cycles,
-        verifyCycles: state.plans === 1 && !verifyCyclesFromStart ? [] : verifyCycles,
+        verifyCycles: state.plans === 1 && !verifyCyclesFromStart ? [] : verifyCycles.filter(v => !state.relinked.has(v.task)),
         risk: { ...(risk ?? {}) },
         startedAt,
       }
@@ -276,6 +279,14 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
       const n = l.match(/resolve (\d+)/)[1]
       state.resolved.add(n)
       return { resolved: true, conflicts: 'specs/demo/tasks.md: kept both task sections' }
+    }
+    if (l.startsWith('relink ')) {
+      const n = l.match(/relink (\d+)/)[1]
+      const out = { fixable: false, applied: false, reason: 'after the relink nothing would verify the task', ...(relinkOutcome ?? {}) }
+      state.relinks.push(n)
+      if (out.fixable && out.applied) state.relinked.add(n)
+      state.events.push(`${l} end`)
+      return out
     }
     if (l.startsWith('park ')) {
       const n = l.match(/park (\d+)/)[1]
