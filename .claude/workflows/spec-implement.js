@@ -386,6 +386,11 @@ async function runCk(kind, argv, cwd) {
   if (!out || !out.json || typeof out.json !== 'object') directCk.failures++
   return out || { code: -1, json: null, stderr: 'no result' }
 }
+// A revision that gives up may leave its claim, which would make the next run's task BUSY.
+async function releaseClaim(n) {
+  if (!DIRECT_CK) return
+  try { await DIRECT_CK(['-C', WT(n), 'worktree', 'release', SPEC, String(n)], { cwd: WT(n) }) } catch {}
+}
 const directCkOut = () => (DIRECT_CK ? { ...directCk, minutes: Math.round(directCk.ms / 600) / 100 } : null)
 const ckError = out => `ck exited ${out && out.code} with no JSON: ${trim((out && (out.stderr || out.stdout)) || '', 400)}`
 const planArgv = exclude => {
@@ -494,7 +499,7 @@ Report each disagreement with both files and lines and the design text. It is "b
 const revisePrompt = (n, review, round, cf = '') => `${MANDATE}${READ_DECISION(n)}Revise Task ${n} of spec ${SPEC} (review round ${round}). The task's gate passed, but the reviewer found blocking problems:
 ${trim(review && review.findings, FINDINGS_LIMIT)}
 ${READ_HANDOFF(n)} ${WRITE_HANDOFF(n)}
-Worktree: ${WT(n)} (branch ${BR(n)}). Run "${NOW}" for startedAt. Claim with "ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover${cf}", fix each blocking finding without weakening any test or editing requirements.md or existing test-plan.md rows, get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" passing again, merge ${INTO} into your branch, re-run the gate, and release the worktree. If a finding is wrong (it contradicts the spec), do not change the code for it: say why in deviations. Run "${NOW}" for finishedAt.
+Worktree: ${WT(n)} (branch ${BR(n)}). Run "${NOW}" for startedAt. Claim with "ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover${cf}", fix each blocking finding without weakening any test or editing requirements.md or existing test-plan.md rows, get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" passing again, merge ${INTO} into your branch, re-run the gate, and release the worktree. Release it even if you stop without finishing, so the next run can claim it. If a finding is wrong (it contradicts the spec), do not change the code for it: say why in deviations. Run "${NOW}" for finishedAt.
 ${GIT_NOTE}
 ${GATE_NOTE}
 ${GUARD_NOTE}
@@ -1508,6 +1513,7 @@ async function runTask(n) {
         lastModel = model
         stop = guardStopOf(r)
         if (stop) await climbGuard(lastModel)
+        else if (!ok(r)) await releaseClaim(n)
         releaseSlot(n)
       }
       while (review && review.verdict === 'changes' && round < REVIEW_ROUNDS && ok(r)) {

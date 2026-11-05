@@ -369,6 +369,23 @@ await test('reviewer: blocking findings send the task back once, then it merges'
   assert.deepEqual([result.tasks[0].review.verdict, result.tasks[0].review.rounds], ['approve', 1])
 })
 
+await test('reviewer: a revision that gives up leaves no claim behind', async () => {
+  const p = project({ deps: { 1: [] }, reviews: { 1: ['changes'] } })
+  const d = directCk(p)
+  const agent = (prompt, opts) => (opts.label === 'task 1 revise 1'
+    ? Promise.resolve({ task: '1', status: 'failed', ok: false, blocker: 'gave up' })
+    : p.agent(prompt, opts))
+  const { result } = await runWorkflow(SCRIPT, { agent, args: { ...baseArgs, agents: ROLES }, ck: d.fn })
+  assert.deepEqual(result.merged, [])
+  assert.ok(d.calls.some(c => c.includes('release') && c.includes('1')), JSON.stringify(d.calls.map(c => c.join(' '))))
+})
+
+await test('reviewer: the revise prompt asks for a release even when it stops early', async () => {
+  const p = project({ deps: { 1: [] }, reviews: { 1: ['changes', 'approve'] } })
+  await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })
+  assert.match(p.state.prompts['task 1 revise 1'], /Release it even if you stop without finishing/)
+})
+
 await test('reviewer: findings that survive the revisions fail the task and nothing merges', async () => {
   const p = project({ deps: { 1: [], 2: ['1'] }, reviews: { 1: ['changes', 'changes'] } })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })
