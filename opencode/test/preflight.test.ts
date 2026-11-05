@@ -90,7 +90,7 @@ function fakeExec(overrides: Record<string, Responder> = {}): FakeExec {
       return typeof override === "function" ? override() : override;
     }
     if (key === "node --version") return { status: 0, stdout: "v22.22.3\n", stderr: "" };
-    if (key === "ck --version") return { status: 0, stdout: "ck, version 0.11.0\n", stderr: "" };
+    if (key === "ck --version") return { status: 0, stdout: "ck, version 0.11.1\n", stderr: "" };
     if (key === "ck --hook stop-verify --plugin-hook") {
       return { status: 0, stdout: "", stderr: "" };
     }
@@ -220,7 +220,7 @@ test("an old ck is an error", async (t) => {
   assert.equal(result.ok, false);
   assert.equal(check.ok, false);
   assert.match(check.detail, /0\.10\.4/);
-  assert.match(check.detail, /0\.11\.0/);
+  assert.match(check.detail, /0\.11\.1/);
 });
 
 test("an unreadable ck version is an error", async (t) => {

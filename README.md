@@ -20,13 +20,13 @@ The same `/spec/*` workflow is available for [OpenCode](https://opencode.ai) fro
 `opencode-claude-kiro` npm package (source in `opencode/`). It registers the five commands, writes
 the flat `ck-*` agents and `AGENTS.md`, runs the vendored workflows through a `workflow` tool, and
 translates OpenCode tool events into the same `ck` guard hooks. It needs Node.js 20+ and `ck`
-0.11.0+. Under OpenCode the workflow's mechanical steps (plan, land, relink) run `ck` directly from
+0.11.1+. Under OpenCode the workflow's mechanical steps (plan, land, relink) run `ck` directly from
 the workflow runner instead of through an agent that copies the command's JSON, so they cost no
 agent, slot or tokens; Claude Code's Workflow runtime cannot run commands, so there agents still do.
 
 ```jsonc
 // opencode.json
-{ "plugins": ["opencode-claude-kiro@0.11.0"] }
+{ "plugins": ["opencode-claude-kiro@0.11.1"] }
 ```
 
 See [`opencode/README.md`](opencode/README.md) for configuration, the live TUI workflow status line,

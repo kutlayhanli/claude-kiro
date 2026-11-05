@@ -18,7 +18,7 @@ adapts the harness surface:
 - OpenCode **2.2.3** (the tested version; the plugin package pins `@opencode/plugin` to it)
 - `node` **20+** on `PATH` (the workflow runner; it is not `process.execPath`, which is the
   `opencode` binary)
-- `ck` **0.11.0+** on `PATH` (`uv tool install claude-kiro`)
+- `ck` **0.11.1+** on `PATH` (`uv tool install claude-kiro`)
 
 The plugin runs a preflight at startup. A missing `node`, old `ck`, incomplete `vendor/`, missing
 agent file, unresolvable model, or dead guard hook fails the plugin load with a fix. A dirty git
@@ -35,7 +35,7 @@ CK_OPENCODE_PLUGIN=/path/to/opencode ck doctor --harness opencode
 ```jsonc
 // opencode.json
 {
-  "plugins": ["opencode-claude-kiro@0.11.0"]
+  "plugins": ["opencode-claude-kiro@0.11.1"]
 }
 ```
 

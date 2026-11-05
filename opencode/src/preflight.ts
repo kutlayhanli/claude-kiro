@@ -61,7 +61,7 @@ export interface PreflightResult {
 }
 
 export const MIN_NODE_MAJOR = 20;
-export const MIN_CK_VERSION = "0.11.0";
+export const MIN_CK_VERSION = "0.11.1";
 
 export const VENDOR_GROUPS = [
   "workflows",

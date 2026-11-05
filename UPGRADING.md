@@ -32,6 +32,7 @@ Then restart Claude Code sessions, and run `ck upgrade` in vendored projects so 
 - **Generated artifacts (#7).** The worktree busy check matches `__pycache__`, `.pytest_cache`, `node_modules`, `.venv` and a top-level `target/` by whole path segment, and only for untracked entries: a tracked change, or real source in a directory that merely looks like one, still blocks a merge.
 - **Tests that can never pass (#8).** A task agent reports `testConflict` (file, test, criterion, reason, fix) instead of retrying; one confirmation on the strongest rung, then the task is `blocked: test`. Its dependents wait, everything else continues, and it never halts the run. The report lists the fixes under "Test-track fixes" (the result under `testFixes`); the test itself is never edited by the workflow.
 - **Pricing (#9).** OpenCode rates come from a models.dev snapshot (`ck pricing refresh [--check]`, `ck pricing show <model>`); every usage key has a rate or is unknown, never a silent $0.
+- **Revisions that give up (found by the E2E).** A revision that stops early now releases its worktree claim, so the next run isn't told the task is busy.
 - **Fewer agents under OpenCode (#11).** The OpenCode runner gives the workflow a `ck` global; the plan, land and relink steps run `ck` directly instead of through an agent. The result gains `directCk`. `args.directCk: false` keeps the agents.
 
 ## 0.10.4 → 0.11.0
