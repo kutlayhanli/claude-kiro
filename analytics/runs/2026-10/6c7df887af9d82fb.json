@@ -1,0 +1,298 @@
+{
+  "agents_by_role": {
+    "implementer": 19,
+    "reviewer": 49,
+    "test-writer": 9
+  },
+  "ck_version": "0.10.0",
+  "claude_code_version": "2.1.308",
+  "cost": {
+    "by_model": {
+      "opus": 64.6062,
+      "sonnet": 93.3447
+    },
+    "by_role": {
+      "implementer": 68.6884,
+      "reviewer": 64.6062,
+      "test-writer": 24.6563
+    },
+    "estimated": false,
+    "pricing_date": "2026-10",
+    "source": "agent_transcripts",
+    "usd": 157.9509087
+  },
+  "counts": {
+    "agents": 77,
+    "agents_other": 0,
+    "conflicts": 0,
+    "conflicts_inferred": 0,
+    "tasks": 27,
+    "tasks_failed": 0,
+    "tasks_merged": 27,
+    "tasks_not_started": 0
+  },
+  "durations": {
+    "by_role": {
+      "implementer": 1127.29,
+      "reviewer": 238.03,
+      "test-writer": 189.04
+    },
+    "wall_minutes": 1248.31
+  },
+  "id": "6c7df887af9d82fb",
+  "interruptions": {
+    "auto_mode_denials": 0,
+    "by_role": {
+      "implementer": {
+        "git": {
+          "isolation_refusals": 1
+        },
+        "other": {
+          "user_rejects": 1
+        },
+        "python": {
+          "isolation_refusals": 1
+        }
+      },
+      "orchestrator": {
+        "other": {
+          "isolation_refusals": 7
+        },
+        "redirect": {
+          "isolation_refusals": 2
+        }
+      },
+      "test-writer": {
+        "redirect": {
+          "prompts": 1
+        },
+        "sed": {
+          "prompts": 1
+        }
+      }
+    },
+    "guard_denials": 0,
+    "guard_escalations": 0,
+    "headless_denials": 0,
+    "isolation_refusals": 11,
+    "post_check_catches": 0,
+    "prompts": 2,
+    "user_rejects": 1,
+    "wait_minutes": 33.07,
+    "wait_minutes_by_role": {
+      "test-writer": 33.07
+    }
+  },
+  "issues": [],
+  "machine": "work",
+  "missing": [
+    "runfile"
+  ],
+  "month": "2026-10",
+  "outcome": "complete",
+  "schema": "ck-run-analytics/1",
+  "source": "agents",
+  "stack": "python",
+  "tasks": [
+    {
+      "index": 1,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 2,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 3,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 4,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 5,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 6,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 7,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 8,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 9,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 10,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 11,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 12,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 13,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 14,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 15,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 16,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 17,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 18,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 19,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 20,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 21,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 22,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 23,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 24,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 25,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 26,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    },
+    {
+      "index": 27,
+      "ok": true,
+      "resolves": 0,
+      "track": "other"
+    }
+  ],
+  "tokens": {
+    "by_model": {
+      "opus": {
+        "cacheCreation": 5119380,
+        "cacheRead": 91677941,
+        "input": 2228,
+        "output": 1033241
+      },
+      "sonnet": {
+        "cacheCreation": 17753345,
+        "cacheRead": 194594190,
+        "input": 2784,
+        "output": 1003692
+      }
+    },
+    "by_role": {
+      "implementer": {
+        "cacheCreation": 14320985,
+        "cacheRead": 137582042,
+        "input": 1906,
+        "output": 536569
+      },
+      "reviewer": {
+        "cacheCreation": 5119380,
+        "cacheRead": 91677941,
+        "input": 2228,
+        "output": 1033241
+      },
+      "test-writer": {
+        "cacheCreation": 3432360,
+        "cacheRead": 57012148,
+        "input": 878,
+        "output": 467123
+      }
+    }
+  },
+  "variant": "default",
+  "workflow": "spec-implement"
+}

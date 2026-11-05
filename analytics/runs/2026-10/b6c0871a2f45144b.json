@@ -1,0 +1,171 @@
+{
+  "agents_by_role": {
+    "implementer": 11,
+    "reviewer": 40,
+    "test-writer": 16
+  },
+  "ck_version": "0.10.0",
+  "claude_code_version": "2.1.292",
+  "cost": {
+    "by_model": {
+      "opus": 25.1278,
+      "sonnet": 28.5431
+    },
+    "by_role": {
+      "implementer": 10.8576,
+      "reviewer": 25.1278,
+      "test-writer": 17.6855
+    },
+    "estimated": false,
+    "pricing_date": "2026-10",
+    "source": "agent_transcripts",
+    "usd": 53.6708679
+  },
+  "counts": {
+    "agents": 67,
+    "agents_other": 0,
+    "conflicts_inferred": 0,
+    "tasks": 0,
+    "tasks_failed": 0,
+    "tasks_merged": 0,
+    "tasks_not_started": 0
+  },
+  "durations": {
+    "by_role": {
+      "implementer": 139.54,
+      "reviewer": 182.83,
+      "test-writer": 494.64
+    },
+    "wall_minutes": 190.43
+  },
+  "id": "b6c0871a2f45144b",
+  "interruptions": {
+    "auto_mode_denials": 0,
+    "by_role": {
+      "implementer": {
+        "git": {
+          "isolation_refusals": 2
+        },
+        "other": {
+          "isolation_refusals": 2
+        },
+        "python": {
+          "isolation_refusals": 2
+        },
+        "redirect": {
+          "isolation_refusals": 9
+        },
+        "sed": {
+          "isolation_refusals": 1
+        }
+      },
+      "orchestrator": {
+        "git": {
+          "isolation_refusals": 1
+        },
+        "other": {
+          "isolation_refusals": 1
+        },
+        "redirect": {
+          "isolation_refusals": 1
+        }
+      },
+      "reviewer": {
+        "git": {
+          "isolation_refusals": 7
+        },
+        "other": {
+          "isolation_refusals": 19
+        },
+        "python": {
+          "isolation_refusals": 3
+        },
+        "redirect": {
+          "isolation_refusals": 29
+        },
+        "sed": {
+          "isolation_refusals": 5
+        }
+      },
+      "test-writer": {
+        "git": {
+          "isolation_refusals": 9
+        },
+        "other": {
+          "isolation_refusals": 6,
+          "prompts": 1
+        },
+        "python": {
+          "isolation_refusals": 2
+        },
+        "redirect": {
+          "isolation_refusals": 15,
+          "prompts": 3
+        },
+        "sed": {
+          "isolation_refusals": 1,
+          "prompts": 4
+        }
+      }
+    },
+    "guard_denials": 0,
+    "guard_escalations": 0,
+    "headless_denials": 0,
+    "isolation_refusals": 115,
+    "post_check_catches": 0,
+    "prompts": 8,
+    "user_rejects": 0,
+    "wait_minutes": 41.23,
+    "wait_minutes_by_role": {
+      "test-writer": 41.23
+    }
+  },
+  "issues": [],
+  "machine": "work",
+  "missing": [
+    "runfile"
+  ],
+  "month": "2026-10",
+  "outcome": "complete",
+  "schema": "ck-run-analytics/1",
+  "source": "agents",
+  "stack": "python",
+  "tokens": {
+    "by_model": {
+      "opus": {
+        "cacheCreation": 3097683,
+        "cacheRead": 46466810,
+        "input": 1620,
+        "output": 16975
+      },
+      "sonnet": {
+        "cacheCreation": 6130663,
+        "cacheRead": 65473267,
+        "input": 1480,
+        "output": 11884
+      }
+    },
+    "by_role": {
+      "implementer": {
+        "cacheCreation": 2675753,
+        "cacheRead": 20645789,
+        "input": 514,
+        "output": 3803
+      },
+      "reviewer": {
+        "cacheCreation": 3097683,
+        "cacheRead": 46466810,
+        "input": 1620,
+        "output": 16975
+      },
+      "test-writer": {
+        "cacheCreation": 3454910,
+        "cacheRead": 44827478,
+        "input": 966,
+        "output": 8081
+      }
+    }
+  },
+  "variant": "default",
+  "workflow": "spec-implement"
+}

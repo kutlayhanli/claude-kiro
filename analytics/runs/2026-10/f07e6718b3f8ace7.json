@@ -1,0 +1,135 @@
+{
+  "agents_by_role": {
+    "fixer": 2,
+    "implementer": 24,
+    "reviewer": 42,
+    "test-writer": 14
+  },
+  "ck_version": "other",
+  "claude_code_version": "2.1.285",
+  "cost": {
+    "by_model": {
+      "opus": 39.4118,
+      "sonnet": 62.8442
+    },
+    "by_role": {
+      "fixer": 2.1274,
+      "implementer": 33.6769,
+      "reviewer": 39.4118,
+      "test-writer": 27.0399
+    },
+    "estimated": false,
+    "pricing_date": "2026-10",
+    "source": "agent_transcripts",
+    "usd": 102.2559254
+  },
+  "counts": {
+    "agents": 82,
+    "agents_other": 0,
+    "conflicts_inferred": 0,
+    "tasks": 0,
+    "tasks_failed": 0,
+    "tasks_merged": 0,
+    "tasks_not_started": 32
+  },
+  "durations": {
+    "by_role": {
+      "fixer": 15.06,
+      "implementer": 276.67,
+      "reviewer": 122.63,
+      "test-writer": 121.1
+    },
+    "wall_minutes": 222.38
+  },
+  "id": "f07e6718b3f8ace7",
+  "interruptions": {
+    "auto_mode_denials": 4,
+    "by_role": {
+      "implementer": {
+        "sed": {
+          "prompts": 2
+        }
+      },
+      "orchestrator": {
+        "other": {
+          "auto_mode_denials": 2
+        },
+        "redirect": {
+          "auto_mode_denials": 2
+        },
+        "sed": {
+          "prompts": 2
+        }
+      }
+    },
+    "guard_denials": 0,
+    "guard_escalations": 0,
+    "headless_denials": 0,
+    "isolation_refusals": 0,
+    "post_check_catches": 0,
+    "prompts": 4,
+    "user_rejects": 0,
+    "wait_minutes": 67.73,
+    "wait_minutes_by_role": {
+      "implementer": 47.62,
+      "orchestrator": 20.11
+    }
+  },
+  "issues": [
+    "run_blocked"
+  ],
+  "machine": "work",
+  "missing": [
+    "ck_version",
+    "runfile"
+  ],
+  "month": "2026-10",
+  "outcome": "blocked",
+  "schema": "ck-run-analytics/1",
+  "source": "agents",
+  "stack": "python",
+  "tokens": {
+    "by_model": {
+      "opus": {
+        "cacheCreation": 3233118,
+        "cacheRead": 49335518,
+        "input": 181935,
+        "output": 632566
+      },
+      "sonnet": {
+        "cacheCreation": 5116628,
+        "cacheRead": 186166499,
+        "input": 420926,
+        "output": 1197745
+      }
+    },
+    "by_role": {
+      "fixer": {
+        "cacheCreation": 192903,
+        "cacheRead": 6229713,
+        "input": 19344,
+        "output": 36052
+      },
+      "implementer": {
+        "cacheCreation": 2545241,
+        "cacheRead": 109595024,
+        "input": 248706,
+        "output": 489734
+      },
+      "reviewer": {
+        "cacheCreation": 3233118,
+        "cacheRead": 49335518,
+        "input": 181935,
+        "output": 632566
+      },
+      "test-writer": {
+        "cacheCreation": 2378484,
+        "cacheRead": 70341762,
+        "input": 152876,
+        "output": 671959
+      }
+    }
+  },
+  "variant": "default",
+  "workflow": "spec-implement"
+}
