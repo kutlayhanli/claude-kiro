@@ -52,7 +52,7 @@ product asks for (such as allowing protected paths) are still allowed and do not
 **Decided by:** user
 
 ### D2: When does the whole suite run with attribution, and who runs it?
-**Choice:** The periodic gate (every N merges, default 10) and the final gate run `ck gate --attribute --json`. Under OpenCode the runner calls it directly, with no agent; under Claude Code a thin agent runs it and returns the JSON verbatim, since the Workflow runtime has no exec. Attributed regressions go straight to the fixer with the structured failures. Landing gates stay task-scoped for speed.
+**Choice:** The periodic gate (every N merges, default 10) and the final gate run `ck gate --attribute --json`. Under OpenCode the runner calls it directly, with no agent; under Claude Code a thin agent runs it and returns the JSON verbatim, since the Workflow runtime has no exec. Each attributed failing test is rerun once before it counts as a regression, so flakes don't reach the fixer. Attributed regressions go straight to the fixer with the structured failures. Landing gates stay task-scoped for speed.
 **Why:** It catches regressions while the spec is in progress, at bounded cost: the equity suite takes about 10 minutes, so running it per landing batch would add hours. It also extends the direct-ck pattern from deterministic-plan to gates.
 **Rejected:** the full suite on every landing batch - about 10 minutes per batch over dozens of batches; keeping the agent-run gate and only adding attribution - keeps the agent's cost and free-text results.
 **Decided by:** user
@@ -74,7 +74,7 @@ product asks for (such as allowing protected paths) are still allowed and do not
 1. **Right-reason failures:** the test-track gate runs the new tests against the integration branch, and every failure must be a "not built yet" kind (missing module or command, NotImplemented, unknown subcommand). Assertion errors on fixtures, or schema and validation errors, send the task back to the test writer with the D3 failure list.
 2. **Project fixture check:** a command the project declares in specs/ck.json (for example `test_track.validate`) runs on test-track gates, so ck stays project-agnostic.
 3. **Blocking cross-test check:** `reviewer.cross_test` is on by default, and its findings block like review findings and route to the D4 test-fixer.
-4. **Row-fidelity review:** the test-task reviewer checks each test's values, dates and thresholds against its test-plan row and the design's data models, not just field names.
+4. **Row-fidelity review:** a script first checks each test's values, enums, dates and thresholds against its test-plan row and the design's data models. The test-task reviewer gets only what the script can't parse, since LLM review accuracy drops sharply as diffs grow.
 **Why:** The equity blockers were mostly invalid fixtures, wrong enum values, double quoting and a test that swapped its row's values for an unreachable threshold. Each check catches a class of these before an implementer ever sees them.
 **Rejected:** none; all four were chosen.
 **Decided by:** user
@@ -85,6 +85,7 @@ product asks for (such as allowing protected paths) are still allowed and do not
 - A `pre-merge-commit` hook gives an earlier, readable refusal.
 - `ck worktree merge` gets the same check as `land`.
 - A run-end audit compares protected files against ck's last approved state and reports any drift.
+- The `reference-transaction` hook stays cheap and acts only on `integrate/*` refs. The spec must verify the hooks work under the ck run sandbox, where the worktree metadata directory was read-only in October.
 **Why:** In the equity E2E an agent merged a refused branch with raw git. The check only existed in `land()`, and wording alone can't stop an agent with a shell. Hooks prevent it, and the audit catches whatever gets past them, such as an agent that removes the hook.
 **Rejected:** audit only - the bad state exists until the audit runs; harness permission rules - specific to one harness, and they miss other shells and tools.
 **Decided by:** user
@@ -95,7 +96,7 @@ product asks for (such as allowing protected paths) are still allowed and do not
 - **Edges:** depends (task to task), verifies (test case to task, from Verify `-k` selectors and Verifies), owns (task to file), provides (task to command), invokes (test file to command, scanned from test code) and imports (today's scan).
 - **Provides:** spec-create writes a `**Provides:**` field on impl tasks wherever it can't be inferred.
 
-Lint reports missing edges, such as a test invoking a command whose task isn't among its own task's dependencies, and `ck relink` adds them. At runtime, a missing-command failure (unknown subcommand, unrecognized arguments, invalid choice) adds the edge live and the task waits, instead of raising a test conflict. D1's attribution walks the same graph.
+The scheduler also uses the owns edges to refuse running tasks whose write-sets overlap at the same time, since agent branches conflict 20-42% of the time and mostly in source files. Lint reports missing edges, such as a test invoking a command whose task isn't among its own task's dependencies, and `ck relink` adds them. At runtime, a missing-command failure (unknown subcommand, unrecognized arguments, invalid choice) adds the edge live and the task waits, instead of raising a test conflict. D1's attribution walks the same graph.
 **Why:** The equity tests depended on `mtr thesis new` (Task 71) and `mtr express choose` (Task 82) through CLI dispatch, which import scans can't see. One graph serves dependency detection and attribution alike, rather than two separate code paths.
 **Rejected:** a Provides field plus runtime checks without a shared graph - attribution and dependencies would stay separate code paths; runtime only - each case costs a failed attempt first.
 **Decided by:** user
@@ -130,7 +131,7 @@ If that check finds `dsh` can't host the workflow, the phase stops with a findin
 **Decided by:** user
 
 ### D12: Which equity E2E reruns must meet the success bar?
-**Choice:** All four must pass: OpenCode with `opencode-go/muse-spark-1.3-contributor` (medium), OpenCode with `opencode-go/deepseek-v4.1-flash` (medium), Claude Code with default roles, and DeepSeek Harness (`dsh`). The bar is the project's full suite green with zero hand repairs, though decisions the product asks a human for are allowed. Roles stay single-model in the two OpenCode runs, so they compare cleanly with the first E2E. For `dsh`: if the verified API shows it can't host the workflow's `agent()` and `ck()` calls, the documented findings report from D11 satisfies the requirement. If it can host them, its E2E must pass like the others.
+**Choice:** All four must pass: OpenCode with `opencode-go/muse-spark-1.3-contributor` (medium), OpenCode with `opencode-go/deepseek-v4.1-flash` (medium), Claude Code with default roles, and DeepSeek Harness (`dsh`). The bar is the project's full suite green with zero hand repairs, though decisions the product asks a human for are allowed. Each run must also not regress cost per merged task or wall minutes per task (from `ck stats`) compared with the first E2E, since this plan adds a test-fixer, risky reviews, blocking cross-test checks and attributed gates. Roles stay single-model in the two OpenCode runs, so they compare cleanly with the first E2E. For `dsh`: if the verified API shows it can't host the workflow's `agent()` and `ck()` calls, the documented findings report from D11 satisfies the requirement. If it can host them, its E2E must pass like the others.
 **Why:** It shows the fixes hold across two models and three harnesses, not just one lucky run.
 **Rejected:** OpenCode and Claude Code required with `dsh` best effort - the user wants all four; one OpenCode run - doesn't show the fixes hold across models and harnesses.
 **Decided by:** user (the `dsh` findings-report rule too)
@@ -139,6 +140,18 @@ If that check finds `dsh` can't host the workflow, the phase stops with a findin
 **Choice:** The reruns use the equity spec from `fix/mtr-spec-issues`, which has the E2E's link fixes. The 12 reviewed slash-command paths are pre-approved in each bench's `land.allow_paths`, so the protected-file decision doesn't count as a hand step. `.claude/CLAUDE.md` stays protected, so Tasks 93 and 94 need the user's approval in each run. That approval is a decision the product asks for, not a repair.
 **Why:** It starts from the spec as fixed and keeps the human step to the one file that loads automatically into sessions.
 **Rejected:** the original spec with protected files decided live - repeats known spec defects and adds hand steps.
+**Decided by:** user
+
+### D14: How do thin workflow agents avoid paying for context they don't use?
+**Choice:** D2's gate agent and the other thin ck agents run as a dedicated lean agent type under Claude Code: Bash only, no CLAUDE.md, Haiku at low effort, a few turns, and one shared output schema. They stop being default subagents. Longer term, a ck mod running processes directly could drop the agent entirely, as OpenCode already does.
+**Why:** An efficiency study of a 41-task Claude Code run found cache writes were 51% of spend, largely because every workflow agent inherits about 15k tokens of unrelated skill and tool listings. The workflow never passes an agent type. This plan adds agents, so it needs to start cheap.
+**Rejected:** none considered; added from the efficiency study at the user's choice.
+**Decided by:** user
+
+### D15: One spec or staged?
+**Choice:** Keep one spec. Tasks still run in dependency order.
+**Why:** The user's call, after the efficiency study suggested staging or splitting.
+**Rejected:** two phases with a measured rerun between them; splitting into two specs.
 **Decided by:** user
 
 ## Delegated to Spec
@@ -165,6 +178,12 @@ If that check finds `dsh` can't host the workflow, the phase stops with a findin
 - [x] All decisions settled (D1-D13); none deferred.
 
 ## Research Notes
+### Efficiency study (2026-11, another session)
+- Report: `/home/kutlay/Workspace/claude-kiro/.claude/worktrees/research-efficiency-2026-11/research/landscape/2026-11-efficiency-and-speed.md` (branch `worktree-research-efficiency-2026-11`). Its run wf_8bca74f5-ecc: cache writes 51% of spend, 44% of writes on each agent's first request; reviewers about 36% of spend across 96 runs.
+- The Workflow concurrency cap is min(16, CPUs-2), which is 14 here; `CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS` raises it.
+- Flakes: at Google, 84% of pass-to-fail transitions were flakes (basis for the D2 rerun).
+- These figures are the study's, not re-measured here.
+
 ### Codebase
 - `src/claude_kiro/gate.py` `_run_gate` 337-428 - excusing is per **test task**: `suite_due` runs a test task's Verify only when every task it verifies is Done; `green_only` (auto mode, test track, spec incomplete) skips the full `verify` suite until all tasks are Done. No test node is attributed to a task, so one real regression in a not-due suite is excused with it. `GateResult.checks` is already structured (name, ok, detail).
 - `plugin/workflows/spec-implement.js` - periodic gate every `FULL_EVERY` (10) merges (1244) and the final gate (1647) go through an agent running `ck gate SPEC` (green-only while incomplete). Red goes to `fixAndRecheck` (1169): fixer ladder plus a recheck agent; still red sets `redTarget`. `DIRECT_CK` covers plan, land, relink only, not gates. The landing gate (`land --gate` -> `run_gate(target, spec, nums)`) is task-scoped too.
