@@ -979,7 +979,7 @@ def run_arm_opencode(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[s
         log.write_text(warm_out if isinstance(warm_out, str) else str(warm_out))
         raise BenchError(f"the OpenCode plugin did not materialize its agents during warmup; see {log}\n{warm_out[-2000:]}")
 
-    prompt = "First use the shell tool to run exactly this command: sleep 2. Then call bench_run exactly once. It blocks until the workflow finishes; report its JSON result verbatim."
+    prompt = "First use the shell tool to run exactly this command: sleep 2. Then call bench_run exactly once. It blocks until the workflow finishes; report its JSON result verbatim, then stop. Take no other action: do not fix, merge or land anything, even when the result says a task is blocked or needs a human."
     argv = [opencode_bin, "run", "--standalone", "--model", arm_model, "--format", "json", prompt]
     echo(f"▶ {arm['id']}: {' '.join(shlex.quote(a) for a in argv)}  (in {clone})")
     started = time.time()

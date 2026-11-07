@@ -760,7 +760,8 @@ def land(
                     num,
                     "PROTECTED",
                     "changes files Claude Code, git or the shell run on their own; not landed, a human must "
-                    "review and merge it (or list the paths in specs/ck.json \"land\": {\"allow_paths\": [...]})",
+                    "review and merge it (or list the paths in specs/ck.json \"land\": {\"allow_paths\": [...]}); "
+                    "an agent stops here and reports it, and never merges it by another route",
                     task_branch(spec, num),
                     touched,
                 )

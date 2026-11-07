@@ -277,6 +277,7 @@ def test_a_branch_touching_a_protected_path_is_never_landed(repo, protected):
     assert result.exit_code == 3, result.output
     assert by["3"]["state"] == "PROTECTED"
     assert by["3"]["files"] == [protected]
+    assert "never merges it by another route" in by["3"]["detail"]
     assert "human" in by["3"]["detail"] and "allow_paths" in by["3"]["detail"]
     assert by["1"]["state"] == "MERGED"  # the rest of the batch still lands
     assert git(repo, "rev-list", "--count", f"{before}..HEAD").strip() == "2"  # task 1's commit and its merge
