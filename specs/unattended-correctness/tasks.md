@@ -1524,8 +1524,8 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 64 (TC-64a, TC-66a), Task 65 (TC-160)
 
 **Acceptance:**
-- [ ] `ck agents --json` shows `reviewer.cross_test: true` with no config (7.1); setting it false globally or per project turns it off (7.3)
-- [ ] The runner agent has Bash as its only tool, Haiku at low effort and at most 5 turns, in the plugin and in the generated agent file; it omits CLAUDE.md through the documented key, or `claude-code-agent-keys.md` records the gap with its source (19.2)
+- [x] `ck agents --json` shows `reviewer.cross_test: true` with no config (7.1); setting it false globally or per project turns it off (7.3)
+- [x] The runner agent has Bash as its only tool, Haiku at low effort and at most 5 turns, in the plugin and in the generated agent file; it omits CLAUDE.md through the documented key, or `claude-code-agent-keys.md` records the gap with its source (19.2)
 
 **Dependencies:** Task 64 (its tests are the oracle), Task 65 (its tests are the oracle)
 **Complexity:** Low
