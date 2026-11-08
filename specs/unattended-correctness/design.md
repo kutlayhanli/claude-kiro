@@ -635,7 +635,10 @@ How edges are filled (the API delegated by PLAN):
   `cmd:` node with no provider (12.3).
 - **imports:** `lint._imports` / `_module_candidates`, unchanged.
 - **Freshness (11.7):** built on demand from files on every call; the only memo is in-process, keyed by each
-  input's `(path, size, mtime_ns)`. No on-disk cache.
+  input's `(path, size, mtime_ns, st_ctime_ns, st_ino)`. `os.utime` can restore size and mtime_ns but not
+  `st_ctime_ns` or `st_ino` (an atomic replace changes the inode), so a same-size, same-mtime rewrite within one
+  second still misses the memo. If a build cannot rely on these (a filesystem with coarse ctime), hash the
+  content instead of trusting stat. No on-disk cache.
 - **Malformed sources (11.8):** a task block that fails to parse, a test file with a syntax error, or an
   unreadable design.md adds a `GraphProblem` and the rest is built.
 - `unknown_commands` treats a path as existing when every word of it appears as a string literal in a non-test
@@ -1280,7 +1283,7 @@ Entries for the criteria that state an error, refusal or fallback.
 | 11.4 | invokes scan |
 | 11.5 | `ck graph --json`, sorted |
 | 11.6 | `AttributionIndex` built from the graph; lint/relink/plan read the same graph |
-| 11.7 | on-demand build, in-process memo keyed by size/mtime |
+| 11.7 | on-demand build, in-process memo keyed by size/mtime/ctime/inode |
 | 11.8 | `GraphProblem` |
 | 12.1 | `missing_command_edges`; `lint_spec.commandEdges` |
 | 12.2 | `ck relink --commands`, `plan_command_relink` |
