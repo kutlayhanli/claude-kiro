@@ -6,7 +6,14 @@
   X's gate can never pass, because its oracle needs code that can only come
   after X. Found by following T's test files' Python imports, through test
   helpers, to the task whose **Files:** list the imported module. This works
-  before the module exists, because ownership comes from tasks.md.
+  before the module exists, because ownership comes from tasks.md. The gate
+  runs T's suite only once every task T verifies is Done, so not a cycle:
+  Y Done by then (Y is, or is a dependency of, a task T verifies; only X's
+  own Verify commands that run T's files count then, and a `-k` or node-ID
+  selection there limits the in-test-body imports to the selected tests); a
+  module that a task Done by then also lists in **Files:** (X itself, a task
+  X depends on, or one the suite waits for); or a module that already exists
+  and defines every imported name (later owners only extend it).
 - Dependencies without a stated reason: every edge serializes work, so each
   should say why ("Task 3 (uses its parser API)"). Reported, not fatal.
 - Risk paths: a task whose **Files:** match a `risk_paths` glob in specs/ck.json
@@ -15,6 +22,7 @@
   however many agents run.
 """
 
+import ast
 import re
 import shlex
 from fnmatch import fnmatchcase
@@ -64,8 +72,14 @@ def dependency_cycles(tasks: Dict[str, SpecTask]) -> List[List[str]]:
     return cycles
 
 
-def _module_candidates(module: str, names: List[str], base: PurePosixPath) -> List[str]:
-    """Repo-relative file paths an import could refer to."""
+Candidate = Tuple[str, Tuple[str, ...]]  # (repo-relative file an import could refer to, names imported from it)
+
+
+def _module_candidates(module: str, names: List[str], base: PurePosixPath) -> List[Candidate]:
+    """Repo-relative file paths an import could refer to, each with the names it must provide.
+
+    The module's own file must provide `names`; a `names[i]` submodule file must merely exist.
+    """
     if module.startswith("."):
         dots = len(module) - len(module.lstrip("."))
         package = base
@@ -73,23 +87,22 @@ def _module_candidates(module: str, names: List[str], base: PurePosixPath) -> Li
             package = package.parent
         rel = module.lstrip(".")
         prefix = str(package / rel.replace(".", "/")) if rel else str(package)
-        stems = [prefix] + [f"{prefix}/{n}" for n in names]
         roots = [""]
     else:
-        path = module.replace(".", "/")
-        stems = [path] + [f"{path}/{n}" for n in names]
+        prefix = module.replace(".", "/")
         roots = ["", "src/", "lib/"]
-    out = []
+    stems = [(prefix, tuple(names))] + [(f"{prefix}/{n}", ()) for n in names]
+    out: List[Candidate] = []
     for root in roots:
-        for stem in stems:
+        for stem, wanted in stems:
             stem = stem.lstrip("./")
-            out += [f"{root}{stem}.py", f"{root}{stem}/__init__.py"]
+            out += [(f"{root}{stem}.py", wanted), (f"{root}{stem}/__init__.py", wanted)]
     return out
 
 
-def _imports(text: str, rel_file: str) -> List[str]:
+def _imports(text: str, rel_file: str) -> List[Candidate]:
     base = PurePosixPath(rel_file).parent
-    candidates = []
+    candidates: List[Candidate] = []
     for match in IMPORT.finditer(text):
         if match.group(3):
             for module in match.group(3).split(","):
@@ -102,6 +115,33 @@ def _imports(text: str, rel_file: str) -> List[str]:
     return candidates
 
 
+def _defined_names(path: Path) -> Optional[Set[str]]:
+    """Names a Python file defines at module level (None if it does not exist or does not parse)."""
+    if not path.is_file():
+        return None
+    try:
+        tree = ast.parse(path.read_text(errors="replace"))
+    except (OSError, SyntaxError, ValueError):
+        return None
+    names: Set[str] = set()
+    stack = list(tree.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for t in targets:
+                names.update(n.id for n in ast.walk(t) if isinstance(n, ast.Name))
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                names.add((alias.asname or alias.name).split(".")[0])
+        elif isinstance(node, (ast.If, ast.Try, ast.With)):
+            stack += [n for field in ("body", "orelse", "finalbody") for n in getattr(node, field, [])]
+            stack += [n for h in getattr(node, "handlers", []) for n in h.body]
+    return names
+
+
 def _test_files(task: SpecTask, project_dir: Path, config: dict) -> List[str]:
     files = [f for f in task.files if is_test_path(f, config)]
     for command in task.verify:
@@ -112,15 +152,150 @@ def _test_files(task: SpecTask, project_dir: Path, config: dict) -> List[str]:
     return list(dict.fromkeys(files))
 
 
-def _owners_reached(start: List[str], project_dir: Path, owner_of: Dict[str, List[str]], max_files: int = 400) -> Dict[str, str]:
-    """{owner task: imported file} for project modules reachable from `start`.
+Selector = Optional[object]  # None: the whole file runs; else a callable (test name, class name) -> bool
 
-    Expands through files nobody owns (test helpers, harness modules); stops at
-    owned files, since their own imports are covered by their tasks' dependencies.
+
+def _k_selector(expr: str):
+    """pytest `-k EXPR` as a predicate over (test name, class name), or None if it can't be read.
+
+    Each bare word matches as a case-insensitive substring of the test or class name; `and`, `or`,
+    `not` and parentheses combine them, as in pytest.
     """
-    reached: Dict[str, str] = {}
+    tokens = re.findall(r"\(|\)|[^\s()]+", expr)
+    if not tokens:
+        return None
+    words = []
+    out = []
+    for tok in tokens:
+        low = tok.lower()
+        if tok in ("(", ")") or low in ("and", "or", "not"):
+            out.append(low if low in ("and", "or", "not") else tok)
+        elif re.fullmatch(r"[\w.\[\]\-]+", tok):
+            words.append(tok.lower())
+            out.append(f"_w[{len(words) - 1}]")
+        else:
+            return None
+    source = " ".join(out)
+    try:
+        code = compile(source, "<-k>", "eval")
+    except SyntaxError:
+        return None
+
+    def select(name: str, cls: str = "") -> bool:
+        hay = f"{cls} {name}".lower()
+        try:
+            return bool(eval(code, {"__builtins__": {}}, {"_w": [w in hay for w in words]}))
+        except Exception:
+            return True
+
+    return select
+
+
+def _node_selector(names: List[str]):
+    def select(name: str, cls: str = "") -> bool:
+        return any(n == name or n == cls or n.split("[")[0] == name for n in names)
+
+    return select
+
+
+def _verify_runs(commands: List[str], config: dict) -> Dict[str, Selector]:
+    """{test file: selector} for the test files a task's Verify commands run.
+
+    A file run whole (in any command) maps to None. A file run only under `-k` or as node IDs
+    maps to a predicate saying which tests run; several selections of one file are OR-ed.
+    """
+    runs: Dict[str, list] = {}
+    for command in commands:
+        try:
+            words = shlex.split(command)
+        except ValueError:
+            words = command.split()
+        k_expr = None
+        for i, w in enumerate(words):
+            if w == "-k" and i + 1 < len(words):
+                k_expr = words[i + 1]
+            elif w.startswith("-k") and len(w) > 2:
+                k_expr = w[2:].lstrip("=")
+        whole: Set[str] = set()
+        nodes: Dict[str, List[str]] = {}
+        for w in words:
+            path, _, node = w.partition("::")
+            if not (path.endswith(".py") and is_test_path(path, config)):
+                continue
+            if node:
+                nodes.setdefault(path, []).append(node.split("::")[-1])
+            else:
+                whole.add(path)
+        k_select = _k_selector(k_expr) if k_expr else None
+        for path in whole:
+            if k_expr and k_select is not None:
+                runs.setdefault(path, []).append(k_select)
+            else:
+                runs[path] = [None]
+        for path, names in nodes.items():
+            runs.setdefault(path, []).append(_node_selector(names))
+    out: Dict[str, Selector] = {}
+    for path, sels in runs.items():
+        if any(s is None for s in sels):
+            out[path] = None
+        else:
+            out[path] = (lambda ss: lambda name, cls="": any(s(name, cls) for s in ss))(sels)
+    return out
+
+
+def _selected_imports(text: str, rel: str, select) -> List[Candidate]:
+    """The import candidates of a test file when only the tests `select` accepts run.
+
+    Module-level imports always run (at collection), and so may any import in a non-test helper.
+    An import inside a test function (or test method) counts only if that test is selected.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return _imports(text, rel)
+    base = PurePosixPath(rel).parent
+    candidates: List[Candidate] = []
+
+    def take(node: ast.AST) -> None:
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Import):
+                for alias in sub.names:
+                    candidates.extend(_module_candidates(alias.name, [], base))
+            elif isinstance(sub, ast.ImportFrom):
+                module = "." * sub.level + (sub.module or "")
+                names = [a.name for a in sub.names if a.name != "*"]
+                candidates.extend(_module_candidates(module, names, base))
+
+    is_test = lambda n: isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test")  # noqa: E731
+    for node in tree.body:
+        if is_test(node):
+            if select(node.name):
+                take(node)
+        elif isinstance(node, ast.ClassDef):
+            for item in node.body:
+                if is_test(item):
+                    if select(item.name, node.name):
+                        take(item)
+                else:
+                    take(item)
+        else:
+            take(node)
+    return candidates
+
+
+def _owners_reached(start, project_dir: Path, owner_of: Dict[str, List[str]], max_files: int = 400) -> Dict[str, List[str]]:
+    """{owner task: imported files} for project modules reachable from `start`.
+
+    `start` is a list of files (each run whole) or a {file: selector} map (see `_verify_runs`):
+    a selector limits that file's in-test imports to the selected tests. Expands through files
+    nobody owns (test helpers, harness modules) in full; stops at owned files, since their own
+    imports are covered by their tasks' dependencies.
+    """
+    selectors: Dict[str, Selector] = dict(start) if isinstance(start, dict) else {f: None for f in start}
+    reached: Dict[str, List[str]] = {}
+    provided: Dict[str, Optional[Set[str]]] = {}
     seen: Set[str] = set()
-    queue = list(start)
+    queue = list(selectors)
     while queue and len(seen) < max_files:
         rel = queue.pop(0)
         if rel in seen:
@@ -133,10 +308,20 @@ def _owners_reached(start: List[str], project_dir: Path, owner_of: Dict[str, Lis
             text = path.read_text(errors="replace")
         except OSError:
             continue
-        for candidate in _imports(text, rel):
+        select = selectors.get(rel)
+        for candidate, wanted in (_selected_imports(text, rel, select) if select is not None else _imports(text, rel)):
             if candidate in owner_of:
+                # An owned file that already exists and defines every imported name can't fail the
+                # import whatever its later owners add (a task extending an existing module).
+                if candidate not in provided:
+                    provided[candidate] = _defined_names(project_dir / candidate)
+                have = provided[candidate]
+                if have is not None and all(n in have for n in wanted):
+                    continue
                 for owner in owner_of[candidate]:
-                    reached.setdefault(owner, candidate)
+                    mods = reached.setdefault(owner, [])
+                    if candidate not in mods:
+                        mods.append(candidate)
             elif candidate not in seen and (project_dir / candidate).is_file():
                 queue.append(candidate)
     return reached
@@ -150,17 +335,50 @@ def verify_order_cycles(tasks: Dict[str, SpecTask], project_dir: Path, config: O
             for f in task.files:
                 owner_of.setdefault(f.removeprefix("./"), []).append(num)
 
+    ancestors: Dict[str, Set[str]] = {}
+
+    def anc(n: str) -> Set[str]:
+        if n not in ancestors:
+            ancestors[n] = _ancestors(tasks, n)
+        return ancestors[n]
+
     found = []
     for num, task in tasks.items():
         if task.track == "test" or task.done:
             continue
+        # Done whenever X's gate runs: X itself (its own work) and everything X depends on.
+        before_gate = {num} | anc(num)
+        own_runs = None  # X's own Verify commands' test files, read once on first need
         for test_num in task.verified_by:
             test_task = tasks.get(test_num)
             if not test_task:
                 continue
-            reached = _owners_reached(_test_files(test_task, project_dir, config), project_dir, owner_of)
-            for owner, module in sorted(reached.items()):
-                if owner != num and owner in tasks and num in _ancestors(tasks, owner):
+            # The gate runs T's suite only once every task T verifies is Done, so by then those
+            # tasks and everything they depend on are Done too.
+            verified = {v for v in test_task.verifies if v in tasks} | {v for v, t in tasks.items() if test_num in t.verified_by}
+            before_suite = set(before_gate)
+            for v in verified:
+                before_suite |= {v} | anc(v)
+            test_files = _test_files(test_task, project_dir, config)
+            suite = _owners_reached(test_files, project_dir, owner_of)
+            selected = None
+            for owner in sorted(suite):
+                if owner == num or owner not in tasks or num not in anc(owner):
+                    continue
+                if owner in before_suite:
+                    # T's suite never runs at X's gate before Y lands. Only X's own Verify commands
+                    # that run T's files can reach Y's module there, under their own selection.
+                    if own_runs is None:
+                        own_runs = _verify_runs(task.verify, config)
+                    if selected is None:
+                        selected = _owners_reached({f: s for f, s in own_runs.items() if f in test_files}, project_dir, owner_of)
+                    modules, done_by_then = selected.get(owner, []), before_gate
+                else:
+                    modules, done_by_then = suite[owner], before_suite
+                # A module that a task Done by then also lists in **Files:** (X itself, a task X
+                # depends on, or one the suite waits for) exists by then: not a cycle.
+                modules = [m for m in modules if not (set(owner_of.get(m, [])) & done_by_then)]
+                for module in modules[:1]:
                     found.append(
                         {
                             "task": num,
