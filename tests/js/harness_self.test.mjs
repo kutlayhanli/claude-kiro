@@ -91,7 +91,7 @@ await test('gateAnswers are not consumed by calls without an envelope', async ()
 })
 
 await test('directCk answers gate argv from gateAnswers and the new argv with CK_CALL envelopes', async () => {
-  const p = project({ deps, gateAnswers: [{ ok: false, failures: [] }, { code: 2, stdout: 'oops' }, 'throw'], runStart: { integration: { branch: 'b' }, hooks: { installed: true }, releasedClaims: [{ task: '1', run: 'k', reason: 'stale' }], keptClaims: [], warnings: [] }, audit: { schema: 'ck-audit/1', complete: true, clean: false, drift: [{ file: 'f', change: 'modified' }] }, fixtureStatus: { locked: [], drift: [{ file: 'f', task: '1', change: 'modified' }], unlabeled: [], configError: null }, fidelity: { checked: [], mismatches: [{ id: 'x' }], unparsed: [], unmatched: [] }, missingCommand: { command: 'ck x', providers: ['4'] } })
+  const p = project({ deps, gateAnswers: [{ ok: false, failures: [] }, { code: 2, stdout: 'oops' }, 'throw'], runStart: { integration: { branch: 'b' }, hooks: { installed: true }, releasedClaims: [{ task: '1', run: 'k', reason: 'stale' }], keptClaims: [], warnings: [] }, audit: { schema: 'ck-audit/1', complete: true, clean: false, drift: [{ file: 'f', change: 'changed' }] }, fixtureStatus: { locked: [], drift: [{ file: 'f', task: '1', change: 'modified' }], unlabeled: [], configError: null }, fidelity: { checked: [], mismatches: [{ id: 'x' }], unparsed: [], unmatched: [] }, missingCommand: { command: 'ck x', providers: ['4'] } })
   const d = directCk(p)
   const g = await d.fn(['gate', 'demo', '--task', '1', '--json'])
   assert.equal(g.code, 1); assert.deepEqual(g.json, { ok: false, failures: [] })
@@ -132,7 +132,11 @@ await test('thin labels run start, audit, testfix ledger/prove: raw without enve
   assert.deepEqual(l1.alreadyFixed.map(e => e.node), ['tests/test_a.py::test_x'])
   assert.deepEqual((await p.agent('ck testfix check demo --test tests/test_b.py::test_y', { label: 'testfix ledger 2', ...THIN })).json.alreadyFixed, [])
   const pr = (await p.agent('ck testfix prove tests/test_a.py', { label: 'testfix prove 1', ...THIN })).json
-  assert.equal(pr.proof.proved, false); assert.equal(pr.scope.in_scope, true); assert.equal(pr.against, 'base')
+  assert.equal(pr.proof.proved, false); assert.equal(pr.scope.in_scope, true); assert.equal(pr.against, 'integration'); assert.equal(pr.proof.against, 'integration')
+  assert.deepEqual(pr.scope.spec_docs_edited, [])
+  const pb = (await p.agent('ck testfix prove demo --blocked 3 --test tests/test_b.py::test_y', { label: 'testfix prove 2', ...THIN })).json
+  assert.equal(pb.against, 'blocked:3'); assert.equal(pb.proof.against, 'blocked:3')
+  assert.deepEqual(pb.proof.outcomes, [{ node: 'tests/test_b.py::test_y', passed: true, cls: null }])
   const bad = project({ deps, audit: 'throw' })
   await assert.rejects(bad.agent('x', { label: 'audit', ...THIN }))
 })

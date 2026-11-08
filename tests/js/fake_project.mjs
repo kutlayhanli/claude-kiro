@@ -397,7 +397,7 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
     if (l === 'run start') return runStart ?? { integration: { branch: 'integrate/demo', state: 'ok' }, hooks: { installed: true, active: true, intact: true, chainedTo: null, problems: [] }, baseline: { commit: 'abc1234', files: 0 }, releasedClaims: [], keptClaims: [], warnings: [] }
     if (l === 'audit') {
       if (audit === 'throw') throw new Error('audit failed')
-      return audit ?? { schema: 'ck-audit/1', complete: true, clean: true, drift: [], hooks: { installed: true, active: true, intact: true, chainedTo: null, problems: [] }, fixtures: { drift: [], lockTampered: false, handcrafted: [] }, problems: [] }
+      return audit ?? { schema: 'ck-audit/1', spec: 'demo', into: 'integrate/demo', head: 'abc1234', complete: true, clean: true, drift: [], hooks: { installed: true, active: true, intact: true, chainedTo: null, problems: [] }, fixtures: { drift: [], lockTampered: false, handcrafted: [] }, problems: [] }
     }
     if (l.startsWith('testfix ledger ')) {
       // `ck testfix check SPEC --test NODE ...`: a node is already fixed when its file part is in priorFixes.
@@ -409,9 +409,14 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
     if (l.startsWith('testfix prove ')) {
       const file = fileOfArgs(prompt, testFix) ?? Object.keys(testFix)[0]
       const t = (file && testFix[file]) || {}
-      const scope = { in_scope: true, outside: [], requirements_edited: false, spec_docs_edited: false, reason: 'in scope', ...(t.scope || {}) }
-      const proof = scope.in_scope === false ? null : { proved: true, against: 'base', outcomes: {}, reason: 'the test fails on the base and passes on the fix', ...(t.proof || {}) }
-      return { scope, proof, changedTests: [], against: 'base' }
+      // design.md Data Models: ScopeDecision and ProofVerdict; `against` is "blocked:<task>" or "integration" (4.11).
+      const blocked = String(prompt).match(/--blocked[ =](\S+)/)
+      const against = blocked ? `blocked:${blocked[1].replace(/^["']|["']$/g, '')}` : 'integration'
+      const nodes = [...String(prompt).matchAll(/--test[ =](\S+)/g)].map(m => m[1].replace(/^["']|["']$/g, ''))
+      const outcomes = (nodes.length ? nodes : file ? [file] : []).map(node => ({ node, passed: true, cls: null }))
+      const scope = { in_scope: true, outside: [], requirements_edited: false, spec_docs_edited: [], reason: 'in scope', ...(t.scope || {}) }
+      const proof = scope.in_scope === false ? null : { proved: true, against, outcomes, reason: 'the test fails on the blocked branch or integration and passes on the fix', ...(t.proof || {}) }
+      return { scope, proof, changedTests: nodes, against: proof ? proof.against : against }
     }
     if (l.startsWith('testfix review ')) {
       const file = testFileOf(l)
@@ -441,7 +446,6 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
   }
   const thinAgent = async (prompt, opts) => {
     const l = opts.label
-    const wrap = true
     if (GATE_LABEL.test(l)) {
       let today
       if (l !== 'gate') today = await rawAgent(prompt, opts)
@@ -457,7 +461,7 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
     const out = await rawAgent(prompt, opts)
     // audit: exit 0 clean, 3 incomplete, 1 drift or hook problems (design.md ck-audit/1).
     if (l === 'audit' && out && typeof out === 'object') return { exitCode: out.complete === false ? 3 : out.clean === false ? 1 : 0, json: out }
-    return wrap ? { exitCode: 0, json: out } : out
+    return { exitCode: 0, json: out }
   }
   const thinCall = async (label, argv) => {
     const out = await agent(`ck ${argv.join(' ')}`, { label, schema: { type: 'object', properties: { exitCode: {}, json: {} } } })
