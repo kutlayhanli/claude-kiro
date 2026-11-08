@@ -1272,7 +1272,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 55: Red-team test-fix proof, rejection and the one-fix limit (Story 4)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 4.2, 4.5, 4.6, 4.8
 **Description:** Try to break each SHALL NOT clause of Story 4 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Clauses: a fix SHALL not land without proof (4.2); a failed proof or rejected review SHALL not land (4.6); a node already fixed once SHALL not get another test-fixer (4.8). Starting points: `ck testfix prove` where the "fixed" test is skipped, xfailed, deselected, deleted or renamed (a proof that passes by not running); a fix that makes the test pass by changing a fixture the blocked task also reads; `ck testfix check` with the same node spelled differently (`./tests/...`, a param ID added, a different case, a renamed file) to dodge the ledger; a corrupted or deleted ledger file; scope dodges (4.5): `test_tc44_redteam_retag_new_row` (the fix renames `test_tc52_x` to `test_tc999_x` and appends a looser TC-999 row to `test-plan.md`) and a fix that only changes a test's TC token so it no longer matches its row, both refused by `ck testfix prove` before any proof run; workflow cases (bridge) where proof and review answers disagree, arrive late, or a prior `testFixes[]` record is fed back as input. Tests named `test_tc41_redteam_<slug>`, `test_tc44_redteam_<slug>`, `test_tc45_redteam_<slug>`, `test_tc47_redteam_<slug>`. CLI cases (prove, scope and the ledger) are named `test_tc41_redteam_<slug>`, `test_tc44_redteam_<slug>` or `test_tc47_redteam_<slug>`; every workflow case is named `test_tc45_redteam_<slug>`.
@@ -1282,10 +1282,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 57 (CLI cases for 4.2, 4.5, 4.8), Task 86 (workflow cases for 4.6)
 
 **Acceptance:**
-- [ ] Written from the requirements only, never from the implementation
-- [ ] CLI cases use real git branches, real pytest and the persisted ledger; workflow cases run the real script and assert no `worktree land` of the fix
-- [ ] Each test fails before the implementation for the right reason
-- [ ] No mocks of the project's own code
+- [x] Written from the requirements only, never from the implementation
+- [x] CLI cases use real git branches, real pytest and the persisted ledger; workflow cases run the real script and assert no `worktree land` of the fix
+- [x] Each test fails before the implementation for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project), Task 2 (bridge, testFix fakes)
 **Complexity:** High
