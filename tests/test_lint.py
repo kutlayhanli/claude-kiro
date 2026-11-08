@@ -164,6 +164,53 @@ def test_node_id_selection_is_read_like_k(tmp_path):
     assert [c["needs"] for c in lint_spec(tmp_path / "specs/sim", tmp_path)["verifyCycles"]] == ["48"]
 
 
+def run_extension_spec(root: Path, run_py: str) -> None:
+    # unattended-correctness Task 1 helper -> cli/run.py: Task 19 is verified by Task 1; Task 108 extends run.py.
+    (root / "tests").mkdir(exist_ok=True)
+    (root / "src/claude_kiro/cli").mkdir(parents=True, exist_ok=True)
+    (root / "src/claude_kiro/cli/run.py").write_text(run_py)
+    (root / "tests/helpers.py").write_text("def sandboxed():\n    from claude_kiro.cli.run import sandbox_settings\n    return sandbox_settings\n")
+    (root / "tests/test_helpers.py").write_text("from tests.helpers import sandboxed\n\n\ndef test_sandboxed():\n    assert sandboxed()\n")
+    write_spec(
+        root,
+        block(1, "Harness", track="test", status="Done", files=["tests/helpers.py", "tests/test_helpers.py"], verify="uv run pytest -q tests/test_helpers.py", verifies="Task 19")
+        + block(19, "Gate JSON", files=["src/claude_kiro/gate.py"], vby="Task 1", deps="Task 1 (oracle)")
+        + block(108, "Hooks", files=["src/claude_kiro/cli/run.py"], deps="Task 19 (reads gate JSON)"),
+    )
+
+
+def test_existing_module_that_already_defines_the_name_is_not_a_cycle(tmp_path):
+    run_extension_spec(tmp_path, "def sandbox_settings(project):\n    return {}\n")
+    assert lint_spec(tmp_path / "specs/sim", tmp_path)["verifyCycles"] == []
+
+
+def test_existing_module_missing_the_imported_name_is_a_cycle(tmp_path):
+    run_extension_spec(tmp_path, "def other():\n    return {}\n")
+    [cycle] = lint_spec(tmp_path / "specs/sim", tmp_path)["verifyCycles"]
+    assert (cycle["task"], cycle["needs"], cycle["module"]) == ("19", "108", "src/claude_kiro/cli/run.py")
+
+
+def test_suite_waiting_on_a_dependent_of_y_or_on_a_creator_is_not_a_cycle(tmp_path):
+    # unattended-correctness Task 9: perf tests verify Tasks 12, 20 and 45 and import attribution.py (Task 18)
+    # and protect.py (created by Task 44, extended by Task 51). The suite runs at Task 12's gate only once 12,
+    # 20 and 45 are Done: Task 20 depends on 18, and Task 45 on 44, so both modules exist by then.
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_perf.py").write_text(
+        "def test_budgets():\n    from claude_kiro.attribution import index\n    from claude_kiro.protect import decide\n    assert index and decide\n"
+    )
+    write_spec(
+        tmp_path,
+        block(9, "Perf", track="test", status="Done", files=["tests/test_perf.py"], verify="uv run pytest -q tests/test_perf.py", verifies="Task 12, Task 20, Task 45")
+        + block(12, "Graph", files=["src/claude_kiro/graph.py"], vby="Task 9", deps="Task 9 (oracle)")
+        + block(18, "Attribution", files=["src/claude_kiro/attribution.py"], deps="Task 12 (builds on the graph)")
+        + block(20, "Attributed gate", files=["src/claude_kiro/gate.py"], vby="Task 9", deps="Task 18 (calls it), Task 9 (oracle)")
+        + block(44, "Protect decisions", files=["src/claude_kiro/protect.py"], deps="None")
+        + block(45, "Hooks", files=["src/claude_kiro/hooks.py"], vby="Task 9", deps="Task 44 (decides), Task 20 (gate), Task 9 (oracle)")
+        + block(51, "Audit", files=["src/claude_kiro/protect.py"], deps="Task 45 (audits what the hooks record)"),
+    )
+    assert lint_spec(tmp_path / "specs/sim", tmp_path)["verifyCycles"] == []
+
+
 def test_module_level_import_counts_under_any_selection(tmp_path):
     # A module-level import runs at collection, whatever -k selects.
     fixture_props(tmp_path, top_level="from claude_kiro.fixtures import Label\n\n\n")
