@@ -1,0 +1,59 @@
+exit: 1
+Verification gate for demo (Task 1, Task 2, Task 3, Task 6, Task 7, Task 8): FAIL
+✓ Task 1 acceptance criteria
+✓ Task 1 test files exist and contain tests
+✓ Task 2 acceptance criteria
+✓ Task 3 acceptance criteria
+✓ Task 6 acceptance criteria
+✓ Task 6 test files exist and contain tests
+✓ Task 7 acceptance criteria
+✓ Task 8 acceptance criteria
+✓ Test collection succeeds (`python -m pytest --collect-only -q`)
+✗ `python -m pytest -q -p no:cacheprovider tests`
+    exit 1
+    .F..                                                                     [100%]
+    =================================== FAILURES ===================================
+    __________________________________ test_tc2_b __________________________________
+    
+        def test_tc2_b():
+            _count('test_tc2_b')
+    >       assert 1 == 2
+    E       assert 1 == 2
+    
+    tests/test_calc_tc.py:26: AssertionError
+    =========================== short test summary info ============================
+    FAILED tests/test_calc_tc.py::test_tc2_b - assert 1 == 2
+    1 failed, 3 passed in <t>s
+✗ `python -m pytest -q tests/test_calc_tc.py`
+    exit 1
+    .F.                                                                      [100%]
+    =================================== FAILURES ===================================
+    __________________________________ test_tc2_b __________________________________
+    
+        def test_tc2_b():
+            _count('test_tc2_b')
+    >       assert 1 == 2
+    E       assert 1 == 2
+    
+    tests/test_calc_tc.py:26: AssertionError
+    =========================== short test summary info ============================
+    FAILED tests/test_calc_tc.py::test_tc2_b - assert 1 == 2
+    1 failed, 2 passed in <t>s
+✗ `python -m pytest -q tests/test_calc_tc.py -k "tc1_ or tc2_"`
+    exit 1
+    .F                                                                       [100%]
+    =================================== FAILURES ===================================
+    __________________________________ test_tc2_b __________________________________
+    
+        def test_tc2_b():
+            _count('test_tc2_b')
+    >       assert 1 == 2
+    E       assert 1 == 2
+    
+    tests/test_calc_tc.py:26: AssertionError
+    =========================== short test summary info ============================
+    FAILED tests/test_calc_tc.py::test_tc2_b - assert 1 == 2
+    1 failed, 1 passed, 1 deselected in <t>s
+✓ `python -m pytest -q tests/test_calc_tc.py -k "tc3_"`
+✓ `python -m pytest -q tests/test_more.py -k "tc5_"`
+✓ No existing tests deleted or weakened

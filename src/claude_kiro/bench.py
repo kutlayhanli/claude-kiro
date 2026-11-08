@@ -192,6 +192,12 @@ def normalize_config(cfg: Dict[str, Any], base_dir: Path) -> Dict[str, Any]:
     out["results_dir"] = rel(cfg.get("results_dir") or "bench-results")
     out["pricing"] = cfg.get("pricing") or {}
     out["timeout_minutes"] = cfg.get("timeout_minutes")
+    ck_config = cfg.get("ck_config")
+    if ck_config is None:
+        ck_config = {}
+    if not isinstance(ck_config, dict):
+        raise BenchError("ck_config must be an object")
+    out["ck_config"] = ck_config
     specs = []
     for s in cfg["specs"]:
         s = {"name": s} if isinstance(s, str) else dict(s)
@@ -213,6 +219,11 @@ def normalize_config(cfg: Dict[str, Any], base_dir: Path) -> Dict[str, Any]:
         seen.add(name)
         c["agents"] = {str(k): v for k, v in (c.get("agents") or {}).items()}
         c["run_args"] = _argv(c.get("run_args"), [])
+        roles = c.get("roles")
+        if roles is not None:
+            if not isinstance(roles, dict) or not all(isinstance(v, str) and v for v in roles.values()):
+                raise BenchError(f"config {name!r}: roles must map a role to a provider/model[#variant] string")
+            c["roles"] = {str(k): v for k, v in roles.items()}
         configs.append(c)
     out["specs"], out["configs"] = specs, configs
     return out
@@ -771,6 +782,52 @@ def _run_opencode(
     return proc.returncode, timed_out, stopped_for_record
 
 
+def _deep_merge(base: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, Any]:
+    for key, value in extra.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _deep_merge(base[key], value)
+        else:
+            base[key] = json.loads(json.dumps(value))
+    return base
+
+
+def _merge_ck_config(clone: Path, ck_config: Optional[Dict[str, Any]]) -> None:
+    """Deep-merge the bench's `ck_config` into the clone's specs/ck.json (before the setup commit)."""
+    if not ck_config:
+        return
+    path = clone / "specs" / "ck.json"
+    data = json.loads(path.read_text()) if path.is_file() else {}
+    if not isinstance(data, dict):
+        data = {}
+    _deep_merge(data, ck_config)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n")
+
+
+# Every harness returns these keys (17.5): the union of what the Claude and OpenCode arms record.
+ARM_RESULT_KEYS = frozenset({
+    "agents", "agents_settings", "argv", "base", "base_sha", "branch", "ck_version", "ck_version_cmd",
+    "clone", "config", "config_order", "cost", "degraded", "exit_code", "fail_closed", "fail_closed_reasons",
+    "failure_label", "final_sha", "finished_at", "guard", "harness", "id", "imported_from", "into", "log",
+    "notes", "peak_context", "record", "rep", "repo", "report", "retries", "run_args", "run_id", "schema",
+    "session", "session_id", "setup_sha", "source", "spec", "spec_settings", "started_at", "throttles",
+    "tokens_by_model", "wall_minutes", "workflow_file", "workflow_status",
+})
+
+
+def check_arm_result(result: Dict[str, Any]) -> List[str]:
+    """Missing or extra keys of an arm result against the shared shape; empty when it conforms."""
+    keys = set(result) if isinstance(result, dict) else set()
+    return [f"missing key: {k}" for k in sorted(ARM_RESULT_KEYS - keys)] + \
+           [f"extra key: {k}" for k in sorted(keys - ARM_RESULT_KEYS)]
+
+
+def _complete_arm_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    for key in ARM_RESULT_KEYS:
+        result.setdefault(key, None)
+    return result
+
+
 def run_arm(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[str], None] = print) -> Dict[str, Any]:
     """Clone, set up, launch and collect one arm; writes and returns results/<id>.json."""
     spec = next(s for s in cfg["specs"] if s["name"] == arm["spec"])
@@ -801,6 +858,7 @@ def run_arm(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[str], None
         s = _sh([*ck, "agents", "set", key, str(value), "--project"], clone, env)
         if s.returncode != 0:
             raise BenchError(f"ck agents set {key} {value} failed:\n{s.stdout}{s.stderr}")
+    _merge_ck_config(clone, cfg.get("ck_config"))
     if _git(clone, "status", "--porcelain"):
         _git(clone, "add", "-A")
         _git(clone, "-c", "user.name=ck-bench", "-c", "user.email=ck-bench@localhost", "commit", "-qm", f"bench: set up {arm['config']}")
@@ -856,6 +914,8 @@ def run_arm(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[str], None
         result["fail_closed"] = True
         result["fail_closed_reasons"].append("timed out")
     results_dir.mkdir(parents=True, exist_ok=True)
+    result.setdefault("harness", "claude")
+    _complete_arm_result(result)
     (results_dir / f"{arm['id']}.json").write_text(json.dumps(result, indent=2))
     return result
 
@@ -914,9 +974,12 @@ def run_arm_opencode(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[s
     data = json.loads(config_path.read_text()) if config_path.is_file() else {}
     if not isinstance(data, dict):
         data = {}
+    _deep_merge(data, cfg.get("ck_config") or {})  # the forced aliases below win over it
     aliases = {name: arm_model for name in ("haiku", "sonnet", "opus", "fable")}
     aliases.update({str(k): str(v) for k, v in (opencode_cfg.get("models") or {}).items()})
     data["opencode"] = {"models": aliases}
+    if conf.get("roles"):
+        data["opencode"]["roles"] = dict(conf["roles"])
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(json.dumps(data, indent=2) + "\n")
 
@@ -1108,6 +1171,8 @@ def run_arm_opencode(cfg: Dict[str, Any], arm: Dict[str, Any], echo: Callable[[s
         reasons.append(f"failure label: {record.get('failureLabel')}")
 
     results_dir.mkdir(parents=True, exist_ok=True)
+    result.setdefault("harness", "claude")
+    _complete_arm_result(result)
     (results_dir / f"{arm['id']}.json").write_text(json.dumps(result, indent=2))
     return result
 
