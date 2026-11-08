@@ -77,7 +77,7 @@ def test_tc4_redteam_token_inside_a_word_is_not_a_tc(tmp_path):
                           tests={"tests/test_more.py::test_xtc3_inword": "fail"})
     code, obj = attributed_gate(root)
     e = entry(obj, "test_xtc3_inword")
-    assert e.get("tc") != "TC-3"
+    assert e["tcId"] is None
     assert "3" not in (e.get("excusedBy") or [])
     assert e["status"] == "regression", f"owning test task 6 verifies Done tasks 7 and 8: {e}"
     assert_red(code, obj)
@@ -89,7 +89,7 @@ def test_tc4_redteam_longer_tc_number_does_not_borrow_a_shorter_one(tmp_path):
                           tests={"tests/test_more.py::test_tc33_big": "fail"})
     code, obj = attributed_gate(root)
     e = entry(obj, "test_tc33_big")
-    assert e.get("tc") == "TC-33"
+    assert e["tcId"] == "TC-33"
     assert e["status"] == "regression" and "3" not in (e.get("excusedBy") or []), e
     assert_red(code, obj)
 
@@ -100,7 +100,7 @@ def test_tc4_redteam_tc12_is_not_tc1(tmp_path):
                           tests={"tests/test_more.py::test_tc12_x": "fail"})
     code, obj = attributed_gate(root)
     e = entry(obj, "test_tc12_x")
-    assert e.get("tc") == "TC-12"
+    assert e["tcId"] == "TC-12"
     assert e["tasks"] != ["2"], "tc12_ was attributed to the task that selects tc1_"
     assert e["status"] == "excused" and e["excusedBy"] == ["7", "8"], e
     assert_not_red_for_excused(code, obj)
@@ -113,7 +113,7 @@ def test_tc4_redteam_padded_and_uppercase_tokens_are_the_same_tc(tmp_path):
     code, obj = attributed_gate(root)
     for name in ("test_TC03_upper", "test_tc003_padded", "test_tc3_plain"):
         e = entry(obj, name)
-        assert e["tc"] == "TC-3" and e["tasks"] == ["3"] and e["status"] == "excused" and e["excusedBy"] == ["3"], e
+        assert e["tcId"] == "TC-3" and e["tasks"] == ["3"] and e["status"] == "excused" and e["excusedBy"] == ["3"], e
     assert_not_red_for_excused(code, obj)
 
 
@@ -130,7 +130,7 @@ def test_tc4_redteam_token_only_in_param_id_excuses_nothing(tmp_path):
         ''')
     code, obj = attributed_gate(root)
     e = entry(obj, "test_wrapper[tc3_sub]")
-    assert e.get("tc") in (None, "") and "3" not in (e.get("excusedBy") or []), e
+    assert e["tcId"] is None and "3" not in (e.get("excusedBy") or []), e
     assert e["status"] == "regression", e
     assert_red(code, obj)
 
@@ -144,7 +144,7 @@ def test_tc4_redteam_token_only_in_class_name_excuses_nothing(tmp_path):
         ''')
     code, obj = attributed_gate(root)
     e = [f for f in obj["failures"] if (f.get("node") or "").endswith("test_plain")][0]
-    assert e.get("tc") in (None, "") and "3" not in (e.get("excusedBy") or []), e
+    assert e["tcId"] is None and "3" not in (e.get("excusedBy") or []), e
     assert e["status"] == "regression", e
     assert_red(code, obj)
 
@@ -207,7 +207,7 @@ def test_tc4_redteam_unowned_import_error_cannot_be_excused(tmp_path):
     assert_red(code, obj)
 
 
-def test_tc4_redteam_unowned_file_with_symlink_twin_in_owned_dir(tmp_path):
+def test_tc4_redteam_unowned_file_with_name_twin_in_owned_dir(tmp_path):
     """A file in an owned directory is not owned by being near an owned file: only the path decides."""
     root = h.attr_project(tmp_path, statuses=done_except("3"))
     add_file(root, "tests/test_calc_tc_twin.py", '''
@@ -430,4 +430,6 @@ def test_tc4_redteam_failure_node_ids_fed_back_as_test_names_are_ordinary_names(
     code, obj = attributed_gate(root)
     e = entry(obj, "test_excused_regression")
     assert e["status"] == "unattributed" and not e.get("excusedBy"), e
+    ef = entry(obj, fed)
+    assert ef["tcId"] == "TC-3" and ef["status"] == "excused" and ef["excusedBy"] == ["3"], ef
     assert_red(code, obj)
