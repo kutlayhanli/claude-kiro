@@ -1,12 +1,13 @@
 // Long-lived JSON-lines bridge: one request object per stdin line, one response object per stdout line.
 //   {op:'ready', order, deps, done, exclude, blocked} -> {ok:true, ready}
 //   {op:'ladder', model}                              -> {ok:true, ladder}
-//   {op:'run', project, args, slots, clock, execCk}   -> {ok:true, result, logs, trace, prompts, opts, events, execLog, execResults}
+//   {op:'run', project, args, slots, clock, execCk}   -> {ok:true, result, logs, trace, prompts, opts, optsList, events, execLog, execResults}
 //       clock: 'virtual' (a VirtualClock: sleeps and trace t are exact virtual ms) | 'real' (real timers) | unset (as before)
 //       execCk: {cmd, env, cwd, dry}: fake agents record progress events through the real CLI (see fake_project.mjs)
 //   {op:'create', args, overrides, execCk}            -> {ok:true, result, logs, trace, prompts, execLog, execResults}
 //       a step-end answer gets the eta printed by the `ck progress event ... step-end --json` its prompt wrote
-//   {op:'call', name, args}                           -> {ok:true, value}   one decisions-block function (any name), called with args
+//   {op:'call', name, args}                           -> {ok:true, value}   one decisions-block function (any name), called with args;
+//       a Set anywhere in a response is written as a sorted array
 //   {op:'run', ..., realCk:{cmd, cwd, env}}           direct ck() calls of the workflow run the real CLI subprocess; the
 //       argv lists are returned as `ckCalls` [{argv, code}]
 // Any throw -> {ok:false, error}. Durations in the project options are milliseconds (1-40).
@@ -68,7 +69,7 @@ async function handle(req) {
     const ckCalls = []
     const ck = req.realCk ? realCkFn(req.realCk, ckCalls, clock ? q => clock.external(q) : q => q) : undefined
     const { result, logs, trace } = await runWorkflow(SCRIPT, { agent: p.agent, args, slots, clock, ck })
-    return { ckCalls, result, logs, trace, prompts: p.state.prompts, opts: p.state.opts, events: p.state.events, execLog: p.state.execLog, execResults: p.state.execResults, reviewTasks: p.state.reviewTasks }
+    return { ckCalls, result, logs, trace, prompts: p.state.prompts, opts: p.state.opts, optsList: p.state.optsList, events: p.state.events, execLog: p.state.execLog, execResults: p.state.execResults, reviewTasks: p.state.reviewTasks }
   }
   if (req.op === 'create') {
     const clock = new VirtualClock()
@@ -96,6 +97,10 @@ async function handle(req) {
   throw new Error(`unknown op: ${req.op}`)
 }
 
+// A Set (for example `heldByCrossTest`'s `Set<task>`) has no JSON form: plain JSON.stringify writes `{}`.
+// Write it as a sorted array so the caller sees its members.
+const setsAsArrays = (_key, v) => (v instanceof Set ? [...v].sort() : v)
+
 const rl = readline.createInterface({ input: process.stdin })
 // Requests are handled one at a time, in order, so responses stay line-aligned.
 let chain = Promise.resolve()
@@ -104,7 +109,7 @@ rl.on('line', line => {
   chain = chain.then(async () => {
     let out
     try { out = { ok: true, ...(await handle(JSON.parse(line))) } } catch (e) { out = { ok: false, error: String((e && e.message) || e) } }
-    process.stdout.write(JSON.stringify(out) + '\n')
+    process.stdout.write(JSON.stringify(out, setsAsArrays) + '\n')
   })
 })
 rl.on('close', () => { chain.then(() => process.exit(0)) })

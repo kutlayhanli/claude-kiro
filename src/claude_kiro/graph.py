@@ -346,14 +346,19 @@ def _plan_rows(text: str) -> List[Tuple[int, Tuple[str, ...], str]]:
 
 
 def _verify_tcs(commands: List[str]) -> List[int]:
-    """TC numbers of `tcN_` terms in each `-k` expression that are not preceded by `not`."""
+    """TC numbers of `tcN_` terms in each command's `-k` expression that are not preceded by `not`.
+
+    `-k` may be attached to its value (`-ktc3_`); pytest keeps the last `-k`, so only that one selects.
+    """
     out: List[int] = []
     for command in commands:
-        for match in re.finditer(r"-k(?:\s+|=)(?:\"([^\"]*)\"|'([^']*)'|(\S+))", command):
-            expr = next(g for g in match.groups() if g is not None)
-            for term in re.finditer(r"(\bnot\s+)?\btc(\d+)_", expr):
-                if term.group(1) is None:
-                    out.append(int(term.group(2)))
+        matches = list(re.finditer(r"(?<!\S)-k(?:\s+|=)?(?:\"([^\"]*)\"|'([^']*)'|(\S+))", command))
+        if not matches:
+            continue
+        expr = next(g for g in matches[-1].groups() if g is not None)
+        for term in re.finditer(r"(\bnot\s+)?\btc(\d+)_", expr):
+            if term.group(1) is None:
+                out.append(int(term.group(2)))
     return out
 
 
