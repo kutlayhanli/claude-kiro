@@ -518,8 +518,15 @@ await test('escalation: a role never escalates to a model that is not above its 
 
 await test('orchestrator: plan, landing, gate and re-check steps use the orchestrator role', async () => {
   const p = project({ deps: { 1: [], 2: ['1'] }, fullRed: true })
-  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, fullGateEvery: 1, agents: ROLES } })
-  for (const l of ['plan 1', 'land 1', 'full gate @1', 're-check 1']) {
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, runnerAgent: 'spec:runner', fullGateEvery: 1, agents: ROLES } })
+  // Thin calls (plan, land) run on the lean agent type: no model or effort on the call, the shared CK_CALL schema.
+  for (const l of ['plan 1', 'land 1']) {
+    assert.equal(p.state.opts[l].agentType, 'spec:runner', l)
+    assert.equal('model' in p.state.opts[l], false, l)
+    assert.equal('effort' in p.state.opts[l], false, l)
+    assert.ok(p.state.opts[l].schema && p.state.opts[l].schema.required && p.state.opts[l].schema.required.includes('exitCode'), l)
+  }
+  for (const l of ['full gate @1', 're-check 1']) {
     assert.deepEqual([p.state.opts[l].model, p.state.opts[l].effort], ['sonnet', 'low'], l)
   }
   assert.equal(result.agents.orchestrator, 'sonnet/low')
@@ -936,7 +943,7 @@ await test('planning: worktree paths in "ready" are read as task numbers, so a t
   const p = project({ deps: { 1: [], 2: ['1'] } })
   const agent = async (prompt, opts) => {
     const r = await p.agent(prompt, opts)
-    return opts.label.startsWith('plan') ? { ...r, ready: r.ready.map(n => `.ck/worktrees/demo-task-${n}`) } : r
+    return opts.label.startsWith('plan') ? { ...r, json: { ...r.json, ready: r.json.ready.map(n => `.ck/worktrees/demo-task-${n}`) } } : r
   }
   const { result } = await runWorkflow(SCRIPT, { agent, args: baseArgs })
   assert.ok(p.state.events.includes('task 1') && p.state.events.includes('task 2'))
@@ -1093,6 +1100,10 @@ const SNAPSHOT_KEYS = [
   "tasks[].wave",
   "tasks[].wrongTests",
   "testFixes",
+  "thinAgent",
+  "thinAgent.fallback",
+  "thinAgent.type",
+  "thinAgent.warning",
   "timing",
   "timing.end",
   "timing.minutes",
