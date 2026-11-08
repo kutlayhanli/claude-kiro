@@ -61,9 +61,10 @@ def _record_of(added: Dict[str, bytes], spec: str) -> Path:
 @pytest.fixture
 def repo(tmp_path):
     root = _base_repo(tmp_path / "repo")
-    rec_demo = _record_of(_integrate(root, "demo"), "demo")
+    added_demo = _integrate(root, "demo")
+    rec_demo = _record_of(added_demo, "demo")
     rec_other = _record_of(_integrate(root, "other"), "other")
-    return {"root": root, "record": rec_demo, "other_record": rec_other}
+    return {"root": root, "record": rec_demo, "other_record": rec_other, "added_demo": added_demo}
 
 
 def _audit(root: Path) -> Tuple[int, Any, str]:
@@ -152,11 +153,9 @@ def test_tc100_redteam_state_dir_deleted_with_other_specs_left(repo):
 
 
 def test_tc100_redteam_every_added_state_file_removed(repo, tmp_path):
-    """All of `integration`'s own files except the hooks and key: delete each one in turn."""
+    """Every state file `integration demo` added under the spec's own directory: delete each one in turn."""
     root = repo["root"]
-    snap = snapshot_ck_state(root)
-    victims = [Path(k) for k in snap
-               if "/ck/" in k and Path(k).parent == repo["record"].parent]
+    victims = [Path(k) for k in repo["added_demo"] if Path(k).parent == repo["record"].parent]
     assert repo["record"] in victims
     for victim in victims:
         data = victim.read_bytes()
@@ -184,6 +183,12 @@ def test_tc100_redteam_other_spec_name_rewritten_in_place(repo):
     data = json.loads(repo["record"].read_text())
     swapped = json.loads(json.dumps(data).replace('"demo"', '"other"'))
     repo["record"].write_text(json.dumps(swapped))
+    if swapped == data:
+        # The record holds no spec-name value: this only reserialised it, which must not break the audit.
+        code, obj, err = _audit(repo["root"])
+        assert isinstance(obj, dict), (code, err)
+        assert obj.get("complete") is True and obj.get("clean") is True, obj
+        return
     obj = _never_clean(repo["root"])
     assert obj.get("complete") is False, obj
 
@@ -341,7 +346,6 @@ def test_tc100_redteam_older_snapshot_restored(repo):
     """After the approved state moves on (a landing), the record is rolled back to the older one."""
     root = repo["root"]
     old = repo["record"].read_bytes()
-    wt = integration_worktree(root)
     # A landing through ck's own path moves the approved state: a plain task landing is enough.
     code, _, err = ck_text(root, "worktree", "create", "demo", "1", "--base", "integrate/demo")
     assert code == 0, err
@@ -360,8 +364,7 @@ def test_tc100_redteam_older_snapshot_restored(repo):
         return  # the landing changed no approved protected state, so there is nothing older to restore
     # An older, validly sealed state: the head moved past it, so it must not give a clean verdict
     # unless the state is the same protected content (no protected file differs).
-    assert obj.get("clean") is False or obj.get("drift") == [], obj
-    del wt
+    assert obj.get("drift") == [], obj
 
 
 def test_tc100_redteam_older_snapshot_with_new_protected_drift(repo):
@@ -434,11 +437,12 @@ def test_tc100_redteam_integration_branch_recreated_same_commit_record_deleted(r
 
 
 def test_tc100_redteam_refs_index_deleted(repo):
-    """ck/refs.json (ref -> spec) is how a ref finds its approved state; without it the state is unreadable."""
+    """Deleting ck/refs.json (the hook's ref -> spec index) must not hide a bypass-landed protected file."""
     root = repo["root"]
     idx = [Path(k) for k in snapshot_ck_state(root) if Path(k).name == "refs.json"]
     if not idx:
         pytest.fail("ck wrote no refs.json under its state directory")
+    _bypass_add(root, ".claude/evil.md", "evil\n")
     for p in idx:
         p.unlink()
     obj = _never_clean(root, expect_incomplete=False)

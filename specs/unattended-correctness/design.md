@@ -1074,6 +1074,8 @@ Entries for the criteria that state an error, refusal or fallback.
   start` exits 0 and reports it; the workflow logs it, keeps it in `runStart`, and the audit reports hooks inactive.
 - **10.5** Approved state missing, unreadable or its mac fails: `AuditReport.complete = false`, `clean = false`,
   problem "approved state unreadable: <reason>"; exit 3.
+  A validly sealed record whose `ref` is not the audited `into` branch counts as missing (same result), so
+  another spec's or ref's record, or `--into` a branch with no record of its own, is never clean.
 - **11.8** Malformed source: a `GraphProblem` naming the source and problem; the rest is built; `ck lint` prints
   it as a warning.
 - **12.6** Missing command with no provider: `liveEdgeDecision` returns `conflict` with the tests that invoke it
