@@ -339,7 +339,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 14: Test per-test attribution and reruns through `ck gate --attribute`
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 1.10, 1.11, 2.4, 2.5, 2.10, 2.11, 3.2
 **Description:** Implement TC-1, TC-2, TC-3, TC-4, TC-5, TC-6, TC-7, TC-8, TC-9, TC-10, TC-11, TC-12, TC-13, TC-15, TC-16, TC-17, TC-26 (b: CLI land part) and TC-27 (b: CLI part) on `attr_project` with real pytest, real `node --test` and real pytest-xdist. Assert on the `ck-gate/1` JSON from `ck_json(..., "gate", "demo", "--attribute", "--json")`: `failures[].tcId`, `tasks`, `status`, `excusedBy`, `attributedBy`, `rerun`, `summary`, `warnings`, exit code. Use counter files to assert run counts (TC-13, TC-15, TC-16, TC-17). TC-11 uses `ck lint demo --json`'s `untaggedTests`. TC-13 compares the text report and exit code byte for byte with `tests/fixtures/unattended/gate-text-baseline/` (design: the text report is unchanged; failures appear only in the JSON forms). TC-26b runs `ck worktree land demo 2 --gate --json` and asserts MERGED with a failing test outside Task 2's suites. TC-193: `verify` deselects `-m "not e2e"`; Task 2's Verify selects a failing e2e-marked `tc2_` test; the attributed gate runs it (regression) and runs no node twice (counter files). TC-195: a pytest wrapper test in an unowned file, parametrized over `tests/js/*.test.mjs`, whose `[thin.test.mjs]` case fails is `unattributed` (`attributedBy:"none"`, never excused, gate red) with a `hint` naming `tests/js/thin.test.mjs` and the test task owning it, whatever the verified tasks' status; a parameter ID naming no owned file is `unattributed` with no hint.
@@ -349,11 +349,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 20 (TC-1 to TC-10, TC-12, TC-13, TC-15 to TC-17, TC-26b, TC-27b, TC-193, TC-195), Task 53 (TC-11 through `ck lint`)
 
 **Acceptance:**
-- [ ] Tests exercise the real boundary: the ck CLI on a real git repo running real pytest, node and xdist
-- [ ] Each test fails before the implementation for the right reason (no `--attribute`/`--json` option, missing keys), not from broken test code; TC-13 and TC-26b are preservation checks and pass before and after
-- [ ] TC-12 compares `failures` element by element across 3 xdist runs, timing fields excluded
-- [ ] TC-17 proves excused tests run once, candidates twice, passing tests once, and no suite reruns whole
-- [ ] No mocks of the project's own code
+- [x] Tests exercise the real boundary: the ck CLI on a real git repo running real pytest, node and xdist
+- [x] Each test fails before the implementation for the right reason (no `--attribute`/`--json` option, missing keys), not from broken test code; TC-13 and TC-26b are preservation checks and pass before and after
+- [x] TC-12 compares `failures` element by element across 3 xdist runs, timing fields excluded
+- [x] TC-17 proves excused tests run once, candidates twice, passing tests once, and no suite reruns whole
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project, ck_json, baselines)
 **Complexity:** High
