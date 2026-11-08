@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ck-gate/1/failure",
+  "title": "ck-gate/1 failure entry (design D3)",
+  "type": "object",
+  "required": ["node", "tcId", "tasks", "attributedBy", "file", "kind", "message", "truncated", "command"],
+  "properties": {
+    "node": {"type": ["string", "null"]},
+    "tcId": {"type": ["string", "null"], "pattern": "^TC-[0-9]+$"},
+    "tasks": {"type": "array", "items": {"type": "string"}},
+    "attributedBy": {"enum": ["tc", "file", "none"]},
+    "file": {"type": "string"},
+    "kind": {"enum": ["assertion", "import", "collection", "timeout", "error"]},
+    "message": {"type": "string", "maxLength": 500},
+    "truncated": {"type": "boolean"},
+    "command": {"type": ["string", "null"]},
+    "status": {"enum": ["regression", "excused", "flaky", "unattributed"]},
+    "excusedBy": {"type": "array", "items": {"type": "string"}},
+    "rerun": {"enum": ["failed", "passed", "unavailable"]},
+    "hint": {"type": "string"},
+    "class": {"enum": ["not-built", "bad", "unclear", null]},
+    "check": {"enum": ["right-reason", "row-fidelity", "validate", null]},
+    "missingCommand": {
+      "type": ["object", "null"],
+      "required": ["command", "providers"],
+      "properties": {
+        "command": {"type": "string"},
+        "providers": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

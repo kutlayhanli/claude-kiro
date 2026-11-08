@@ -15,7 +15,7 @@ Test-track conventions (every test task below):
 ## Task Breakdown
 
 ### Task 1: Build the shared Python harness and captured baselines
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.11, 3.9, 3.10
 **Description:** Build the Python test infrastructure every other Python task uses (test-plan "To add" items 1 and 2). Create `tests/unattended_helpers.py` with: Harness Contract items 1 and 2 are pinned here by `failure.schema.json` and the baselines.
@@ -42,11 +42,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 19 (captures `failure.schema.json` and the text-gate baselines its output is checked against), Task 37 (captures `land-json-keys.json`, the land JSON it must keep)
 
 **Acceptance:**
-- [ ] Every helper drives real git or the real ck CLI; nothing mocks a `claude_kiro` module
-- [ ] `land-json-keys.json` and `gate-text-baseline/*.txt` are captured from the unchanged base commit (named in README.md), before any impl task of this spec merges
-- [ ] `failure.schema.json` validates the design's `ck-gate/1` example failure and rejects a `kind` outside the 5 kinds and a `message` over 500 characters
-- [ ] `sandboxed` skips only on a bwrap startup failure, with the bwrap error as the reason
-- [ ] The helper self-checks pass today (they test the harness, not the feature) and are xdist-safe
+- [x] Every helper drives real git or the real ck CLI; nothing mocks a `claude_kiro` module
+- [x] `land-json-keys.json` and `gate-text-baseline/*.txt` are captured from the unchanged base commit (named in README.md), before any impl task of this spec merges
+- [x] `failure.schema.json` validates the design's `ck-gate/1` example failure and rejects a `kind` outside the 5 kinds and a `message` over 500 characters
+- [x] `sandboxed` skips only on a bwrap startup failure, with the bwrap error as the reason
+- [x] The helper self-checks pass today (they test the harness, not the feature) and are xdist-safe
 
 **Dependencies:** None
 **Complexity:** High
