@@ -112,7 +112,7 @@ def test_tc175_p17_oracle_matches_the_listed_paths():
 INTEGRATE_REFS = ["refs/heads/integrate/demo", "refs/heads/integrate/a/b", "refs/heads/integrate/équity"]
 OTHER_REFS = ["refs/heads/integrate", "refs/heads/integrated/x", "refs/heads/feat/integrate/x",
               "refs/remotes/origin/integrate/x", "refs/tags/integrate/x", "HEAD", "refs/heads/main",
-              "refs/heads/feature", "refs/heads/Integrate/demo", "refs/heads/integrate"]
+              "refs/heads/feature", "refs/heads/Integrate/demo"]
 PROTECTED_BASES = [".claude/x", "a/.claude/x", ".mcp.json", "a/.mcp.json", ".githooks/x", ".husky/x",
                    ".git-hooks/x", ".pre-commit-config.yaml", ".envrc", "specs/ck.json"]
 NEAR_MISSES = ["claude/x", ".claude-notes/x", "specs/ck.json.bak", "specs/demo/ck.json", "x.mcp.json",
@@ -151,8 +151,9 @@ def decide(ref: str, changed, allow):
 
     update = protect.RefUpdate(ref=ref, old=OLD, new=NEW, new_tree="3" * 40, new_parents=(OLD,),
                                ancestor_of_old=False)
-    # The caller hands over the protected changed paths; a path the filter lets through is decided by the allow-list.
-    protected = [p for p in changed if is_protected(p)]
+    # The product's own protected-path filter (no allow-list: every protected path) picks the protected changed
+    # paths; the change-listing layer unquotes git-quoted names before they reach the seam (task 44).
+    protected = [git_unquote(p) for p in protect.refuse_paths(ref, list(changed), [])]
     return protect.ref_update_decision(update, protected, list(allow), None, None)
 
 
@@ -163,8 +164,16 @@ def refused_of(decision) -> Set[str]:
 @settings(**PURE)
 @given(refs, changed_paths, allow_lists, st.sampled_from(ALL_ALLOW_GLOBS), st.sampled_from(ALL_PATHS))
 def test_tc175_p17_ref_update_decision_refuses_exactly_protected_not_allowed(ref, changed, allow, extra_glob, extra_path):
+    from claude_kiro import protect
+
     d = decide(ref, changed, allow)
     want = refused_oracle(ref, changed, allow)
+    # The product filter, fed the raw generated paths (near-misses and random paths included), is the oracle's twin.
+    filtered = protect.refuse_paths(ref, list(changed), list(allow))
+    assert isinstance(filtered, list)
+    assert {git_unquote(p) for p in filtered} == want, (ref, changed, allow, filtered)
+    if not ref.startswith("refs/heads/integrate/"):
+        assert filtered == []
     assert refused_of(d) == want, (ref, changed, allow)
     assert d.allow is (not want), (ref, changed, allow, d)
     if not ref.startswith("refs/heads/integrate/"):
@@ -273,13 +282,13 @@ def test_tc175_p35_approval_decision_truth_table(case):
 REF = "refs/heads/integrate/demo"
 OID = {"a": "a" * 40, "b": "b" * 40, "c": "c" * 40}
 DRIFT_PATHS = [".claude/x", ".mcp.json", ".githooks/pre-commit", ".envrc", "specs/ck.json", ".claude/ä.md"]
-BAD_APPROVED = ["missing", "corrupt-empty", "corrupt-files", "corrupt-text", "corrupt-number", "corrupt-bytes"]
+BAD_APPROVED = ["missing", "corrupt-files-int", "corrupt-files-none"]
 
 
 @st.composite
 def audit_cases(draw):
     kind = draw(st.sampled_from(["valid", "valid", "valid", *BAD_APPROVED]))
-    approved = {p: draw(st.sampled_from(sorted(OID))) for p in draw(st.lists(st.sampled_from(DRIFT_PATHS), unique=True, max_size=4))}
+    approved = {p: draw(st.sampled_from(sorted(OID.values()))) for p in draw(st.lists(st.sampled_from(DRIFT_PATHS), unique=True, max_size=4))}
     if draw(st.booleans()):  # current starts from the approved state, then drifts
         current = dict(approved)
         for p in draw(st.lists(st.sampled_from(DRIFT_PATHS), unique=True, max_size=3)):
@@ -287,9 +296,9 @@ def audit_cases(draw):
             if change == "delete":
                 current.pop(p, None)
             else:
-                current[p] = draw(st.sampled_from(sorted(OID)))
+                current[p] = draw(st.sampled_from(sorted(OID.values())))
     else:
-        current = {p: draw(st.sampled_from(sorted(OID))) for p in draw(st.lists(st.sampled_from(DRIFT_PATHS), unique=True, max_size=4))}
+        current = {p: draw(st.sampled_from(sorted(OID.values()))) for p in draw(st.lists(st.sampled_from(DRIFT_PATHS), unique=True, max_size=4))}
     hooks = tuple(draw(st.booleans()) for _ in range(3))  # installed, active, intact
     fixture_drift = draw(st.lists(st.sampled_from(["tests/fixtures/a.json", "tests/fixtures/b.json"]), unique=True, max_size=2))
     tampered = draw(st.booleans())
@@ -310,7 +319,7 @@ def drift_oracle(approved: Dict[str, str], current: Dict[str, str]) -> Set[Tuple
 
 
 def _entry_path(e) -> str:
-    return e["file"] if "file" in e else e["path"]
+    return e["file"]  # design.md Data Models: AuditReport.drift entries are {file, change}
 
 
 @settings(**PURE)
@@ -319,9 +328,12 @@ def test_tc175_p36_unreadable_approved_state_is_never_clean(case):
     from claude_kiro import protect
 
     kind, approved_files, current, (installed, active, intact), fixture_drift, tampered = case
+    # What read_approved_state yields for a missing, corrupt or bad-mac record is None; an ApprovedState whose
+    # fields are corrupt is the other unreadable shape the seam can see.
     bad = {
-        "missing": None, "corrupt-empty": {}, "corrupt-files": {"ref": REF, "commit": "d" * 40, "files": 3},
-        "corrupt-text": "not a state", "corrupt-number": 42, "corrupt-bytes": b"\x00\xff",
+        "missing": None,
+        "corrupt-files-int": protect.ApprovedState(ref=REF, commit="d" * 40, files=3, approvals=()),
+        "corrupt-files-none": protect.ApprovedState(ref=REF, commit="d" * 40, files=None, approvals=()),
     }
     approved = (protect.ApprovedState(ref=REF, commit="d" * 40, files=approved_files, approvals=())
                 if kind == "valid" else bad[kind])
@@ -408,7 +420,9 @@ def landed(root: Path, n: str) -> Tuple[int, dict, str]:
 
 def extract_code(text: str) -> Optional[str]:
     """The 6-character code the approval command prints (the line that mentions the code)."""
-    lines = [ln for ln in text.replace("\r", "").splitlines() if re.search("code", ln, re.I)]
+    all_lines = text.replace("\r", "").splitlines()
+    # Design only says a 6-character code is printed: prefer the line that mentions it, else any line with one.
+    lines = [ln for ln in all_lines if re.search("code", ln, re.I)] or all_lines
     for line in reversed(lines):
         tokens = re.findall(r"(?<![A-Za-z0-9])[A-Za-z0-9]{6}(?![A-Za-z0-9])", line)
         mixed = [t for t in tokens if not t.isalpha() or not t.islower()]
@@ -567,6 +581,8 @@ class LandingMachine(RuleBasedStateMachine):
     def restore(self, k):
         snap, head = self.snaps[k % len(self.snaps)]
         h.restore_ck_state(self.root, snap)
+        # The snapshot covers the git common dir, so the restore puts the ref back at exactly the recorded head.
+        assert h.ref(self.root, "integrate/demo") == head, "restore left the ref off the snapshot's head"
         self._observe(restored=True)
 
     @rule()

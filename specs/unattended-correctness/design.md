@@ -121,14 +121,14 @@ How the PLAN.md decisions shape it:
   - `merge()` gains the protected check (`protected_changes` against `land_allow_paths(target)`), state
     `PROTECTED` with the files (9.6), and runs its `git merge` with a landing token in the environment (9.7).
   - `land()` issues a landing token for each `git merge` and `git reset` it runs on an `integrate/*` target
-    (9.7), records the approved protected state after the batch (10.4), records new recorded-fixture locks and
+    (9.7), records, after the batch, only the protected paths the landed tasks changed as approved (10.4; the rest of the state is never re-recorded at head), records new recorded-fixture locks and
     reports fixture drift per task (`Landed.fixtureDrift`), and, through `GateFn`, carries `failures` on RED
     entries (`Landed.failures`).
   - New keyword `land(..., approved: Optional[Dict[str, List[str]]] = None)`: task -> protected files I approved,
     used only by `ck worktree approve` (9.8).
   - `create_integration` calls `protect.ensure_hooks` (install only where the git metadata is writable,
-    otherwise report the hook state; 9.1, 9.10) and records the baseline protected state on creation and on
-    reuse; its `Outcome.detail` names a hook problem. It creates the `integrate/*` ref with a landing token, as
+    otherwise report the hook state; 9.1, 9.10) and records the baseline protected state only when no approved
+    state exists for the ref (never on reuse, which would launder bypass writes; 10.1); its `Outcome.detail` names a hook problem. It creates the `integrate/*` ref with a landing token, as
     every ck-made `integrate/*` update (9.7, 9.12).
   - After every install step ck runs (`create --install`, land's install, `gate --install`) and at the start of
     each `land()`, ck calls `protect.ensure_hooks`: when `core.hooksPath` no longer points at ck's directory (a
