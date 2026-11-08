@@ -1678,7 +1678,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 73: Show each role's resolved model in the OpenCode doctor
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 14.8
 **Description:** In `opencode/src/preflight.ts`, add `checkRoles(ctx)` that lists all seven roles with the resolved model and its source (`roles` map, alias map, or default) and include it in the preflight result, so `ck doctor --harness opencode` prints the same lines. Harness Contract owner: item 11's preflight `roles: [{role, model, source}]`.
@@ -1688,7 +1688,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 70 (TC-133)
 
 **Acceptance:**
-- [ ] Preflight and `ck doctor --harness opencode` show each role's resolved model and where it came from (14.8)
+- [x] Preflight and `ck doctor --harness opencode` show each role's resolved model and where it came from (14.8)
 
 **Dependencies:** Task 71 (calls `resolveRoleRef` and reads `config.roles`), Task 70 (its tests are the oracle)
 **Complexity:** Low
