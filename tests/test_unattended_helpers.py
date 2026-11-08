@@ -365,6 +365,11 @@ def test_failure_schema_accepts_the_design_example_and_minimal_entry():
                              "missingCommand": {"command": "mtr x", "providers": ["4"]}}) == []
 
 
+def test_failure_schema_accepts_command_attribution_and_a_null_file():
+    assert h.failure_errors({**EXAMPLE_FAILURE, "attributedBy": "command", "file": None}) == []
+    assert h.failure_errors({**EXAMPLE_FAILURE, "file": 3})
+
+
 @pytest.mark.parametrize("kind", ["assertion", "import", "collection", "timeout", "error"])
 def test_failure_schema_accepts_the_five_kinds(kind):
     assert h.failure_errors({**EXAMPLE_FAILURE, "kind": kind}) == []
