@@ -22,7 +22,7 @@ case where the file really needs Y once it exists.
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from claude_kiro.hooks._shared.spec_parser import SpecTask, parse_tasks_text
 from claude_kiro.lint import verify_order_cycles, verify_file_cycles, verify_paths
@@ -133,3 +133,99 @@ def relink_text(text: str, project_dir: Path, config: dict, task: str) -> "tuple
     tasks = {t.num: t for t in parse_tasks_text(text)}
     r = plan_relink(tasks, project_dir, config, str(task))
     return (apply_relink(text, r) if r.fixable else None), r
+
+
+# --------------------------------------------------------------------------- command edges (12.2)
+
+
+@dataclass
+class CommandRelink:
+    """Dependency edges that make a test task's command work: `adds` maps a task to the (provider task, command)
+    pairs to add to its **Dependencies:**; `refused` lists the edges that would close a cycle."""
+
+    adds: Dict[str, List[Tuple[str, str]]] = field(default_factory=dict)
+    refused: List[Dict[str, str]] = field(default_factory=list)
+
+    def to_dict(self) -> Dict:
+        return {
+            "adds": [{"task": t, "dependsOn": p, "command": c}
+                     for t, pairs in sorted(self.adds.items(), key=lambda kv: int(kv[0]))
+                     for p, c in pairs],
+            "refused": self.refused,
+        }
+
+
+def _node_num(node: str) -> str:
+    return node.split(":", 1)[-1]
+
+
+def _reaches(deps: Dict[str, List[str]], src: str, dst: str) -> bool:
+    seen: set = set()
+    stack = list(deps.get(src, []))
+    while stack:
+        node = stack.pop()
+        if node == dst:
+            return True
+        if node not in seen:
+            seen.add(node)
+            stack.extend(deps.get(node, []))
+    return False
+
+
+def plan_command_relink(graph, tasks: Dict[str, SpecTask]) -> CommandRelink:
+    """The **Dependencies:** edges that `graph.missing_command_edges` calls for (12.1), one per (task, provider) pair.
+
+    Edges are added one at a time against the dependencies already accepted, so a set of edges that only closes a
+    cycle together is refused too. Refused edges are reported, not added.
+    """
+    from claude_kiro.graph import missing_command_edges
+
+    deps: Dict[str, List[str]] = {n: [d for d in t.dependencies if d in tasks] for n, t in tasks.items()}
+    wanted: Dict[Tuple[str, str], List[str]] = {}
+    for m in missing_command_edges(graph):
+        task, provider = _node_num(m.lacking), _node_num(m.provider)
+        if task in tasks and provider in tasks and task != provider:
+            wanted.setdefault((task, provider), []).append(m.command)
+    out = CommandRelink()
+    for (task, provider) in sorted(wanted, key=lambda k: (int(k[0]), int(k[1]))):
+        command = sorted(set(wanted[(task, provider)]))[0]
+        if _reaches(deps, provider, task):
+            out.refused.append({
+                "task": task,
+                "dependsOn": provider,
+                "command": command,
+                "message": (f"Task {task} needs `{command}` from Task {provider}, but Task {provider} already depends "
+                            f"on Task {task}: the edge would close a cycle"),
+            })
+            continue
+        deps.setdefault(task, []).append(provider)
+        out.adds.setdefault(task, []).append((provider, command))
+    return out
+
+
+def _add_dependencies(block: str, refs: List[str]) -> str:
+    """The block with `refs` appended to its **Dependencies:** field (replacing None/n/a/-)."""
+    match = re.search(r"^\*\*Dependencies:\*\*[ \t]*(.*)$", block, re.MULTILINE | re.IGNORECASE)
+    if match is None:
+        return _set_field(block, "Dependencies", ", ".join(refs))
+    value = match.group(1).strip()
+    if not value or value.lower().startswith(("none", "n/a", "-")):
+        new = ", ".join(refs)
+    else:
+        new = f"{value}, {', '.join(refs)}"
+    return block[:match.start()] + f"**Dependencies:** {new}" + block[match.end():]
+
+
+def apply_command_relink(text: str, r: CommandRelink) -> str:
+    """tasks.md text with the command edges added; other text is left byte-identical."""
+    if not r.adds:
+        return text
+
+    def edit(m: "re.Match") -> str:
+        num, block = m.group(1), m.group(0)
+        pairs = r.adds.get(num)
+        if not pairs:
+            return block
+        return _add_dependencies(block, [f"Task {p} (provides `{c}`)" for p, c in pairs])
+
+    return TASK_BLOCK.sub(edit, text)

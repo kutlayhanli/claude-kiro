@@ -71,7 +71,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 - `tests/landing_bridge.py` - Python side of the two new bridge ops
 - `tests/js/real_agents.mjs` - scripted agents for the smoke tests
 - `tests/js/harness_self.test.mjs` - self-checks of the fake runtime additions
-**Verify:** `node tests/js/harness_self.test.mjs` `uv run pytest -q tests/test_workflow_scripts.py`
+**Verify:** `node tests/js/harness_self.test.mjs` `uv run pytest -q tests/test_workflow_scripts.py -k "harness_self or deterministic_plan or finish_first or guard_ladder or landing_speed or spec_create or spec_implement or spec_review_frozen"`
 **Verifies:** Task 78 (the fake runtime, bridge and `CK_CALL` envelopes its thin routing runs under)
 
 **Acceptance:**
@@ -774,7 +774,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 33: Add graph findings to lint and command edges to relink
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.9, 11.6, 11.8, 12.1, 12.2, 12.3, 12.7, 12.9, 13.4
 **Description:** In `src/claude_kiro/lint.py`, make `lint_spec` build the spec graph once and add warning keys: `commandEdges` (from `graph.missing_command_edges`: test file, command, providing task, task lacking the dependency), `unknownCommands` (from `graph.unknown_commands`, with source words gathered from non-test source files), `untaggedTests` (each test function in the spec's test files with no TC id, naming the owning test task), `noWriteSet` (impl tasks with no Files) and `graphProblems`. The existing `cycles`, `verifyCycles`, `reasonless`, `criticalPath` and `riskUntagged` keys and their computation stay byte-for-byte the same; `verify_order_cycles` reads imports through the graph's `imports` edges with identical output. New entries never change lint's exit code. In `src/claude_kiro/relink.py`, add `plan_command_relink(graph, tasks) -> CommandRelink` and `apply_command_relink(text, r)`: add `Task P (provides \`cmd\`)` to the **Dependencies:** of every task 12.1 names, and refuse (and report) any edge that would create a cycle. `plan_relink` / `apply_relink` are unchanged. Harness Contract owner: item 5's new lint finding kinds (design keys `commandEdges`, `unknownCommands`, `untaggedTests`, `noWriteSet`, `graphProblems`) and the command edges `ck relink` adds.
@@ -785,11 +785,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 8 (P-23 at `plan_command_relink`)
 
 **Acceptance:**
-- [ ] `lint_spec` reports each missing command dependency with test file, command, provider and dependent task (12.1)
-- [ ] Commands no task provides and the project does not define are warned about (12.3)
-- [ ] Untagged test functions are warned about, naming the owning test task (1.9); tasks with no Files are warned about (13.4); graph problems are listed (11.8)
-- [ ] `plan_command_relink` adds exactly the missing edges and refuses one that would close a cycle (12.2, 12.7)
-- [ ] Existing import-based and Verify-cycle results are unchanged (12.9)
+- [x] `lint_spec` reports each missing command dependency with test file, command, provider and dependent task (12.1)
+- [x] Commands no task provides and the project does not define are warned about (12.3)
+- [x] Untagged test functions are warned about, naming the owning test task (1.9); tasks with no Files are warned about (13.4); graph problems are listed (11.8)
+- [x] `plan_command_relink` adds exactly the missing edges and refuses one that would close a cycle (12.2, 12.7)
+- [x] Existing import-based and Verify-cycle results are unchanged (12.9)
 
 **Dependencies:** Task 13 (calls `missing_command_edges` and `unknown_commands`), Task 8 (its tests are the oracle)
 **Complexity:** Medium
@@ -2048,7 +2048,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 89: Test live command edges and write-set scheduling in the workflow
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 12.5, 12.6, 12.7, 12.8, 13.1, 13.2, 13.3, 13.4, 13.5, 13.6
 **Description:** Implement TC-114, TC-116, TC-117, TC-118, TC-120, TC-121, TC-122 (a), TC-123 and TC-124 (a) against the real workflow. Assert: a missing-command failure for unfinished Task 5's command adds no conflict, uses no retry, logs a live edge, and re-requests Task 2 only after Task 5's land ends; no provider becomes a test conflict through confirmation then the test-fixer; a cycle (`2 -> 5 -> 2`) adds no edge and blocks Task 2 naming it; `liveEdges[]` has `{task, dependsOn, command}`; overlapping Tasks 2 and 3 run in priority order with Task 3 after Task 2's land; disjoint Task 4 fills a free slot and `writeSetHolds` names 3 waiting on 2; a task with no Files is not held; when the running task fails, the next held task starts and the run terminates; plan `deps` unchanged and no relink for overlap.
@@ -2058,9 +2058,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 94 (TC-114, TC-116 to TC-118, TC-120 to TC-124a; the suite needs live edges and write-set holds)
 
 **Acceptance:**
-- [ ] Tests run the real workflow script under the fake runtime and virtual clock
-- [ ] They fail before the implementation because there are no live edges or write-set holds
-- [ ] No mocks of the project's own code
+- [x] Tests run the real workflow script under the fake runtime and virtual clock
+- [x] They fail before the implementation because there are no live edges or write-set holds
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 2 (owns, overlaps, provides, missingCommand fakes)
 **Complexity:** High

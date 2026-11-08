@@ -189,7 +189,8 @@ def lint(spec: str, as_json: bool, contracts: bool, tasks, base, strict: bool):
         return
     result = _plan(Path.cwd(), spec, set())
     if as_json:
-        click.echo(json.dumps({k: result[k] for k in ("cycles", "verifyCycles", "reasonless", "criticalPath", "waves", "riskUntagged")}, indent=2))
+        click.echo(json.dumps({k: result[k] for k in ("cycles", "verifyCycles", "reasonless", "criticalPath", "waves", "riskUntagged",
+                                                      "commandEdges", "unknownCommands", "untaggedTests", "noWriteSet", "graphProblems")}, indent=2))
     else:
         click.echo(f"Plan lint for {result['spec']}:")
         if result["cycles"]:

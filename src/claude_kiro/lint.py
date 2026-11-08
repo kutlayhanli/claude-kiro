@@ -558,15 +558,137 @@ def task_risk(tasks: Dict[str, SpecTask], config: dict) -> Dict:
     return {"risk": risk, "riskUntagged": untagged}
 
 
+_TC_ID = re.compile(r"(?:^|[_\s])tc\d+_")
+_JS_TEST_NAME = re.compile(r"\btest\(\s*['\"`]([^'\"`]+)")
+_QUOTED = re.compile(r"""(['"`])((?:\\.|(?!\1).)*)\1""")
+_WORD = re.compile(r"[A-Za-z0-9_][\w\-]*")
+
+
+def _task_ref(node: str) -> str:
+    """A graph node id ("task:5") as the task reference lint reports ("Task 5")."""
+    return f"Task {node.split(':', 1)[-1]}"
+
+
+def _source_words(project_dir: Path, sources: List[str]) -> Set[str]:
+    """Words of the string literals in the non-test source files (command names a source defines)."""
+    words: Set[str] = set()
+    for rel in sources:
+        path = project_dir / rel
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(errors="replace")
+        except OSError:
+            continue
+        literals: List[str] = []
+        if rel.endswith(".py"):
+            try:
+                tree = ast.parse(text)
+            except (SyntaxError, ValueError):
+                tree = None
+            if tree is not None:
+                literals = [n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+        else:
+            literals = [m.group(2) for m in _QUOTED.finditer(text)]
+        for literal in literals:
+            words.update(_WORD.findall(literal))
+    return words
+
+
+def _untagged_tests(graph, project_dir: Path, owners: Dict[str, str]) -> List[Dict[str, str]]:
+    """Test functions in the spec's test files whose name carries no TC id, with the test task that owns the file."""
+    out: List[Dict[str, str]] = []
+    for node in sorted(graph.nodes, key=lambda n: n.id):
+        if node.kind != "test_file":
+            continue
+        path = project_dir / node.label
+        try:
+            text = path.read_text(errors="replace")
+        except OSError:
+            continue
+        if node.label.endswith(".py"):
+            try:
+                tree = ast.parse(text)
+            except (SyntaxError, ValueError):
+                continue
+            names = [n.name for n in ast.walk(tree)
+                     if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test")]
+        else:
+            names = _JS_TEST_NAME.findall(text)
+        owner = owners.get(node.label, "")
+        for name in names:
+            if _TC_ID.search(name) is None:
+                out.append({
+                    "file": node.label,
+                    "test": name,
+                    "task": f"Task {owner}" if owner else "",
+                    "message": f"{node.label}: {name} has no TC id (owned by Task {owner})" if owner
+                    else f"{node.label}: {name} has no TC id",
+                })
+    return out
+
+
+def _graph_findings(spec_dir: Path, project_dir: Path, tasks: Dict[str, SpecTask], config: dict) -> Dict[str, List]:
+    """The keys the spec graph adds to lint (11.8, 12.1, 12.3, 1.9, 13.4). Reported, never fatal."""
+    from claude_kiro.graph import _cli_rows, build_graph, missing_command_edges, unknown_commands
+
+    graph = build_graph(project_dir, spec_dir)
+    command_edges = []
+    for m in missing_command_edges(graph):
+        provider, lacking = _task_ref(m.provider), _task_ref(m.lacking)
+        test_file = m.test_file.split(":", 1)[-1]
+        command_edges.append({
+            "testFile": test_file,
+            "command": m.command,
+            "provider": provider,
+            "task": lacking,
+            "message": (f"{test_file} invokes `{m.command}`, which {provider} provides, but {lacking} "
+                        f"does not depend on {provider}"),
+        })
+
+    design = spec_dir / "design.md"
+    design_text = design.read_text(errors="replace") if design.is_file() else ""
+    cli_rows = _cli_rows(design_text)
+    design_commands = {cmd for cmd, _ in cli_rows}
+    sources = sorted({n.label for n in graph.nodes if n.kind == "source_file"} | {f for _, f in cli_rows})
+    sources = [s for s in sources if not is_test_path(s, config)]
+    unknown = []
+    for u in unknown_commands(graph, _source_words(project_dir, sources)):
+        if u.command in design_commands:
+            continue  # the design's CLI table declares it
+        unknown.append({
+            "command": u.command,
+            "testFiles": [f.split(":", 1)[-1] for f in u.test_files],
+            "message": f"`{u.command}` is invoked by {', '.join(f.split(':', 1)[-1] for f in u.test_files)} "
+                       "but no task provides it and no source file defines it",
+        })
+
+    owners = {f.removeprefix("./"): num for num, t in tasks.items() if t.track == "test" for f in t.files}
+    no_write_set = [
+        {"task": f"Task {num}", "message": f"Task {num} ({t.title}) has no **Files:**, so its write set is unknown"}
+        for num, t in sorted(tasks.items(), key=lambda kv: int(kv[0]))
+        if t.track != "test" and not t.files and not t.done
+    ]
+    return {
+        "commandEdges": command_edges,
+        "unknownCommands": unknown,
+        "untaggedTests": _untagged_tests(graph, project_dir, owners),
+        "noWriteSet": no_write_set,
+        "graphProblems": [{"source": p.source, "problem": p.problem} for p in graph.problems],
+    }
+
+
 def lint_spec(spec_dir: Path, project_dir: Path) -> Dict:
     tasks = {t.num: t for t in parse_tasks(spec_dir / "tasks.md")}
     cycles = dependency_cycles(tasks)
     config = load_config(project_dir)
     risk = task_risk(tasks, config)
-    return {
+    result = {
         "riskUntagged": risk["riskUntagged"],
         "cycles": cycles,
         "verifyCycles": ([] if cycles else verify_order_cycles(tasks, project_dir, config)) + verify_file_cycles(tasks, config),
         "reasonless": reasonless_dependencies(tasks),
         "criticalPath": [] if cycles else critical_path(tasks),
     }
+    result.update(_graph_findings(spec_dir, project_dir, tasks, config))
+    return result
