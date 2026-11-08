@@ -624,6 +624,8 @@ How edges are filled (the API delegated by PLAN):
 - **provides:** `**Provides:**` wins (11.3). Otherwise inferred: a design.md table row with a backticked command
   path whose row names a file the task owns; else a backticked command path, starting with a known program, in
   the task's title or description. Ambiguity (two tasks inferred) keeps both edges and adds a GraphProblem.
+  Group commands (`mtr thesis`) follow the same rule: a `cmd:` node exists only when some task provides it or a
+  test invokes it; a table row alone, with no owning task, adds no node.
 - **invokes:** scan of each test file (Python AST string constants and list/tuple literals; regex for JS) for a
   sequence of words that starts with a known program (`["mtr", "thesis", "new"]`, `"mtr thesis new --x"`), or a
   `CliRunner().invoke(..., ["thesis", "new"])`-style list matching a known command path without the program. The
