@@ -1,0 +1,50 @@
+exit: 1
+Verification gate for demo (Task 3): FAIL
+✓ Task 3 acceptance criteria
+✓ Test collection succeeds (`python -m pytest --collect-only -q`)
+✗ `python -m pytest -q -p no:cacheprovider tests`
+    exit 1
+    .E                                                                       [100%]
+    ==================================== ERRORS ====================================
+    _________________________ ERROR at setup of test_tc3_c _________________________
+    
+        @pytest.fixture
+        def boom_test_tc3_c():
+    >       raise RuntimeError('setup boom')
+    E       RuntimeError: setup boom
+    
+    tests/test_calc_tc.py:26: RuntimeError
+    =========================== short test summary info ============================
+    ERROR tests/test_calc_tc.py::test_tc3_c - RuntimeError: setup boom
+    1 passed, 1 error in <t>s
+✗ `python -m pytest -q tests/test_calc_tc.py -k "tc3_"`
+    exit 1
+    E                                                                        [100%]
+    ==================================== ERRORS ====================================
+    _________________________ ERROR at setup of test_tc3_c _________________________
+    
+        @pytest.fixture
+        def boom_test_tc3_c():
+    >       raise RuntimeError('setup boom')
+    E       RuntimeError: setup boom
+    
+    tests/test_calc_tc.py:26: RuntimeError
+    =========================== short test summary info ============================
+    ERROR tests/test_calc_tc.py::test_tc3_c - RuntimeError: setup boom
+    1 deselected, 1 error in <t>s
+✗ `python -m pytest -q tests/test_calc_tc.py`
+    exit 1
+    .E                                                                       [100%]
+    ==================================== ERRORS ====================================
+    _________________________ ERROR at setup of test_tc3_c _________________________
+    
+        @pytest.fixture
+        def boom_test_tc3_c():
+    >       raise RuntimeError('setup boom')
+    E       RuntimeError: setup boom
+    
+    tests/test_calc_tc.py:26: RuntimeError
+    =========================== short test summary info ============================
+    ERROR tests/test_calc_tc.py::test_tc3_c - RuntimeError: setup boom
+    1 passed, 1 error in <t>s
+✓ No existing tests deleted or weakened
