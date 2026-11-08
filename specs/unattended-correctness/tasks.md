@@ -936,7 +936,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 40: Red-team the protected-file hooks (Story 9)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 9.2, 9.6, 9.8, 9.11, 9.12, 10.1, 10.2
 **Description:** Try to break Story 9's refusal of protected changes with adversarial inputs: unusual surface forms, near-miss values, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way found becomes a test. Starts from TC-90, TC-91, TC-92, TC-93, TC-94 and TC-95: git-quoted non-ASCII and space paths (`.claude/commands/ä.md`) through raw merge, land and merge; a branch that allows itself in `specs/ck.json` (one and two commits); bypasses (`-c core.hooksPath=/dev/null`, deleted hooks, direct ref file writes) then reported by `ck worktree audit`; deletions and renames out of `.claude/`; a protected change buried two merges deep; approval attempts under `sandboxed` and `readonly_git_metadata`, including `script -qc` with "yes" piped in. TC-182 (9.12): `git update-ref -d refs/heads/integrate/demo` passes, then re-creating it at a commit carrying `.claude/CLAUDE.md` is refused (ref stays absent); re-creating at the last approved commit passes; `branch -D` then `git branch integrate/demo <protected>`, `git push . <protected>:refs/heads/integrate/new` and `git worktree add -b integrate/x <protected>` are refused; `ck worktree integration demo` creating its own ref succeeds. TC-190: `sandbox_settings(...)` lists `<common>/ck/hooks` and `<common>/ck/key` under `denyWrite` (and not `ck/tokens`); where namespaces exist, sandboxed writes to a hook script, `chain.json`, the interpreter record and the key fail with their sha256s unchanged, while a sandboxed allowed `ck worktree land` still succeeds.
@@ -946,11 +946,12 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 45 (TC-91, TC-93, TC-94, TC-182), Task 46 (TC-90), Task 47 (TC-95), Task 51 (TC-92, bypasses reported by the audit), Task 108 (TC-190)
 
 **Acceptance:**
-- [ ] Written from the requirements only, never from the implementation
-- [ ] Every refusal checks the ref is unchanged; bypass cases check the audit reports the drift and hook state
-- [ ] TC-90 fails before the implementation (today's `protected_changes` returns `[]` for quoted paths)
-- [ ] No mocks of the project's own code
+- [x] Written from the requirements only, never from the implementation
+- [x] Every refusal checks the ref is unchanged; bypass cases check the audit reports the drift and hook state
+- [x] TC-90 fails before the implementation (today's `protected_changes` returns `[]` for quoted paths)
+- [x] No mocks of the project's own code
 
+**Deviation:** TC-190 (b) and the sandboxed TC-95 case use a local `sandbox_run` in the test file: it adds `denyWrite` entries as read-only binds, makes the interpreter and sources readable and keeps `.git/worktrees` writable, because `sandboxed` in the helper does none of these (helper unchanged).
 **Dependencies:** Task 1 (hooks_repo, sandboxed, readonly_git_metadata)
 **Complexity:** High
 **Risk:** safety (attacks the authorization path for protected-file landings)
