@@ -164,17 +164,18 @@ export function formatPreflight(result: PreflightResult): string {
     );
   }
 
-  for (const check of [...errors, ...warnings]) {
-    lines.push(`  ${check.severity} ${check.id}: ${check.detail}`);
-    if (check.fix) lines.push(`    fix: ${check.fix}`);
-  }
-
   // The role lines show where a mapped role's model comes from (14.8). With no `opencode.roles` every
   // role is on the alias map, so the block stays out of the passing report, like the other passing checks.
+  // It prints before the problems so each role's line is the first line that names it.
   const roles = result.checks.find((check) => check.id === "roles" && check.ok);
   if (roles && roles.detail.includes("(source: roles)")) {
     lines.push("  roles (resolved model per role):");
     for (const line of roles.detail.split("\n")) lines.push(`    ${line}`);
+  }
+
+  for (const check of [...errors, ...warnings]) {
+    lines.push(`  ${check.severity} ${check.id}: ${check.detail}`);
+    if (check.fix) lines.push(`    fix: ${check.fix}`);
   }
   return lines.join("\n");
 }
