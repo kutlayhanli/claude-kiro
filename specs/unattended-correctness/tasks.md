@@ -1721,7 +1721,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 75: Test thin agents, run start and run end in the workflow
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 2.13, 10.1, 10.3, 14.1, 14.6, 16.7, 19.1, 19.3, 19.4, 19.5, 19.6
 **Description:** Implement TC-98 (b), TC-101, TC-131 (b), TC-148 (b), TC-159, TC-161, TC-162 (a), TC-163 and TC-164 (a) against the real workflow. Assert: run end calls the audit once after the last step for green, red and thrown runs, and an `audit: 'throw'` answer is recorded incomplete, never clean; run start (`run start` label / `worktree start --run` argv) is called once before the first task agent; on the Claude Code path every thin call TC-159 lists (plan, land, relink, park, gates, run start, audit) carries `agentType` and no task/review/fix/test-fix/cross-test/resolver call does; every thin `opts.schema` is deep-equal; `runnerAgent` null gives no agent type and a `thinAgent.warning`; malformed thin answers (missing `exitCode`, `json` not an object, free text) are failed calls; on the OpenCode path there are no thin labels; Claude Code agent opts carry only Claude aliases with `opencode.roles` present. On the OpenCode path (the `ck` global present), every base agent call's opts carry its `role`, and escalated ladder steps do not (14.1). TC-188 (2.13): pass 1 parks Task 3 on `PROTECTED` with a note naming `ck worktree approve demo 3` and the resume with the same `runId`, and Task 4 does not start; pass 2 with the same `runId` and Task 3 Done treats pass 1's claims as its own, starts Task 4, and requests one final attributed gate after Task 4's land (outcome `complete`). The test-fix thin calls are asserted in Task 83.
