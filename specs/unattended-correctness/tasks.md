@@ -156,7 +156,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 6: Add the D3 failure model and the pytest report plugin
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.6, 3.1, 3.2, 3.5, 12.5
 **Description:** Create `src/claude_kiro/failures.py` with the D3 model from design "Data Models / Python (failures.py)": the `Kind` literal (`assertion`, `import`, `collection`, `timeout`, `error`) and the frozen `Failure` dataclass (node, file, kind, message, truncated, command, exc_type, phase, crash_path, detail, missing_command) with an `as_json()` that emits the `ck-gate/1` failure keys (`node`, `tcId`, `tasks`, `attributedBy`, `file`, `kind`, `message`, `truncated`, `command`, `missingCommand`; `detail` is never emitted). Add the pure seams `classify_kind(exc_type, phase, message, timed_out) -> Kind` (AssertionError and subclasses by name -> assertion; ImportError/ModuleNotFoundError at collect -> import; other collect errors incl. SyntaxError -> collection; timed_out -> timeout; everything else, including a class merely named `MyAssertionError`, -> error), `truncate_message(text, limit=500) -> (str, bool)` (counts characters, safe for multibyte text, never drops the entry) and `missing_command(text, programs) -> Optional[str]` (click `No such command 'x'`, argparse `invalid choice: 'x'` and `unrecognized arguments`, returning the command path such as `mtr thesis new`). Add the readers the gate will use: `read_report(path, command)` for the JSON-lines report the plugin writes, `parse_short_summary(output, command)` for pytest's `FAILED`/`ERROR collecting` summary lines, and `failing_files(output, known_files, command)` for non-pytest runners (file-level entries). Create `src/claude_kiro/resources/pytest_plugin/ck_pytest_report.py`: a pytest plugin loaded with `-p ck_pytest_report` that appends one JSON line per failed or errored report (node id, phase, exception type, innermost crash path and line, first line of the crash message, longer detail up to 4000 chars) to `$CK_GATE_REPORT`, and, when `CK_GATE_COLLECT` is set, one line per collected node ID; under xdist only the controller writes; it does nothing when the variable is unset and never touches the network. In `pytest_configure` it reads `CK_GATE_REPORT`, `CK_GATE_ROOT` and `CK_GATE_COLLECT`, then removes them and its own `-p ck_pytest_report` token from `os.environ` (including `PYTEST_ADDOPTS`), so a nested pytest started by a test inherits nothing, and it writes only when `config.rootpath` equals `CK_GATE_ROOT` (design Public Interfaces). `Failure` gains `crash_line` (5.7). Make sure the plugin directory ships with the package. Harness Contract owner: item 2 (the failure entry, with design's keys) and item 3's `failures.KINDS`, `failures.MESSAGE_LIMIT` and `failures.truncate` (design: `Kind`, the 500-character limit and `truncate_message`).
@@ -168,11 +168,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 3 (P-5a at the truncation and kind seams)
 
 **Acceptance:**
-- [ ] `classify_kind` returns exactly one of the five kinds, and `error` for anything it cannot classify (3.2)
-- [ ] `truncate_message` returns at most 500 characters with `truncated` true iff the input was longer, and never drops an entry (3.5, NFR message limit)
-- [ ] An import or syntax error during collection yields a file-level failure with kind `import` or `collection` (1.6)
-- [ ] `missing_command` returns the command path for click `No such command`, argparse `invalid choice` and `unrecognized arguments` (12.5)
-- [ ] The plugin writes one JSON line per failing node only when `CK_GATE_REPORT` is set, once per node under xdist
+- [x] `classify_kind` returns exactly one of the five kinds, and `error` for anything it cannot classify (3.2)
+- [x] `truncate_message` returns at most 500 characters with `truncated` true iff the input was longer, and never drops an entry (3.5, NFR message limit)
+- [x] An import or syntax error during collection yields a file-level failure with kind `import` or `collection` (1.6)
+- [x] `missing_command` returns the command path for click `No such command`, argparse `invalid choice` and `unrecognized arguments` (12.5)
+- [x] The plugin writes one JSON line per failing node only when `CK_GATE_REPORT` is set, once per node under xdist
 
 **Dependencies:** Task 3 (its tests are the oracle)
 **Complexity:** Medium
