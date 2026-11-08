@@ -6,14 +6,14 @@
   X's gate can never pass, because its oracle needs code that can only come
   after X. Found by following T's test files' Python imports, through test
   helpers, to the task whose **Files:** list the imported module. This works
-  before the module exists, because ownership comes from tasks.md. Not a
-  cycle: a module that already exists and defines every imported name (later
-  owners only extend it), a module X itself lists in **Files:** (X creates or
-  extends it), or
-  T's suite when T also verifies Y (the gate defers T's suite until every
-  task it verifies is Done). In that case only X's own Verify commands that
-  run T's files count, and a `-k` or node-ID selection there limits the
-  in-test-body imports to the selected tests.
+  before the module exists, because ownership comes from tasks.md. The gate
+  runs T's suite only once every task T verifies is Done, so not a cycle:
+  Y Done by then (Y is, or is a dependency of, a task T verifies; only X's
+  own Verify commands that run T's files count then, and a `-k` or node-ID
+  selection there limits the in-test-body imports to the selected tests); a
+  module that a task Done by then also lists in **Files:** (X itself, a task
+  X depends on, or one the suite waits for); or a module that already exists
+  and defines every imported name (later owners only extend it).
 - Dependencies without a stated reason: every edge serializes work, so each
   should say why ("Task 3 (uses its parser API)"). Reported, not fatal.
 - Risk paths: a task whose **Files:** match a `risk_paths` glob in specs/ck.json
@@ -335,34 +335,49 @@ def verify_order_cycles(tasks: Dict[str, SpecTask], project_dir: Path, config: O
             for f in task.files:
                 owner_of.setdefault(f.removeprefix("./"), []).append(num)
 
+    ancestors: Dict[str, Set[str]] = {}
+
+    def anc(n: str) -> Set[str]:
+        if n not in ancestors:
+            ancestors[n] = _ancestors(tasks, n)
+        return ancestors[n]
+
     found = []
     for num, task in tasks.items():
         if task.track == "test" or task.done:
             continue
+        # Done whenever X's gate runs: X itself (its own work) and everything X depends on.
+        before_gate = {num} | anc(num)
         own_runs = None  # X's own Verify commands' test files, read once on first need
         for test_num in task.verified_by:
             test_task = tasks.get(test_num)
             if not test_task:
                 continue
+            # The gate runs T's suite only once every task T verifies is Done, so by then those
+            # tasks and everything they depend on are Done too.
+            verified = {v for v in test_task.verifies if v in tasks} | {v for v, t in tasks.items() if test_num in t.verified_by}
+            before_suite = set(before_gate)
+            for v in verified:
+                before_suite |= {v} | anc(v)
             test_files = _test_files(test_task, project_dir, config)
             suite = _owners_reached(test_files, project_dir, owner_of)
             selected = None
             for owner in sorted(suite):
-                if owner == num or owner not in tasks or num not in _ancestors(tasks, owner):
+                if owner == num or owner not in tasks or num not in anc(owner):
                     continue
-                if owner in test_task.verifies or test_num in tasks[owner].verified_by:
-                    # The gate runs T's suite only once every task T verifies is Done, so it is
-                    # never required at X's gate before Y lands. Only X's own Verify commands that
-                    # run T's files can reach Y's module there, under their own selection.
+                if owner in before_suite:
+                    # T's suite never runs at X's gate before Y lands. Only X's own Verify commands
+                    # that run T's files can reach Y's module there, under their own selection.
                     if own_runs is None:
                         own_runs = _verify_runs(task.verify, config)
                     if selected is None:
                         selected = _owners_reached({f: s for f, s in own_runs.items() if f in test_files}, project_dir, owner_of)
-                    modules = selected.get(owner, [])
+                    modules, done_by_then = selected.get(owner, []), before_gate
                 else:
-                    modules = suite[owner]
-                # A module X itself lists in **Files:** is X's to create or extend: not a cycle.
-                modules = [m for m in modules if num not in owner_of.get(m, [])]
+                    modules, done_by_then = suite[owner], before_suite
+                # A module that a task Done by then also lists in **Files:** (X itself, a task X
+                # depends on, or one the suite waits for) exists by then: not a cycle.
+                modules = [m for m in modules if not (set(owner_of.get(m, [])) & done_by_then)]
                 for module in modules[:1]:
                     found.append(
                         {
