@@ -643,7 +643,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 27: Red-team row fidelity's reviewer items and read-only rule (Story 8)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 8.3, 8.6
 **Description:** Try to break each SHALL NOT clause of Story 8 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Clauses: values the script checked SHALL not reach the reviewer (8.3); the check SHALL not modify the test plan, design or tests (8.6). Starting points via `ck lint demo --fidelity --json` and a test-track gate: the same literal appearing both checked and in a runtime expression; a row with a value inside backticks, a footnote, or a markdown table cell with a pipe; read-only spec files; a test file with CRLF line endings, a BOM or a non-UTF-8 byte; a symlinked test-plan; a fidelity output fed back as a test-plan row. Assert byte-identical files and modes after the run. Tests named `test_tc71_redteam_<slug>` and `test_tc74_redteam_<slug>`. Cases that run a test-track gate carry `ongate` in their name (`test_tc74_redteam_ongate_<slug>`); the `ck lint --fidelity` cases do not.
@@ -653,10 +653,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 32 (gate-side cases (`ongate`)), Task 53 (8.3, 8.6 through `ck lint --fidelity`)
 
 **Acceptance:**
-- [ ] Written from the requirements only, never from the implementation
-- [ ] Tests run the real CLI on real files and compare hashes, modes and `git status`
-- [ ] Each test fails before the implementation for the right reason
-- [ ] No mocks of the project's own code
+- [x] Written from the requirements only, never from the implementation
+- [x] Tests run the real CLI on real files and compare hashes, modes and `git status`
+- [x] Each test fails before the implementation for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project)
 **Complexity:** Low
