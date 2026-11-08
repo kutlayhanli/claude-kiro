@@ -1624,7 +1624,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 71: Parse and validate `opencode.roles` in the OpenCode host
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 14.1, 14.2, 14.3, 14.4
 **Description:** In `opencode/src/models.ts`, add `ROLE_NAMES` (`implementer`, `test_writer`, `reviewer`, `reviewer_risky`, `fixer`, `orchestrator`, `resolver`) and the pure functions `validateRoleRef(value) -> string | null` (an error for a missing provider, missing model, or empty variant in `provider/model[#variant]`) and `resolveRoleRef(role, roles) -> RoleRef | null` (`{provider, model, variant}` or null when the role is unmapped). In `opencode/src/config.ts`, add `CkConfig.roles: Record<RoleName, string>`, accept `"roles"` as a known `opencode` key, layer global then project (project wins per role) and record `sources["roles.<role>"]`; an unknown role or malformed reference throws `ConfigError` at `loadConfig` naming `opencode.roles.<role>` and the value, so the workflow tool refuses to start before any agent runs. Harness Contract owner: item 6's `opencode.roles` and item 11's `loadConfig` roles with `sources["roles.<role>"]`, and the role-resolution seam (design: `resolveRoleRef`; Task 72 completes the contract's `resolveRoleModel` behaviour).
