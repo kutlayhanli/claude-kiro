@@ -17,8 +17,16 @@ import pytest
 
 import unattended_helpers as h
 
-GIT_INTERNAL = ("objects", "refs", "logs", "worktrees", "hooks")
-GIT_FILES = ("index", "HEAD", "ORIG_HEAD", "FETCH_HEAD", "config", "packed-refs", "COMMIT_EDITMSG", "description")
+# The standard git hook names. ck's hooks directory holds one script per name, beside non-script records
+# (chain.json, the recorded interpreter) that the hook-tamper cases must leave alone.
+GIT_HOOK_NAMES = frozenset({
+    "applypatch-msg", "pre-applypatch", "post-applypatch", "pre-commit", "pre-merge-commit",
+    "prepare-commit-msg", "commit-msg", "post-commit", "pre-rebase", "post-checkout", "post-merge",
+    "pre-push", "pre-receive", "update", "proc-receive", "post-receive", "post-update",
+    "reference-transaction", "push-to-checkout", "pre-auto-gc", "post-rewrite", "sendemail-validate",
+    "fsmonitor-watchman", "p4-changelist", "p4-prepare-changelist", "p4-post-changelist", "p4-pre-submit",
+    "post-index-change",
+})
 
 
 def common_dir(root: Path) -> Path:
@@ -34,6 +42,10 @@ def hook_files(root: Path) -> List[Path]:
     if not d.is_dir():
         return []
     return sorted(p for p in d.iterdir() if p.is_file() and not p.name.endswith(".sample"))
+
+
+def hook_scripts(paths: List[Path]) -> List[Path]:
+    return [p for p in paths if p.name in GIT_HOOK_NAMES]
 
 
 def audit_repo(tmp_path: Path, *, allow: Optional[List[str]] = None, readonly_install: bool = False):
@@ -148,17 +160,20 @@ def _assert_hooks_reported(code, obj):
 
 def test_tc97_hooks_deleted(tmp_path):
     root, ck_hooks, _ = audit_repo(tmp_path)
-    assert ck_hooks, "ck worktree integration installed no hook files"
-    for p in ck_hooks:
+    scripts = hook_scripts(ck_hooks)
+    assert scripts, f"ck worktree integration installed no hook scripts: {ck_hooks}"
+    for p in scripts:
         p.unlink()
     _assert_hooks_reported(*audit(root))
 
 
 def test_tc97_hook_content_altered(tmp_path):
     root, ck_hooks, _ = audit_repo(tmp_path)
-    assert ck_hooks, "ck worktree integration installed no hook files"
-    for p in ck_hooks:
-        p.write_text(p.read_text() + "\n# tampered\nexit 0\n")
+    target = [p for p in ck_hooks if p.name == "reference-transaction"]
+    assert target, f"ck worktree integration installed no reference-transaction hook: {ck_hooks}"
+    others = {p: p.read_bytes() for p in ck_hooks if p != target[0]}
+    target[0].write_text(target[0].read_text() + "\n# tampered\nexit 0\n")
+    assert all(p.read_bytes() == b for p, b in others.items())  # only the one script changed
     code, obj = audit(root)
     _assert_hooks_reported(code, obj)
     assert obj["hooks"]["intact"] is False
@@ -226,13 +241,11 @@ def _approve_in_pty(root: Path) -> int:
                 break
             seen += chunk
             if not typed:
-                for line in seen.splitlines():
-                    if re.search(rb"code", line, re.IGNORECASE):
-                        toks = re.findall(rb"\b[A-Za-z0-9]{6}\b", line)
-                        if toks:
-                            os.write(fd, toks[-1] + b"\n")
-                            typed = True
-                            break
+                # the first 6-character token after the word "code", on the same line or a following one
+                m = re.search(rb"code\W+(?:\S*\W+)??\b([A-Za-z0-9]{6})\b", seen, re.IGNORECASE)
+                if m and m.end() < len(seen):  # the token is complete only once more output follows it
+                    os.write(fd, m.group(1) + b"\n")
+                    typed = True
     if not typed:
         try:
             os.kill(pid, signal.SIGKILL)
@@ -272,15 +285,7 @@ def test_tc99_approval_landing_is_not_drift(tmp_path):
 def _approved_record_candidates(root: Path, changed: List[str]) -> List[Path]:
     """Files `ck worktree integration` wrote that are neither git internals nor worktree checkouts."""
     common = common_dir(root)
-    wts = root / ".ck" / "worktrees"
-    out = []
-    for key in changed:
-        p = Path(key)
-        if wts in p.parents:
-            continue
-        if (common / "ck" / "demo") in p.parents:
-            out.append(p)
-    return out
+    return [Path(key) for key in changed if (common / "ck" / "demo") in Path(key).parents]
 
 
 @pytest.mark.parametrize("mode", ["deleted", "corrupt"])
