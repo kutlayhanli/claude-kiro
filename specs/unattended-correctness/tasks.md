@@ -134,7 +134,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 5: Test the structured failure format in gate and land JSON
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 3.2, 3.3, 3.4, 3.5, 3.9, 3.10
 **Description:** Implement TC-28, TC-29, TC-30, TC-31, TC-32, TC-36 (CLI sources: `ck gate --json`, `ck gate --attribute --json`, `ck worktree land --gate --json` `tasks[].failures`) and TC-37 (land JSON still has every key path in `land-json-keys.json`). TC-29 is a table over real pytest outcomes (bare assert, `AssertionError` subclass, `MyAssertionError(Exception)`, module-level `ImportError`/`ModuleNotFoundError`, `SyntaxError`, setup error, teardown error, `RuntimeError`, verify timeout, `pytest.fail`). TC-183: `ck gate demo --attribute --json --compact` prints `ck-gate-compact/1` (full regression and flaky entries, `excusedByTask` counts, `report` path) and the report file equals a `--json` run's object (timing excluded). TC-191: a passing gated test that runs a nested failing pytest with `os.environ` copied leaves `failures` empty, with and without `-n 2`. Every failure object is validated against `tests/fixtures/unattended/failure.schema.json`. TC-36's CLI sources are separate tests named `test_tc36_gate_json_<slug>`, `test_tc36_gate_attribute_<slug>` and `test_tc36_land_<slug>`, so each runs at the task that adds its source.
@@ -144,10 +144,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 19 (TC-28 to TC-30, TC-32, TC-191 and TC-36's `ck gate --json` source), Task 20 (TC-31, TC-183 and TC-36's `--attribute` source), Task 37 (TC-36's land source and TC-37)
 
 **Acceptance:**
-- [ ] Tests run the real gate and real land on real repos with real pytest
-- [ ] They fail before the implementation because `failures` is missing or `--json` is unknown, not because of test bugs; TC-37 passes before and after
-- [ ] TC-32 checks the 500-character bound on multibyte text and that 120 failing tests give 120 entries
-- [ ] No mocks of the project's own code
+- [x] Tests run the real gate and real land on real repos with real pytest
+- [x] They fail before the implementation because `failures` is missing or `--json` is unknown, not because of test bugs; TC-37 passes before and after
+- [x] TC-32 checks the 500-character bound on multibyte text and that 120 failing tests give 120 entries
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project, failure.schema.json, land-json-keys.json)
 **Complexity:** Medium
@@ -181,7 +181,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 7: Test `ck graph` nodes, edges, freshness and problems
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8
 **Description:** Implement TC-102, TC-103, TC-104, TC-105, TC-14, TC-107 and TC-108 on `spec_graph_project` with `ck graph demo --json` (`ck-graph/1`). TC-102 compares node kinds (`task`, `tc`, `test_file`, `source_file`, `command`) and edge kinds (`depends`, `verifies`, `owns`, `provides`, `invokes`, `imports`) with exact expected sets. TC-103: design-table inference and `**Provides:**` precedence. TC-104: every P-20 invocation form and near-miss in one file. TC-105: byte-identical output sorted by (kind, id). TC-14: moving `tc3_` from Task 3's Verify to Task 8's changes the verifies edge and `ck gate --attribute --json`'s `tasks` together. TC-107: edits with `os.utime` restoring mtimes are reflected. TC-108: malformed task blocks and a syntax-error test file appear in `problems`, the rest equals the clean subset's graph.
@@ -191,10 +191,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 12 (TC-105, TC-107, TC-108), Task 13 (TC-102 to TC-104), Task 20 (TC-14 through `ck gate --attribute`)
 
 **Acceptance:**
-- [ ] Tests run the real CLI on real files
-- [ ] They fail before the implementation because `ck graph` does not exist
-- [ ] TC-14 checks graph and gate change in the same step (one mapping)
-- [ ] No mocks of the project's own code
+- [x] Tests run the real CLI on real files
+- [x] They fail before the implementation because `ck graph` does not exist
+- [x] TC-14 checks graph and gate change in the same step (one mapping)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (spec_graph_project, attr_project)
 **Complexity:** High
@@ -227,7 +227,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 9: Test the attribution, hook and graph performance budgets
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 9.4, 11.1
 **Description:** Implement TC-169, TC-170 and TC-109, all `@pytest.mark.serial`. TC-169: a parsed result of 2,000 tests and 200 failures over a generated 100-task spec (graph and `AttributionIndex` built before the clock starts); `attribute_failure` over all failures plus `rerun_plan` and `gate_verdict` take under 2 s; and `ck gate --attribute --json` with a stub verify command printing pre-recorded pytest output, minus the stub's own time, is under 2 s. TC-170: on `equity_sized_repo`, median of 20 `git update-ref refs/heads/x` with hooks minus without is under 50 ms; for `integrate/demo` (allowed change) under 1 s. TC-109: 100 tasks and 200 test files, `ck graph demo --json` wall time minus `ck --version` under 3 s.
@@ -237,10 +237,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 12 (TC-109), Task 20 (TC-169), Task 45 (TC-170)
 
 **Acceptance:**
-- [ ] Timings run the real seams, real CLI and real git hooks
-- [ ] They fail before the implementation because the seams, hooks and `ck graph` do not exist
-- [ ] Inputs are generated deterministically (fixed seeds)
-- [ ] No mocks of the project's own code
+- [x] Timings run the real seams, real CLI and real git hooks
+- [x] They fail before the implementation because the seams, hooks and `ck graph` do not exist
+- [x] Inputs are generated deterministically (fixed seeds)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (equity_sized_repo, spec_graph_project)
 **Complexity:** Medium
@@ -406,7 +406,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 17: Test command dependencies in lint, relink, plan and spec-create
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 12.1, 12.2, 12.3, 12.4, 12.5, 12.9, 13.1, 13.4, 13.6
 **Description:** Implement TC-110, TC-111, TC-112, TC-113 (a and b), TC-115, TC-119, TC-122 (b), TC-124 (b) and TC-125. TC-110: `ck lint demo --json` `commandEdges` names the test file, `mtr thesis new`, Task 5 and Task 2. TC-111: `ck relink demo --commands --apply --json` adds the dependency; a second lint is clean and a second relink changes nothing. TC-112: `mtr bogus` in `unknownCommands`, `mtr version` not. TC-113a (JS): the real `spec-create.js` tasks-writing prompt asks for `**Provides:**` and a check with `ck graph` or `ck lint`; TC-113b: `ck graph` on such a tasks.md has the provides edge. TC-115: failure entries carry `missingCommand.command == "mtr thesis new"` for click `No such command`, `unrecognized arguments` and `invalid choice`. TC-119: the existing lint and relink tests run unchanged. TC-122b: `noWriteSet` for a task with no Files. TC-124b: `ck plan demo --json` leaves tasks.md byte-identical. TC-125: `overlaps` for `src/*.py`/`src/a.py` and `src/**`/`src/x/y.py`, none for `src/a.py`/`src/ab.py`. TC-119's existing lint and relink suites run unchanged in Task 33's Verify.
@@ -417,10 +417,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 13 (TC-113b), Task 19 (TC-115), Task 53 (TC-110 to TC-112, TC-122b, TC-124b, TC-125), Task 95 (TC-113a)
 
 **Acceptance:**
-- [ ] Tests run the real lint, relink, plan and gate CLIs on real files and the real spec-create script
-- [ ] They fail before the implementation because the new lint keys, `--commands` and `missingCommand` do not exist
-- [ ] TC-119's existing files are run, not modified
-- [ ] No mocks of the project's own code
+- [x] Tests run the real lint, relink, plan and gate CLIs on real files and the real spec-create script
+- [x] They fail before the implementation because the new lint keys, `--commands` and `missingCommand` do not exist
+- [x] TC-119's existing files are run, not modified
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (spec_graph_project; TC-113a uses the existing `tests/js/fake_create.mjs`)
 **Complexity:** High
@@ -936,7 +936,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 40: Red-team the protected-file hooks (Story 9)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 9.2, 9.6, 9.8, 9.11, 9.12, 10.1, 10.2
 **Description:** Try to break Story 9's refusal of protected changes with adversarial inputs: unusual surface forms, near-miss values, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way found becomes a test. Starts from TC-90, TC-91, TC-92, TC-93, TC-94 and TC-95: git-quoted non-ASCII and space paths (`.claude/commands/ä.md`) through raw merge, land and merge; a branch that allows itself in `specs/ck.json` (one and two commits); bypasses (`-c core.hooksPath=/dev/null`, deleted hooks, direct ref file writes) then reported by `ck worktree audit`; deletions and renames out of `.claude/`; a protected change buried two merges deep; approval attempts under `sandboxed` and `readonly_git_metadata`, including `script -qc` with "yes" piped in. TC-182 (9.12): `git update-ref -d refs/heads/integrate/demo` passes, then re-creating it at a commit carrying `.claude/CLAUDE.md` is refused (ref stays absent); re-creating at the last approved commit passes; `branch -D` then `git branch integrate/demo <protected>`, `git push . <protected>:refs/heads/integrate/new` and `git worktree add -b integrate/x <protected>` are refused; `ck worktree integration demo` creating its own ref succeeds. TC-190: `sandbox_settings(...)` lists `<common>/ck/hooks` and `<common>/ck/key` under `denyWrite` (and not `ck/tokens`); where namespaces exist, sandboxed writes to a hook script, `chain.json`, the interpreter record and the key fail with their sha256s unchanged, while a sandboxed allowed `ck worktree land` still succeeds.
@@ -946,11 +946,12 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 45 (TC-91, TC-93, TC-94, TC-182), Task 46 (TC-90), Task 47 (TC-95), Task 51 (TC-92, bypasses reported by the audit), Task 108 (TC-190)
 
 **Acceptance:**
-- [ ] Written from the requirements only, never from the implementation
-- [ ] Every refusal checks the ref is unchanged; bypass cases check the audit reports the drift and hook state
-- [ ] TC-90 fails before the implementation (today's `protected_changes` returns `[]` for quoted paths)
-- [ ] No mocks of the project's own code
+- [x] Written from the requirements only, never from the implementation
+- [x] Every refusal checks the ref is unchanged; bypass cases check the audit reports the drift and hook state
+- [x] TC-90 fails before the implementation (today's `protected_changes` returns `[]` for quoted paths)
+- [x] No mocks of the project's own code
 
+**Deviation:** TC-190 (b) and the sandboxed TC-95 case use a local `sandbox_run` in the test file: it adds `denyWrite` entries as read-only binds, makes the interpreter and sources readable and keeps `.git/worktrees` writable, because `sandboxed` in the helper does none of these (helper unchanged).
 **Dependencies:** Task 1 (hooks_repo, sandboxed, readonly_git_metadata)
 **Complexity:** High
 **Risk:** safety (attacks the authorization path for protected-file landings)
@@ -958,7 +959,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 41: Test the run-end protected-file audit
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 10.1, 10.2, 10.3, 10.4, 10.5
 **Description:** Implement TC-96, TC-97, TC-98 (a), TC-99 and TC-100 with `ck worktree audit demo --json` (`ck-audit/1`). TC-96: ref-file bypass adds `.claude/a`, changes `.mcp.json`, deletes `.claude/settings.json`; `drift` lists exactly those with `added`/`changed`/`deleted`. TC-97: hooks deleted, altered, `core.hooksPath` repointed, never installed; each in `hooks`. TC-98a: `clean: true`, exit 0. TC-99: allow-list and approval landings are not drift. TC-100: delete or corrupt the approved-state record (found by `snapshot_ck_state` diff around `ck worktree integration`): `complete: false`, `clean: false`, exit 3.
@@ -968,9 +969,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 51 (TC-96 to TC-100)
 
 **Acceptance:**
-- [ ] Tests run real git, real landings and the real audit CLI
-- [ ] They fail before the implementation because `ck worktree audit` does not exist
-- [ ] No mocks of the project's own code
+- [x] Tests run real git, real landings and the real audit CLI
+- [x] They fail before the implementation because `ck worktree audit` does not exist
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (hooks_repo, snapshot helpers)
 **Complexity:** Medium
@@ -979,7 +980,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 42: Red-team the audit's incomplete state (Story 10)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 10.5
 **Description:** Try to break each SHALL NOT clause of Story 10 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Clause: an audit that cannot read the approved state SHALL not report the run clean (10.5). Starting points with `ck worktree audit demo --json` on `hooks_repo`: the approved-state record truncated, emptied, replaced by valid JSON for another spec or another ref, replaced by an older snapshot from `snapshot_ck_state`, made unreadable by permissions, replaced by a directory or a symlink, or with a mac that matches the old content; the ck data dir moved; the integration branch deleted and recreated. Every case must give `complete: false` and `clean: false` (or report drift), never `clean: true`. Tests named `test_tc100_redteam_<slug>`.
@@ -989,10 +990,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 51 (red team of 10.5)
 
 **Acceptance:**
-- [ ] Written from the requirements only, never from the implementation
-- [ ] Tests reach ck's state only through the snapshot helpers and the CLI
-- [ ] Each test fails before the implementation for the right reason
-- [ ] No mocks of the project's own code
+- [x] Written from the requirements only, never from the implementation
+- [x] Tests reach ck's state only through the snapshot helpers and the CLI
+- [x] Each test fails before the implementation for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (hooks_repo, snapshot helpers)
 **Complexity:** Medium
@@ -1001,7 +1002,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 43: Test the recorded-fixture hash lock and labels
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 15.1, 15.2, 15.3, 15.4, 15.5, 15.6, 15.7, 15.8
 **Description:** Implement TC-134, TC-135, TC-136, TC-137, TC-138, TC-139 (a), TC-140 and TC-141 with real landings. Config `fixtures.recorded: ["tests/fixtures/recorded/**"]`. TC-134: first land of `prices.json` locks its sha256, shown by `ck fixtures status demo --json`. TC-135: a later land changing it reports `fixtureDrift` with file and task, and the audit reports it. TC-136: `ck fixtures mark tests/fixtures/recorded/prices.json --handcrafted "trimmed to 3 rows"` then land: no drift, reason in status. TC-137: reasons `""`, `"   "`, `"\n"` stay drift. TC-138: editing or deleting a lock entry for an existing file is reported by the audit. TC-139a: `unlabeled` lists files without capture metadata or handcrafted label. TC-140: no globs, no new state file in the `snapshot_ck_state` diff and no fixture items. TC-141: globs `42`, `null`, `["a", 1]`, `{"x": "y"}` give a config error naming `fixtures.recorded` from land and status.
@@ -1011,9 +1012,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 48 (TC-139a), Task 49 (TC-134, TC-136, TC-137, TC-141), Task 51 (TC-135, TC-138, TC-140 (audit side))
 
 **Acceptance:**
-- [ ] Tests run real landings, the real fixtures CLI and the real audit
-- [ ] They fail before the implementation because `ck fixtures` does not exist
-- [ ] No mocks of the project's own code
+- [x] Tests run real landings, the real fixtures CLI and the real audit
+- [x] They fail before the implementation because `ck fixtures` does not exist
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project, snapshot helpers)
 **Complexity:** Medium
@@ -1204,7 +1205,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 52: Test no network calls and run the backward-compatibility suite
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 18.5, 9.2, 10.1, 11.5, 12.2, 15.1
 **Description:** Implement TC-168 (with the `no_network` fixture, these run with an empty network log: `ck gate --attribute --json`, `ck graph`, `ck lint`, `ck relink --commands --apply`, a hooked raw `git merge`, `ck worktree land`, `ck worktree audit`, `ck worktree start`, `ck fixtures status`, `ck lint --fidelity`, `ck testfix check`). Each command's test is named `test_tc168_<command>`, and the `ck testfix check` one is `test_tc168_testfix_check`. TC-171 and TC-158 (both `specs/ck.json` verify commands pass whatever the `dsh` outcome) are checked by the run's final attributed gate.
@@ -1214,9 +1215,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 53 (TC-168 for gate, graph, lint, relink, plan, land, hooks, audit, start and fixtures), Task 57 (TC-168 for `ck testfix check`)
 
 **Acceptance:**
-- [ ] Network blocking uses the existing `no_network` fixture and netguard for Python children
-- [ ] TC-168 fails before the implementation because the listed commands do not exist
-- [ ] No mocks of the project's own code
+- [x] Network blocking uses the existing `no_network` fixture and netguard for Python children
+- [x] TC-168 fails before the implementation because the listed commands do not exist
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project, hooks_repo, spec_graph_project)
 **Complexity:** Low
@@ -1248,7 +1249,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 54: Test `ck testfix` scope, proof and the one-fix ledger on real repos
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 4.2, 4.4, 4.5, 4.8, 4.11
 **Description:** Implement TC-41, TC-44 (a) and TC-47 (a). TC-41: `ck testfix prove demo <fixid> --blocked 4 --test <node> --json` on a real repo with a real test-fix worktree branch: (a) the fixed test passes against Task 4's branch plus the fix (proof proved); (b) it fails with `ImportError` for a name Task 4's Files own (proved, outcome class `not-built`); (c) it fails on a fixture assertion (not proved). TC-44a: `prove` on fix branches that change `src/calc.py`, `specs/demo/requirements.md` or `specs/demo/test-plan.md` (an existing row, or only a new row appended) returns an out-of-scope scope decision naming the paths, with no proof run; a branch changing only `tests/` and `tests/fixtures/` is in scope. TC-47a: `ck testfix check demo --test <node> --json` allows the node, `ck testfix record ... --outcome landed` writes the ledger, and a new process (after a new `ck progress begin`) gets the node in `alreadyFixed`. TC-44a also covers a branch that only adds a new row to `specs/demo/test-plan.md` (out of scope). TC-185: `ck testfix prove demo testfix1 --held 2 --test <node> --json` with no Task 2 branch proves against the integration branch (`against: "integration"`): a not-built `ImportError` is proved, a fixture assertion or a skipped test is not; neither `--blocked` nor `--held` is a usage error. TC-187: a proved fix changing `tests/test_calc_tc.py` lands MERGED through the real `ck worktree land demo testfix1 --gate --json` with `gateTasks: ["1"]`; a fix changing only an unowned file lands RED with the reason and the ref unchanged.
@@ -1258,10 +1259,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 57 (TC-41, TC-44a, TC-47a, TC-185, TC-187)
 
 **Acceptance:**
-- [ ] Tests use real git branches, real pytest and real persisted ledger state across processes
-- [ ] They fail before the implementation because `ck testfix` does not exist
-- [ ] The scope check is asserted to run before any proof run (no counter-file runs for an out-of-scope fix)
-- [ ] No mocks of the project's own code
+- [x] Tests use real git branches, real pytest and real persisted ledger state across processes
+- [x] They fail before the implementation because `ck testfix` does not exist
+- [x] The scope check is asserted to run before any proof run (no counter-file runs for an out-of-scope fix)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project, ck_json)
 **Complexity:** Medium
@@ -2418,7 +2419,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 106: Red-team claim release by run ID (Story 16)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 16.2, 16.3, 16.5
 **Description:** Try to break each SHALL NOT clause of Story 16 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Clause: a running run's claim SHALL be kept and its task not taken (16.3). Starting points with real git locks and real progress records: a live run whose last event is more than 120 minutes old while its only agent is still working (record what happens: released as stale, which the design accepts, and that its commits are kept); an owner string containing ` run <key>` or `(claim x at y run z)` to spoof another run; run keys with spaces, parentheses and non-ASCII; a `CK_NOW` skew between the claiming and the starting process; a run record with a forged `end` event appended by hand next to a live spool copy; spool and data-dir copies that disagree. Seam cases against `claim_info`, `run_liveness` and `claim_release_decision` are named `test_tc145_redteam_seam_<slug>`; CLI cases through `ck worktree start` are named `test_tc145_redteam_<slug>`.
@@ -2428,10 +2429,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 36 (seam cases), Task 50 (CLI cases through `ck worktree start`)
 
 **Acceptance:**
-- [ ] Written from the requirements only, never from the implementation
-- [ ] A live run's claim is never released by a spoofed owner string or run key
-- [ ] Each test fails before the implementation for the right reason
-- [ ] No mocks of the project's own code
+- [x] Written from the requirements only, never from the implementation
+- [x] A live run's claim is never released by a spoofed owner string or run key
+- [x] Each test fails before the implementation for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (progress_run, ck_json)
 **Complexity:** Medium
@@ -2440,7 +2441,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 107: Red-team right-reason classification (Story 5)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.3, 5.4, 5.7
 **Description:** Try to break Story 5's blocking boundary with adversarial inputs: a wrong-reason failure must block (5.3, 5.7) and an unclear one must never block (5.4). Every way you find to break it becomes a test. Starting points: a test that raises `NotImplementedError` itself (not from project code); an import typo of a project module in the test file (`from calcc import x`); a CLI message (`No such command`) quoted inside an assertion message the test writes; an assert on fixture data reached through an alias, a comprehension, a `with open(...)` block or a helper defined in the same file; an assert on a project call hidden behind a local variable; a pytest fixture argument that only returns a literal (unclear under 5.7, so it must not block); a helper defined in the same file, or imported from a test helper module, that calls project code (unclear under 5.7); ANSI codes, `\r\n` and a reformatted traceback around each message. Seam cases against `failures.classify_not_built` and `assert_reaches_project` are named `test_tc52_redteam_seam_<slug>`; CLI cases through `ck gate demo --task 1 --json` are named `test_tc52_redteam_<slug>`.
@@ -2450,10 +2451,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 29 (seam cases), Task 31 (CLI cases through `ck gate`)
 
 **Acceptance:**
-- [ ] Written from the requirements only, never from the implementation
-- [ ] Every disguised wrong-reason failure blocks and every disguised unclear one does not
-- [ ] Each test fails before the implementation for the right reason
-- [ ] No mocks of the project's own code
+- [x] Written from the requirements only, never from the implementation
+- [x] Every disguised wrong-reason failure blocks and every disguised unclear one does not
+- [x] Each test fails before the implementation for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project, spec_graph_project fixture CLIs)
 **Complexity:** Medium
