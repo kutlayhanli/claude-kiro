@@ -365,7 +365,7 @@ def claim_cmd(spec, task, owner, takeover, progress_run, progress_event, progres
     """
     root = _root()
     owner = owner or f"ck task agent on {socket.gethostname()}"
-    outcome = wt.claim(root, _spec_name(spec), task, owner, takeover=takeover)
+    outcome = wt.claim(root, _spec_name(spec), task, owner, takeover=takeover, run=progress_run)
     if outcome.state == "CLAIMED" and progress_run and progress_event:
         _record_progress(_spec_name(spec), progress_run,
                          [(progress_event, {"task": task, "model": progress_model, "attempt": attempt})])
