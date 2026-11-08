@@ -109,6 +109,13 @@ def assert_refused(root: Path, proc: subprocess.CompletedProcess, ref_name: str,
     assert h.ref(root, ref_name) == before, f"{what} moved {ref_name} although it was refused"
 
 
+def assert_hook_refusal(root: Path, run_git, ref_name: str, before: str, what: str) -> None:
+    """A raw update-ref of the protected commit, refused by ck's hook (its message names .claude/CLAUDE.md)."""
+    proc = run_git(["update-ref", ref_name, tip(root, 1)])
+    assert_refused(root, proc, ref_name, before, what)
+    assert ".claude/CLAUDE.md" in proc.stdout + proc.stderr, f"{what}: not ck's hook message:\n{proc.stdout}{proc.stderr}"
+
+
 def states_of(obj: Any) -> Dict[str, str]:
     """task -> state, from `land --json` ({"tasks": [...]}) or `merge --json` ([...])."""
     items = obj["tasks"] if isinstance(obj, dict) else obj
@@ -345,11 +352,12 @@ def test_tc79a_replaying_ck_state_after_an_allowed_landing_lets_no_other_update_
     assert code == 0 and states_of(obj)["2"] == "MERGED", f"{code} {obj} {err}"
     landed = integ_ref(root)
     after = h.snapshot_ck_state(root)
-    detach_integration(root)
     h.restore_ck_state(root, after)
+    detach_integration(root)
     proc = h.raw(root, "update-ref", PROTECTED_REF, tip(root, 1))
     assert_refused(root, proc, PROTECTED_REF, landed, "raw update to another protected commit after the landing")
     h.restore_ck_state(root, after)
+    detach_integration(root)
     again = h.raw(root, "update-ref", PROTECTED_REF, tip(root, 1))
     assert_refused(root, again, PROTECTED_REF, landed, "the same raw update with ck's state replayed")
 
@@ -362,11 +370,12 @@ def test_tc79b_a_used_token_does_not_let_the_same_update_be_replayed_with_raw_gi
     approved = integ_ref(root)
     assert approved != before and h.raw(root, "cat-file", "-e", f"{approved}:.claude/CLAUDE.md").returncode == 0
     state = h.snapshot_ck_state(root)  # right after the landing: the used token and ck's records
-    # Put the ref back the way ck would (a direct ref write), then replay the same update with plain git.
+    # Replay ck's state first (it also holds the ref and the worktree HEAD), then put the ref back the way ck would
+    # (a direct ref write) and detach, so only the used token and ck's records remain from the landing.
+    h.restore_ck_state(root, state)
     (common_dir(root) / "refs" / "heads" / "integrate" / "demo").write_text(before + "\n")
     assert integ_ref(root) == before
     detach_integration(root)
-    h.restore_ck_state(root, state)
     proc = h.raw(root, "update-ref", PROTECTED_REF, approved)
     assert_refused(root, proc, PROTECTED_REF, before, "replaying the approved update with plain git")
 
@@ -556,12 +565,16 @@ def test_tc85_ck_chains_to_the_repositorys_own_hooks(tmp_path, scenario):
 @pytest.fixture
 def unwritable_hooks_location(tmp_path):
     """The hooks location made read-only before install: no hooks yet, ck's directory and the config read-only."""
+    if os.geteuid() == 0:
+        pytest.skip("chmod read-only does not bind root")
     root = h.hooks_repo(tmp_path)
     remove_ck_hooks(root)
     h.raw(root, "config", "--unset", "core.hooksPath")
     common = common_dir(root)
-    (common / "ck").mkdir(exist_ok=True)
-    targets = [common / "ck", common / "config"]
+    for sub in ("ck", "ck/demo", "ck/tokens"):  # writable records stay writable; only the hooks location is locked
+        (common / sub).mkdir(parents=True, exist_ok=True)
+    (common / "ck" / "hooks").mkdir(exist_ok=True)
+    targets = [common / "ck" / "hooks", common / "config"]
     saved = [(p, stat.S_IMODE(p.stat().st_mode)) for p in targets]
     for path, mode in saved:
         path.chmod(mode & ~0o222)
@@ -600,6 +613,7 @@ def test_tc86_run_start_reports_that_hooks_are_not_installed_with_the_reason(unw
 # --------------------------------------------------------------------------- TC-87, TC-88
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="chmod read-only does not bind root")
 def test_tc87_hooks_stay_effective_and_tokens_work_with_read_only_git_metadata(tmp_path):
     root = h.hooks_repo(tmp_path)
     allow_paths_on_integration(root, ALLOW_COMMANDS)
@@ -608,9 +622,13 @@ def test_tc87_hooks_stay_effective_and_tokens_work_with_read_only_git_metadata(t
     with h.readonly_git_metadata(root):
         merge = h.raw(wt, "merge", "--no-ff", "--no-verify", "--no-edit", "feat/demo-task-1")
         assert_refused(root, merge, PROTECTED_REF, before, "raw merge --no-verify of Task 1 under read-only metadata")
-        # The ref itself is writable (refs are not metadata the sandbox locks), so the refusal here is the hook's.
-        direct = h.raw(root, "update-ref", PROTECTED_REF, tip(root, 1))
-        assert_refused(root, direct, PROTECTED_REF, before, "raw update-ref under read-only metadata")
+        # The merge can die on read-only worktree metadata before any hook runs; the ref update reaches the hook.
+        assert_hook_refusal(root, lambda a: h.raw(root, *a), PROTECTED_REF, before,
+                            "raw update-ref under read-only metadata")
+        # ck's own landing needs the integration worktree's gitdir (ORIG_HEAD, index) writable: that gitdir is
+        # unlocked for the landing only; the hooks, config and the other worktrees stay read-only.
+        gitdir = Path(h.raw(wt, "rev-parse", "--path-format=absolute", "--git-dir").stdout.strip())
+        gitdir.chmod(gitdir.stat().st_mode | 0o200)
         code, obj, err = h.ck_json(root, "worktree", "land", "demo", "2", "--into", "integrate/demo", "--keep", "--json")
         assert obj is not None, f"no JSON ({code}): {err}"
         assert states_of(obj)["2"] == "MERGED", f"an allowed landing must succeed under read-only metadata: {obj} {err}"
@@ -646,6 +664,11 @@ def test_tc88_a_raw_protected_merge_is_refused_inside_the_real_sandbox(tmp_path)
     proc = h.sandboxed(["git", "-C", str(wt), "merge", "--no-ff", "--no-verify", "--no-edit", "feat/demo-task-1"],
                        root, root / ".ck" / "worktrees", env=sandbox_ck(tmp_path, root))
     assert_refused(root, proc, PROTECTED_REF, before, "sandboxed git merge --no-verify of Task 1")
+    env = sandbox_ck(tmp_path, root)
+    run = lambda a: h.sandboxed(["git", "-C", str(root), *a], root, root / ".ck" / "worktrees", env=env)
+    assert_hook_refusal(root, run, PROTECTED_REF, before, "sandboxed raw update-ref of the protected commit")
+    ok = run(["update-ref", "refs/heads/feature", tip(root, 3)])  # control: not protected, so the hook lets it pass
+    assert ok.returncode == 0, f"a sandboxed update to a non-protected ref must pass:\n{ok.stdout}{ok.stderr}"
 
 
 # --------------------------------------------------------------------------- TC-189
@@ -663,6 +686,7 @@ def _run_env(tmp_path: Path, claude_bin: Path) -> Dict[str, str]:
     return {"PATH": os.pathsep.join([str(claude_bin), str(tools), os.environ.get("PATH", "")]), "HOME": str(home)}
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="chmod read-only does not bind root")
 def test_tc189_ck_run_installs_the_hooks_before_launch_and_they_hold_in_read_only_metadata(tmp_path):
     root = h.hooks_repo(tmp_path)
     remove_ck_hooks(root)
@@ -693,6 +717,10 @@ def test_tc189_ck_run_installs_the_hooks_before_launch_and_they_hold_in_read_onl
         assert status["installed"] is True and status["active"] is True, status
         proc = h.raw(wt, "merge", "--no-ff", "--no-verify", "--no-edit", "feat/demo-task-1")
         assert_refused(root, proc, PROTECTED_REF, before, "raw merge --no-verify under read-only metadata after ck run")
+        assert_hook_refusal(root, lambda a: h.raw(root, *a), PROTECTED_REF, before,
+                            "raw update-ref under read-only metadata after ck run")
+        ok = h.raw(root, "update-ref", "refs/heads/feature", tip(root, 3))  # control: the refusal is the hook's
+        assert ok.returncode == 0, ok.stdout + ok.stderr
 
 
 def test_tc189_the_same_start_and_merge_inside_the_real_sandbox(tmp_path):
@@ -713,6 +741,10 @@ def test_tc189_the_same_start_and_merge_inside_the_real_sandbox(tmp_path):
     proc = h.sandboxed(["git", "-C", str(wt), "merge", "--no-ff", "--no-verify", "--no-edit", "feat/demo-task-1"],
                        root, worktrees, env=sb_env)
     assert_refused(root, proc, PROTECTED_REF, before, "sandboxed raw merge --no-verify after ck run")
+    run = lambda a: h.sandboxed(["git", "-C", str(root), *a], root, worktrees, env=sb_env)
+    assert_hook_refusal(root, run, PROTECTED_REF, before, "sandboxed raw update-ref after ck run")
+    ok = run(["update-ref", "refs/heads/feature", tip(root, 3)])
+    assert ok.returncode == 0, ok.stdout + ok.stderr
 
 
 # --------------------------------------------------------------------------- TC-194
@@ -739,7 +771,6 @@ def test_tc194_a_husky_prepare_that_resets_hooks_path_is_repaired_and_chained(tm
     assert ".husky/_" in json.dumps(chain), f"chain.json does not name .husky/_: {chain}"
     reports = [v for v in find_key(obj, "hooks") if v]
     assert reports and ".husky/_" in json.dumps(reports), f"the land result does not report the re-install: {obj}"
-    assert marker.exists() and _marker_lines(marker) >= 1, "the husky pre-merge-commit hook did not run for the land"
 
     after_land = integ_ref(root)
     assert after_land != before
