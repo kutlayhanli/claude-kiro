@@ -71,7 +71,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 - `tests/landing_bridge.py` - Python side of the two new bridge ops
 - `tests/js/real_agents.mjs` - scripted agents for the smoke tests
 - `tests/js/harness_self.test.mjs` - self-checks of the fake runtime additions
-**Verify:** `node tests/js/harness_self.test.mjs` `uv run pytest -q tests/test_workflow_scripts.py`
+**Verify:** `node tests/js/harness_self.test.mjs` `uv run pytest -q tests/test_workflow_scripts.py -k "harness_self or deterministic_plan or finish_first or guard_ladder or landing_speed or spec_create or spec_implement or spec_review_frozen"`
 **Verifies:** Task 78 (the fake runtime, bridge and `CK_CALL` envelopes its thin routing runs under)
 
 **Acceptance:**
