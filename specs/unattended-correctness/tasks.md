@@ -1407,7 +1407,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 61: Add bench `ck_config`, per-arm roles and the arm result check
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 14.5, 17.5, 20.1, 20.4
 **Description:** In `src/claude_kiro/bench.py`, `normalize_config` accepts a top-level `ck_config` object and, for OpenCode arms, `configs[].roles` (`{role: "provider/model#variant"}`). `run_arm` and `run_arm_opencode` deep-merge `ck_config` into each clone's `specs/ck.json` before the setup commit (used to pre-approve the 12 reviewed slash-command paths in `land.allow_paths`). `run_arm_opencode` writes `opencode.roles` from the arm's `roles` next to the forced aliases; arms without `roles` write none, so every role runs on the arm's single model. Add `check_arm_result(result) -> List[str]` listing missing or extra keys against the shared arm result shape. Harness Contract owner: item 6's bench arm `roles` and item 12 (one arm result key set; `run_arm_opencode` honours `arm["roles"]`).
@@ -1417,13 +1417,15 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 58 (TC-130, TC-131a)
 
 **Acceptance:**
-- [ ] An arm with `roles` writes them as the clone's `opencode.roles`; unmapped roles keep the arm's model (14.5, 20.4)
-- [ ] `ck_config` is merged into every clone's specs/ck.json, so `land.allow_paths` carries the reviewed paths (20.1)
-- [ ] `check_arm_result` reports any deviation from the shared result keys (17.5)
+- [x] An arm with `roles` writes them as the clone's `opencode.roles`; unmapped roles keep the arm's model (14.5, 20.4)
+- [x] `ck_config` is merged into every clone's specs/ck.json, so `land.allow_paths` carries the reviewed paths (20.1)
+- [x] `check_arm_result` reports any deviation from the shared result keys (17.5)
 
 **Dependencies:** Task 58 (its tests are the oracle)
 **Complexity:** Medium
 **Risk:** safety (writes `land.allow_paths`, which pre-approves protected-file landings in bench clones)
+
+**Notes:** `ARM_RESULT_KEYS` is the union of the Claude and OpenCode arm result keys; both run paths fill absent keys with null before writing.
 
 ---
 
