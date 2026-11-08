@@ -64,6 +64,13 @@ _IMPL = [
     ("cross", _c(rf"cross-test wave (?P<w>{_NUM})")),
     ("plan", _c(rf"plan (?P<k>{_NUM})(?: retry)?")),
     ("report", _c(r"report")),
+    # unattended-correctness (req 14.7): the test-fix loop and its thin ck calls.
+    ("testfix_writer", _c(rf"testfix (?P<k>{_NUM}) \(Task (?P<n>{_ID})\)")),
+    ("testfix_review", _c(rf"testfix review (?P<k>{_NUM})")),
+    ("run_start", _c(r"run start")),
+    ("audit", _c(r"audit")),
+    ("testfix_ledger", _c(rf"testfix ledger (?P<k>{_NUM})")),
+    ("testfix_prove", _c(rf"testfix prove (?P<k>{_NUM})")),
 ]
 
 _CREATE_FIXED = {
@@ -158,6 +165,19 @@ def _implement(label: str) -> LabelMatch:
             return LabelMatch(role="plan", matched=True, attempt=int(g["k"]))
         if name == "report":
             return LabelMatch(role="report", matched=True)
+        if name == "testfix_writer":
+            return LabelMatch(role="test-writer", matched=True, task=_task(g["n"]), attempt=int(g["k"]),
+                              step="testfix")
+        if name == "testfix_review":
+            return LabelMatch(role="reviewer", matched=True, attempt=int(g["k"]), step="testfix")
+        if name == "run_start":
+            return LabelMatch(role="gate", matched=True, step="run_start")
+        if name == "audit":
+            return LabelMatch(role="gate", matched=True, step="audit")
+        if name == "testfix_ledger":
+            return LabelMatch(role="gate", matched=True, attempt=int(g["k"]), step="testfix_ledger")
+        if name == "testfix_prove":
+            return LabelMatch(role="gate", matched=True, attempt=int(g["k"]), step="testfix_prove")
     return _OTHER
 
 
