@@ -1105,7 +1105,8 @@ def upgrade(dry_run: bool, no_migrate: bool, allow_downgrade: bool, to_vendor: b
 @click.argument("spec")
 @click.option("--task", "-t", "tasks", multiple=True, help="Task number to verify (repeatable). Default: every Done task.")
 @click.option("--no-reuse", is_flag=True, help="With --task: run the commands even if this exact tree already passed them")
-def gate(spec: str, tasks: tuple, no_reuse: bool):
+@click.option("--json", "as_json", is_flag=True, help="Print only the ck-gate/1 JSON object (with a failures list); same exit codes")
+def gate(spec: str, tasks: tuple, no_reuse: bool, as_json: bool):
     """Run the verification gate for SPEC (a name in specs/ or a path).
 
     Checks acceptance boxes, runs the verify commands from specs/ck.json and the
@@ -1134,6 +1135,9 @@ def gate(spec: str, tasks: tuple, no_reuse: bool):
     heartbeat(project_dir)  # a gate run in a claimed task worktree keeps the claim fresh
     result = run_gate(project_dir, candidate, [t.removeprefix("Task ").strip() for t in tasks] or None,
                       reuse=bool(tasks) and not no_reuse)
+    if as_json:
+        click.echo(json.dumps(result.to_json(), ensure_ascii=False))
+        sys.exit(0 if result.ok else 1)
     if not result.tasks and not result.checks:
         click.echo("ℹ️  No Done tasks to verify. Pass --task N to verify a specific task.")
         return
