@@ -1699,7 +1699,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 74: Property tests for gate verdicts, thin agents and gate positions in the workflow
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.1, 2.6, 2.8, 2.9, 2.11, 2.12, 7.4, 19.1, 19.3, 19.5, 19.6
 **Description:** Implement the TC-174 rows P-7, P-30, P-31 and P-34 through the bridge. P-7: `gateOutcome` (via `{op:'call'}`) is `error` for every malformed input (null, numbers, strings, arrays, `{}`, missing `failures`, `failures` as object or string, `ok` as string, statuses outside the four, non-zero `exitCode` with valid JSON, entries missing `node` and `file`, `json: null` envelopes, and malformed `ck-gate-compact/1` objects: `regressions` not an array, `excusedByTask` values negative or not integers), otherwise red iff a `regression` or `unattributed` entry; valid full and compact objects with the same failures give the same verdict. P-34: `heldByCrossTest` returns exactly the impl tasks verified by the files of the tests open findings name (node ID, bare function name or file; `testVerifies` with extra and missing entries), and in the run trace no task of that set starts while its finding is open and no other task is held. P-30: over `scenarios()` x {ck global present, absent} x {runner available, not}, every thin call has the lean `agentType` and the shared schema, no other call has it, the OpenCode path has no thin agents, and unavailability gives no type plus a warning. P-31: over `scenarios()`, N in 0-5 and batch sizes 1-4, attributed gates are requested exactly when the merge count crosses a multiple of N, plus one final gate. Bridge settings `max_examples=60`, derandomized, no database. The file declares `PROPERTIES = {"P-7": ..., "P-30": ..., "P-31": ..., "P-34": ...}` with tests named `test_tc174_p<k>_<slug>`.
@@ -1710,15 +1710,17 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 78 (P-30 at the thin-routing seam), Task 81 (P-7, P-31), Task 87 (P-34 at `heldByCrossTest`)
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the rows
-- [ ] Settings are deterministic
-- [ ] Tests call the decisions-block seam and the real script through the bridge, not a server
-- [ ] They fail before the implementation because the seams are missing from the decisions block
-- [ ] No mocks of the project's own code
+- [x] Generators cover every surface form and negative listed in the rows
+- [x] Settings are deterministic
+- [x] Tests call the decisions-block seam and the real script through the bridge, not a server
+- [x] They fail before the implementation because the seams are missing from the decisions block
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 2 (bridge call op, UNATTENDED_NAMES)
 **Complexity:** Medium
 **Risk:** normal
+
+**Implementation notes:** `code` outside {0, 1} with valid JSON is the malformed case in P-7 (a red gate legitimately exits 1). P-34 has a pure-seam test and a run-trace test; P-30 treats the `ck` global path as `real_ck` with a no-output command. Deliberate strengthening of the P-7 domain: a valid object whose `ok` disagrees with the exit code (`ok: true` exiting 1, `ok: false` exiting 0) is `error`, since the gate's `ok` and exit code agree (0 iff ok); Task 81's `gateOutcome` must honour it. The P-7 generators also cover an entry with `node: null` and `file: null`, a missing or wrong `schema`, and a non-task-ID key in `excusedByTask`. The bridge writes any Set in a response as a sorted array (plain JSON writes `{}`), so `heldByCrossTest`'s `Set<task>` is observable through `{op:'call'}`; the run op also returns `optsList` (every agent call's label and opts, in order), which P-30 checks call by call. The P-34 trace test supplies `testFix` for the finding's file and ends the finding's open window when the test fix lands; held tasks must start after it.
 
 ---
 
