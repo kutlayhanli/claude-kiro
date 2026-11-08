@@ -85,6 +85,63 @@ export function isEffort(value: string): value is Effort {
   return (EFFORTS as readonly string[]).includes(value);
 }
 
+/** The roles a workflow agent can be pinned to through `opencode.roles`. */
+export const ROLE_NAMES = [
+  "implementer",
+  "test_writer",
+  "reviewer",
+  "reviewer_risky",
+  "fixer",
+  "orchestrator",
+  "resolver",
+] as const;
+export type RoleName = (typeof ROLE_NAMES)[number];
+
+export function isRoleName(value: string): value is RoleName {
+  return (ROLE_NAMES as readonly string[]).includes(value);
+}
+
+/** A role's model reference, split into its parts. `variant` is null when the reference has none. */
+export interface RoleRef {
+  provider: string;
+  model: string;
+  variant: string | null;
+}
+
+/**
+ * Check one `opencode.roles` value. Returns `null` when it is a valid `provider/model[#variant]`
+ * reference, otherwise a short description of what is wrong with it.
+ */
+export function validateRoleRef(value: unknown): string | null {
+  if (typeof value !== "string") return "expected a provider/model[#variant] string";
+  if (!value.trim() || value !== value.trim()) return "must not be empty or padded with spaces";
+  const slash = value.indexOf("/");
+  if (slash === -1) return "missing model (expected provider/model[#variant])";
+  if (slash === 0) return "missing provider (expected provider/model[#variant])";
+  const provider = value.slice(0, slash);
+  if (provider.includes("#")) return "missing provider (expected provider/model[#variant])";
+  const hash = value.indexOf("#", slash + 1);
+  const model = value.slice(slash + 1, hash === -1 ? undefined : hash);
+  if (!model) return "missing model (expected provider/model[#variant])";
+  if (hash !== -1) {
+    const variant = value.slice(hash + 1);
+    if (!variant) return "empty variant after # (expected provider/model[#variant])";
+    if (variant.includes("#")) return "more than one # (expected provider/model[#variant])";
+  }
+  return null;
+}
+
+/**
+ * The model a role is mapped to, or `null` when the role is unmapped (the caller then uses the
+ * alias map). Values were checked by `validateRoleRef` when the config loaded.
+ */
+export function resolveRoleRef(role: string, roles: Partial<Record<string, string>>): RoleRef | null {
+  const value = roles[role];
+  if (value === undefined) return null;
+  const ref = parseRef(value);
+  return { provider: ref.providerID, model: ref.id, variant: ref.variant ?? null };
+}
+
 /** Mirror of OpenCode's `Model.Ref.parse` (packages/schema/src/model.ts). */
 export function parseRef(input: string): ModelRef {
   const providerEnd = input.indexOf("/");
