@@ -36,6 +36,7 @@ AGENT_ROLES = {
     "fixer": "fixer",
     "resolver": "resolver",
     "reviewer": "reviewer",
+    "runner": None,  # the lean thin ck agent: fixed frontmatter, no role settings
 }
 
 # Vendored copy in a project -> source file in the plugin.
