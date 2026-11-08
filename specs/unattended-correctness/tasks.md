@@ -2108,7 +2108,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 92: End-to-end smoke tests across the workflow, real ck and real git
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.2, 2.6, 2.11, 3.6, 4.1, 4.2, 4.3, 4.4, 4.10, 9.2, 9.6, 9.8, 10.1, 12.1, 12.2, 12.5
 **Description:** Implement TC-176, TC-177, TC-178, TC-179 and TC-43 (b). Run the real `spec-implement.js` through the bridge with `realCk` (OpenCode path) and `tests/js/real_agents.mjs` on real `attr_project` / `spec_graph_project` repos. TC-176: Task 2's first commit breaks `tc1`, the real attributed gate at merge 2 (N=2) is red with tc1 on Task 2, the fixer gets that entry, the recheck is green, and the final gate is green with no excused entries. TC-177 (and TC-43b): a test asserting an unreachable value, a scripted conflict and confirmation, a scripted test-fixer commit, the real `ck testfix check` and `prove`, a scripted approve, the real land of the fix, Task 2 retried and merged, final gate green. TC-178: a scripted raw `git merge --no-verify` of a protected branch is refused, the run continues, the run-end real audit is clean. TC-179: real lint reports the command edge, real relink adds it, and without relink the run adds the live edge and Task 2 merges after Task 5.
@@ -2118,9 +2118,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 94 (TC-176 to TC-179, TC-43b; the first task with every piece the smoke runs need)
 
 **Acceptance:**
-- [ ] Every ck call goes to the real CLI on a real repo with real pytest and real hooks; only agents are scripted (no LLM)
-- [ ] They fail before the implementation for missing behaviour (no attributed gate, no test-fix loop, no hooks, no live edge)
-- [ ] No mocks of the project's own code
+- [x] Every ck call goes to the real CLI on a real repo with real pytest and real hooks; only agents are scripted (no LLM)
+- [x] They fail before the implementation for missing behaviour (no attributed gate, no test-fix loop, no hooks, no live edge)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project, spec_graph_project, hooks helpers), Task 2 (realCk bridge, real_agents.mjs)
 **Complexity:** High
