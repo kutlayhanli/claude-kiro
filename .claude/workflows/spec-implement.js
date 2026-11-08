@@ -319,6 +319,7 @@ const REVIEW_SCHEMA = {
       items: {
         type: 'object',
         properties: {
+          task: { type: 'string', description: 'the task number this finding is about (required in a batched review-wave)' },
           severity: { type: 'string', enum: ['blocking', 'minor'] },
           file: { type: 'string' },
           issue: { type: 'string', description: 'what is wrong, and the spec text it contradicts' },
@@ -1295,7 +1296,11 @@ async function reviewBatch(batch) {
     review = null
   }
   for (const n of ids) pendingReview.get(n).reviewed = true
+  review = attributeFindings(review, ids)
   const flagged = flaggedOf(review, ids)
+  if (review && review.verdict === 'changes' && ids.length > 1 && flagged.length === ids.length && !(review.findings || []).some(f => f && f.severity !== 'minor' && f.task != null)) {
+    log(`Review wave ${waveNo}: its blocking findings name no covered task, so all of Tasks ${ids.join(', ')} revise`)
+  }
   for (const n of ids.filter(t => !flagged.includes(t))) setBatchApproval(n, review, waveNo, ids)
   if (!review) log(`Review wave ${waveNo}: the review agent returned nothing; landing Tasks ${ids.join(', ')} unreviewed`)
   const keep = []
@@ -1308,14 +1313,30 @@ async function reviewBatch(batch) {
   return keep
 }
 
-// Which batched tasks a batched verdict flags for revision (4.4): findings
-// that name a covered task flag it; a `changes` verdict with no attributable
-// finding flags the whole wave (a blocking problem is re-verified, never
-// silently recorded). An `approve` (or no) verdict flags nobody.
+// Issue #16: give each batched finding its covered task. A finding that carries no
+// `task` (a structured output that dropped it) gets the one covered task its text
+// names ("Task 74, P-7 ..."); a finding naming none or several stays unattributed.
+function attributeFindings(review, batched) {
+  if (!review || !Array.isArray(review.findings)) return review
+  const findings = review.findings.map(f => {
+    if (!f || (f.task != null && batched.includes(String(f.task)))) return f
+    const text = [f.issue, f.fix, f.file].filter(x => typeof x === 'string').join(' ')
+    const named = [...new Set([...text.matchAll(/\bTasks?\s+(\d+)\b/g)].map(m => m[1]).filter(t => batched.includes(t)))]
+    return named.length === 1 ? { ...f, task: named[0] } : f
+  })
+  return { ...review, findings }
+}
+
+// Which batched tasks a batched verdict flags for revision (4.4): blocking findings
+// that name a covered task flag it (a minor finding never flags another task); a
+// `changes` verdict whose blocking findings name no covered task flags the whole wave
+// (a blocking problem is re-verified, never silently recorded), and says so (#16).
+// An `approve` (or no) verdict flags nobody.
 function flaggedOf(review, batched) {
   if (!review || review.verdict !== 'changes') return []
   const findings = Array.isArray(review.findings) ? review.findings : []
-  const named = [...new Set(findings.map(f => (f && f.task != null ? String(f.task) : null)).filter(t => t != null && batched.includes(t)))]
+  const blocking = findings.filter(f => f && f.severity !== 'minor')
+  const named = [...new Set(blocking.map(f => (f.task != null ? String(f.task) : null)).filter(t => t != null && batched.includes(t)))]
   return named.length ? named : [...batched]
 }
 
