@@ -123,6 +123,7 @@ def test_tc102_graph_nodes_and_edges_equal_the_expected_sets(tmp_path):
     }
     assert edge_set(g, "provides") == {
         ("provides", "task:2", "cmd:mtr thesis new"),  # design table row names a file Task 2 owns
+        ("provides", "task:2", "cmd:mtr thesis"),      # its design table row also names a file Task 2 owns
         ("provides", "task:3", "cmd:mtr version"),     # **Provides:** field
     }
     assert edge_set(g, "invokes") == {
