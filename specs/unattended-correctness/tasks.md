@@ -979,7 +979,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 42: Red-team the audit's incomplete state (Story 10)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 10.5
 **Description:** Try to break each SHALL NOT clause of Story 10 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Clause: an audit that cannot read the approved state SHALL not report the run clean (10.5). Starting points with `ck worktree audit demo --json` on `hooks_repo`: the approved-state record truncated, emptied, replaced by valid JSON for another spec or another ref, replaced by an older snapshot from `snapshot_ck_state`, made unreadable by permissions, replaced by a directory or a symlink, or with a mac that matches the old content; the ck data dir moved; the integration branch deleted and recreated. Every case must give `complete: false` and `clean: false` (or report drift), never `clean: true`. Tests named `test_tc100_redteam_<slug>`.
@@ -989,10 +989,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 51 (red team of 10.5)
 
 **Acceptance:**
-- [ ] Written from the requirements only, never from the implementation
-- [ ] Tests reach ck's state only through the snapshot helpers and the CLI
-- [ ] Each test fails before the implementation for the right reason
-- [ ] No mocks of the project's own code
+- [x] Written from the requirements only, never from the implementation
+- [x] Tests reach ck's state only through the snapshot helpers and the CLI
+- [x] Each test fails before the implementation for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (hooks_repo, snapshot helpers)
 **Complexity:** Medium
