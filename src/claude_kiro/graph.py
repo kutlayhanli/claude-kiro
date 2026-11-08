@@ -6,6 +6,11 @@ file's content hash, so an edit that keeps size and mtime is still seen. A malfo
 `GraphProblem` and the rest of the graph is still built.
 
 Scan only: no project code is imported and no network is used.
+
+Scope of `imports` edges: an edge is added only when both ends are non-glob Files-owned paths of the spec and
+the importing file was scanned. An import of a repo file no task owns adds no edge. A file that exists but
+cannot be read (a directory in place of a file, a permission error) adds a `GraphProblem`; a missing file adds
+nothing.
 """
 
 import ast
@@ -228,11 +233,17 @@ def _scan(rel: str, data: bytes) -> _Scan:
     return hit
 
 
-def _file_bytes(path: Path) -> Optional[bytes]:
+def _read(path: Path) -> Tuple[Optional[bytes], Optional[str]]:
+    """(bytes, None) when the file is read; (None, None) when it does not exist (silent: a task may not have
+    written its file yet); (None, problem) when it exists but cannot be read (11.8: never silent)."""
     try:
-        return path.read_bytes() if path.is_file() else None
-    except OSError:
-        return None
+        if not path.exists() and not path.is_symlink():
+            return None, None
+        if not path.is_file():
+            return None, "unreadable: exists but is not a regular file"
+        return path.read_bytes(), None
+    except OSError as err:
+        return None, f"unreadable: {err.strerror or err}"
 
 
 def _rel(path: Path, base: Path) -> str:
@@ -326,24 +337,30 @@ def build_graph(project_dir: Path, spec_dir: Path) -> SpecGraph:
     spec_rel = _rel(spec_dir, project_dir)
     problems: List[GraphProblem] = []
 
-    tasks_bytes = _file_bytes(spec_dir / "tasks.md")
+    tasks_bytes, problem = _read(spec_dir / "tasks.md")
     tasks: Dict[str, SpecTask] = {}
-    if tasks_bytes is not None:
+    if problem:
+        problems.append(GraphProblem(f"{spec_rel}/tasks.md", problem))
+    elif tasks_bytes is not None:
         try:
             tasks = _parse_tasks(tasks_bytes.decode("utf-8"), f"{spec_rel}/tasks.md", problems)
         except UnicodeDecodeError as err:
             problems.append(GraphProblem(f"{spec_rel}/tasks.md", f"not UTF-8 text (byte {err.start})"))
 
-    design_bytes = _file_bytes(spec_dir / "design.md")
-    if design_bytes is not None:
+    design_bytes, problem = _read(spec_dir / "design.md")
+    if problem:
+        problems.append(GraphProblem(f"{spec_rel}/design.md", problem))
+    elif design_bytes is not None:
         try:
             _check_design(design_bytes.decode("utf-8"), f"{spec_rel}/design.md", problems)
         except UnicodeDecodeError as err:
             problems.append(GraphProblem(f"{spec_rel}/design.md", f"not UTF-8 text (byte {err.start})"))
 
     plan: List[Tuple[int, Tuple[str, ...], str]] = []
-    plan_bytes = _file_bytes(spec_dir / "test-plan.md")
-    if plan_bytes is not None:
+    plan_bytes, problem = _read(spec_dir / "test-plan.md")
+    if problem:
+        problems.append(GraphProblem(f"{spec_rel}/test-plan.md", problem))
+    elif plan_bytes is not None:
         try:
             plan = _plan_rows(plan_bytes.decode("utf-8"))
         except UnicodeDecodeError as err:
@@ -371,7 +388,10 @@ def build_graph(project_dir: Path, spec_dir: Path) -> SpecGraph:
     for path in sorted({p for ps in norm_files.values() for p in ps}):
         if _is_glob(path):
             continue
-        data = _file_bytes(project_dir / path)
+        data, problem = _read(project_dir / path)
+        if problem:
+            problems.append(GraphProblem(path, problem))
+            continue
         if data is None:
             continue
         scan = _scan(path, data)
@@ -379,8 +399,8 @@ def build_graph(project_dir: Path, spec_dir: Path) -> SpecGraph:
             problems.append(GraphProblem(path, scan.problem))
         scans[path] = scan
 
-    # A tc node exists for each TC some test file or test-plan row defines. A TC that only a Verify -k names
-    # gets its edge, and no node until a test defines it.
+    # A tc node exists for each TC some test file or test-plan row defines. Its label is the test-plan description
+    # when one exists, else "TC-n". A TC that only a Verify -k names has a verifies edge and no node (dangling).
     tc_labels: Dict[int, str] = {}
     for num in sorted(tasks, key=int):
         task = tasks[num]
@@ -393,7 +413,8 @@ def build_graph(project_dir: Path, spec_dir: Path) -> SpecGraph:
             for tc, row_files, desc in plan:
                 if files & set(row_files):
                     tcs.add(tc)
-                    tc_labels.setdefault(tc, desc)
+                    if desc and not tc_labels.get(tc):
+                        tc_labels[tc] = desc
             for tc in tcs:
                 tc_labels.setdefault(tc, "")
             for verified in task.verifies:
@@ -403,6 +424,7 @@ def build_graph(project_dir: Path, spec_dir: Path) -> SpecGraph:
                     edges.add(Edge("verifies", f"tc:TC-{tc}", f"task:{verified}", "Verifies"))
         else:
             for tc in _verify_tcs(task.verify):
+                # No tc node for a TC only this -k names: a dangling verifies source (design 11.2, see Task 12).
                 edges.add(Edge("verifies", f"tc:TC-{tc}", f"task:{num}", "Verify -k"))
 
     for src_path, scan in scans.items():
