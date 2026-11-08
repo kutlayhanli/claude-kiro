@@ -17,7 +17,18 @@ import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { CkConfig } from "./config.ts";
-import { baseRef, parseRef, type Catalog, type CatalogModel, type ModelRef } from "./models.ts";
+import {
+  ROLE_NAMES,
+  baseRef,
+  isRoleName,
+  parseRef,
+  resolveRoleRef,
+  validateRoleRef,
+  type Catalog,
+  type CatalogModel,
+  type ModelRef,
+  type RoleRef,
+} from "./models.ts";
 import { parseFrontmatter } from "./rewrite.ts";
 
 export interface PreflightExecOptions {
@@ -120,6 +131,7 @@ export async function runPreflight(options: PreflightOptions): Promise<Preflight
     checkCkVersion(ctx),
     checkVendor(ctx),
     ...checkModels(ctx),
+    checkRoles(ctx),
     ...EXPECTED_AGENT_IDS.map((id) => checkAgent(ctx, id)),
   ];
   if (options.config.guard.enabled) checks.push(checkGuardHook(ctx));
@@ -155,6 +167,14 @@ export function formatPreflight(result: PreflightResult): string {
   for (const check of [...errors, ...warnings]) {
     lines.push(`  ${check.severity} ${check.id}: ${check.detail}`);
     if (check.fix) lines.push(`    fix: ${check.fix}`);
+  }
+
+  // The role lines show where a mapped role's model comes from (14.8). With no `opencode.roles` every
+  // role is on the alias map, so the block stays out of the passing report, like the other passing checks.
+  const roles = result.checks.find((check) => check.id === "roles" && check.ok);
+  if (roles && roles.detail.includes("(source: roles)")) {
+    lines.push("  roles (resolved model per role):");
+    for (const line of roles.detail.split("\n")) lines.push(`    ${line}`);
   }
   return lines.join("\n");
 }
@@ -366,6 +386,45 @@ function checkModels(ctx: CheckContext): PreflightCheck[] {
   });
 
   return [modelsCheck, variantsCheck];
+}
+
+/**
+ * List every workflow role with the model it runs on and where that model came from (14.8): the
+ * `opencode.roles` map, or the alias map when the role is unmapped (the workflow passes an alias per
+ * call, so the concrete model is only known at call time). The detail has one line per role.
+ */
+function checkRoles(ctx: CheckContext): PreflightCheck {
+  return safeCheck("roles", "error", () => {
+    const configured = ctx.options.config.roles as Readonly<Record<string, string | undefined>>;
+    const problems: string[] = [];
+    for (const [role, value] of Object.entries(configured)) {
+      if (value === undefined) continue;
+      if (!isRoleName(role)) {
+        problems.push(`unknown role ${JSON.stringify(role)} (known: ${ROLE_NAMES.join(", ")})`);
+        continue;
+      }
+      const problem = validateRoleRef(value);
+      if (problem) problems.push(`${role} = ${JSON.stringify(value)}: ${problem}`);
+    }
+    if (problems.length > 0) {
+      return {
+        ok: false,
+        detail: problems.join("; "),
+        fix: "Fix opencode.roles in specs/ck.json (or the global ck config) to use known role names and provider/model[#variant] references.",
+      };
+    }
+
+    const lines = ROLE_NAMES.map((role) => {
+      const resolved: RoleRef | null = resolveRoleRef(role, configured);
+      const padded = role.padEnd(16);
+      if (resolved) {
+        const variant = resolved.variant ? `#${resolved.variant}` : "";
+        return `${padded} ${resolved.provider}/${resolved.model}${variant} (source: roles)`;
+      }
+      return `${padded} via the alias map, resolved per call (source: alias)`;
+    });
+    return { ok: true, detail: lines.join("\n") };
+  });
 }
 
 function checkAgent(ctx: CheckContext, id: string): PreflightCheck {
