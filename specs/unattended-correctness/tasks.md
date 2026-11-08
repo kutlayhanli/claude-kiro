@@ -298,7 +298,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 - `src/claude_kiro/graph.py` - new: graph model, `build_graph` (tasks, tcs, files, depends/owns/verifies/imports), memo, problems, `to_json`, `paths_overlap`, `write_set_overlaps`
 - `src/claude_kiro/cli/graph.py` - new: `ck graph SPEC [--json]`
 - `src/claude_kiro/cli/main.py` - register the `graph` command
-**Verify:** `uv run pytest -q tests/test_spec_graph.py -k "tc105_ or tc107_ or tc108_"` `uv run pytest -q tests/test_spec_graph_properties.py -k "tc175_p21 or tc175_p22 or tc175_p26"` `uv run pytest -q tests/test_spec_graph_redteam.py -k "tc107_redteam"` `uv run pytest -q -m serial tests/test_unattended_perf.py -k "tc109_"`
+**Verify:** `uv run pytest -q tests/test_spec_graph.py -k "(tc105_ or tc107_ or tc108_) and not tc107_edits_with_restored_mtimes"` `uv run pytest -q tests/test_spec_graph_properties.py -k "tc175_p21 or tc175_p22 or tc175_p26"` `uv run pytest -q tests/test_spec_graph_redteam.py -k "tc107_redteam and not source_file_same_size_same_mtime"` `uv run pytest -q -m serial tests/test_unattended_perf.py -k "tc109_"`
 **Verified by:** Task 7 (TC-105, TC-107, TC-108), Task 8 (P-21, P-22, P-26), Task 9 (TC-109), Task 10 (11.7 freshness cases (`tc107_redteam`))
 
 **Acceptance:**
@@ -322,7 +322,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Description:** Extend `src/claude_kiro/graph.py` with command nodes (`cmd:<path words>`) and the provides and invokes edges, per design "How edges are filled". Programs: `[project.scripts]` keys in pyproject.toml, package.json `bin`, and the first words of the design's CLI table (`SpecGraph.programs`). Provides: a task's `**Provides:**` (from `SpecTask.provides`) wins over inference; otherwise a design.md table row with a backticked command path whose row names a file the task owns, else a backticked command path starting with a known program in the task's title or description; two inferred providers keep both edges and add a `GraphProblem`. Invokes: scan each test file (Python AST string constants and list/tuple literals; regex for JS) for a word sequence starting with a known program (`["mtr", "thesis", "new"]`, `"mtr thesis new --x"`) or a `CliRunner().invoke(..., ["thesis", "new"])`-style list matching a known command path without the program; the edge goes to the longest known command path that prefixes it, and an unknown path under a known program becomes a `cmd:` node with no provider. Add the pure seams `missing_command_edges(graph) -> List[MissingEdge]` (test file of a test task verifying V invokes a command that P provides, P != V, and P is not among V's transitive dependencies) and `unknown_commands(graph, source_words) -> List[UnknownCommand]` (a path exists when every word appears as a string literal in a non-test source file). Malformed Provides values become `GraphProblem`s. Harness Contract owner: item 3's `graph.invoked_commands` (design: the invokes scan; keep it a pure function of source text, command paths and programs).
 **Files:**
 - `src/claude_kiro/graph.py` - programs discovery, command nodes, provides (field + inference), invokes scan, `missing_command_edges`, `unknown_commands`
-**Verify:** `uv run pytest -q tests/test_spec_graph.py -k "tc102_ or tc103_ or tc104_"` `uv run pytest -q tests/test_spec_graph_properties.py -k "tc175_p20"` `uv run pytest -q tests/test_command_deps.py -k "tc113_"`
+**Verify:** `uv run pytest -q tests/test_spec_graph.py -k "tc102_ or tc103_ or tc104_"` `uv run pytest -q tests/test_spec_graph_properties.py -k "tc175_p20"` `uv run pytest -q tests/test_command_deps.py -k "tc113_"` `uv run pytest -q tests/test_spec_graph.py::test_tc107_edits_with_restored_mtimes_are_reflected`
 **Verified by:** Task 7 (TC-102 to TC-104), Task 8 (P-20 at the invokes scan), Task 17 (TC-113b)
 
 **Acceptance:**
@@ -780,7 +780,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Files:**
 - `src/claude_kiro/lint.py` - graph-based `commandEdges`, `unknownCommands`, `untaggedTests`, `noWriteSet`, `graphProblems`
 - `src/claude_kiro/relink.py` - `plan_command_relink`, `apply_command_relink`
-**Verify:** `uv run pytest -q tests/test_lint.py tests/test_relink.py` `uv run pytest -q tests/test_spec_graph_properties.py -k "tc175_p23"`
+**Verify:** `uv run pytest -q tests/test_lint.py tests/test_relink.py` `uv run pytest -q tests/test_spec_graph_properties.py -k "tc175_p23"` `uv run pytest -q tests/test_spec_graph_redteam.py::test_tc107_redteam_source_file_same_size_same_mtime`
 **Verified by:** Task 8 (P-23 at `plan_command_relink`)
 
 **Acceptance:**
@@ -1030,7 +1030,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Description:** Create `src/claude_kiro/protect.py` with `RefUpdate`, `TokenRecord`, `RefDecision`, `HookStatus`, `ApprovedState` and `AuditReport` (design "Data Models / Python (protect.py)"). Pure seams: `ref_update_decision(update, protected_changed, allow, token, approved)` (non-`refs/heads/integrate/` ref -> allow; delete -> allow; create -> allow when the new commit's protected files equal `approved` (the ref's approved state, path -> blob oid), else, and when there is no approved state, only with a matching token (9.12); otherwise protected paths minus allow-list empty -> allow; else allow only with a matching token; the message names the files and `ck worktree approve SPEC TASK`); `token_matches(token, update, used, mac_ok)` (unused, mac valid, same ref, same old, same new tree and parents); `merge_commit_decision(head_ref, changed, allow, token_present)`; `approval_decision(stdin_tty, stdout_tty, typed, expected)`; `audit_decision(approved, current, allow, hooks, fixtures)` (fixtures passed as a mapping; drift = protected files added, changed or deleted against the approved state; incomplete when the state is missing or its mac fails; clean only when complete with no drift, hooks installed, active and intact, and no fixture drift or lock tampering). State in `<git-common-dir>/ck/`: an HMAC key (`key`, mode 0600, created on first use; `install_hooks` uses it first, so under `ck run` it exists before the sandbox, which denies writes to it, starts), `issue_token(root, ref, old, tree, parents, reason, files)` writing `tokens/<id>.json`, `consume_token(root, id, update)` renaming it to `used/` (a token bound to `old` can never match a later update even if the rename fails), and `read_approved_state` / `record_approved_state(root, spec, ref, commit, files, approval)` for the sealed `<spec>/protected.json`, plus the `<common>/ck/refs.json` index (ref -> spec) the hook uses to find a ref's approved state; the state outlives a deleted ref (9.12). Paths compared with `PROTECTED_PATHS` must be unquoted (use `git diff -z` / `core.quotePath=false` in any helper that lists changes). No network. Harness Contract owner: item 3's `protect.refuse_paths` (design: `ref_update_decision` with the protected-path filter) and item 10's tokens and approved state.
 **Files:**
 - `src/claude_kiro/protect.py` - new: models, decision seams, HMAC key, token issue/consume, sealed approved state
-**Verify:** `uv run pytest -q tests/test_protected_hooks_properties.py -k "tc175_p17 or tc175_p35 or tc175_p36"`
+**Verify:** `uv run pytest -q tests/test_protected_hooks_properties.py -k "(tc175_p17 or tc175_p35 or tc175_p36) and not real_audit"`
 **Verified by:** Task 38 (P-17 at `ref_update_decision`, P-35 at `approval_decision`, P-36 at `audit_decision`)
 
 **Acceptance:**
@@ -1190,7 +1190,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Files:**
 - `src/claude_kiro/protect.py` - `audit()` input gathering
 - `src/claude_kiro/cli/worktree.py` - `ck worktree audit`
-**Verify:** `uv run pytest -q tests/test_protected_audit.py tests/test_protected_audit_redteam.py` `uv run pytest -q tests/test_protected_hooks_redteam.py -k "tc92_"` `uv run pytest -q tests/test_fixture_lock.py -k "tc135_ or tc138_ or tc140_"` `uv run pytest -q tests/test_protected_hooks_properties.py -k "tc175_p19"`
+**Verify:** `uv run pytest -q tests/test_protected_audit.py tests/test_protected_audit_redteam.py` `uv run pytest -q tests/test_protected_hooks_redteam.py -k "tc92_"` `uv run pytest -q tests/test_fixture_lock.py -k "tc135_ or tc138_ or tc140_"` `uv run pytest -q tests/test_protected_hooks_properties.py -k "tc175_p19 or real_audit"`
 **Verified by:** Task 38 (P-19 on the real audit), Task 40 (TC-92, bypasses reported by the audit), Task 41 (TC-96 to TC-100), Task 42 (red team of 10.5), Task 43 (TC-135, TC-138, TC-140 (audit side))
 
 **Acceptance:**
