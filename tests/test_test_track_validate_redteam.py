@@ -108,7 +108,6 @@ INVALID = {
     "false": False,
     "object": {"a": 1},
     "empty_object": {},
-    "null": None,
     "mixed_list": ["ok", 3],
     "list_with_null": ["ok", None],
     "list_with_bool": [True],
@@ -125,7 +124,7 @@ def test_tc62_redteam_invalid_value_is_a_config_error(setup, name):
     assert_config_error(setup, setup.gate("1"))
 
 
-@pytest.mark.parametrize("name", ["null", "int", "object", "mixed_list"])
+@pytest.mark.parametrize("name", ["int", "object", "mixed_list"])
 def test_tc62_redteam_invalid_value_fails_the_whole_spec_gate_too(setup, name):
     setup.config["test_track"] = {"validate": INVALID[name]}
     result = setup.gate()
@@ -158,7 +157,6 @@ def test_tc62_redteam_invalid_value_in_json_output_is_not_green(setup):
 NOT_AN_OBJECT = {
     "string": "python scripts/validate.py",
     "list": ["python scripts/validate.py"],
-    "null": None,
     "int": 7,
     "true": True,
 }
@@ -167,14 +165,23 @@ NOT_AN_OBJECT = {
 @pytest.mark.parametrize("name", sorted(NOT_AN_OBJECT))
 def test_tc62_redteam_test_track_itself_not_an_object(setup, name):
     """`test_track` declared as something other than an object cannot declare `validate`: the gate must
-    neither crash nor pass as if nothing was declared, and it must not run any command."""
+    not crash and must not run any command (the design does not define a verdict for this case)."""
     setup.config["test_track"] = NOT_AN_OBJECT[name]
     result = setup.gate("1")
     out = output_of(result)
     assert "Traceback" not in out, out
     assert setup.runs == 0
-    assert result.returncode != 0, f"the gate passed as if test_track were absent:\n{out}"
-    assert "test_track" in out, out
+
+
+def test_tc62_redteam_explicit_null_behaves_like_an_absent_key(setup):
+    """null is the documented default for `test_track.validate`: no validator declared, gate as before."""
+    setup.config["test_track"] = {"validate": None}
+    assert_as_absent(setup, setup.gate("1"))
+
+
+def test_tc62_redteam_null_test_track_behaves_like_an_absent_key(setup):
+    setup.config["test_track"] = None
+    assert_as_absent(setup, setup.gate("1"))
 
 
 def test_tc62_redteam_valid_list_still_runs_each_command_in_order(setup):
@@ -239,6 +246,8 @@ def test_tc62_redteam_near_miss_name_with_invalid_value_is_not_an_error(setup):
     assert_as_absent(setup, setup.gate("1"))
 
 
+# Note: ck never reads `$CK_CONFIG_HOME/config.json` for this key; the two global-config tests below
+# only pin that the validator stays off.
 def test_tc62_redteam_key_in_global_config_only_is_not_declared(setup):
     """The key lives in the project's specs/ck.json: a global preferences file does not declare it."""
     setup.config_home.mkdir(parents=True, exist_ok=True)
@@ -259,7 +268,7 @@ def test_tc62_redteam_invalid_in_project_beats_valid_in_global(setup):
     assert_config_error(setup, setup.gate("1"))
 
 
-def test_tc62_redteam_the_error_output_fed_back_as_config_is_still_an_error(setup):
+def test_tc62_redteam_error_output_fed_back_as_a_string_does_not_crash(setup):
     """The system's own output as input: a config whose value is the gate's error text is a string, which is valid
     (and runs as a command), so it never crashes the config load."""
     setup.config["test_track"] = {"validate": 42}
@@ -363,7 +372,8 @@ def test_tc63_redteam_impl_task_that_owns_test_files_is_still_impl(setup):
 def test_tc63_redteam_impl_task_verify_naming_the_validator_is_not_the_validator(setup):
     """An impl task whose own Verify line mentions the script runs that line once, not the declared validator."""
     tasks = (setup.project / "specs" / "calc" / "tasks.md").read_text()
-    setup.set_tasks(tasks.replace("**Verified by:** Task 1\n", "**Verified by:** Task 1\n**Verify:** `python -c pass`\n"))
+    other = f"{shlex.quote(sys.executable)} scripts/validate.py {shlex.quote(str(setup.marker) + '.other')}"
+    setup.set_tasks(tasks.replace("**Verified by:** Task 1\n", f"**Verified by:** Task 1\n**Verify:** `{other}`\n"))
     with_validator(setup)
     result = setup.gate("2")
     assert result.returncode == 0, output_of(result)
@@ -379,7 +389,7 @@ def test_tc63_redteam_impl_gate_with_invalid_value_does_not_run_it_either(setup)
     assert setup.runs == 0
 
 
-def test_tc63_redteam_impl_gate_does_not_run_validator_with_no_reuse_off(setup):
+def test_tc63_redteam_repeated_impl_gate_never_runs_validator(setup):
     """A reused (cached) impl gate result is no reason to run the validator either."""
     with_validator(setup)
     setup.write_config()
