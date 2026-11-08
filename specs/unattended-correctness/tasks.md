@@ -1001,7 +1001,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 43: Test the recorded-fixture hash lock and labels
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 15.1, 15.2, 15.3, 15.4, 15.5, 15.6, 15.7, 15.8
 **Description:** Implement TC-134, TC-135, TC-136, TC-137, TC-138, TC-139 (a), TC-140 and TC-141 with real landings. Config `fixtures.recorded: ["tests/fixtures/recorded/**"]`. TC-134: first land of `prices.json` locks its sha256, shown by `ck fixtures status demo --json`. TC-135: a later land changing it reports `fixtureDrift` with file and task, and the audit reports it. TC-136: `ck fixtures mark tests/fixtures/recorded/prices.json --handcrafted "trimmed to 3 rows"` then land: no drift, reason in status. TC-137: reasons `""`, `"   "`, `"\n"` stay drift. TC-138: editing or deleting a lock entry for an existing file is reported by the audit. TC-139a: `unlabeled` lists files without capture metadata or handcrafted label. TC-140: no globs, no new state file in the `snapshot_ck_state` diff and no fixture items. TC-141: globs `42`, `null`, `["a", 1]`, `{"x": "y"}` give a config error naming `fixtures.recorded` from land and status.
@@ -1011,9 +1011,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 48 (TC-139a), Task 49 (TC-134, TC-136, TC-137, TC-141), Task 51 (TC-135, TC-138, TC-140 (audit side))
 
 **Acceptance:**
-- [ ] Tests run real landings, the real fixtures CLI and the real audit
-- [ ] They fail before the implementation because `ck fixtures` does not exist
-- [ ] No mocks of the project's own code
+- [x] Tests run real landings, the real fixtures CLI and the real audit
+- [x] They fail before the implementation because `ck fixtures` does not exist
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project, snapshot helpers)
 **Complexity:** Medium
