@@ -624,6 +624,8 @@ How edges are filled (the API delegated by PLAN):
 - **provides:** `**Provides:**` wins (11.3). Otherwise inferred: a design.md table row with a backticked command
   path whose row names a file the task owns; else a backticked command path, starting with a known program, in
   the task's title or description. Ambiguity (two tasks inferred) keeps both edges and adds a GraphProblem.
+  Group commands (`mtr thesis`) follow the same rule: a `cmd:` node exists only when some task provides it or a
+  test invokes it; a table row alone, with no owning task, adds no node.
 - **invokes:** scan of each test file (Python AST string constants and list/tuple literals; regex for JS) for a
   sequence of words that starts with a known program (`["mtr", "thesis", "new"]`, `"mtr thesis new --x"`), or a
   `CliRunner().invoke(..., ["thesis", "new"])`-style list matching a known command path without the program. The
@@ -1074,6 +1076,8 @@ Entries for the criteria that state an error, refusal or fallback.
   start` exits 0 and reports it; the workflow logs it, keeps it in `runStart`, and the audit reports hooks inactive.
 - **10.5** Approved state missing, unreadable or its mac fails: `AuditReport.complete = false`, `clean = false`,
   problem "approved state unreadable: <reason>"; exit 3.
+  A validly sealed record whose `ref` is not the audited `into` branch counts as missing (same result), so
+  another spec's or ref's record, or `--into` a branch with no record of its own, is never clean.
 - **11.8** Malformed source: a `GraphProblem` naming the source and problem; the rest is built; `ck lint` prints
   it as a warning.
 - **12.6** Missing command with no provider: `liveEdgeDecision` returns `conflict` with the tests that invoke it
