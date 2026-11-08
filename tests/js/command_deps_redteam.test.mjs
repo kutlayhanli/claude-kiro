@@ -11,9 +11,10 @@
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { runWorkflow } from './load_workflow.mjs'
+import { runWorkflow, useVirtualTime } from './load_workflow.mjs'
 import { project } from './fake_project.mjs'
 
+useVirtualTime()  // sleeps run on the simulated clock, so the ordering assertions do not depend on machine load
 const here = path.dirname(fileURLToPath(import.meta.url))
 const SCRIPT = path.join(here, '../../plugin/workflows/spec-implement.js')
 const baseArgs = { spec: 'demo', root: '/repo', into: 'integrate/demo', targetDir: '/repo/.ck/worktrees/demo-integration' }
