@@ -13,6 +13,10 @@ export const NAMES = ['readyTasks', 'chainLengths', 'applyPlanView', 'planConsis
 // Guard-ladder decisions: loaded only when asked, so the suite stays green before the workflow gains them.
 export const GUARD_NAMES = ['guardLadder', 'guardStopOf', 'parkAction']
 
+// Decisions of the unattended-correctness spec: loaded only through `extra`, so existing suites stay green
+// before the workflow gains the seams.
+export const UNATTENDED_NAMES = ['gateOutcome', 'thinAgentMode', 'failuresForPrompt', 'testConflictsOf', 'testFixPlan', 'heldByCrossTest', 'liveEdgeDecision', 'writeSetHold']
+
 export function loadDecisions(scriptPath = SCRIPT, { extra = [] } = {}) {
   if (scriptPath && typeof scriptPath === 'object') { extra = scriptPath.extra ?? []; scriptPath = SCRIPT }
   const names = [...NAMES, ...extra]

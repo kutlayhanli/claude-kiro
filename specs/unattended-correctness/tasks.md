@@ -60,7 +60,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 2: Extend the JS workflow harness and bridge
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.2, 2.3, 3.6, 19.3
 **Description:** Build the workflow-side infrastructure (test-plan "To add" items 3-6). In `tests/js/fake_project.mjs` add, leaving existing options unchanged: `gateAnswers` (`[json | {code, stdout} | 'throw' | 'hang']`, consumed in order through `directCk` `gate` argv or the thin labels `full gate @k`, `re-check k`, `final gate`), `taskFailures`, `testConflictsList`, `testFix` (`{file: {verdict: 'fixed'|'test-correct'|'cannot-fix', proof, scope, review, finding}}`), `priorFixes` (answers `ck testfix check`'s `alreadyFixed`), `crossTest`, `fidelity`, `fixtureStatus`, `owns`/`overlaps`/`testVerifies`/`provides` (in plan answers), `missingCommand`, `audit` (json or `'throw'`) and `runStart` (the `ck worktree start` answer). `directCk` must answer `gate`, `graph`, `worktree start`, `worktree audit`, `testfix check|prove|record` and `fixtures status` argv, and the thin labels `run start`, `audit`, `testfix ledger <k>`, `testfix prove <k>` with `CK_CALL` envelopes `{exitCode, json}`. For the existing thin labels (`plan <k>`, `land ...`, `report`, `park <n>`, `relink <n>`, `full gate @k`, `re-check k`, `final gate`), whenever the agent call carries `schema: CK_CALL` or an `agentType`, wrap today's answer in the envelope `{exitCode: 0, json: <today's answer>}` (gate labels: `json` is the `gateAnswers` entry, or today's `{green}` answer turned into a `ck-gate/1` object); calls without them get today's answers unchanged, so the wrap is invisible before Task 78 and the existing suites keep passing after it. `gateAnswers` entries may also be `ck-gate-compact/1` objects (2.12). In `tests/js/load_decisions.mjs` add `UNATTENDED_NAMES = ['gateOutcome', 'thinAgentMode', 'failuresForPrompt', 'testConflictsOf', 'testFixPlan', 'heldByCrossTest', 'liveEdgeDecision', 'writeSetHold']`, loaded only through `extra`. In `tests/js/bridge.mjs` add `{op:'call', name, args}` and `{op:'run', ..., realCk:{cmd, cwd, env}}`, and mirror both in `tests/landing_bridge.py`. Create `tests/js/real_agents.mjs` (scripted agents: claim with the prompt's command, write `scenario.files[n]`, commit, run the prompt's gate command through real ck, return the RESULT built from ck's JSON; no LLM). Add `tests/js/harness_self.test.mjs`, which checks that the existing suites' options still behave and that the new options answer as specified. Harness Contract item 13 (the bridge) is test infrastructure owned here.
@@ -75,11 +75,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 78 (the fake runtime, bridge and `CK_CALL` envelopes its thin routing runs under)
 
 **Acceptance:**
-- [ ] Every existing `tests/js/*.test.mjs` suite still passes unchanged with the extended fake project
-- [ ] `loadDecisions()` without `extra` still loads only today's names, so existing suites stay green before the workflow gains the new seams
-- [ ] Existing thin labels are answered in a `CK_CALL` envelope exactly when the call carries `schema: CK_CALL` or an `agentType`; `harness_self.test.mjs` checks both forms
-- [ ] `realCk` routes direct `ck()` calls to the real CLI subprocess with the given cwd and env
-- [ ] The fakes stand in only for the Workflow runtime and agents; no project code is mocked
+- [x] Every existing `tests/js/*.test.mjs` suite still passes unchanged with the extended fake project
+- [x] `loadDecisions()` without `extra` still loads only today's names, so existing suites stay green before the workflow gains the new seams
+- [x] Existing thin labels are answered in a `CK_CALL` envelope exactly when the call carries `schema: CK_CALL` or an `agentType`; `harness_self.test.mjs` checks both forms
+- [x] `realCk` routes direct `ck()` calls to the real CLI subprocess with the given cwd and env
+- [x] The fakes stand in only for the Workflow runtime and agents; no project code is mocked
 
 **Dependencies:** None
 **Complexity:** High
@@ -600,7 +600,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 25: Red-team the fixture validation config and scope (Story 6)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.5, 6.6
 **Description:** Try to break each SHALL NOT clause of Story 6 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Clauses: an invalid `test_track.validate` SHALL not gate as if the key were absent (6.5); an impl-track gate SHALL not run the command (6.6). Starting points: `test_track` itself as a string, list or null; `validate` as `[]`, `[""]`, a list with a nested list, a string of whitespace; the key under a near-miss name (`test-track`, `testTrack`); the key in global config only; a task whose Track line is unusual (`**Track:** Test`, missing Track, `impl ` with trailing space); an impl task that owns test files; a mixed gate of a test task and an impl task. Tests named `test_tc62_redteam_<slug>` and `test_tc63_redteam_<slug>`.
@@ -610,10 +610,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 31 (red team of 6.5, 6.6)
 
 **Acceptance:**
-- [ ] Written from the requirements only, never from the implementation
-- [ ] Tests run the real gate and config load, using a marker file to prove whether the command ran
-- [ ] Each test fails before the implementation for the right reason
-- [ ] No mocks of the project's own code
+- [x] Written from the requirements only, never from the implementation
+- [x] Tests run the real gate and config load, using a marker file to prove whether the command ran
+- [x] Each test fails before the implementation for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project)
 **Complexity:** Low
@@ -1024,7 +1024,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 44: Add the protected-change decisions, landing tokens and approved state
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 9.2, 9.3, 9.4, 9.5, 9.8, 9.12, 10.1, 10.2, 10.3, 10.4, 10.5, 15.5
 **Description:** Create `src/claude_kiro/protect.py` with `RefUpdate`, `TokenRecord`, `RefDecision`, `HookStatus`, `ApprovedState` and `AuditReport` (design "Data Models / Python (protect.py)"). Pure seams: `ref_update_decision(update, protected_changed, allow, token, approved)` (non-`refs/heads/integrate/` ref -> allow; delete -> allow; create -> allow when the new commit's protected files equal `approved` (the ref's approved state, path -> blob oid), else, and when there is no approved state, only with a matching token (9.12); otherwise protected paths minus allow-list empty -> allow; else allow only with a matching token; the message names the files and `ck worktree approve SPEC TASK`); `token_matches(token, update, used, mac_ok)` (unused, mac valid, same ref, same old, same new tree and parents); `merge_commit_decision(head_ref, changed, allow, token_present)`; `approval_decision(stdin_tty, stdout_tty, typed, expected)`; `audit_decision(approved, current, allow, hooks, fixtures)` (fixtures passed as a mapping; drift = protected files added, changed or deleted against the approved state; incomplete when the state is missing or its mac fails; clean only when complete with no drift, hooks installed, active and intact, and no fixture drift or lock tampering). State in `<git-common-dir>/ck/`: an HMAC key (`key`, mode 0600, created on first use; `install_hooks` uses it first, so under `ck run` it exists before the sandbox, which denies writes to it, starts), `issue_token(root, ref, old, tree, parents, reason, files)` writing `tokens/<id>.json`, `consume_token(root, id, update)` renaming it to `used/` (a token bound to `old` can never match a later update even if the rename fails), and `read_approved_state` / `record_approved_state(root, spec, ref, commit, files, approval)` for the sealed `<spec>/protected.json`, plus the `<common>/ck/refs.json` index (ref -> spec) the hook uses to find a ref's approved state; the state outlives a deleted ref (9.12). Paths compared with `PROTECTED_PATHS` must be unquoted (use `git diff -z` / `core.quotePath=false` in any helper that lists changes). No network. Harness Contract owner: item 3's `protect.refuse_paths` (design: `ref_update_decision` with the protected-path filter) and item 10's tokens and approved state.
@@ -1034,11 +1034,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 38 (P-17 at `ref_update_decision`, P-35 at `approval_decision`, P-36 at `audit_decision`)
 
 **Acceptance:**
-- [ ] Updates to refs outside `integrate/*` are always allowed (9.4)
-- [ ] An `integrate/*` update adding protected files outside the allow-list is refused unless a matching token is presented (9.2)
-- [ ] A token matches only its ref, old value, tree and parents, and only once (9.3)
-- [ ] `approval_decision` needs a TTY on stdin and stdout and the typed code (9.8)
-- [ ] `audit_decision` reports added, changed and deleted protected files, hook problems, fixture lock tampering, and incomplete when the approved state is unreadable (10.1, 10.2, 10.3, 10.5, 15.5); approved landings are not drift (10.4)
+- [x] Updates to refs outside `integrate/*` are always allowed (9.4)
+- [x] An `integrate/*` update adding protected files outside the allow-list is refused unless a matching token is presented (9.2)
+- [x] A token matches only its ref, old value, tree and parents, and only once (9.3)
+- [x] `approval_decision` needs a TTY on stdin and stdout and the typed code (9.8)
+- [x] `audit_decision` reports added, changed and deleted protected files, hook problems, fixture lock tampering, and incomplete when the approved state is unreadable (10.1, 10.2, 10.3, 10.5, 15.5); approved landings are not drift (10.4)
 
 **Dependencies:** Task 38 (its tests are the oracle)
 **Complexity:** High

@@ -68,7 +68,7 @@ class Bridge:
         req["order"] = list(order) if order is not None else list(deps)
         return self._ok(req)["ready"]
 
-    def run(self, project: Dict[str, Any], args: Optional[Dict[str, Any]] = None, slots: Optional[int] = None, clock: Optional[str] = None, exec_ck: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def run(self, project: Dict[str, Any], args: Optional[Dict[str, Any]] = None, slots: Optional[int] = None, clock: Optional[str] = None, exec_ck: Optional[Dict[str, Any]] = None, real_ck: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """clock: "virtual" (exact virtual-time sleeps and trace `t`), "real", or None (the bridge default).
         exec_ck: {"cmd": [...], "env": {...}, "cwd": ..., "dry": bool}; fake agents record progress events through the real CLI."""
         req: Dict[str, Any] = {"op": "run", "project": project, "args": args or {}, "slots": slots}
@@ -76,9 +76,15 @@ class Bridge:
             req["clock"] = clock
         if exec_ck is not None:
             req["execCk"] = exec_ck
+        if real_ck is not None:
+            req["realCk"] = real_ck  # {"cmd": [...], "cwd": ..., "env": {...}}: direct ck() calls run the real CLI
         out = self._ok(req)
         out.pop("ok")
         return out
+
+    def call(self, name: str, *args: Any) -> Any:
+        """One decisions-block function by name (for example `gateOutcome`), called with args; its return value."""
+        return self._ok({"op": "call", "name": name, "args": list(args)})["value"]
 
     def create(self, args: Optional[Dict[str, Any]] = None, overrides: Optional[Dict[str, Any]] = None, exec_ck: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Run plugin/workflows/spec-create.js with the shared stub agent; returns result, logs, trace, prompts, execLog."""
