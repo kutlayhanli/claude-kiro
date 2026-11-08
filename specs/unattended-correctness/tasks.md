@@ -362,7 +362,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 15: Red-team excused failures in attribution (Story 1)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.3
 **Description:** Try to break each SHALL NOT clause of Story 1 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. The clause: an excused failure SHALL not make the gate red, and conversely nothing outside 1.3 may be excused. Starting points through `ck gate --attribute --json` on `attr_project`: a test named so its TC token belongs to a Done task but a near-miss token (`tc12_` vs `tc1_`, `TC012_`, token in the param ID) points at an unfinished one; an unowned file or unknown TC sneaking an excuse; a Verify with `not tc3_` or two `-k` options; a test task that verifies a task not in tasks.md; a task status written in an unusual form; feeding a previous gate's `failures` node IDs back as test names. Tests are named `test_tc4_redteam_<slug>` (or the TC of the row each attacks).
@@ -372,10 +372,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 20 (red team of 1.3 through `ck gate --attribute`)
 
 **Acceptance:**
-- [ ] Written from the requirements only, never from the implementation
-- [ ] Tests exercise the real gate CLI on real repos with real pytest
-- [ ] Each test fails before the implementation for the right reason (missing behaviour)
-- [ ] No mocks of the project's own code
+- [x] Written from the requirements only, never from the implementation
+- [x] Tests exercise the real gate CLI on real repos with real pytest
+- [x] Each test fails before the implementation for the right reason (missing behaviour)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project)
 **Complexity:** Medium
