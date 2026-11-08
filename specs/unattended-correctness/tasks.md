@@ -578,7 +578,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 24: Test the project-declared fixture validation command
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.1, 6.2, 6.3, 6.4, 6.5, 6.6
 **Description:** Implement TC-58, TC-59 (a), TC-60, TC-61, TC-62 and TC-63. Use `specs/ck.json` `"test_track": {"validate": "python scripts/validate.py"}` with a script that writes its cwd to a marker, prints 60 lines and exits 1, or sleeps past `verify_timeout: 1`. TC-61 compares checks with the same project gated without the key. TC-62 covers `42`, `{"a":1}`, `["ok", 3]`, `null` (config error naming `test_track.validate`, no test command ran) and `["a", "b"]` (both run). TC-63 gates an impl task and asserts the marker is absent.
@@ -588,10 +588,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 31 (TC-58 to TC-63)
 
 **Acceptance:**
-- [ ] Tests run real subprocesses through the real gate and config load
-- [ ] They fail before the implementation because the key is ignored (no marker)
-- [ ] TC-61 passes before and after (preservation)
-- [ ] No mocks of the project's own code
+- [x] Tests run real subprocesses through the real gate and config load
+- [x] They fail before the implementation because the key is ignored (no marker)
+- [x] TC-61 passes before and after (preservation)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project, counters)
 **Complexity:** Medium
