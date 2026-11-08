@@ -56,14 +56,21 @@ const landEndIdx = (trace, n) => trace.findIndex(e => e.ev === 'end' && /^land /
 const task2Requests = trace => reqIdx(trace, /^task 2( |$)/)
 const retryLabels = events => events.filter(e => /^task 2 retry/.test(e) && !e.endsWith(' end'))
 
+// No test conflict, by the design's own records: no test-fix ran (testFixes empty) and the task is not parked as
+// needs-input with kind "test-fix" (design, error handling 4.5/4.6).
+function assertNoTestConflict(result, v) {
+  assert.deepEqual(result.testFixes ?? [], [], 'no test conflict is raised (no test fix)')
+  const parkedForTestFix = (result.needsInput ?? []).filter(e => String(e.task) === String(v) && e.kind === 'test-fix')
+  assert.deepEqual(parkedForTestFix, [], `task ${v} is not parked for a test fix`)
+}
+
 // The 12.5 contract for one waiting task V on provider P: edge listed, no conflict, no retry used, V re-requested only
 // after P's land ended, V merged in the end.
 function assertWaited({ result, trace, logs, p }, v, provider, command = CMD) {
   assert.ok(Array.isArray(result.liveEdges), 'the result lists liveEdges')
   const edges = result.liveEdges.filter(e => e.task === v)
   assert.ok(edges.some(e => e.dependsOn === provider && e.command === command), `live edge ${v} -> ${provider} missing: ${JSON.stringify(result.liveEdges)}`)
-  assert.deepEqual(result.testFixes ?? [], [], 'no test conflict is raised')
-  assert.ok(!result.failed.some(f => /test/i.test(String(f.reason)) && f.task === v && /^blocked: test/.test(String(f.reason))), 'not blocked on a test')
+  assertNoTestConflict(result, v)
   assert.deepEqual(retryLabels(p.state.events), [], `no retry label: ${p.state.events.join(', ')}`)
   const reqs = task2Requests(trace)
   assert.ok(reqs.length >= 2, `task ${v} is requested again after waiting`)
@@ -74,15 +81,18 @@ function assertWaited({ result, trace, logs, p }, v, provider, command = CMD) {
 
 // ================= 12.5 =================
 
+// The workflow reads ck's `missingCommand` mark, not the message text: these cases set the mark by hand and only
+// confirm that the text is ignored when the mark is set. Surface-form detection (curly quotes, ANSI, wrapped lines,
+// argparse) is ck's job and is not exercised here.
 for (const [form, message] of Object.entries(MESSAGES)) {
-  await test(`tc114_redteam message form ${form}: edge added, no conflict, no retry spent (maxRetries 0)`, async () => {
+  await test(`tc114_redteam text is ignored when the mark is set (${form} message): edge added, no conflict, no retry spent (maxRetries 0)`, async () => {
     const p = project({ deps: { 2: [], 5: [] }, failUntil: { 2: 1 }, durations: { 2: 5, 5: 40 }, mergeDurations: { 5: 10 }, taskFailures: { 2: [failure(message, ['5'])] } })
     const o = await run(p, { ...baseArgs, ...graphArgs({ 2: [], 5: [] }), maxRetries: 0, maxConcurrent: 2, mergeBatch: 1 })
     assertWaited({ ...o, p }, '2', '5')
   })
 }
 
-await test('tc114_redteam the message is irrelevant: ck marked the failure, the text is empty', async () => {
+await test('tc114_redteam text is ignored when the mark is set (empty message)', async () => {
   const p = project({ deps: { 2: [], 5: [] }, failUntil: { 2: 1 }, durations: { 2: 5, 5: 40 }, taskFailures: { 2: [failure('', ['5'])] } })
   const o = await run(p, { ...baseArgs, ...graphArgs({ 2: [], 5: [] }), maxRetries: 0, maxConcurrent: 2, mergeBatch: 1 })
   assertWaited({ ...o, p }, '2', '5')
@@ -187,7 +197,7 @@ await test('tc117_redteam direct cycle: no edge, blocked naming 2 -> 5 -> 2, no 
   assert.ok(!result.merged.includes('2') && !result.merged.includes('5'))
 })
 
-await test('tc117_redteam cycle with the curly-quote and ANSI forms is still blocked', async () => {
+await test('tc117_redteam text is ignored when the mark is set (curly, ANSI, wrapped, argparse messages): the cycle is still blocked', async () => {
   for (const m of [MESSAGES.curly, MESSAGES.ansi, MESSAGES.wrapped, MESSAGES.argparse]) {
     const deps = { 2: [], 5: ['2'] }
     const p = project({ deps, failUntil: { 2: 1 }, taskFailures: { 2: [failure(m, ['5'])] } })
@@ -228,18 +238,23 @@ await test('tc117_redteam a cycle formed only with a previously added live edge 
   assert.ok(!result.merged.includes('5'))
 })
 
-await test('tc117_redteam one provider cycles and another does not: only the safe edge is added', async () => {
+// 12.7 applies to the 2 -> 5 edge whatever happens to 2 -> 6: that edge is not added and Task 2 is reported blocked,
+// naming the cycle. Whether the safe 2 -> 6 edge is also recorded is left open by the design, so it is not asserted.
+await test('tc117_redteam one provider cycles and another does not: the cyclic edge is not added, the task is blocked naming 2 -> 5 -> 2', async () => {
   const deps = { 2: [], 5: ['2'], 6: [] }
   const p = project({ deps, failUntil: { 2: 1 }, durations: { 2: 5, 6: 40 }, mergeDurations: { 6: 5 }, taskFailures: { 2: [failure(MESSAGES.plain, ['5', '6'])] } })
   const { result } = await run(p, { ...baseArgs, ...graphArgs(deps), maxRetries: 0, maxConcurrent: 3, mergeBatch: 1 })
-  assert.ok(!result.liveEdges.some(e => e.task === '2' && e.dependsOn === '5'), JSON.stringify(result.liveEdges))
-  assert.deepEqual(result.testFixes ?? [], [])
+  assert.ok(!(result.liveEdges ?? []).some(e => e.task === '2' && e.dependsOn === '5'), JSON.stringify(result.liveEdges))
+  const f = result.failed.find(x => x.task === '2')
+  assert.ok(f && /^blocked/.test(f.reason) && cycleRe(2, 5, 2).test(f.reason), JSON.stringify(result.failed))
+  assert.ok(!result.merged.includes('2'), 'a blocked task does not merge')
+  assertNoTestConflict(result, '2')
 })
 
 await test('tc117_redteam the blocked reason of a cycle is not a test conflict reason', async () => {
   const deps = { 2: [], 5: ['2'] }
   const p = project({ deps, failUntil: { 2: 1 }, taskFailures: { 2: [failure(MESSAGES.plain, ['5'])] } })
-  const { result, logs } = await run(p, { ...baseArgs, ...graphArgs(deps), maxRetries: 1 })
-  assert.ok(!result.failed.some(x => /^blocked: test/.test(String(x.reason))), JSON.stringify(result.failed))
-  assert.ok(!logs.some(l => String(l).startsWith('Test-track fixes')), 'no test-track fix list')
+  const { result } = await run(p, { ...baseArgs, ...graphArgs(deps), maxRetries: 1 })
+  assert.ok(result.failed.some(x => x.task === '2' && /^blocked: command cycle/.test(String(x.reason))), JSON.stringify(result.failed))
+  assertNoTestConflict(result, '2')
 })
