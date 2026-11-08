@@ -789,7 +789,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 34: Property tests for the claim release decision
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 16.2, 16.3, 16.4, 16.5, 16.7
 **Description:** Implement the TC-175 row P-27 at `claude_kiro.worktrees.claim_release_decision`: over the full cross product (run ID present or absent; liveness `running`, `finished`, `stale`, `missing`/None; owned by the starting run or not; age 0-300 min with 59, 60, 61 around the threshold; stale threshold 1-120 min), the decision equals the truth table (`own`, `keep`, `release`, and for no run ID `release` iff age > threshold); a running run's claim is never released. Settings 200 examples, derandomized, no database. `PROPERTIES = {"P-27": ...}`, tests `test_tc175_p27_<slug>`.
@@ -800,11 +800,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 36 (P-27 at `claim_release_decision`)
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the row
-- [ ] Settings are deterministic
-- [ ] Tests call the decision seam, not a server
-- [ ] They fail before the implementation because the seam does not exist
-- [ ] No mocks of the project's own code
+- [x] Generators cover every surface form and negative listed in the row
+- [x] Settings are deterministic
+- [x] Tests call the decision seam, not a server
+- [x] They fail before the implementation because the seam does not exist
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Low
