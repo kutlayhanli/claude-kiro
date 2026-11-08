@@ -501,7 +501,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 21: Property tests for right-reason classification and row fidelity
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.2, 5.3, 5.4, 8.1, 8.2, 8.3, 8.4, 8.5, 8.6
 **Description:** Implement the TC-175 rows P-12, P-14, P-15 and P-16. P-12 at `claude_kiro.failures.classify_not_built` with a `ProjectContext`: every not-built-yet form gives `not-built`, every wrong-reason form gives `bad`, everything else `unclear` or `not-built` but never `bad`; a test-body `AssertionError` is `bad` iff its assert reaches no project code and no project import, and adding either to its dependencies turns it `unclear`; ANSI codes, `\r\n`, indented tracebacks and pytest noise never change the class (click 8.2 curly quotes included). P-14 at `claude_kiro.fidelity.check_values` (with its extraction): equal values match in every surface form (numbers with `$`, `USD`, thousands separators, ranges in 4 forms, percentages vs fractions, 5 date forms, enum forms), different values mismatch, both range ends checked; negatives one cent or one day off, a sibling enum member, a row quantity used as a price. P-15: each item lands in exactly one of matched, mismatches, unparsed, unmatched; reviewer items equal unparsed plus unmatched. P-16: inputs are unchanged after the call. Settings 200 examples, derandomized, no database. `PROPERTIES = {"P-12": ..., "P-14": ..., "P-15": ..., "P-16": ...}`, tests `test_tc175_p<k>_<slug>`.
@@ -512,11 +512,13 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 29 (P-12 at `classify_not_built`), Task 30 (P-14 to P-16 at the fidelity seams)
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the rows
-- [ ] Settings are deterministic
-- [ ] Tests call the decision seams, not a server
-- [ ] They fail before the implementation because the seams do not exist
-- [ ] No mocks of the project's own code
+- [x] Generators cover every surface form and negative listed in the rows
+- [x] Settings are deterministic
+- [x] Tests call the decision seams, not a server
+- [x] They fail before the implementation because the seams do not exist
+- [x] No mocks of the project's own code
+
+**Implementation notes:** P-14 to P-16 drive `extract_test_values`, `parse_row`, `parse_models` and `check_values` over generated strings (design models as `Enum` classes plus a dataclass in a python block; test-plan rows as table rows). P-12 builds `Failure`/`ProjectContext` per design. The row lists `NotImplementedError` raised from test code and `ModuleNotFoundError` for a module under the task's own Files as unclear and wrong-reason; design rules 1 and 2 would give not-built and unclear, so the first is asserted only as never `bad`, the second as `bad` (the row governs).
 
 **Dependencies:** None
 **Complexity:** High
