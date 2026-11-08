@@ -168,11 +168,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 3 (P-5a at the truncation and kind seams)
 
 **Acceptance:**
-- [ ] `classify_kind` returns exactly one of the five kinds, and `error` for anything it cannot classify (3.2)
-- [ ] `truncate_message` returns at most 500 characters with `truncated` true iff the input was longer, and never drops an entry (3.5, NFR message limit)
-- [ ] An import or syntax error during collection yields a file-level failure with kind `import` or `collection` (1.6)
-- [ ] `missing_command` returns the command path for click `No such command`, argparse `invalid choice` and `unrecognized arguments` (12.5)
-- [ ] The plugin writes one JSON line per failing node only when `CK_GATE_REPORT` is set, once per node under xdist
+- [x] `classify_kind` returns exactly one of the five kinds, and `error` for anything it cannot classify (3.2)
+- [x] `truncate_message` returns at most 500 characters with `truncated` true iff the input was longer, and never drops an entry (3.5, NFR message limit)
+- [x] An import or syntax error during collection yields a file-level failure with kind `import` or `collection` (1.6)
+- [x] `missing_command` returns the command path for click `No such command`, argparse `invalid choice` and `unrecognized arguments` (12.5)
+- [x] The plugin writes one JSON line per failing node only when `CK_GATE_REPORT` is set, once per node under xdist
 
 **Dependencies:** Task 3 (its tests are the oracle)
 **Complexity:** Medium

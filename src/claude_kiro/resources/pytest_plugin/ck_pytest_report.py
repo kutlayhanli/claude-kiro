@@ -77,6 +77,7 @@ def _relative(path):
 
 
 _EXC_PREFIX = re.compile(r"^([A-Za-z_][\w.]*)(?::\s?(.*))?$")
+_EXC_LAST = re.compile(r"^([A-Za-z_][\w.]*(?:Error|Exception|Warning|Exit|Interrupt))(?::\s?(.*))?$")
 
 
 _RAISED = {}  # (nodeid, phase) -> exception class name, from the call's excinfo (controller process only)
@@ -110,6 +111,16 @@ def _crash(longrepr, exc_hint=None):
     if m and m.group(1).endswith(("Error", "Exception", "Warning", "Exit", "Interrupt")):
         exc = m.group(1).split(".")[-1]
         message = m.group(2) or ""
+    if not exc and crash is None:  # collection errors carry no reprcrash: take the last exception line
+        for raw in reversed(text.splitlines()):
+            line_text = raw.strip()
+            if line_text.startswith("E ") or line_text.startswith("E\t"):
+                line_text = line_text[1:].strip()
+            m = _EXC_LAST.match(line_text)
+            if m:
+                exc = m.group(1).split(".")[-1]
+                message = (m.group(2) or "").strip()
+                break
     if exc_hint:
         exc = exc_hint
     elif not exc and first.startswith("assert"):  # pytest rewrote a bare assert with no exception name
