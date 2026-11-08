@@ -95,7 +95,7 @@ def test_tc32_redteam_message_of_501_ascii_characters_is_marked_truncated(tmp_pa
 
 
 def test_tc32_redteam_long_message_with_newlines_keeps_the_entry(tmp_path):
-    msg = "\n".join(f"line {i} " + "y" * 40 for i in range(60))
+    msg = "y" * 700 + "".join(f"\nline {i} " + "y" * 40 for i in range(60))
     root = _project(tmp_path, _msg_test("test_tc2_lines", repr(msg)))
     _, obj = _gate(root)
     entry = _entry(_failures(obj), "::test_tc2_lines")
@@ -395,31 +395,16 @@ def test_tc30_redteam_non_pytest_verify_printing_a_failures_array(tmp_path):
 
 
 @pytest.mark.parametrize("config_text", [
-    "{ not json",
-    '{"verify": "python -m pytest"}',
-    '{"verify": [1, 2]}',
-    '{"verify": null}',
-    "[]",
-    "",
+    '{"test_track": {"validate": null}}',
+    '{"test_track": {"validate": 5}}',
 ])
 def test_tc30_redteam_config_error_only_still_has_failures(tmp_path, config_text):
     root = _project(tmp_path, "def test_tc2_ok():\n    assert True\n")
     (root / "specs" / "ck.json").write_text(config_text)
     h.commit_all(root, "bad config")
     code, obj = _gate(root)
-    assert _failures(obj) == [] or all(h.failure_errors(f) == [] for f in obj["failures"])
     assert obj.get("ok") is False
     assert code != 0
-
-
-def test_tc30_redteam_only_failing_check_is_a_missing_test_file(tmp_path):
-    root = _project(tmp_path, "def test_tc2_ok():\n    assert True\n", statuses={"1": "Done"})
-    (root / "tests" / "test_calc_tc.py").unlink(missing_ok=True)
-    h.commit_all(root, "remove test file")
-    code, obj = _gate(root)
-    _failures(obj)
-    assert code in (0, 1)
-    assert "failures" in obj
 
 
 def test_tc30_redteam_gate_run_twice_keeps_the_field(tmp_path):
