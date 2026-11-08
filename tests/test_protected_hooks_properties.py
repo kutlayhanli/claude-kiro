@@ -329,7 +329,8 @@ def test_tc175_p36_unreadable_approved_state_is_never_clean(case):
 
     kind, approved_files, current, (installed, active, intact), fixture_drift, tampered = case
     # What read_approved_state yields for a missing, corrupt or bad-mac record is None; an ApprovedState whose
-    # fields are corrupt is the other unreadable shape the seam can see.
+    # fields are corrupt is the other unreadable shape the seam can see. The wrong-spec, wrong-ref and failing-mac
+    # records are tested at the real audit (the seam takes no expected ref): the two tests after this one.
     bad = {
         "missing": None,
         "corrupt-files-int": protect.ApprovedState(ref=REF, commit="d" * 40, files=3, approvals=()),
@@ -351,6 +352,71 @@ def test_tc175_p36_unreadable_approved_state_is_never_clean(case):
     assert len(report.drift) == len(want)
     expect_clean = not want and installed and active and intact and not fixture_drift and not tampered
     assert report.clean is expect_clean, (case, report)
+
+
+# P-36 at the real audit: the wrong-spec / wrong-ref and failing-mac negatives. `audit_decision` takes no expected
+# ref or spec, so these cannot be tested at the seam; they run `ck worktree audit` on real records.
+
+def _record_files(root: Path, spec: str) -> List[Path]:
+    state = h.snapshot_ck_state(root)
+    return [Path(k) for k in state if "protected" in Path(k).name.lower() and f"/{spec}/" in k]
+
+
+def _two_integrations() -> Tuple[Path, Path, Path, Path]:
+    """(tmp, root, demo record, other record): `hooks_repo` plus a second sealed integration for spec `other`."""
+    tmp = Path(tempfile.mkdtemp(prefix="ck-p36-"))
+    root = h.hooks_repo(tmp)
+    other = root / "specs" / "other"
+    other.mkdir(parents=True)
+    (other / "tasks.md").write_text(
+        "# Implementation Tasks: Other\n\n## Task Breakdown\n\n"
+        "### Task 1: one\n**Status:** Not Started\n**Track:** impl\n**Dependencies:** None\n\n")
+    h.commit_all(root, "second spec")
+    code, _, err = h.ck_text(root, "worktree", "integration", "other")
+    assert code == 0, err
+    demo_rec, other_rec = _record_files(root, "demo"), _record_files(root, "other")
+    assert demo_rec and other_rec, (demo_rec, other_rec)
+    pick = lambda c: Path(sorted(c, key=lambda q: len(str(q)))[0])
+    return tmp, root, pick(demo_rec), pick(other_rec)
+
+
+def _real_audit_is_incomplete(root: Path) -> None:
+    code, obj, err = h.ck_json(root, "worktree", "audit", "demo", "--into", "integrate/demo", "--json")
+    assert isinstance(obj, dict), (code, err)
+    assert obj["complete"] is False and obj["clean"] is False, obj
+    assert code != 0, obj
+
+
+def test_tc175_p36_real_audit_wrong_spec_or_ref_record_is_never_complete():
+    tmp, root, demo_rec, other_rec = _two_integrations()
+    try:
+        code, obj, err = h.ck_json(root, "worktree", "audit", "demo", "--into", "integrate/demo", "--json")
+        assert isinstance(obj, dict) and obj["complete"] is True, (code, obj, err)  # control: untouched is readable
+        # Another integration's record carries a valid mac (one key seals every spec) but another spec and ref.
+        demo_rec.write_bytes(other_rec.read_bytes())
+        _real_audit_is_incomplete(root)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_tc175_p36_real_audit_failing_mac_is_never_complete():
+    import json
+
+    for how in ("flip-mac", "change-field-keep-mac"):
+        tmp, root, demo_rec, _ = _two_integrations()
+        try:
+            data = json.loads(demo_rec.read_text())
+            macs = [k for k in data if "mac" in k.lower() or "seal" in k.lower() or "sig" in k.lower()]
+            assert macs, sorted(data)
+            if how == "flip-mac":
+                m = str(data[macs[0]])
+                data[macs[0]] = ("0" if m[:1] != "0" else "1") + m[1:]
+            else:
+                data["commit"] = "e" * 40  # valid JSON, field changed, mac untouched
+            demo_rec.write_text(json.dumps(data))
+            _real_audit_is_incomplete(root)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 # --------------------------------------------------------------------------- real-git helpers
