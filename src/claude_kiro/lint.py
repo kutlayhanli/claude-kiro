@@ -7,7 +7,9 @@
   after X. Found by following T's test files' Python imports, through test
   helpers, to the task whose **Files:** list the imported module. This works
   before the module exists, because ownership comes from tasks.md. Not a
-  cycle: a module X itself lists in **Files:** (X creates or extends it), or
+  cycle: a module that already exists and defines every imported name (later
+  owners only extend it), a module X itself lists in **Files:** (X creates or
+  extends it), or
   T's suite when T also verifies Y (the gate defers T's suite until every
   task it verifies is Done). In that case only X's own Verify commands that
   run T's files count, and a `-k` or node-ID selection there limits the
@@ -70,8 +72,14 @@ def dependency_cycles(tasks: Dict[str, SpecTask]) -> List[List[str]]:
     return cycles
 
 
-def _module_candidates(module: str, names: List[str], base: PurePosixPath) -> List[str]:
-    """Repo-relative file paths an import could refer to."""
+Candidate = Tuple[str, Tuple[str, ...]]  # (repo-relative file an import could refer to, names imported from it)
+
+
+def _module_candidates(module: str, names: List[str], base: PurePosixPath) -> List[Candidate]:
+    """Repo-relative file paths an import could refer to, each with the names it must provide.
+
+    The module's own file must provide `names`; a `names[i]` submodule file must merely exist.
+    """
     if module.startswith("."):
         dots = len(module) - len(module.lstrip("."))
         package = base
@@ -79,23 +87,22 @@ def _module_candidates(module: str, names: List[str], base: PurePosixPath) -> Li
             package = package.parent
         rel = module.lstrip(".")
         prefix = str(package / rel.replace(".", "/")) if rel else str(package)
-        stems = [prefix] + [f"{prefix}/{n}" for n in names]
         roots = [""]
     else:
-        path = module.replace(".", "/")
-        stems = [path] + [f"{path}/{n}" for n in names]
+        prefix = module.replace(".", "/")
         roots = ["", "src/", "lib/"]
-    out = []
+    stems = [(prefix, tuple(names))] + [(f"{prefix}/{n}", ()) for n in names]
+    out: List[Candidate] = []
     for root in roots:
-        for stem in stems:
+        for stem, wanted in stems:
             stem = stem.lstrip("./")
-            out += [f"{root}{stem}.py", f"{root}{stem}/__init__.py"]
+            out += [(f"{root}{stem}.py", wanted), (f"{root}{stem}/__init__.py", wanted)]
     return out
 
 
-def _imports(text: str, rel_file: str) -> List[str]:
+def _imports(text: str, rel_file: str) -> List[Candidate]:
     base = PurePosixPath(rel_file).parent
-    candidates = []
+    candidates: List[Candidate] = []
     for match in IMPORT.finditer(text):
         if match.group(3):
             for module in match.group(3).split(","):
@@ -106,6 +113,33 @@ def _imports(text: str, rel_file: str) -> List[str]:
             names = [n.strip().split(" as ")[0] for n in match.group(2).strip("() ").split(",") if n.strip() and n.strip() != "*"]
             candidates += _module_candidates(match.group(1), names, base)
     return candidates
+
+
+def _defined_names(path: Path) -> Optional[Set[str]]:
+    """Names a Python file defines at module level (None if it does not exist or does not parse)."""
+    if not path.is_file():
+        return None
+    try:
+        tree = ast.parse(path.read_text(errors="replace"))
+    except (OSError, SyntaxError, ValueError):
+        return None
+    names: Set[str] = set()
+    stack = list(tree.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for t in targets:
+                names.update(n.id for n in ast.walk(t) if isinstance(n, ast.Name))
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                names.add((alias.asname or alias.name).split(".")[0])
+        elif isinstance(node, (ast.If, ast.Try, ast.With)):
+            stack += [n for field in ("body", "orelse", "finalbody") for n in getattr(node, field, [])]
+            stack += [n for h in getattr(node, "handlers", []) for n in h.body]
+    return names
 
 
 def _test_files(task: SpecTask, project_dir: Path, config: dict) -> List[str]:
@@ -209,7 +243,7 @@ def _verify_runs(commands: List[str], config: dict) -> Dict[str, Selector]:
     return out
 
 
-def _selected_imports(text: str, rel: str, select) -> List[str]:
+def _selected_imports(text: str, rel: str, select) -> List[Candidate]:
     """The import candidates of a test file when only the tests `select` accepts run.
 
     Module-level imports always run (at collection), and so may any import in a non-test helper.
@@ -220,7 +254,7 @@ def _selected_imports(text: str, rel: str, select) -> List[str]:
     except SyntaxError:
         return _imports(text, rel)
     base = PurePosixPath(rel).parent
-    candidates: List[str] = []
+    candidates: List[Candidate] = []
 
     def take(node: ast.AST) -> None:
         for sub in ast.walk(node):
@@ -259,6 +293,7 @@ def _owners_reached(start, project_dir: Path, owner_of: Dict[str, List[str]], ma
     """
     selectors: Dict[str, Selector] = dict(start) if isinstance(start, dict) else {f: None for f in start}
     reached: Dict[str, List[str]] = {}
+    provided: Dict[str, Optional[Set[str]]] = {}
     seen: Set[str] = set()
     queue = list(selectors)
     while queue and len(seen) < max_files:
@@ -274,8 +309,15 @@ def _owners_reached(start, project_dir: Path, owner_of: Dict[str, List[str]], ma
         except OSError:
             continue
         select = selectors.get(rel)
-        for candidate in (_selected_imports(text, rel, select) if select is not None else _imports(text, rel)):
+        for candidate, wanted in (_selected_imports(text, rel, select) if select is not None else _imports(text, rel)):
             if candidate in owner_of:
+                # An owned file that already exists and defines every imported name can't fail the
+                # import whatever its later owners add (a task extending an existing module).
+                if candidate not in provided:
+                    provided[candidate] = _defined_names(project_dir / candidate)
+                have = provided[candidate]
+                if have is not None and all(n in have for n in wanted):
+                    continue
                 for owner in owner_of[candidate]:
                     mods = reached.setdefault(owner, [])
                     if candidate not in mods:

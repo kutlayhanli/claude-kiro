@@ -164,6 +164,32 @@ def test_node_id_selection_is_read_like_k(tmp_path):
     assert [c["needs"] for c in lint_spec(tmp_path / "specs/sim", tmp_path)["verifyCycles"]] == ["48"]
 
 
+def run_extension_spec(root: Path, run_py: str) -> None:
+    # unattended-correctness Task 1 helper -> cli/run.py: Task 19 is verified by Task 1; Task 108 extends run.py.
+    (root / "tests").mkdir(exist_ok=True)
+    (root / "src/claude_kiro/cli").mkdir(parents=True, exist_ok=True)
+    (root / "src/claude_kiro/cli/run.py").write_text(run_py)
+    (root / "tests/helpers.py").write_text("def sandboxed():\n    from claude_kiro.cli.run import sandbox_settings\n    return sandbox_settings\n")
+    (root / "tests/test_helpers.py").write_text("from tests.helpers import sandboxed\n\n\ndef test_sandboxed():\n    assert sandboxed()\n")
+    write_spec(
+        root,
+        block(1, "Harness", track="test", status="Done", files=["tests/helpers.py", "tests/test_helpers.py"], verify="uv run pytest -q tests/test_helpers.py", verifies="Task 19")
+        + block(19, "Gate JSON", files=["src/claude_kiro/gate.py"], vby="Task 1", deps="Task 1 (oracle)")
+        + block(108, "Hooks", files=["src/claude_kiro/cli/run.py"], deps="Task 19 (reads gate JSON)"),
+    )
+
+
+def test_existing_module_that_already_defines_the_name_is_not_a_cycle(tmp_path):
+    run_extension_spec(tmp_path, "def sandbox_settings(project):\n    return {}\n")
+    assert lint_spec(tmp_path / "specs/sim", tmp_path)["verifyCycles"] == []
+
+
+def test_existing_module_missing_the_imported_name_is_a_cycle(tmp_path):
+    run_extension_spec(tmp_path, "def other():\n    return {}\n")
+    [cycle] = lint_spec(tmp_path / "specs/sim", tmp_path)["verifyCycles"]
+    assert (cycle["task"], cycle["needs"], cycle["module"]) == ("19", "108", "src/claude_kiro/cli/run.py")
+
+
 def test_module_level_import_counts_under_any_selection(tmp_path):
     # A module-level import runs at collection, whatever -k selects.
     fixture_props(tmp_path, top_level="from claude_kiro.fixtures import Label\n\n\n")
