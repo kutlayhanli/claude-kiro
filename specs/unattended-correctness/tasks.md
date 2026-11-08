@@ -266,7 +266,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 11: Parse the `**Provides:**` field on tasks
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 11.3
 **Description:** In `src/claude_kiro/hooks/_shared/spec_parser.py`, add `SpecTask.provides: List[str]` (default empty), filled from a `**Provides:**` line holding one or more backticked command paths (`**Provides:** \`mtr thesis new\`, \`mtr thesis list\``). Whitespace inside each path is normalized to single spaces; a Provides line with no backticked value yields an empty list and leaves the rest of the task parsed (the graph reports it as a problem in Task 13). Nothing else in the parser changes; existing callers keep working. Foundation task: its Verify is a smoke check (the existing lint and relink suites); 11.3 is verified at Task 13 by Tasks 7 and 17, whose tests need the graph's provides edges.
@@ -275,8 +275,8 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verify:** `uv run pytest -q tests/test_lint.py tests/test_relink.py`
 
 **Acceptance:**
-- [ ] A task with `**Provides:** \`mtr thesis new\`` parses to `provides == ["mtr thesis new"]` (11.3)
-- [ ] Tasks without the field parse exactly as before (`provides == []`)
+- [x] A task with `**Provides:** \`mtr thesis new\`` parses to `provides == ["mtr thesis new"]` (11.3)
+- [x] Tasks without the field parse exactly as before (`provides == []`)
 
 **Dependencies:** None
 **Complexity:** Low
