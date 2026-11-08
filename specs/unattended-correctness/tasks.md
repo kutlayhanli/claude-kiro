@@ -687,7 +687,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 29: Add the right-reason classifier
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 5.2, 5.3, 5.4, 5.5, 5.6, 5.7
 **Description:** Extend `src/claude_kiro/failures.py` with `ProjectContext` (including `test_sources`), `TestResult` and `RightReasonVerdict` (design "Data Models") and three pure seams. `classify_not_built(failure, ctx) -> "not-built" | "bad" | "unclear"` applies design's rules, first match wins: (1) `NotImplementedError` anywhere -> not-built; (2) ImportError family, `cannot import name`, or `AttributeError: module 'x' has no attribute 'y'` naming a module in `ctx.project_modules` or a path in `ctx.owned_paths` -> not-built, a third-party module -> unclear; (3) `missing_command(detail, programs)` matches, or click `No such command` / `No such option`, argparse `invalid choice` / `unrecognized arguments` for one of `ctx.programs` (including inside an assertion on a CLI exit code) -> not-built; (4) data loading errors (`ValidationError`, `JSONDecodeError`, `yaml.YAMLError`, `UnicodeDecodeError`, `FileNotFoundError` for a path in `ctx.test_paths`), any error in phase `setup`, an `AssertionError` whose crash path is a helper, conftest or fixture file other than the test file, and `SyntaxError` / `NameError` in the test file -> bad; (5) an `AssertionError` whose crash path is the test file -> `assert_reaches_project(ctx.test_sources[file], failure.crash_line, ctx)`: `False` (the assert expression, followed back through assignments and `for`/`with` targets in its test function, uses only literals, builtins, the standard library and file-loaded data) -> bad; `True` (it reaches a name imported from a project module or owned path, a test-function parameter such as a pytest fixture, or a call on one) or `None` (cannot parse) -> unclear (5.7); (6) everything else -> unclear. `right_reason_verdict(results, all_verified_done) -> RightReasonVerdict`: when `all_verified_done`, `require_pass` is true and no class applies (5.6); otherwise `blocking` holds the bad failures, `unclear` the unclear ones, `already_passing` the passing nodes. Harness Contract owner: item 3's `rightreason.classify` (design: `failures.classify_not_built`, classes `not-built`, `bad`, `unclear`).
@@ -697,10 +697,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 21 (P-12 at `classify_not_built`), Task 107 (seam cases of the Story 5 red team)
 
 **Acceptance:**
-- [ ] Missing project modules or names, missing CLI commands or subcommands, unrecognized arguments, invalid choices and `NotImplementedError` classify as not-built (5.2)
-- [ ] Fixture assertion errors and schema or validation errors while loading fixtures classify as bad (5.3); a test-body `AssertionError` is bad (blocks) only when its failing assert runs no project code and uses no name imported from the project's own code (only literals or file-loaded data); one that reaches project code, a project import, a fixture argument or cannot be parsed is unclear, passes and is reported (5.4, 5.7; PLAN D19, V2)
-- [ ] Unclassifiable failures are unclear and do not block (5.4); passing tests are listed as already passing (5.5)
-- [ ] With all verified tasks Done the verdict requires a pass and applies no class (5.6)
+- [x] Missing project modules or names, missing CLI commands or subcommands, unrecognized arguments, invalid choices and `NotImplementedError` classify as not-built (5.2)
+- [x] Fixture assertion errors and schema or validation errors while loading fixtures classify as bad (5.3); a test-body `AssertionError` is bad (blocks) only when its failing assert runs no project code and uses no name imported from the project's own code (only literals or file-loaded data); one that reaches project code, a project import, a fixture argument or cannot be parsed is unclear, passes and is reported (5.4, 5.7; PLAN D19, V2)
+- [x] Unclassifiable failures are unclear and do not block (5.4); passing tests are listed as already passing (5.5)
+- [x] With all verified tasks Done the verdict requires a pass and applies no class (5.6)
 
 **Dependencies:** Task 6 (edits failures.py, which Task 6 creates), Task 21 (its tests are the oracle), Task 107 (its tests are the oracle)
 **Complexity:** Medium
