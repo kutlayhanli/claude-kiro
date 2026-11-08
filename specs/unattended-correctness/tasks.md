@@ -1204,7 +1204,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 52: Test no network calls and run the backward-compatibility suite
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 18.5, 9.2, 10.1, 11.5, 12.2, 15.1
 **Description:** Implement TC-168 (with the `no_network` fixture, these run with an empty network log: `ck gate --attribute --json`, `ck graph`, `ck lint`, `ck relink --commands --apply`, a hooked raw `git merge`, `ck worktree land`, `ck worktree audit`, `ck worktree start`, `ck fixtures status`, `ck lint --fidelity`, `ck testfix check`). Each command's test is named `test_tc168_<command>`, and the `ck testfix check` one is `test_tc168_testfix_check`. TC-171 and TC-158 (both `specs/ck.json` verify commands pass whatever the `dsh` outcome) are checked by the run's final attributed gate.
@@ -1214,9 +1214,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 53 (TC-168 for gate, graph, lint, relink, plan, land, hooks, audit, start and fixtures), Task 57 (TC-168 for `ck testfix check`)
 
 **Acceptance:**
-- [ ] Network blocking uses the existing `no_network` fixture and netguard for Python children
-- [ ] TC-168 fails before the implementation because the listed commands do not exist
-- [ ] No mocks of the project's own code
+- [x] Network blocking uses the existing `no_network` fixture and netguard for Python children
+- [x] TC-168 fails before the implementation because the listed commands do not exist
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project, hooks_repo, spec_graph_project)
 **Complexity:** Low
