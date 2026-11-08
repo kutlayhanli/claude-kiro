@@ -1798,7 +1798,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 - `plugin/workflows/spec-implement.js` - `runnerAgent`/`runId` args, `CK_CALL`, `thinAgentMode`, `thinCk`, thin routing of plan/land/relink/park/report, `thinAgent` result
 - `tests/js/spec_implement.test.mjs` - superseded orchestrator-opts assertions on `plan 1` / `land 1`
 - `tests/js/landing_speed.test.mjs` - superseded raw plan/land answer shapes, if pinned
-**Verify:** `uv run pytest -q tests/test_unattended_workflow_properties.py -k "tc174_p30"` `uv run pytest -q tests/test_workflow_scripts.py -k "spec_implement or landing_speed or deterministic_plan or finish_first or guard_ladder"`
+**Verify:** `uv run pytest -q tests/test_workflow_scripts.py -k "spec_implement or landing_speed or deterministic_plan or finish_first or guard_ladder"`
 **Verified by:** Task 2 (the fake runtime, bridge and `CK_CALL` envelopes its thin routing runs under), Task 74 (P-30 at the thin-routing seam)
 
 **Acceptance:**
@@ -1890,7 +1890,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Description:** In `plugin/workflows/spec-implement.js`: before the first task agent, call `thinCk('run start', ['worktree', 'start', SPEC, '--run', runId, '--json'])` once and keep its JSON as `runStart` (log released claims and any hook problem; a hook problem is also a result warning); pass `--progress-run <runId>` in every claim command so claims carry the run ID. At run end, on every outcome (complete, red stop, halted, refused, thrown step error), call `thinCk('audit', ['worktree', 'audit', SPEC, '--json'])` after the last step and store it as `audit`; a failed or unparseable audit is recorded as incomplete, never clean. A landing that comes back `PROTECTED` parks the task as needs-input with `kind: "protected"`, the files, the command `ck worktree approve <spec> <task>` for me to run in my own terminal, and the resume: run `/spec:implement <spec>` again with the same `runId` (2.13); no agent lands it. A pass started with a `runId` whose earlier pass parked a task that is now Done needs nothing special: run start treats that run's claims as its own (16.7), the task's dependents become ready from `ck plan`, and the final attributed gate runs after the last merge (2.11). Harness Contract owner: item 7's result `audit` and `sweep` (design: `runStart`), the `audit` and `run start` labels, and the direct `worktree audit` / `worktree start` calls.
 **Files:**
 - `plugin/workflows/spec-implement.js` - run start step, claims with run ID, run-end audit on every outcome, protected park
-**Verify:** `node tests/js/thin_agents.test.mjs` `node tests/js/test_fix.test.mjs tc84_`
+**Verify:** `node tests/js/thin_agents.test.mjs` `node tests/js/test_fix.test.mjs tc84_` `uv run pytest -q tests/test_unattended_workflow_properties.py -k "tc174_p30"`
 **Verified by:** Task 75 (TC-98b, TC-101, TC-131b, TC-148b, TC-159, TC-161 to TC-164a, TC-188; the suite needs run start and the audit this task adds), Task 83 (TC-84c, selected with the suite's TC argv filter)
 
 **Acceptance:**
@@ -2178,7 +2178,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 95: Have spec-create write Provides fields and TC-prefixed test names
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.9, 12.4
 **Description:** In `plugin/workflows/spec-create.js`, the impl-track prompt and `TASK_BLOCK` gain a `**Provides:**` field (backticked command paths) on every impl task that adds or changes a CLI command and whose commands ck cannot infer, with an instruction to check with `ck graph` or `ck lint`. The test-track prompt asks for `tcNNN_` test-name prefixes on every test and for fixtures labelled with `ck fixtures mark`.
@@ -2188,8 +2188,8 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 17 (TC-113a)
 
 **Acceptance:**
-- [ ] Impl tasks whose commands ck cannot infer get a `**Provides:**` field (12.4)
-- [ ] Test-track tasks name their tests with `tcNNN_` prefixes (1.9)
+- [x] Impl tasks whose commands ck cannot infer get a `**Provides:**` field (12.4)
+- [x] Test-track tasks name their tests with `tcNNN_` prefixes (1.9)
 
 **Dependencies:** Task 17 (its tests are the oracle)
 **Complexity:** Low

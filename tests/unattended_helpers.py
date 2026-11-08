@@ -666,7 +666,7 @@ INVOCATION_FORMS = (
 )
 NEAR_MISS_FORMS = (
     'run_cli(["thesis", "newer"])', 'run_cli(["thesis-new"])', 'run_cli(["express", "--name", "thesis"])',
-    'assert ok, "thesis new failed"', '# mtr thesis new', 'subprocess.run(["git", "thesis", "new"])',
+    'assert ok, "thesis new failed"', 'pass  # mtr thesis new', 'subprocess.run(["git", "thesis", "new"])',
 )
 
 
