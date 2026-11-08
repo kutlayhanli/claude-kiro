@@ -7,6 +7,7 @@ import os
 import pty
 import re
 import select
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -58,7 +59,8 @@ def audit_repo(tmp_path: Path, *, allow: Optional[List[str]] = None, readonly_in
     hooks_before = set(hook_files(root))
     if readonly_install:
         with h.readonly_git_metadata(root):
-            h.ck_text(root, "worktree", "integration", "demo")
+            code, _, err = h.ck_text(root, "worktree", "integration", "demo")
+        assert code == 0, f"integration must still succeed when hooks cannot be installed: {err}"
     else:
         code, _, err = h.ck_text(root, "worktree", "integration", "demo")
         assert code == 0, err
@@ -171,6 +173,7 @@ def test_tc97_hooks_path_repointed(tmp_path):
     assert any("hooksPath" in p for p in obj["hooks"]["problems"]), obj["hooks"]
 
 
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="chmod a-w does not stop root")
 def test_tc97_hooks_never_installed(tmp_path):
     root, ck_hooks, _ = audit_repo(tmp_path, readonly_install=True)
     assert not ck_hooks
@@ -204,12 +207,14 @@ def _approve_in_pty(root: Path) -> int:
     """`ck worktree approve demo 1` at a real terminal: read the 6-character code, type it back."""
     pid, fd = pty.fork()
     if pid == 0:
-        os.chdir(root)
-        os.execvp(h.CK_ARGV[0], [*h.CK_ARGV, "worktree", "approve", "demo", "1"])
+        try:
+            os.chdir(root)
+            os.execvp(h.CK_ARGV[0], [*h.CK_ARGV, "worktree", "approve", "demo", "1"])
+        finally:
+            os._exit(127)
     seen = b""
     typed = False
     deadline = time.time() + 120
-    status = None
     while time.time() < deadline:
         ready, _, _ = select.select([fd], [], [], 1.0)
         if ready:
@@ -221,13 +226,32 @@ def _approve_in_pty(root: Path) -> int:
                 break
             seen += chunk
             if not typed:
-                m = re.search(rb"code[^\r\n]*?\b([A-Za-z0-9]{6})\b", seen, re.IGNORECASE)
-                if m:
-                    os.write(fd, m.group(1) + b"\n")
-                    typed = True
-    _, status = os.waitpid(pid, 0)
+                for line in seen.splitlines():
+                    if re.search(rb"code", line, re.IGNORECASE):
+                        toks = re.findall(rb"\b[A-Za-z0-9]{6}\b", line)
+                        if toks:
+                            os.write(fd, toks[-1] + b"\n")
+                            typed = True
+                            break
+    if not typed:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+        os.waitpid(pid, 0)
+        os.close(fd)
+        pytest.fail(f"no code prompt seen: {seen!r}")
+    # the code is typed; give the child the rest of the deadline, then stop it rather than hang
+    while time.time() < deadline:
+        done, status = os.waitpid(pid, os.WNOHANG)
+        if done:
+            os.close(fd)
+            return os.waitstatus_to_exitcode(status)
+        time.sleep(0.2)
+    os.kill(pid, signal.SIGKILL)
+    os.waitpid(pid, 0)
     os.close(fd)
-    return os.waitstatus_to_exitcode(status)
+    pytest.fail(f"ck worktree approve did not finish: {seen!r}")
 
 
 def test_tc99_approval_landing_is_not_drift(tmp_path):
@@ -254,11 +278,8 @@ def _approved_record_candidates(root: Path, changed: List[str]) -> List[Path]:
         p = Path(key)
         if wts in p.parents:
             continue
-        if common in p.parents:
-            rel = p.relative_to(common)
-            if rel.parts[0] in GIT_INTERNAL or rel.name in GIT_FILES:
-                continue
-        out.append(p)
+        if (common / "ck" / "demo") in p.parents:
+            out.append(p)
     return out
 
 
@@ -277,4 +298,4 @@ def test_tc100_unreadable_approved_state_is_incomplete(tmp_path, mode):
     code, obj = audit(root)
     assert code == 3, obj
     assert obj["complete"] is False and obj["clean"] is False
-    assert obj["problems"], obj
+    assert any(str(x).startswith("approved state unreadable") for x in obj["problems"]), obj
