@@ -466,12 +466,12 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 1 (captures `failure.schema.json` and the text-gate baselines its output is checked against), Task 3 (P-5b through the real CLI), Task 4 (red team of 3.3, 3.5 through `ck gate --json`), Task 5 (TC-28 to TC-30, TC-32, TC-191 and TC-36's `ck gate --json` source), Task 17 (TC-115)
 
 **Acceptance:**
-- [ ] `ck gate --json` lists one entry per failing node (or per failing file for collection errors and non-pytest runners) with node, TC id, tasks, file, kind and message (3.1, 1.6, 1.7)
-- [ ] Every entry's kind is one of the five kinds (3.2); messages over 500 characters are truncated and marked, never dropped (3.5)
-- [ ] A passing gate prints `"failures": []`; the field is never omitted (3.3)
+- [x] `ck gate --json` lists one entry per failing node (or per failing file for collection errors and non-pytest runners) with node, TC id, tasks, file, kind and message (3.1, 1.6, 1.7)
+- [x] Every entry's kind is one of the five kinds (3.2); messages over 500 characters are truncated and marked, never dropped (3.5)
+- [x] A passing gate prints `"failures": []`; the field is never omitted (3.3)
 - [ ] Every field `ck gate` and its consumers provide today is still there (3.10), and `ck gate` without `--json` prints exactly today's report (1.11)
 - [ ] A nested pytest run started by a gated test never adds entries to the gate's failures (TC-191)
-- [ ] A missing-command failure carries `missingCommand` with its providers (12.5)
+- [x] A missing-command failure carries `missingCommand` with its providers (12.5)
 
 **Dependencies:** Task 6 (calls the failure readers and `classify_kind`), Task 18 (fills TC id and tasks through `AttributionIndex`), Task 13 (reads providers from the graph's provides edges), Task 1 (its tests are the oracle), Task 3 (its tests are the oracle), Task 4 (its tests are the oracle), Task 5 (its tests are the oracle), Task 17 (its tests are the oracle)
 **Complexity:** High
