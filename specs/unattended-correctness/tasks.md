@@ -1532,7 +1532,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 67: Test stats role attribution of the new workflow labels
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 14.7
 **Description:** Extend TC-132's stats side (`ck stats` collect keeps agents per role) to the labels the workflow gains (design "analytics/roles.py"). Commit a run record fixture `tests/fixtures/unattended/stats-labels-record.json` whose agent rows are labelled `testfix 1 (Task 2)`, `testfix review 1`, `run start`, `audit`, `testfix ledger 1` and `testfix prove 1`, plus today's labels (`plan 1`, `land 2`, `full gate @10`, `final gate`, `re-check 1`, `report`, `park 3`, `relink 4`). Run the real `ck stats` collect and show over it with an isolated stats home (the `tests/stats_helpers.py` pattern) and assert that each new label is counted under its role (test-writer, reviewer, gate) and every existing label keeps its role. Tests are named `test_tc132_<slug>`.
@@ -1543,10 +1543,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 68 (TC-132 stats labels)
 
 **Acceptance:**
-- [ ] Tests run the real `ck stats` CLI over a committed record fixture
-- [ ] They fail before the implementation because the new labels map to no role, not because of fixture errors
-- [ ] Existing labels are asserted to keep their roles
-- [ ] No mocks of the project's own code
+- [x] Tests run the real `ck stats` CLI over a committed record fixture
+- [x] They fail before the implementation because the new labels map to no role, not because of fixture errors
+- [x] Existing labels are asserted to keep their roles
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Low
