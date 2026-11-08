@@ -13,8 +13,8 @@ each naming the criterion and the run ID (20.7); an empty list means the bar is 
 Evidence conventions (design.md, `reruns.md`):
 - approvals: `[{"task": 93, "kind": "ck worktree approve"}, ...]`, task an int (not a bool, float
   or string), only Tasks 93 and 94, only through the approval command.
-- finalGate: `{"state": "green", "afterLastMerge": true}`.
-- hooksAtStart: true; audit: "clean" (or true, or an object with `clean: true` or `state: "clean"`).
+- finalGate: `{"state": "green", "afterLastMerge": true}` (design GateRun: state 'green'|'red'|'error').
+- hooksAtStart: true; audit: the ck-audit/1 object (`complete: true`, `clean: true`).
 - failedCriteria: `[]` when the bar is met.
 """
 
@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SPEC_DIR = ROOT / "specs" / "unattended-correctness"
 RERUNS_MD = SPEC_DIR / "reruns.md"
 BENCH_CONFIG = SPEC_DIR / "bench-equity-reruns.json"
-DSH_VERIFICATION = SPEC_DIR / "dsh-verification.json"
+DSH_VERIFICATION = SPEC_DIR / "dsh-verification.md"
 
 SPEC_REF = "fix/mtr-spec-issues"
 
@@ -52,7 +52,7 @@ ALLOWED_COMMANDS = {
 
 APPROVAL_KIND = "ck worktree approve"
 APPROVED_TASKS = (93, 94)
-GREEN_STATES = ("green", "passed", "pass")
+GREEN_STATE = "green"
 OPENCODE_MODELS = ("opencode-go/muse-spark-1.3-contributor", "opencode-go/deepseek-v4.1-flash")
 
 PROPERTIES: Dict[str, str] = {}
@@ -70,10 +70,8 @@ def _is_num(v: Any) -> bool:
 
 
 def _audit_clean(audit: Any) -> bool:
-    if audit is True or audit == "clean":
-        return True
     if isinstance(audit, dict):
-        return audit.get("clean") is True or audit.get("state") == "clean"
+        return audit.get("clean") is True and audit.get("complete") is not False
     return False
 
 
@@ -111,7 +109,8 @@ def _validate_arm(arm: Any, baseline: Dict[str, Any], index: int) -> List[str]:
         bad("20.2", f"tasks Done/total is {done!r}/{total!r}, every task must be Done")
 
     gate = arm.get("finalGate")
-    if not (isinstance(gate, dict) and gate.get("state") in GREEN_STATES and gate.get("afterLastMerge") is True):
+    if not (isinstance(gate, dict) and gate.get("state") == GREEN_STATE
+            and gate.get("green", True) is True and gate.get("afterLastMerge") is True):
         bad("20.2", f"final attributed gate is {gate!r}, must be green and run after the last merge of the last pass")
 
     suite = arm.get("suite")
@@ -153,8 +152,10 @@ def _validate_arm(arm: Any, baseline: Dict[str, Any], index: int) -> List[str]:
             ok = isinstance(entry, dict) and entry.get("criterion") and entry.get("runId") == run
             out.append(f"{tag}: criterion 20.7: recorded failure {entry!r}"
                        + ("" if ok else " (names no criterion or no run ID)"))
-        if failed and not fc:
-            out.append(f"{tag}: criterion 20.7: failed bars {sorted(set(failed))} are not recorded in failedCriteria")
+        recorded = {e.get("criterion") for e in fc if isinstance(e, dict) and e.get("runId") == run}
+        missing = sorted(set(failed) - recorded)
+        if missing:
+            out.append(f"{tag}: criterion 20.7: failed bars {missing} are not recorded in failedCriteria with the run ID")
     return out
 
 
@@ -165,6 +166,8 @@ def validate_evidence(doc: Any, dsh_findings: Optional[Dict[str, Any]] = None) -
     out: List[str] = []
 
     baseline = doc.get("baseline")
+    if isinstance(baseline, dict) and not (isinstance(baseline.get("run"), str) and baseline.get("run")):
+        out.append("baseline: run must be a non-empty string (criterion 20.5)")
     if not (isinstance(baseline, dict) and _is_num(baseline.get("costPerMergedTask"))
             and _is_num(baseline.get("wallMinPerTask"))):
         out.append("baseline: costPerMergedTask and wallMinPerTask must be numbers (criterion 20.5)")
@@ -207,6 +210,8 @@ def validate_evidence(doc: Any, dsh_findings: Optional[Dict[str, Any]] = None) -
     if not isinstance(sandbox, dict):
         out.append("sandboxTests: missing (criterion 9.11)")
     else:
+        if not (isinstance(sandbox.get("host"), str) and sandbox.get("host")):
+            out.append("sandboxTests.host must be a non-empty string (criterion 9.11)")
         for key in ("tc88", "tc189"):
             if sandbox.get(key) != "passed":
                 out.append(f"sandboxTests.{key} is {sandbox.get(key)!r}, must be 'passed' not skipped (criterion 9.11)")
@@ -216,15 +221,19 @@ def validate_evidence(doc: Any, dsh_findings: Optional[Dict[str, Any]] = None) -
 # --- helpers -------------------------------------------------------------------------------------
 
 
-def _evidence() -> Dict[str, Any]:
-    assert RERUNS_MD.is_file(), f"{RERUNS_MD} does not exist: the equity reruns (Task 104) have not been recorded"
-    m = re.search(r"```json\s*\n(.*?)\n```", RERUNS_MD.read_text(encoding="utf-8"), re.S)
-    assert m, f"{RERUNS_MD} has no fenced ```json block"
+def _json_block(path: Path) -> Dict[str, Any]:
+    m = re.search(r"```json\s*\n(.*?)\n```", path.read_text(encoding="utf-8"), re.S)
+    assert m, f"{path} has no fenced ```json block"
     return json.loads(m.group(1))
 
 
+def _evidence() -> Dict[str, Any]:
+    assert RERUNS_MD.is_file(), f"{RERUNS_MD} does not exist: the equity reruns (Task 104) have not been recorded"
+    return _json_block(RERUNS_MD)
+
+
 def _dsh_findings() -> Optional[Dict[str, Any]]:
-    return json.loads(DSH_VERIFICATION.read_text()) if DSH_VERIFICATION.is_file() else None
+    return _json_block(DSH_VERIFICATION) if DSH_VERIFICATION.is_file() else None
 
 
 def _bench() -> Dict[str, Any]:
@@ -237,7 +246,7 @@ def _is_opencode(conf: Dict[str, Any]) -> bool:
 
 
 def _allow_paths(cfg: Dict[str, Any], conf: Dict[str, Any]) -> List[str]:
-    ck_config = conf.get("ck_config", cfg.get("ck_config"))
+    ck_config = cfg.get("ck_config")
     assert isinstance(ck_config, dict), f"config {conf.get('name')!r} has no ck_config"
     land = ck_config.get("land")
     assert isinstance(land, dict) and isinstance(land.get("allow_paths"), list), \
@@ -254,9 +263,7 @@ def _git(cwd: Path, *args: str) -> str:
 
 def test_tc165_configs_use_the_fix_spec_ref():
     cfg = _bench()
-    refs = [cfg.get("base")] + [s.get("ref") or s.get("base") or s.get("branch")
-                                for s in cfg.get("specs", []) if isinstance(s, dict)]
-    assert SPEC_REF in refs, f"no spec ref {SPEC_REF!r} in the bench config (found {refs})"
+    assert cfg.get("base") == SPEC_REF, f"bench base is {cfg.get('base')!r}, must be {SPEC_REF!r}"
     for conf in cfg["configs"]:
         for key in ("base", "ref"):
             if key in conf:
@@ -311,11 +318,14 @@ def test_tc165_claude_md_stays_protected_with_that_allow_list(tmp_path):
 
 def test_tc165_opencode_arms_have_one_model_and_no_roles():
     cfg = _bench()
+    assert "roles" not in ((cfg.get("ck_config") or {}).get("opencode") or {}), "ck_config.opencode.roles is set (20.4)"
     opencode = [c for c in cfg["configs"] if _is_opencode(c)]
     assert len(opencode) == 2, f"expected 2 OpenCode arms, found {len(opencode)}"
     for conf in opencode:
         assert not conf.get("roles"), f"OpenCode arm {conf.get('name')!r} has a roles map (20.4)"
         assert "roles" not in (conf.get("opencode") or {}), f"OpenCode arm {conf.get('name')!r} has opencode.roles"
+        assert "roles" not in ((conf.get("ck_config") or {}).get("opencode") or {}), \
+            f"OpenCode arm {conf.get('name')!r} ck_config has opencode.roles"
     for model in OPENCODE_MODELS:
         assert any(model in json.dumps(c) for c in opencode), f"no OpenCode arm uses {model}"
 
