@@ -527,7 +527,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 22: Property tests for config validators and fixture drift
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.5, 15.2, 15.3, 15.4, 15.8
 **Description:** Implement the TC-175 rows P-13 and P-32. P-13: `claude_kiro.config.test_track_validate` and `fixture_globs` accept iff the value is a string or list of strings (for globs: a list of strings), else raise `ConfigError` naming the key, over `st.recursive` JSON (strings, empty string, mixed lists, nested lists, dicts, numbers, bools, null). P-32: `claude_kiro.fixtures.lock_decision` over 1-8 events on 5 files (3 matching the globs) with handcraft labels whose reasons are `""`, `" "`, `"\t\n"` or real text: drift is exactly the locked files changed without a label with a non-blank reason. Settings 200 examples, derandomized, no database. `PROPERTIES = {"P-13": ..., "P-32": ...}`, tests `test_tc175_p<k>_<slug>`.
@@ -538,11 +538,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 28 (P-13 at the config readers), Task 48 (P-32 at `lock_decision`)
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the rows
-- [ ] Settings are deterministic
-- [ ] Tests call the decision seams, not a server
-- [ ] They fail before the implementation because the seams do not exist
-- [ ] No mocks of the project's own code
+- [x] Generators cover every surface form and negative listed in the rows
+- [x] Settings are deterministic
+- [x] Tests call the decision seams, not a server
+- [x] They fail before the implementation because the seams do not exist
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Low
@@ -2298,7 +2298,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 101: Validate the equity rerun evidence
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.13, 9.10, 9.11, 18.2, 20.1, 20.2, 20.3, 20.4, 20.5, 20.6, 20.7
 **Description:** Implement TC-89, TC-165, TC-166 and TC-167. TC-165: the committed bench configs for the 4 reruns use spec ref `fix/mtr-spec-issues`, have `land.allow_paths` (via `ck_config`) equal as a set to the 12 paths listed in requirement 20.1 (`.claude/commands/{digest,express,grade,inbox,ingest,roles,spotcheck,sweep}.md` and `.claude/commands/thesis/{close,new,review,revise}.md`, hard-coded in the test as its oracle), and `protected_changes` on a synthetic `.claude/CLAUDE.md` change with that allow-list still returns it; OpenCode arms have no `roles`. TC-166/TC-167/TC-89: read `specs/unattended-correctness/reruns.md` and its fenced ```json block (`{baseline, arms: [{name, harness, model, run, passes, tasksDone, tasksTotal, finalGate, suite, handRepairs, approvals, hooksAtStart, audit, costPerMergedTask, wallMinPerTask, failedCriteria}], thinAgentContext, sandboxTests}`) and assert 4 arms (or 3 plus `dsh` findings when 18.3 applies), every entry of `passes` started with the arm's `run` as its `runId` (several passes of one run ID are one rerun, 2.13), every task Done, a green final attributed gate after the last merge of the last pass, failed + errors = 0, no hand repairs, approvals only for Tasks 93 and 94, hooks installed at start and a clean audit at end, cost and wall at or below the baseline, lean cache writes at least 50% below default, `sandboxTests.tc88` and `sandboxTests.tc189` equal to `passed` (not `skipped`, 9.11), and every failed bar naming its criterion and run ID.
@@ -2308,10 +2308,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 103 (TC-165), Task 104 (TC-89, TC-166, TC-167)
 
 **Acceptance:**
-- [ ] Tests validate committed evidence and configs; they never generate them
-- [ ] TC-165 uses the real `protected_changes`
-- [ ] They fail before the reruns because the evidence file does not exist
-- [ ] No mocks of the project's own code
+- [x] Tests validate committed evidence and configs; they never generate them
+- [x] TC-165 uses the real `protected_changes`
+- [x] They fail before the reruns because the evidence file does not exist
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Low
