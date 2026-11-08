@@ -350,3 +350,23 @@ def test_tc108_malformed_sources_become_problems_and_the_rest_is_built(tmp_path)
     assert nodes == clean_nodes
     assert edges == clean_edges
     assert not any(n[1] in ("task:5", "task:x") for n in node_set(g)), "a malformed block adds no task node"
+
+
+def test_tc108_unreadable_sources_become_problems_and_missing_ones_stay_silent(tmp_path):
+    # 11.8: a source that exists but cannot be read is named, never dropped silently. A missing file adds nothing.
+    root = h.spec_graph_project(tmp_path / "unreadable", tasks=base_tasks(), design_cli=DESIGN_CLI,
+                                tests={"tests/test_cli.py": CLI_TEST}, sources={"src/mtr/thesis.py": THESIS_SRC})
+    spec = root / "specs" / "sim"
+    (spec / "design.md").unlink()
+    (spec / "design.md").mkdir()  # a directory where design.md should be: exists, cannot be read as a file
+    (spec / "test-plan.md").unlink()  # missing: silent
+    (root / "src" / "mtr" / "thesis.py").unlink()
+    (root / "src" / "mtr" / "thesis.py").mkdir()  # an owned source that cannot be read
+
+    g = graph(root)
+
+    by_source = {p["source"]: p["problem"] for p in g["problems"]}
+    assert set(by_source) == {"specs/sim/design.md", "src/mtr/thesis.py"}, by_source
+    assert by_source["specs/sim/design.md"].startswith("unreadable")
+    assert by_source["src/mtr/thesis.py"].startswith("unreadable")
+    assert "task:2" in {n["id"] for n in g["nodes"]}, "the rest of the graph is still built"

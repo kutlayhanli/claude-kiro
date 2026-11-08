@@ -634,7 +634,10 @@ How edges are filled (the API delegated by PLAN):
   test task T, every TC found in T's test files (`def test_tcNNN_`, `test('tcNNN_ ...')`) or in test-plan rows
   whose Test file column names one of T's files, to each task in `T.verifies`. Each edge keeps its origin in
   `source` (`"Verify -k"` or `"Verifies"`). Attribution (1.1) uses a TC's `"Verify -k"` edges; it falls back to
-  its `"Verifies"` edges only when the TC has no `"Verify -k"` edge, so the two are never unioned.
+  its `"Verifies"` edges only when the TC has no `"Verify -k"` edge, so the two are never unioned. A tc node exists
+  only for a TC some test file or test-plan row defines. A TC that only a Verify `-k` names keeps its verifies
+  edge with no tc node: a dangling verifies source, which consumers must accept (the freshness rule of 11.7
+  requires the node to vanish once no test defines the TC).
 - **provides:** `**Provides:**` wins (11.3). Otherwise inferred: a design.md table row with a backticked command
   path whose row names a file the task owns; else a backticked command path, starting with a known program, in
   the task's title or description. Ambiguity (two tasks inferred) keeps both edges and adds a GraphProblem.
