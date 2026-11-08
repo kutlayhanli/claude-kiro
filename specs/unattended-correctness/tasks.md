@@ -1354,7 +1354,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 59: Test the harness registry in bench and doctor
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 17.1, 17.2, 17.3, 17.4, 17.5
 **Description:** Implement TC-150, TC-151, TC-152 and TC-153. TC-150: `ck bench run cfg.json --harness nope --dry-run` and `ck doctor --harness nope` exit non-zero listing every registered name; `--help` lists exactly the registered names. TC-151: register a fake harness `fakeh` in-process (`claude_kiro.harnesses.register`, `CliRunner`), run `ck bench run cfg.json --harness fakeh` (result written) and `ck doctor --harness fakeh` (adapter's doctor called). TC-152: run the existing bench and doctor tests unchanged, and `--runner` with `--harness opencode` still fails with today's message. TC-153: arm results from the fake claude run, the fake opencode run and `fakeh` have the same key set.
@@ -1364,10 +1364,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 62 (TC-150 to TC-153)
 
 **Acceptance:**
-- [ ] Tests run the real bench and doctor CLIs; only external binaries and the registered fake adapter are fakes
-- [ ] They fail before the implementation because `--harness` is a fixed `click.Choice` with no registry
-- [ ] Existing bench and doctor tests are run, not modified
-- [ ] No mocks of the project's own code
+- [x] Tests run the real bench and doctor CLIs; only external binaries and the registered fake adapter are fakes
+- [x] They fail before the implementation because `--harness` is a fixed `click.Choice` with no registry
+- [x] Existing bench and doctor tests are run, not modified
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Medium
@@ -1376,7 +1376,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 60: Property tests for harness name lookup
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 17.1, 17.2
 **Description:** Implement the TC-175 row P-29 at `claude_kiro.harnesses.select` and through the CLI: lookup succeeds iff the name equals a registered name exactly; otherwise the error lists every registered name; `--harness` on `ck bench run --dry-run` and `ck doctor` accepts exactly the same set. Domain: registered names, case variants (`Claude`), whitespace (` claude`), near-misses (`claude-code`, `open-code`, `opencode2`, `dsh` when unregistered) and the empty string. Settings 200 examples for the seam (CLI part capped at 25), derandomized, no database. `PROPERTIES = {"P-29": ...}`, tests `test_tc175_p29_<slug>`.
@@ -1387,11 +1387,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 62 (P-29 at `select` and the CLI)
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the row
-- [ ] Settings are deterministic
-- [ ] Tests call the seam and the real CLI, not a server
-- [ ] They fail before the implementation because the registry does not exist
-- [ ] No mocks of the project's own code
+- [x] Generators cover every surface form and negative listed in the row
+- [x] Settings are deterministic
+- [x] Tests call the seam and the real CLI, not a server
+- [x] They fail before the implementation because the registry does not exist
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Low
@@ -1465,7 +1465,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 64: Test the cross-test default and opt-out in agent config
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.1, 7.3
 **Description:** Implement TC-64 (a) and TC-66 (a): `ck agents --json` with isolated config shows `reviewer.cross_test: true`; `ck agents set reviewer.cross_test false` globally and then per project shows false.
@@ -1475,9 +1475,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 66 (TC-64a, TC-66a)
 
 **Acceptance:**
-- [ ] Tests use the real `ck agents` CLI with the conftest-isolated config home
-- [ ] TC-64a fails before the implementation because the default is false
-- [ ] No mocks of the project's own code
+- [x] Tests use the real `ck agents` CLI with the conftest-isolated config home
+- [x] TC-64a fails before the implementation because the default is false
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Low
@@ -1574,7 +1574,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 69: Test OpenCode per-role model config and resolution
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 14.1, 14.2, 14.3, 14.4
 **Description:** Implement TC-126, TC-127, TC-128, TC-129 and TC-180 (P-28) in TypeScript with `node --test` against the real `opencode/src/config.ts`, `models.ts` (`ROLE_NAMES`, `resolveRoleRef`, `validateRoleRef`), `run-child.ts` and `workflow-tool.ts`. TC-126: project `opencode.roles.reviewer` resolves an `agent()` call with `role: "reviewer"`, `model: "opus"` to `opencode-go/deepseek-v4.1-flash` variant `medium` with `modelSource: "roles"`. TC-127: unmapped `fixer` resolves through the alias map as today. TC-128: project beats global, `sources["roles.implementer"]` names the project file. TC-129: invalid references throw `ConfigError` naming `opencode.roles.<key>` and the value, and the workflow tool creates no child session. P-28 is table-driven over the 7 role names plus `Implementer`, `test-writer`, `reviewer-risky`, `" reviewer"`, `""`, and the values `opencode-go/deepseek-v4.1-flash#medium`, `opencode-go/muse-spark-1.3-contributor`, `p/m#`, `/m`, `p/`, `p`, `p/m#a#b`, `" p/m "`, `""`, `42`, `null`, `{}`. The file exports `PROPERTIES = { 'P-28': 'tc180_p28 role references are accepted iff valid' }`. Test names start with their TC (`tc126_ ...`, `tc180_p28 ...`) so `--test-name-pattern` can select them.
@@ -1585,10 +1585,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 71 (TC-127 to TC-129 and P-28 at the config and model seams), Task 72 (TC-126)
 
 **Acceptance:**
-- [ ] Tests call the real config loading and model resolution seams, not a server
-- [ ] They fail before the implementation because `opencode.roles` is an unknown config key
-- [ ] The P-28 table covers every surface form and negative listed in the row; it is deterministic (enumerated, no randomness)
-- [ ] No mocks of the project's own code
+- [x] Tests call the real config loading and model resolution seams, not a server
+- [x] They fail before the implementation because `opencode.roles` is an unknown config key
+- [x] The P-28 table covers every surface form and negative listed in the row; it is deterministic (enumerated, no randomness)
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Medium
