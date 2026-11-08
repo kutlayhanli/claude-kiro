@@ -333,6 +333,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 - [ ] `unknown_commands` reports a command no task provides and the project does not define (12.3)
 
 **Dependencies:** Task 12 (edits graph.py, which Task 12 creates), Task 11 (reads `SpecTask.provides`), Task 7 (its tests are the oracle), Task 8 (its tests are the oracle), Task 17 (its tests are the oracle)
+**Notes (attempt 2):** A `**Provides:**` value whose program discovery does not know is not a malformed value (11.3: the field wins); only an empty value or a bare program is a `GraphProblem`. Needed by `test_tc108_unreadable_sources_become_problems_and_missing_ones_stay_silent` (an unreadable design.md hides the CLI table's programs). Blocked on a test-track fix: `NEAR_MISS_FORMS` entry `'# mtr thesis new'` makes tc104's generated test files a SyntaxError, which 11.8 must report as a problem while tc104 asserts `problems == []`.
 **Complexity:** High
 **Risk:** normal
 

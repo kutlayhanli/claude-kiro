@@ -420,12 +420,14 @@ def _programs(project_dir: Path, cli_rows: List[Tuple[str, str]], problems: List
 
 
 def _provides_problem(value: str, programs: Set[str]) -> Optional[str]:
-    """Why a **Provides:** value is malformed (11.8), or None when it is a command path of a known program."""
+    """Why a **Provides:** value is malformed (11.8), or None when it is a command path (program and command).
+
+    The program need not be one discovery knows: **Provides:** wins over inference (11.3), and an unreadable
+    design.md (whose CLI table names the programs) must not turn every Provides field into a problem (TC-108)."""
+    del programs  # kept in the signature for callers; an unknown program is not a malformed value
     words = value.split()
     if not words:
         return "Provides names no command"
-    if words[0] not in programs:
-        return f"Provides names no known program: {value!r}"
     if len(words) < 2:
         return f"Provides names no command path: {value!r}"
     return None
