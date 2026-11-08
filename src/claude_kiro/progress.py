@@ -14,7 +14,7 @@ import stat
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Literal, Mapping, Optional, Sequence, Set, Tuple
 
 from claude_kiro.analytics import store
 
@@ -126,11 +126,18 @@ def _record_error(key: str, kind: str, exc: BaseException, env: Optional[Mapping
         pass
 
 
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+
+
 def _append_line(path: Path, data: bytes) -> None:
-    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    """Append `data` to the regular file `path`. A symlink (or FIFO, device, directory) in its place is refused: run
+    files may sit in the spool, which a sandboxed child can write, and this process may run unsandboxed."""
+    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NONBLOCK | _NOFOLLOW, 0o600)
     try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"not a regular file: {path.name}")
         try:
-            os.chmod(path, 0o600)
+            os.fchmod(fd, 0o600)
         except OSError:
             pass
         fcntl.flock(fd, fcntl.LOCK_EX)
@@ -169,8 +176,8 @@ def append(key: str, event: Mapping[str, Any], env: Optional[Mapping[str, str]] 
 # --------------------------------------------------------------------------- read
 
 def _read_regular(path: Path) -> bytes:
-    """The bytes of a regular file; a FIFO, device or directory in its place raises OSError (never blocks)."""
-    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    """The bytes of a regular file; a symlink, FIFO, device or directory in its place raises OSError (never blocks)."""
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | _NOFOLLOW)
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise OSError(f"not a regular file: {path.name}")
@@ -428,7 +435,10 @@ def is_stale(last_event_at: Optional[datetime], now: datetime) -> bool:
     return now - last_event_at > timedelta(minutes=STALE_MIN)
 
 
-def run_liveness(key: str, env: Optional[Mapping[str, str]], now: datetime) -> str:
+Liveness = Literal["running", "finished", "stale", "missing"]
+
+
+def run_liveness(key: str, env: Optional[Mapping[str, str]], now: datetime) -> Liveness:
     """"running", "finished", "stale" or "missing" for run `key`, read across the spool and data-dir copies."""
     e = dict(_environ(env))
     envs = [e]
@@ -439,7 +449,7 @@ def run_liveness(key: str, env: Optional[Mapping[str, str]], now: datetime) -> s
     for copy_env in envs:
         try:
             path = run_file(key, copy_env)
-            if not path.is_file():
+            if path.is_symlink() or not path.is_file():
                 continue
             evs, _ = read_events(path)
         except (OSError, ValueError):

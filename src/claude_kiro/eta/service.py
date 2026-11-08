@@ -946,13 +946,23 @@ def send_done_for_superseded(key: str, *, now: datetime, env: Optional[Mapping[s
 
 
 def _supersede_spool(spool: Path, spec: str, now: Any) -> None:
-    """End every unfinished run copy of `spec` under `spool` as superseded (16.2)."""
+    """End every unfinished run copy of `spec` under `spool` as superseded (16.2).
+
+    A sandboxed child can write the spool and this process may run unsandboxed: only regular files named like ck's
+    own run keys of `spec` are touched, and the read and the append both refuse a symlink swapped in after the check."""
+    import stat
+
     try:
         if spool.is_symlink() or not spool.is_dir():
             return
         spool_env = {"CK_PROGRESS_DIR": str(spool)}
+        own = re.compile(re.escape(spec) + r"--\d{8}T\d{6}Z-[^/]+")
         for path in sorted(spool.glob(f"{spec}--*.jsonl")):
+            if not own.fullmatch(path.stem):
+                continue
             try:
+                if not stat.S_ISREG(path.lstat().st_mode):
+                    continue
                 evs, _ = progress.read_events(path)
             except OSError:
                 continue

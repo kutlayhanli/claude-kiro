@@ -26,10 +26,13 @@ import time
 from dataclasses import asdict, dataclass, field
 from fnmatch import fnmatchcase
 from pathlib import Path
-from typing import Callable, Dict, Iterator, List, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, Iterator, List, Mapping, Optional, Tuple
 
 from claude_kiro.config import load_config
 from claude_kiro.paths import LEGACY_WORKTREES_DIR, WORKTREES_DIR
+
+if TYPE_CHECKING:
+    from claude_kiro.progress import Liveness
 
 
 class WorktreeError(Exception):
@@ -297,7 +300,7 @@ def claim_info(reason: Optional[str]) -> ClaimInfo:
     return ClaimInfo(m.group("owner"), m.group("token"), m.group("at"), m.group("run") or None)
 
 
-def claim_release_decision(claim: ClaimInfo, starting_run: Optional[str], liveness: Optional[str], age_s: float,
+def claim_release_decision(claim: ClaimInfo, starting_run: Optional[str], liveness: Optional["Liveness"], age_s: float,
                            stale_minutes: float = CLAIM_STALE_MINUTES) -> str:
     """"own" (the starting run's claim), "keep" or "release" (16.2-16.5, 16.7)."""
     if claim.run is not None:
@@ -309,8 +312,10 @@ def claim_release_decision(claim: ClaimInfo, starting_run: Optional[str], livene
 
 @dataclass
 class RunStartClaims:
+    # `run` is None for a claim with no run ID (16.4). A kept entry whose release was attempted and failed carries
+    # `error` (git's message), so a caller can tell "live run, kept on purpose" from "unlock failed".
     released: List[Dict[str, Optional[str]]] = field(default_factory=list)  # {task, run, reason}
-    kept: List[Dict[str, Optional[str]]] = field(default_factory=list)      # {task, run}
+    kept: List[Dict[str, Optional[str]]] = field(default_factory=list)      # {task, run[, error]}
 
 
 def release_for_run_start(root: Path, spec: str, run: Optional[str], env: Optional[Mapping[str, str]] = None,
@@ -334,8 +339,8 @@ def release_for_run_start(root: Path, spec: str, run: Optional[str], env: Option
         if decision == "release":
             try:
                 git(root, "worktree", "unlock", str(path))
-            except WorktreeError:
-                out.kept.append({"task": num, "run": info.run})
+            except WorktreeError as exc:
+                out.kept.append({"task": num, "run": info.run, "error": str(exc) or "git worktree unlock failed"})
                 continue
             out.released.append({"task": num, "run": info.run, "reason": reason})
         else:
