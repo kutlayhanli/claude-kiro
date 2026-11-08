@@ -63,7 +63,8 @@ DEFAULTS: Dict[str, Dict[str, Any]] = {
     # cross_test: true = once a wave of test-track tasks has merged, one read-only agent
     # (at risky_model/risky_effort) checks the merged test files agree with each other
     # and with design.md's data models, starting from `ck lint --contracts`. Report only.
-    "reviewer": {"model": "opus", "effort": "high", "enabled": True, "rounds": 1, "risky_model": "opus", "risky_effort": "high", "cross_test": False},
+    # Default on (7.1); set false globally or per project to turn it off (7.3).
+    "reviewer": {"model": "opus", "effort": "high", "enabled": True, "rounds": 1, "risky_model": "opus", "risky_effort": "high", "cross_test": True},
     # Repairs a red target branch: reads the failing gate, decides environment vs code, fixes.
     # Judgment-heavy and rare (about once a run). null = same as implementer.
     # escalate: null = the implementer's list (models not above the fixer's are skipped).
@@ -485,13 +486,17 @@ def agent_type_files(roles: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
 
     files = {}
     for name, (meta, body) in plugin.agent_sources().items():
-        settings = roles[plugin.AGENT_ROLES[name]]
+        role = plugin.AGENT_ROLES[name]
+        # The runner has no role: its frontmatter is fixed in the plugin file.
+        settings = roles[role] if role else {"model": meta.get("model"), "effort": meta.get("effort")}
         lines = ["---", f"name: ck-{name}", f"description: {_yaml_value(meta['description'])}"]
         for key in ("model", "effort"):
             if settings.get(key) and settings[key] != INHERIT:
                 lines.append(f"{key}: {settings[key]}")
         if meta.get("tools"):
             lines.append(f"tools: {meta['tools']}")
+        if meta.get("maxTurns"):
+            lines.append(f"maxTurns: {meta['maxTurns']}")
         lines += ["---", "", GENERATED_MARK, "", body, ""]
         files[f"ck-{name}.md"] = "\n".join(lines)
     return files
