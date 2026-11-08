@@ -368,13 +368,24 @@ const MANDATE = `MANDATE: The user ran /spec:implement ${SPEC}, which instructs 
 
 // The progress flags a claim command carries: event is task-start, retry, escalation, revision, landfix or resolve.
 const claimFlags = (event, opts, attempt) => (PROGRESS_RUN ? ` --progress-run ${PROGRESS_RUN} --progress-event ${event} --progress-model ${(opts && opts.model) || 'inherit'} --attempt ${attempt}` : '')
+// Claude Code's Workflow runtime has no wall clock (scripts replay deterministically for resume):
+// reading it throws. A throw inside call() left a phantom inFlight entry per agent call, so
+// finish-first saw every runtime slot busy and the run sat with no agents. Timing is optional:
+// read the clock through this guard, which gives null without one, and every timer skips its sum.
+// Test harnesses and the OpenCode runner pass a Date, so agent ms and the overhead share still
+// measure there.
+const CLOCK = typeof Date === 'function' ? Date : null
+function nowMs() {
+  try { const t = CLOCK && CLOCK.now(); return typeof t === 'number' && Number.isFinite(t) ? t : null } catch { return null }
+}
+const since = t0 => { const t = t0 === null ? null : nowMs(); return t === null ? 0 : t - t0 }
 // Issue #11: a harness that can run ck itself (the OpenCode runner passes a `ck` global) runs the
 // mechanical plan, land and relink steps directly instead of through an agent that copies the
 // command's JSON. Claude Code's Workflow runtime has no such global: there the agents run them.
 const DIRECT_CK = A.directCk !== false && typeof ck === 'function' ? ck : null
 const directCk = { plan: 0, land: 0, relink: 0, ms: 0, failures: 0 }
 async function runCk(kind, argv, cwd) {
-  const t0 = Date.now()
+  const t0 = nowMs()
   let out = null
   try {
     out = await DIRECT_CK(argv, { cwd })
@@ -382,7 +393,7 @@ async function runCk(kind, argv, cwd) {
     out = { code: -1, stdout: '', stderr: String(e && e.message), json: null }
   }
   directCk[kind] = (directCk[kind] || 0) + 1
-  directCk.ms += Date.now() - t0
+  directCk.ms += since(t0)
   if (!out || !out.json || typeof out.json !== 'object') directCk.failures++
   return out || { code: -1, json: null, stderr: 'no result' }
 }
@@ -883,12 +894,12 @@ const signal = () => (poked ? Promise.resolve() : new Promise(resolve => { wakeL
 function call(kind, prompt, opts) {
   const entry = { seq: ++callSeq, kind }
   inFlight.push(entry)
-  const t0 = Date.now()
+  const t0 = nowMs()
   return (async () => {
     try {
       return await agent(prompt, opts)
     } finally {
-      agentMs[kind] = (agentMs[kind] || 0) + (Date.now() - t0)
+      agentMs[kind] = (agentMs[kind] || 0) + since(t0)
       const i = inFlight.indexOf(entry)
       if (i >= 0) inFlight.splice(i, 1)
       poke()

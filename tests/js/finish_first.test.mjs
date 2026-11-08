@@ -361,4 +361,22 @@ await test('NFR-6: slots 1 with a cross-test in flight and a held start: the rea
   assert.deepEqual([...result.merged].sort(), ['1', '2', '3'])
 })
 
+// Claude Code's Workflow runtime has no wall clock: reading it throws. A throw inside call()
+// once left a phantom inFlight entry per agent call, so with finish-first on the run filled its
+// slots with phantoms and sat with no agents at all. The run must start, merge and settle anyway.
+await test('no wall clock (Workflow runtime): reading Date throws, agents still start and every task merges', async () => {
+  // Like the runtime: the clock (Date.now, new Date) throws; Date.parse of a given string is deterministic and works.
+  const RealDate = Date
+  const NoClock = class { constructor() { throw new Error('Date is unavailable in workflow scripts') } static now() { throw new Error('Date.now is unavailable in workflow scripts') } static parse(s) { return RealDate.parse(s) } }
+  const deps = { 1: [], 2: [], 3: ['1'], 4: ['2', '3'] }
+  const p = project({ deps })
+  let timer
+  const limit = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`the run did not settle within ${RUN_LIMIT_MS} ms`)), RUN_LIMIT_MS) })
+  try {
+    const { result, trace } = await Promise.race([runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, ...graphArgs(deps), agents: REVIEW_ON, agentSlots: 2, finishFirst: true }, slots: 2, scriptDate: NoClock }), limit])
+    assert.ok(trace.some(e => e.ev === 'start' && isFirstAttempt(e.label)), 'task agents start')
+    assert.deepEqual([...result.merged].sort(), ['1', '2', '3', '4'])
+  } finally { clearTimeout(timer) }
+})
+
 process.exit(process.exitCode ?? 0)

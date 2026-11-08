@@ -20,7 +20,9 @@ function hookDump() {
 
 // With a positive integer `slots`, at most `slots` agent calls run at once and the rest wait FIFO,
 // like the runtime queue. `trace` records request/start/end per call (performance.now()).
-export async function runWorkflow(scriptPath, { agent, args, slots, clock, ck }) {
+// `scriptDate` (optional) replaces the script's Date outright, e.g. one whose reads throw like
+// Claude Code's Workflow runtime, which has no wall clock (scripts replay for resume).
+export async function runWorkflow(scriptPath, { agent, args, slots, clock, ck, scriptDate }) {
   hookDump()
   const nowT = clock ? () => clock.now() : () => performance.now()  // a clock replaces the trace's real time
   const workflow = path.basename(scriptPath).replace(/\.js$/, '')
@@ -58,7 +60,9 @@ export async function runWorkflow(scriptPath, { agent, args, slots, clock, ck })
   // On a virtual clock the script's own Date reads the clock too, so what it measures with
   // Date.now() (agent ms, the overhead share) replays identically, like the trace.
   const base = Date.parse('2026-10-04T10:00:00Z')
-  const ScriptDate = clock
+  const ScriptDate = scriptDate !== undefined
+    ? scriptDate
+    : clock
     ? class extends Date {
         constructor(...a) { if (a.length) super(...a); else super(base + clock.now()) }
         static now() { return base + clock.now() }
