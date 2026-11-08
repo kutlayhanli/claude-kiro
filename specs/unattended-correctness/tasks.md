@@ -1248,7 +1248,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 54: Test `ck testfix` scope, proof and the one-fix ledger on real repos
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 4.2, 4.4, 4.5, 4.8, 4.11
 **Description:** Implement TC-41, TC-44 (a) and TC-47 (a). TC-41: `ck testfix prove demo <fixid> --blocked 4 --test <node> --json` on a real repo with a real test-fix worktree branch: (a) the fixed test passes against Task 4's branch plus the fix (proof proved); (b) it fails with `ImportError` for a name Task 4's Files own (proved, outcome class `not-built`); (c) it fails on a fixture assertion (not proved). TC-44a: `prove` on fix branches that change `src/calc.py`, `specs/demo/requirements.md` or `specs/demo/test-plan.md` (an existing row, or only a new row appended) returns an out-of-scope scope decision naming the paths, with no proof run; a branch changing only `tests/` and `tests/fixtures/` is in scope. TC-47a: `ck testfix check demo --test <node> --json` allows the node, `ck testfix record ... --outcome landed` writes the ledger, and a new process (after a new `ck progress begin`) gets the node in `alreadyFixed`. TC-44a also covers a branch that only adds a new row to `specs/demo/test-plan.md` (out of scope). TC-185: `ck testfix prove demo testfix1 --held 2 --test <node> --json` with no Task 2 branch proves against the integration branch (`against: "integration"`): a not-built `ImportError` is proved, a fixture assertion or a skipped test is not; neither `--blocked` nor `--held` is a usage error. TC-187: a proved fix changing `tests/test_calc_tc.py` lands MERGED through the real `ck worktree land demo testfix1 --gate --json` with `gateTasks: ["1"]`; a fix changing only an unowned file lands RED with the reason and the ref unchanged.
@@ -1258,10 +1258,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 57 (TC-41, TC-44a, TC-47a, TC-185, TC-187)
 
 **Acceptance:**
-- [ ] Tests use real git branches, real pytest and real persisted ledger state across processes
-- [ ] They fail before the implementation because `ck testfix` does not exist
-- [ ] The scope check is asserted to run before any proof run (no counter-file runs for an out-of-scope fix)
-- [ ] No mocks of the project's own code
+- [x] Tests use real git branches, real pytest and real persisted ledger state across processes
+- [x] They fail before the implementation because `ck testfix` does not exist
+- [x] The scope check is asserted to run before any proof run (no counter-file runs for an out-of-scope fix)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project, ck_json)
 **Complexity:** Medium
