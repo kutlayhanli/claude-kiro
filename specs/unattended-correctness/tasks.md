@@ -1488,7 +1488,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 65: Test the lean runner agent file, its vendoring and the skill flag
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 19.2, 19.4
 **Description:** Implement TC-160, TC-162 (b) and TC-172. TC-160: `plugin/agents/runner.md` frontmatter has `tools: Bash` only, `model: haiku`, `effort: low`, `maxTurns` <= 5, and for CLAUDE.md either the documented key that `specs/unattended-correctness/claude-code-agent-keys.md` names set to true, or that file's recorded gap with no CLAUDE.md key in the frontmatter (a missing record, an unrecorded key or a documented key left out fails); `ck vendor` into a temp project writes `.claude/agents/ck-runner.md` with the same frontmatter; the existing plugin-validate pattern passes. TC-162b: `plugin/skills/implement/SKILL.md` and `.claude/commands/spec/implement.md` pass `runnerAgent` (`spec:runner` / `ck-runner`), and `ck doctor` in a vendored project missing `ck-runner.md` reports it. TC-172 runs the existing byte-identity tests in `tests/test_plugin.py` unchanged. Tests are named `test_tc160_<slug>`, `test_tc162_plugin_<slug>` (the plugin skill), `test_tc162_doctor_<slug>` (`ck doctor`) and `test_tc162_vendored_<slug>` (the vendored copy), so each runs at the task that adds its file. TC-172's existing byte-identity tests (`tests/test_plugin.py`) run unchanged in Task 97's Verify.
@@ -1498,10 +1498,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 66 (TC-160), Task 96 (TC-162b for the plugin skill and `ck doctor`), Task 97 (TC-162b for the vendored copy, TC-172)
 
 **Acceptance:**
-- [ ] Tests read the real files and run the real `ck vendor` and `ck doctor`
-- [ ] They fail before the implementation because the runner agent file does not exist
-- [ ] `tests/test_plugin.py` is run, not modified
-- [ ] No mocks of the project's own code
+- [x] Tests read the real files and run the real `ck vendor` and `ck doctor`
+- [x] They fail before the implementation because the runner agent file does not exist
+- [x] `tests/test_plugin.py` is run, not modified
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Low
