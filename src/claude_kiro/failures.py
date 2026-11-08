@@ -7,6 +7,8 @@ named in the output (`failing_files`).
 """
 
 import ast
+import builtins
+import importlib.util
 import json
 import re
 import sys
@@ -328,6 +330,18 @@ _NAMED_MODULE = (re.compile(r"No module named '([^']+)'"),
 _NO_SUCH_OPTION = re.compile(r"No such option: (\S+)")
 _USAGE = re.compile(r"(?i)\busage:")
 _PYTEST_E = re.compile(r"(?m)^[ \t]*E(?=[ \t]{3})[ \t]*")
+# An exception line of a traceback (also a chained one, `E   NotImplementedError: x`), not a message that quotes it
+_NOT_IMPLEMENTED = re.compile(r"(?m)^\s*(?:E\s+)?(?:[\w.]+\.)?NotImplementedError\b")
+# Builtins that run the code they are given: a use of one reaches project code.
+_CODE_BUILTINS = frozenset({"__import__", "eval", "exec", "compile"})
+_BUILTIN_NAMES = frozenset(dir(builtins))
+# Modules whose every use starts a program or runs project code (the CLI through `subprocess`, a module by name).
+_EXEC_MODULES = frozenset({"subprocess", "runpy", "importlib", "pty", "multiprocessing"})
+# `os` functions that start a program: `os.system`, `os.popen`, `os.execv`, `os.spawnl`, `os.posix_spawn`, ...
+_OS_EXEC = re.compile(r"^(system|popen|exec[lv]p?e?|spawn[lv]p?e?|posix_spawnp?)$")
+# Attributes every module has; `__file__` is the test file's own path, not code.
+_MODULE_ATTRS = frozenset({"__file__", "__name__", "__doc__", "__package__", "__spec__", "__loader__",
+                           "__builtins__", "__annotations__"})
 
 
 @dataclass(frozen=True)
@@ -393,10 +407,13 @@ def _named_module(text: str) -> Optional[str]:
 
 
 def _test_side(path: str, ctx: ProjectContext) -> bool:
-    """A test helper, conftest or fixture file: not project code."""
+    """A test helper, conftest or fixture file: not project code. A project's own source is never test-side."""
     parts = path.split("/")
-    return path in ctx.test_paths or "tests" in parts[:-1] or "fixtures" in parts[:-1] \
-        or parts[-1].startswith("conftest")
+    if path in ctx.test_paths or parts[-1].startswith("conftest"):
+        return True
+    if path in ctx.owned_paths or parts[0] == "src":
+        return False
+    return "tests" in parts[:-1] or "fixtures" in parts[:-1]
 
 
 def _cli_not_built(f: Failure, ctx: ProjectContext) -> bool:
@@ -457,8 +474,9 @@ def _collect(nodes: Sequence[ast.AST], scope: _Scope) -> None:
                 scope.add(a.asname or a.name.split(".")[0], "import", a.name)
         elif isinstance(node, ast.ImportFrom):
             mod = "." * node.level + (node.module or "")
-            for a in node.names:
-                scope.add(a.asname or a.name, "import", mod)
+            for a in node.names:  # `from X import *` binds "*"; names it supplies are unbound here (see _name_reaches)
+                exec_name = mod == "os" and bool(_OS_EXEC.match(a.name))
+                scope.add(a.asname or a.name, "import", "os." + a.name if exec_name else mod)
         elif isinstance(node, ast.Assign):
             for t in node.targets:
                 for n in _store_names(t):
@@ -482,18 +500,23 @@ def _collect(nodes: Sequence[ast.AST], scope: _Scope) -> None:
                 scope.add(n, "expr", node.iter)
         elif isinstance(node, ast.ExceptHandler) and node.name and node.type is not None:
             scope.add(node.name, "expr", node.type)
+        elif isinstance(node, ast.Lambda):  # a lambda's parameters are its own locals: values, not fixtures
+            for a in _all_args(node.args):
+                scope.add(a.arg, "expr", ast.Constant(value=None))
         stack.extend(ast.iter_child_nodes(node))
 
 
-def _reaches(expr: ast.AST, scope: _Scope, visiting: Set[tuple]) -> bool:
+def _reaches(expr: ast.AST, scope: _Scope, visiting: Set[tuple], ctx: ProjectContext) -> bool:
     for node in ast.walk(expr):
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-            if _name_reaches(node.id, scope, visiting):
+            if _name_reaches(node.id, scope, visiting, ctx):
                 return True
+        elif isinstance(node, ast.Attribute) and _OS_EXEC.match(node.attr):  # `os.system(...)`, `os.popen(...)`
+            return True
     return False
 
 
-def _name_reaches(name: str, scope: _Scope, visiting: Set[tuple]) -> bool:
+def _name_reaches(name: str, scope: _Scope, visiting: Set[tuple], ctx: ProjectContext) -> bool:
     s: Optional[_Scope] = scope
     while s is not None:
         if name in s.names:
@@ -502,42 +525,69 @@ def _name_reaches(name: str, scope: _Scope, visiting: Set[tuple]) -> bool:
                 return False
             visiting.add(key)
             try:
-                return any(_binding_reaches(kind, payload, s, visiting) for kind, payload in s.names[name])
+                return any(_binding_reaches(kind, payload, s, visiting, ctx) for kind, payload in s.names[name])
             finally:
                 visiting.discard(key)
         s = s.parent
-    return False  # a builtin, or a name nothing binds
+    # Unbound: a builtin is not project code, but a code-running builtin is, and so is any other name, which may
+    # come from a `from X import *` the parse cannot expand (every ambiguity is unclear, never bad).
+    if name in _MODULE_ATTRS:
+        return False
+    if name in _CODE_BUILTINS:
+        return True
+    return name not in _BUILTIN_NAMES
 
 
-def _binding_reaches(kind: str, payload: object, s: _Scope, visiting: Set[tuple]) -> bool:
+def _import_reaches(mod: str, ctx: ProjectContext) -> bool:
+    """Project, helper, unknown and program-running modules reach project code; the standard library does not,
+    nor does a third-party package installed outside the repository (a data reader such as `yaml` or `pytest`)."""
+    if mod.startswith("."):
+        return True
+    top = mod.split(".")[0]
+    if top in ctx.project_modules or _path_matches(mod, ctx.owned_paths) or _path_matches(mod, ctx.test_paths):
+        return True
+    if top in _EXEC_MODULES or (mod.startswith("os.") and _OS_EXEC.match(mod[3:])):
+        return True
+    if top in sys.stdlib_module_names:
+        return False
+    try:  # only the top-level name: find_spec of a dotted name would import its parent package
+        spec = importlib.util.find_spec(top)
+    except (ImportError, ValueError):
+        spec = None
+    origin = (spec.origin or "") if spec is not None else ""
+    if origin and ("site-packages" in origin or "dist-packages" in origin):
+        return False
+    return True  # a repository file, a namespace or an unknown module: cannot tell what it runs
+
+
+def _binding_reaches(kind: str, payload: object, s: _Scope, visiting: Set[tuple], ctx: ProjectContext) -> bool:
     if kind == "param":  # a test-function parameter is a pytest fixture, which may call project code
         return True
-    if kind == "import":  # project, helper and unknown modules reach project code; the standard library does not
-        mod = str(payload)
-        return mod.startswith(".") or mod.split(".")[0] not in sys.stdlib_module_names
+    if kind == "import":
+        return _import_reaches(str(payload), ctx)
     key = ("binding", id(payload))
     if key in visiting:
         return False
     visiting.add(key)
     try:
         if kind == "expr":
-            return _reaches(payload, s, visiting)  # type: ignore[arg-type]
-        return _def_reaches(payload, s, visiting)  # type: ignore[arg-type]
+            return _reaches(payload, s, visiting, ctx)  # type: ignore[arg-type]
+        return _def_reaches(payload, s, visiting, ctx)  # type: ignore[arg-type]
     finally:
         visiting.discard(key)
 
 
-def _def_reaches(node: ast.AST, s: _Scope, visiting: Set[tuple]) -> bool:
+def _def_reaches(node: ast.AST, s: _Scope, visiting: Set[tuple], ctx: ProjectContext) -> bool:
     """A same-file function reaches project code when its defaults or its body do."""
     args = node.args  # type: ignore[attr-defined]
     for d in list(args.defaults) + [k for k in args.kw_defaults if k is not None]:
-        if _reaches(d, s, visiting):
+        if _reaches(d, s, visiting, ctx):
             return True
     fscope = _Scope(s)
     for a in _all_args(args):
         fscope.add(a.arg, "param")
     _collect(node.body, fscope)  # type: ignore[attr-defined]
-    return any(_reaches(stmt, fscope, visiting) for stmt in node.body)  # type: ignore[attr-defined]
+    return any(_reaches(stmt, fscope, visiting, ctx) for stmt in node.body)  # type: ignore[attr-defined]
 
 
 def assert_reaches_project(test_source: Optional[str], line: Optional[int], ctx: ProjectContext) -> Optional[bool]:
@@ -576,7 +626,7 @@ def assert_reaches_project(test_source: Optional[str], line: Optional[int], ctx:
             scope.add(a.arg, "param")
         _collect(func.body, scope)  # type: ignore[attr-defined]
     roots: List[ast.AST] = [target.test] + ([target.msg] if target.msg is not None else [])
-    return any(_reaches(r, scope, set()) for r in roots)
+    return any(_reaches(r, scope, set(), ctx) for r in roots)
 
 
 # --------------------------------------------------------------------------- the classifier (5.2-5.4, 5.7)
@@ -590,7 +640,9 @@ def classify_not_built(failure: Failure, ctx: ProjectContext) -> str:
     an AssertionError in the test file, bad only when its assert reaches no project code (5.7); otherwise unclear.
     """
     exc = failure.exc_type
-    if exc == "NotImplementedError":
+    # anywhere in the chain: a wrapping exception's text still carries the stub's NotImplementedError (rule 1)
+    if exc == "NotImplementedError" or _NOT_IMPLEMENTED.search(_clean(failure.message)) \
+            or _NOT_IMPLEMENTED.search(_clean(failure.detail)):
         return "not-built"
     if exc in IMPORT_FAMILY:
         mod = _named_module(_clean(failure.message)) or _named_module(_clean(failure.detail))
@@ -631,6 +683,8 @@ def right_reason_verdict(results: Sequence[TestResult], all_verified_done: bool,
     """
     if all_verified_done:
         return RightReasonVerdict(blocking=(), unclear=(), already_passing=(), require_pass=True)
+    if ctx is None:  # without the project context no failure can be classified: refuse rather than fail open
+        raise ValueError("right_reason_verdict needs a ProjectContext unless all verified tasks are Done")
     blocking: List[Failure] = []
     unclear: List[Failure] = []
     passing: List[str] = []
@@ -640,7 +694,7 @@ def right_reason_verdict(results: Sequence[TestResult], all_verified_done: bool,
             continue
         if r.failure is None:
             continue
-        cls = classify_not_built(r.failure, ctx) if ctx is not None else "unclear"
+        cls = classify_not_built(r.failure, ctx)
         if cls == "bad":
             blocking.append(r.failure)
         elif cls == "unclear":
