@@ -1636,8 +1636,8 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 
 **Acceptance:**
 - [ ] A mapped role resolves to its provider, model and variant (14.1); an unmapped role returns null so the alias map applies (14.2)
-- [ ] Project config wins over global per role, with the source recorded (14.3)
-- [ ] An unknown role or malformed reference is a `ConfigError` naming the key and value, raised at config load (14.4)
+- [x] Project config wins over global per role, with the source recorded (14.3)
+- [x] An unknown role or malformed reference is a `ConfigError` naming the key and value, raised at config load (14.4)
 
 **Dependencies:** Task 69 (its tests are the oracle)
 **Complexity:** Medium
