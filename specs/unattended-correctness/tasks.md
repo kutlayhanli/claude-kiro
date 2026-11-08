@@ -1024,7 +1024,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 44: Add the protected-change decisions, landing tokens and approved state
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 9.2, 9.3, 9.4, 9.5, 9.8, 9.12, 10.1, 10.2, 10.3, 10.4, 10.5, 15.5
 **Description:** Create `src/claude_kiro/protect.py` with `RefUpdate`, `TokenRecord`, `RefDecision`, `HookStatus`, `ApprovedState` and `AuditReport` (design "Data Models / Python (protect.py)"). Pure seams: `ref_update_decision(update, protected_changed, allow, token, approved)` (non-`refs/heads/integrate/` ref -> allow; delete -> allow; create -> allow when the new commit's protected files equal `approved` (the ref's approved state, path -> blob oid), else, and when there is no approved state, only with a matching token (9.12); otherwise protected paths minus allow-list empty -> allow; else allow only with a matching token; the message names the files and `ck worktree approve SPEC TASK`); `token_matches(token, update, used, mac_ok)` (unused, mac valid, same ref, same old, same new tree and parents); `merge_commit_decision(head_ref, changed, allow, token_present)`; `approval_decision(stdin_tty, stdout_tty, typed, expected)`; `audit_decision(approved, current, allow, hooks, fixtures)` (fixtures passed as a mapping; drift = protected files added, changed or deleted against the approved state; incomplete when the state is missing or its mac fails; clean only when complete with no drift, hooks installed, active and intact, and no fixture drift or lock tampering). State in `<git-common-dir>/ck/`: an HMAC key (`key`, mode 0600, created on first use; `install_hooks` uses it first, so under `ck run` it exists before the sandbox, which denies writes to it, starts), `issue_token(root, ref, old, tree, parents, reason, files)` writing `tokens/<id>.json`, `consume_token(root, id, update)` renaming it to `used/` (a token bound to `old` can never match a later update even if the rename fails), and `read_approved_state` / `record_approved_state(root, spec, ref, commit, files, approval)` for the sealed `<spec>/protected.json`, plus the `<common>/ck/refs.json` index (ref -> spec) the hook uses to find a ref's approved state; the state outlives a deleted ref (9.12). Paths compared with `PROTECTED_PATHS` must be unquoted (use `git diff -z` / `core.quotePath=false` in any helper that lists changes). No network. Harness Contract owner: item 3's `protect.refuse_paths` (design: `ref_update_decision` with the protected-path filter) and item 10's tokens and approved state.
@@ -1034,11 +1034,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 38 (P-17 at `ref_update_decision`, P-35 at `approval_decision`, P-36 at `audit_decision`)
 
 **Acceptance:**
-- [ ] Updates to refs outside `integrate/*` are always allowed (9.4)
-- [ ] An `integrate/*` update adding protected files outside the allow-list is refused unless a matching token is presented (9.2)
-- [ ] A token matches only its ref, old value, tree and parents, and only once (9.3)
-- [ ] `approval_decision` needs a TTY on stdin and stdout and the typed code (9.8)
-- [ ] `audit_decision` reports added, changed and deleted protected files, hook problems, fixture lock tampering, and incomplete when the approved state is unreadable (10.1, 10.2, 10.3, 10.5, 15.5); approved landings are not drift (10.4)
+- [x] Updates to refs outside `integrate/*` are always allowed (9.4)
+- [x] An `integrate/*` update adding protected files outside the allow-list is refused unless a matching token is presented (9.2)
+- [x] A token matches only its ref, old value, tree and parents, and only once (9.3)
+- [x] `approval_decision` needs a TTY on stdin and stdout and the typed code (9.8)
+- [x] `audit_decision` reports added, changed and deleted protected files, hook problems, fixture lock tampering, and incomplete when the approved state is unreadable (10.1, 10.2, 10.3, 10.5, 15.5); approved landings are not drift (10.4)
 
 **Dependencies:** Task 38 (its tests are the oracle)
 **Complexity:** High
