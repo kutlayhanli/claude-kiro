@@ -143,11 +143,22 @@ export async function runPreflight(options: PreflightOptions): Promise<Preflight
   };
 }
 
+export interface FormatPreflightOptions {
+  /**
+   * Always print the seven-role block when the roles check passes (the doctor path, 14.8). The plugin
+   * startup log leaves it out unless a role is mapped, so a default setup keeps its log short.
+   */
+  listRoles?: boolean;
+}
+
 /**
  * Render a result for the plugin log or `ck doctor`-style output: errors and warnings only, each
  * with its fix on the following line. Passing checks stay quiet so startup logs remain short.
  */
-export function formatPreflight(result: PreflightResult): string {
+export function formatPreflight(
+  result: PreflightResult,
+  options: FormatPreflightOptions = {},
+): string {
   const errors = result.checks.filter((check) => !check.ok && check.severity === "error");
   const warnings = result.checks.filter((check) => !check.ok && check.severity === "warn");
   const lines: string[] = [];
@@ -164,11 +175,11 @@ export function formatPreflight(result: PreflightResult): string {
     );
   }
 
-  // The role lines show where a mapped role's model comes from (14.8). With no `opencode.roles` every
-  // role is on the alias map, so the block stays out of the passing report, like the other passing checks.
-  // It prints before the problems so each role's line is the first line that names it.
+  // The role lines show where each role's model comes from (14.8). The doctor passes `listRoles`, so it
+  // always lists all seven roles. The startup log omits the block when no role is mapped, because every
+  // role is then on the alias map. It prints before the problems so each role's line is the first line that names it.
   const roles = result.checks.find((check) => check.id === "roles" && check.ok);
-  if (roles && roles.detail.includes("(source: roles)")) {
+  if (roles && (options.listRoles || roles.detail.includes("(source: roles)"))) {
     lines.push("  roles (resolved model per role):");
     for (const line of roles.detail.split("\n")) lines.push(`    ${line}`);
   }
