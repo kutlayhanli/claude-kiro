@@ -1657,7 +1657,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 72: Run OpenCode agents on their role's model and record it
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 14.1, 14.2, 14.7
 **Description:** In `opencode/src/run-child.ts`, add `RunChildOptions.role?: string | null`; `resolveChildModel` consults `resolveRoleRef(role, config.roles)` first and falls back to today's alias path; `ChildOutcome` gains `modelSource: "roles" | "alias" | "inherit"`. In `opencode/src/workflow-tool.ts`, `handleAgent` reads `opts.role`, passes it to `runChild`, and sets `AgentMeta.role`, so the run record (`record.ts`, which already has `AgentRow.role`) holds each agent's role and the model and variant it actually ran on. Harness Contract owner: item 11's role-first model resolution and per-agent `model` and `variant` in run records.
@@ -1668,8 +1668,8 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 69 (TC-126), Task 70 (TC-132)
 
 **Acceptance:**
-- [ ] An agent call with a mapped `role` runs on the role's model and variant (14.1); an unmapped role uses the alias map as today (14.2)
-- [ ] The run record has each agent's role, model and variant (14.7)
+- [x] An agent call with a mapped `role` runs on the role's model and variant (14.1); an unmapped role uses the alias map as today (14.2)
+- [x] The run record has each agent's role, model and variant (14.7)
 
 **Dependencies:** Task 71 (calls `resolveRoleRef` and reads `config.roles`), Task 69 (its tests are the oracle), Task 70 (its tests are the oracle)
 **Complexity:** Medium
