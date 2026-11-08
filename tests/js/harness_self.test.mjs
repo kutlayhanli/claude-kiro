@@ -91,7 +91,7 @@ await test('gateAnswers are not consumed by calls without an envelope', async ()
 })
 
 await test('directCk answers gate argv from gateAnswers and the new argv with CK_CALL envelopes', async () => {
-  const p = project({ deps, gateAnswers: [{ ok: false, failures: [] }, { code: 2, stdout: 'oops' }, 'throw'], runStart: { integration: { branch: 'b' }, hooks: { installed: true }, releasedClaims: [{ task: '1', run: 'k', reason: 'stale' }], keptClaims: [], warnings: [] }, audit: { schema: 'ck-audit/1', complete: true, clean: false, drift: [{ file: 'f', change: 'changed' }] }, fixtureStatus: { locked: [], drift: [{ file: 'f', task: '1', change: 'modified' }], unlabeled: [], configError: null }, fidelity: { checked: [], mismatches: [{ id: 'x' }], unparsed: [], unmatched: [] }, missingCommand: { command: 'ck x', providers: ['4'] } })
+  const p = project({ deps, gateAnswers: [{ ok: false, failures: [] }, { code: 2, stdout: 'oops' }, 'throw'], runStart: { integration: { branch: 'b' }, hooks: { installed: true }, releasedClaims: [{ task: '1', run: 'k', reason: 'stale' }], keptClaims: [], warnings: [] }, audit: { schema: 'ck-audit/1', complete: true, clean: false, drift: [{ file: 'f', change: 'changed' }] }, fixtureStatus: { locked: [], drift: [{ file: 'f', task: '1', change: 'changed' }], unlabeled: [], configError: null }, fidelity: { checked: [], mismatches: [{ id: 'x' }], unparsed: [], unmatched: [] }, missingCommand: { command: 'ck x', providers: ['4'] } })
   const d = directCk(p)
   const g = await d.fn(['gate', 'demo', '--task', '1', '--json'])
   assert.equal(g.code, 1); assert.deepEqual(g.json, { ok: false, failures: [] })
@@ -100,7 +100,7 @@ await test('directCk answers gate argv from gateAnswers and the new argv with CK
   await assert.rejects(d.fn(['gate', 'demo']))
   assert.equal((await d.fn(['worktree', 'start', 'demo', '--run', 'k', '--json'])).json.releasedClaims[0].task, '1')
   assert.equal((await d.fn(['worktree', 'audit', 'demo', '--json'])).json.clean, false)
-  assert.deepEqual((await d.fn(['fixtures', 'status', '--json'])).json.drift, [{ file: 'f', task: '1', change: 'modified' }])
+  assert.deepEqual((await d.fn(['fixtures', 'status', '--json'])).json.drift, [{ file: 'f', task: '1', change: 'changed' }])
   assert.equal((await d.fn(['lint', 'demo', '--fidelity', '--json'])).json.mismatches.length, 1)
   assert.equal((await d.fn(['graph', 'demo', '--json'])).json.missingCommand.command, 'ck x')
   assert.equal((await d.fn(['graph', 'demo', '--json'])).json.spec, 'demo')
@@ -155,7 +155,7 @@ await test('taskFailures and testConflictsList ride the task result', async () =
 })
 
 await test('testFix, crossTest and the plan extras', async () => {
-  const p = project({ deps, testFix: { 'tests/a.py': { verdict: 'test-correct', finding: { file: 'tests/a.py', test: 't', issue: 'i' }, review: { verdict: 'changes', findings: [] } }, 'tests/b.py': {} }, crossTest: [{ verdict: 'changes', findings: [{ severity: 'blocking', test: 't' }], summary: 's' }, { verdict: 'approve', findings: [], summary: 'ok' }], owns: { 1: ['tests/a.py'] }, overlaps: [['1', '2']], testVerifies: { 1: ['1.1'] }, provides: { 1: ['ck x'] } })
+  const p = project({ deps, testFix: { 'tests/a.py': { verdict: 'test-correct', finding: { file: 'tests/a.py', test: 't', issue: 'i' }, review: { verdict: 'changes', findings: [] } }, 'tests/b.py': {} }, crossTest: [{ verdict: 'changes', findings: [{ severity: 'blocking', test: 't' }], summary: 's' }, { verdict: 'approve', findings: [], summary: 'ok' }], owns: { 1: ['tests/a.py'] }, overlaps: { '1': ['2'], '2': ['1'] }, testVerifies: { 'tests/a.py': ['1'] }, provides: { 'ck x': ['1'] } })
   const fa = await p.agent('p', { label: 'testfix 1 (Task 5)' })
   assert.equal(fa.verdict, 'test-correct'); assert.equal(fa.changedTests[0].file, 'tests/a.py'); assert.equal(fa.finding.issue, 'i')
   assert.equal((await p.agent('p', { label: 'testfix 2 (Task 5)' })).verdict, 'fixed')
@@ -164,7 +164,7 @@ await test('testFix, crossTest and the plan extras', async () => {
   assert.equal((await p.agent('p', { label: 'cross-test 2' })).verdict, 'approve')
   assert.equal((await p.agent('p', { label: 'cross-test 3' })).verdict, 'approve')
   const plan = await p.agent('p', { label: 'plan 1' })
-  assert.deepEqual([plan.owns, plan.overlaps, plan.testVerifies, plan.provides], [{ 1: ['tests/a.py'] }, [['1', '2']], { 1: ['1.1'] }, { 1: ['ck x'] }])
+  assert.deepEqual([plan.owns, plan.overlaps, plan.testVerifies, plan.provides], [{ 1: ['tests/a.py'] }, { '1': ['2'], '2': ['1'] }, { 'tests/a.py': ['1'] }, { 'ck x': ['1'] }])
   const plain = await project({ deps }).agent('p', { label: 'plan 1' })
   assert.ok(!('owns' in plain) && !('overlaps' in plain))
   assert.equal((await project({ deps }).agent('p', { label: 'cross-test 1' })).verdict, 'changes')

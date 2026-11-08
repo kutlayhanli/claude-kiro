@@ -132,7 +132,7 @@ const never = () => new Promise(() => {})
 //   crossTest: answer | [answers]          replaces the cross-test reviewer's answer (a list: one per call, the last repeats)
 //   fidelity: json                         answer of `ck lint --fidelity`
 //   fixtureStatus: json                    answer of `ck fixtures status`
-//   owns / overlaps / testVerifies / provides: merged into every plan answer
+//   owns / overlaps / testVerifies / provides: merged into every plan answer (harness convenience: owns is not in the design's plan additions; missingCommand on the graph answer is likewise a convenience, the design carries it on the gate Failure)
 //   missingCommand: {command, providers}   carried by the `ck graph` answer
 //   audit: json | 'throw'                  answer of `audit` / `ck worktree audit`
 //   runStart: json                         answer of `run start` / `ck worktree start`
@@ -397,7 +397,7 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
     if (l === 'run start') return runStart ?? { integration: { branch: 'integrate/demo', state: 'ok' }, hooks: { installed: true, active: true, intact: true, chainedTo: null, problems: [] }, baseline: { commit: 'abc1234', files: 0 }, releasedClaims: [], keptClaims: [], warnings: [] }
     if (l === 'audit') {
       if (audit === 'throw') throw new Error('audit failed')
-      return audit ?? { schema: 'ck-audit/1', spec: 'demo', into: 'integrate/demo', head: 'abc1234', complete: true, clean: true, drift: [], hooks: { installed: true, active: true, intact: true, chainedTo: null, problems: [] }, fixtures: { drift: [], lockTampered: false, handcrafted: [] }, problems: [] }
+      return audit ?? { schema: 'ck-audit/1', spec: 'demo', into: 'integrate/demo', head: 'abc1234', complete: true, clean: true, drift: [], hooks: { installed: true, active: true, intact: true, chainedTo: null, problems: [] }, fixtures: { drift: [], newLocks: [], lockTampered: false, handcrafted: [] }, problems: [] }
     }
     if (l.startsWith('testfix ledger ')) {
       // `ck testfix check SPEC --test NODE ...`: a node is already fixed when its file part is in priorFixes.
