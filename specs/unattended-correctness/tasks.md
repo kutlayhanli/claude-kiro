@@ -1924,7 +1924,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 84: Test test-track routing, cross-test blocking and reviewer inputs in the workflow
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.3, 6.2, 7.1, 7.3, 7.4, 7.5, 8.3, 8.5, 15.6
 **Description:** Implement TC-55, TC-59 (b), TC-64 (b), TC-66 (b), TC-67, TC-68, TC-71 (b), TC-73 (b) and TC-139 (b) against the real workflow. Assert: a test-track gate with `class: "bad"` entries retries with the test-writer role's opts and the marked list; a `check: "validate"` failure sends the task back to the test writer; a cross-test agent runs by default and not with `cross_test: false`; an open finding holds Task 2 while unrelated Task 9 runs; no findings gives a trace equal to `cross_test: false` apart from the cross-test agent; the review prompt holds exactly the fidelity `unparsed` and `unmatched` items and no section when empty; `fixtureStatus.unlabeled` reaches the review prompt and a blocking finding sends the task back.
@@ -1934,10 +1934,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 87 (TC-55, TC-59b, TC-64b, TC-66b to TC-68, TC-71b, TC-73b, TC-139b)
 
 **Acceptance:**
-- [ ] Tests run the real workflow script source
-- [ ] They fail before the implementation because cross-test is off and report-only and the review prompt has no fidelity or fixture items
-- [ ] TC-68 compares whole traces, not a single label
-- [ ] No mocks of the project's own code
+- [x] Tests run the real workflow script source
+- [x] They fail before the implementation because cross-test is off and report-only and the review prompt has no fidelity or fixture items
+- [x] TC-68 compares whole traces, not a single label
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 2 (crossTest, fidelity, fixtureStatus fakes)
 **Complexity:** Medium
