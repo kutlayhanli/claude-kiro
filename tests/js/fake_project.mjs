@@ -122,7 +122,7 @@ const never = () => new Promise(() => {})
 //                                          `final gate`. 'throw' makes the call throw, 'hang' never settles. An entry
 //                                          may be a ck-gate/1 or ck-gate-compact/1 object. Exhausted: today's {green}
 //                                          answer turned into a ck-gate/1 object.
-//   taskFailures: {n: Failure[]}           the `failures` of task n's non-passing attempts
+//   taskFailures: {n: Failure[] | Failure[][]}  the `failures` of task n's non-passing attempts: one list for every attempt, or one list per attempt (attempt k gets the k-th; the last repeats)
 //   testConflictsList: {n: TestConflict[] | {conflicts, attempts}}   task n's first attempts return status blocked
 //                                          with that `testConflicts` list
 //   testFix: {file: {verdict: 'fixed'|'test-correct'|'cannot-fix', proof, scope, review, finding}}
@@ -290,7 +290,10 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
         }
       }
       const pass = state.attempts[n] > (failUntil[n] || 0)
-      return { task: n, status: pass ? 'done' : 'in_progress', gatePassed: pass, summary: `attempt ${state.attempts[n]}`, commits: 'abc123', startedAt, finishedAt: stamp(), ...(!pass && taskFailures[n] ? { failures: taskFailures[n] } : {}), ...wtField }
+      // taskFailures[n] is one list for every attempt, or a list per attempt (attempt k gets the k-th; the last repeats).
+      const served = taskFailures[n]
+      const failures = served && Array.isArray(served[0]) ? served[Math.min(state.attempts[n], served.length) - 1] : served
+      return { task: n, status: pass ? 'done' : 'in_progress', gatePassed: pass, summary: `attempt ${state.attempts[n]}`, commits: 'abc123', startedAt, finishedAt: stamp(), ...(!pass && failures ? { failures } : {}), ...wtField }
     }
     if (l.startsWith('land ')) {
       // `ck worktree land`: precheck (conflicts, pairwise deferral), one gate, bisect a red batch.
