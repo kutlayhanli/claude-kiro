@@ -461,7 +461,7 @@ gather inputs and act on the output; they never re-implement the rule.
 | `failuresForPrompt(failures, limit = 50)` | workflow decisions block | `-> {shown, more: {file: count}, total}` | 3.8 |
 | `testFixPlan({conflicts, alreadyFixed})` | workflow decisions block | `-> {groups: [{file, conflicts}], toMe: [...]}` | 4.8, 4.9 |
 | `heldByCrossTest({findings, testVerifies})` | workflow decisions block | `-> Set<task>` | 7.4 |
-| `gateOutcome(call)` | workflow decisions block | `CkCallResult -> {state: 'green'\|'red'\|'error', green, regressions, excusedByTask, flaky, report, reason}` (reads `ck-gate/1` or `ck-gate-compact/1`) | 2.6, 2.8, 2.9, 2.12, 19.5 |
+| `gateOutcome(call)` | workflow decisions block | `CkCallResult -> {state: 'green'\|'red'\|'error', green, regressions, excusedByTask, flaky, report, reason}` (reads `ck-gate/1` or `ck-gate-compact/1`; a green needs `ok:true` and exit code 0, so `code` is cross-checked against `ok`) | 2.6, 2.8, 2.9, 2.12, 19.5 |
 | `thinAgentMode({runnerAgent, unavailable, direct})` | workflow decisions block | `-> {mode: 'direct'\|'lean'\|'default', warning}` | 19.1, 19.4, 19.6 |
 | `resolveRoleRef(role, roles)` / `validateRoleRef(value)` | `opencode/src/models.ts` | `-> RoleRef \| null` / `-> string \| null` (error) | 14.1-14.4, 14.6 |
 
@@ -555,16 +555,22 @@ class ProjectContext:            # classify_not_built inputs, gathered by the ga
 no name imported from the project's own code; every other test-body `AssertionError` is unclear, passes, and is
 reported:
 
-1. `NotImplementedError` anywhere in the chain -> not-built.
+1. `NotImplementedError` anywhere in the chain -> not-built. "Anywhere" means an exception line of a traceback
+   (`NotImplementedError: x` at the start of a line, also in a chained traceback); a message that only quotes the
+   name mid-line (`AssertionError: NotImplementedError: ...`) is not a chain.
 2. `ModuleNotFoundError` / `ImportError` / `cannot import name` / `AttributeError: module 'x' has no attribute 'y'`
    naming a module in `project_modules` or a path in `owned_paths` -> not-built. Naming a third-party module ->
-   unclear.
+   unclear. Naming a test helper module (a path in `test_paths`, such as `tests/helpers.py`) -> bad: a broken
+   helper is a test-side wrong reason.
 3. `missing_command(detail, programs)` returns a command, or the detail holds click's `No such command`,
-   argparse's `invalid choice` / `unrecognized arguments` for one of `programs` (including inside an assertion
-   on a CLI exit code) -> not-built.
+   argparse's `invalid choice` / `unrecognized arguments` for one of `programs` -> not-built. An
+   `AssertionError` (a CLI exit code checked with `assert`) counts only when the text carries the program's usage
+   banner (`usage:`): the banner stops an assertion's own message that quotes a CLI error from passing as the
+   CLI's output (anti-spoof; such a message falls through to rule 5).
 4. Schema/validation errors while loading data (`ValidationError`, `JSONDecodeError`, `yaml.YAMLError`,
    `UnicodeDecodeError`, `FileNotFoundError` for a path in `test_paths`), any error in phase `setup`, an
-   `AssertionError` whose `crash_path` is a test helper, conftest or fixture file other than the test file itself,
+   `AssertionError` whose `crash_path` is a test helper, conftest or fixture file other than the test file itself (a
+   path in `test_paths`, a conftest, or a `tests/` or `fixtures/` file that is not in `owned_paths` and not under `src/`),
    and `SyntaxError` / `NameError` in the test file -> bad.
 5. An `AssertionError` whose `crash_path` is the test file (5.7): `assert_reaches_project(test_sources[file],
    crash_line, ctx)` parses the test file with `ast`, finds the `assert` statement at `crash_line` and its
@@ -576,7 +582,13 @@ reported:
    the same way, and reaches project code when its body does; a call to a name imported from any other module
    of the repository (a test helper such as `tests/helpers.py`) reaches project code, because the parse cannot
    see what it runs (5.7: "no call into project code"). Builtins, literals, the standard library (`json`, `pathlib`, `open`, `csv`, `datetime`, ...)
-   and third-party data readers do not count. `False` (only literals or file-loaded data, for example
+   and third-party data readers installed outside the repository (`packaging`, `pytest`) do not count. Four
+   exceptions reach project code, since they run a program or project code: `subprocess`, `runpy`, `importlib`,
+   `pty`, `multiprocessing` and `os.system` / `os.popen` / `os.exec*` / `os.spawn*` (the CLI run through a
+   standard-library module); the builtins `__import__`, `eval`, `exec` and `compile`. A name that nothing in its
+   scope binds and that is not a builtin (for example one a `from X import *` supplies, or a global the parse
+   cannot see) reaches project code, so an ambiguity stays unclear, never bad. A `lambda`'s own parameters are
+   values, not fixtures. `False` (only literals or file-loaded data, for example
    `prices = json.load(open("tests/fixtures/prices.json")); assert prices["AAPL"] == 4.15`) -> bad. `True` (for
    example `assert rate_floor(prices) == 0.04`, where a stub may return a wrong value) or `None` (the source or
    line cannot be parsed) -> unclear.
@@ -622,7 +634,10 @@ How edges are filled (the API delegated by PLAN):
   test task T, every TC found in T's test files (`def test_tcNNN_`, `test('tcNNN_ ...')`) or in test-plan rows
   whose Test file column names one of T's files, to each task in `T.verifies`. Each edge keeps its origin in
   `source` (`"Verify -k"` or `"Verifies"`). Attribution (1.1) uses a TC's `"Verify -k"` edges; it falls back to
-  its `"Verifies"` edges only when the TC has no `"Verify -k"` edge, so the two are never unioned.
+  its `"Verifies"` edges only when the TC has no `"Verify -k"` edge, so the two are never unioned. A tc node exists
+  only for a TC some test file or test-plan row defines. A TC that only a Verify `-k` names keeps its verifies
+  edge with no tc node: a dangling verifies source, which consumers must accept (the freshness rule of 11.7
+  requires the node to vanish once no test defines the TC).
 - **provides:** `**Provides:**` wins (11.3). Otherwise inferred: a design.md table row with a backticked command
   path whose row names a file the task owns; else a backticked command path, starting with a known program, in
   the task's title or description. Ambiguity (two tasks inferred) keeps both edges and adds a GraphProblem.
@@ -824,6 +839,11 @@ class ProofVerdict:
 
 Ledger = Mapping[str, Mapping[str, str]]   # <common>/ck/<spec>/testfix-ledger.json: node -> {fix, at, outcome}
 
+# Node canonicalisation (4.8): `fix_allowed`, `ck testfix check` and `ck testfix record` key the ledger by a
+# canonical node, so a re-spelled id names the same entry: strip surrounding whitespace, turn `\` into `/`,
+# normalise the path part (collapse `//`, resolve `.` and `..`, drop a leading `./`), drop a trailing `[param]`
+# id, and compare case-insensitively (the ledger is a refusal list: a false match only sends a node to me).
+
 @dataclass(frozen=True)
 class TestValue:            # fidelity
     test: str
@@ -935,6 +955,10 @@ const CK_CALL = { type: 'object', properties: {
 //                  source: 'conflict'|'cross-test'|'missing-command',
 //                  tests: [node], outcome: 'landed'|'to-me'|'test-correct', proof: ProofVerdict|null,
 //                  scope: ScopeDecision|null, review: { verdict, findings }|null, reason }
+//   The workflow does not trust `in_scope` alone (4.5): a ScopeDecision with a non-empty `outside` or
+//   `spec_docs_edited`, or with `requirements_edited` true, is out of scope whatever `in_scope` says.
+//   A review counts as approved only for verdict 'approve' with no finding of severity 'blocking' (4.6):
+//   an approve verdict that lists a blocking finding, or any other or missing verdict, is rejected.
 // LiveEdge: { task, dependsOn, command, at }
 // TESTFIX schema (test-fixer agent):
 //   { verdict: 'fixed'|'test-correct'|'cannot-fix', changedTests: [{file, test}], commits: string,

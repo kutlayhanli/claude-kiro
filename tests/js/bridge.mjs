@@ -1,13 +1,18 @@
 // Long-lived JSON-lines bridge: one request object per stdin line, one response object per stdout line.
 //   {op:'ready', order, deps, done, exclude, blocked} -> {ok:true, ready}
 //   {op:'ladder', model}                              -> {ok:true, ladder}
-//   {op:'run', project, args, slots, clock, execCk}   -> {ok:true, result, logs, trace, prompts, opts, events, execLog, execResults}
+//   {op:'run', project, args, slots, clock, execCk}   -> {ok:true, result, logs, trace, prompts, opts, optsList, events, execLog, execResults}
 //       clock: 'virtual' (a VirtualClock: sleeps and trace t are exact virtual ms) | 'real' (real timers) | unset (as before)
 //       execCk: {cmd, env, cwd, dry}: fake agents record progress events through the real CLI (see fake_project.mjs)
 //   {op:'create', args, overrides, execCk}            -> {ok:true, result, logs, trace, prompts, execLog, execResults}
 //       a step-end answer gets the eta printed by the `ck progress event ... step-end --json` its prompt wrote
+//   {op:'call', name, args}                           -> {ok:true, value}   one decisions-block function (any name), called with args;
+//       a Set anywhere in a response is written as a sorted array
+//   {op:'run', ..., realCk:{cmd, cwd, env}}           direct ck() calls of the workflow run the real CLI subprocess; the
+//       argv lists are returned as `ckCalls` [{argv, code}]
 // Any throw -> {ok:false, error}. Durations in the project options are milliseconds (1-40).
 import readline from 'node:readline'
+import { execFile } from 'node:child_process'
 import { runWorkflow, useVirtualTime } from './load_workflow.mjs'
 import { project, writtenCommands, execCkRun } from './fake_project.mjs'
 import { stub } from './fake_create.mjs'
@@ -23,6 +28,22 @@ useVirtualTime()
 const CREATE_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../plugin/workflows/spec-create.js')
 const baseArgs ={ spec: 'demo', root: '/repo', into: 'integrate/demo', targetDir: '/repo/.ck/worktrees/demo-integration' }
 
+// The workflow's direct `ck()` global over the real CLI: {cmd, cwd, env}; argv is appended to cmd. Returns {code, stdout, stderr, json}.
+export function realCkFn({ cmd, cwd, env }, ckCalls, external = q => q) {
+  return async argv => {
+    const [bin, ...pre] = cmd
+    const res = await external(new Promise(resolve => {
+      execFile(bin, [...pre, ...argv], { env: { ...process.env, ...(env || {}) }, cwd: cwd || process.cwd(), encoding: 'utf8' }, (err, out, errOut) => {
+        resolve({ code: err ? (typeof err.code === 'number' ? err.code : -1) : 0, stdout: out || '', stderr: errOut || '' })
+      })
+    }))
+    let json = null
+    try { const v = JSON.parse(res.stdout); json = v && typeof v === 'object' ? v : null } catch {}
+    ckCalls.push({ argv, code: res.code })
+    return { ...res, json }
+  }
+}
+
 async function handle(req) {
   if (req.op === 'ready') {
     const { readyTasks } = req.script ? loadDecisions(req.script) : loadDecisions()  // req.script: test hook for a script without markers
@@ -31,6 +52,10 @@ async function handle(req) {
   if (req.op === 'ladder') {
     const { guardLadder } = loadDecisions({ extra: GUARD_NAMES })
     return { ladder: guardLadder(req.model) }
+  }
+  if (req.op === 'call') {
+    const decisions = loadDecisions({ extra: [req.name] })
+    return { value: decisions[req.name](...(req.args ?? [])) ?? null }
   }
   if (req.op === 'run') {
     // With execCk and no clock given, default to 'virtual': the global pump would keep advancing simulated timers
@@ -41,8 +66,10 @@ async function handle(req) {
     const p = project({ ...req.project, ...timing, ...(req.execCk ? { execCk: req.execCk } : {}) })
     const slots = req.slots ?? undefined
     const args = { ...baseArgs, ...req.args, ...(slots ? { agentSlots: slots } : {}) }
-    const { result, logs, trace } = await runWorkflow(SCRIPT, { agent: p.agent, args, slots, clock })
-    return { result, logs, trace, prompts: p.state.prompts, opts: p.state.opts, events: p.state.events, execLog: p.state.execLog, execResults: p.state.execResults, reviewTasks: p.state.reviewTasks }
+    const ckCalls = []
+    const ck = req.realCk ? realCkFn(req.realCk, ckCalls, clock ? q => clock.external(q) : q => q) : undefined
+    const { result, logs, trace } = await runWorkflow(SCRIPT, { agent: p.agent, args, slots, clock, ck })
+    return { ckCalls, result, logs, trace, prompts: p.state.prompts, opts: p.state.opts, optsList: p.state.optsList, events: p.state.events, execLog: p.state.execLog, execResults: p.state.execResults, reviewTasks: p.state.reviewTasks }
   }
   if (req.op === 'create') {
     const clock = new VirtualClock()
@@ -70,6 +97,10 @@ async function handle(req) {
   throw new Error(`unknown op: ${req.op}`)
 }
 
+// A Set (for example `heldByCrossTest`'s `Set<task>`) has no JSON form: plain JSON.stringify writes `{}`.
+// Write it as a sorted array so the caller sees its members.
+const setsAsArrays = (_key, v) => (v instanceof Set ? [...v].sort() : v)
+
 const rl = readline.createInterface({ input: process.stdin })
 // Requests are handled one at a time, in order, so responses stay line-aligned.
 let chain = Promise.resolve()
@@ -78,7 +109,7 @@ rl.on('line', line => {
   chain = chain.then(async () => {
     let out
     try { out = { ok: true, ...(await handle(JSON.parse(line))) } } catch (e) { out = { ok: false, error: String((e && e.message) || e) } }
-    process.stdout.write(JSON.stringify(out) + '\n')
+    process.stdout.write(JSON.stringify(out, setsAsArrays) + '\n')
   })
 })
 rl.on('close', () => { chain.then(() => process.exit(0)) })

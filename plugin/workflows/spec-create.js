@@ -296,6 +296,7 @@ Return the structured result after writing the file.`, { label: 'write test-plan
 **Files:**
 - \`path/to/file\` - specific change
 **Verify:** \`exact command\` \`another command\`
+**Provides:** \`ck command path\` \`another command path\`   (impl tasks that add or change a CLI command ck cannot infer only; omit otherwise)
 **Properties:** P-1, P-2   (test tasks that write property tests only; omit otherwise)
 
 **Acceptance:**
@@ -329,6 +330,7 @@ Rules:
 - Small tasks, one focused change set each. Two tasks that could run in parallel must not edit the same file.
 - Add a dependency only when this task calls code, reads data, or edits a file that the other task creates. Every dependency carries a one-line reason in parentheses, e.g. "Task I3 (calls parse_config)". Every dependency serializes the run, so don't add order-only edges.
 - No task references a component absent from design.md.
+- **Provides:** on every impl task that adds or changes a CLI command whose command paths ck cannot infer from the code, list those paths in backticks after the field name, e.g. Provides: followed by the path \`ck fixtures mark\`. Once the tasks are written, check the list with \`ck graph\` or \`ck lint\`; add any command they report as missing. Tasks that add no command omit the field.
 ${RISK_RULE}
 
 Write the draft file, then return the structured result.`, { label: 'write implementation track', phase: 'Task Tracks', schema: WRITE_RESULT }),
@@ -350,6 +352,7 @@ Rules:
 - **Verify:** the exact command that runs this task's tests (from ${TPL} Commands).
 - Acceptance must include: tests exercise the real boundary named in the test plan; tests fail before the implementation exists for the right reason (missing behavior, not broken test code); no mocks of the project's own code in integration tests.
 - Test tasks depend only on other test tasks (infrastructure), never on implementation tasks, so they can start as soon as the spec is approved.
+- **Test names.** Name every test function with its TC ID prefix, \`tcNNN_\` (lowercase, e.g. \`tc113a_provides_field\`), so that \`-k "tcNNN_"\` selects it. Where a test needs a fixture the test track creates, label that fixture with \`ck fixtures mark\` in the task's Files or Description, so the gate can tell it apart from implementation code.
 ${RISK_RULE} A test task whose cases exercise such an effect is safety too: its tests are the oracle for it.
 - **Properties.** Write one test task per property group from ${TPL}'s ## Properties section (properties that share a decision seam or a requirement story). List its P-ids under **Properties:** (e.g. \`**Properties:** P-1, P-2\`) and in the Description; together the tasks cover every P-n. **Verify:** runs that task's property test file. The test file declares a module-level map from each property to the test that checks it, in the file's own language: \`PROPERTIES = {"P-3": "test_name", "P-4": ["test_a", "test_b"]}\` (JS/TS: \`export const PROPERTIES = { 'P-3': 'test name' }\`). \`ck gate\` reads these maps to check every P-n is covered. Acceptance includes: the generators cover every surface form and negative listed in the row; settings are deterministic; the tests call the decision seam, not a server.
 - **Red-team tasks.** For each user story with a SHALL NOT criterion, add a red-team test task. Like every test task it is written before the code and from the requirements only, never from the implementation. Its Description: "Try to break each SHALL NOT clause of Story N with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test." Its **Requirements:** are the story's SHALL NOT criteria; it verifies the impl tasks that implement them.
