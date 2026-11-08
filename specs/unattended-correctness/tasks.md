@@ -1333,7 +1333,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 58: Test bench arm role maps and the Claude Code path ignoring them
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 14.5, 14.6
 **Description:** Implement TC-130 and TC-131 (a). TC-130: a bench config arm `{model: "opencode-go/muse-spark-1.3-contributor", roles: {reviewer: "opencode-go/deepseek-v4.1-flash#medium"}}` run through the fake `opencode` binary flow (`tests/bench_helpers.py` pattern) writes clone config with `opencode.roles.reviewer` mapped and every other role on the arm model; the fake binary reads it back. TC-131a: with `opencode.roles` in `specs/ck.json`, `ck agents --json` is unchanged.
@@ -1343,9 +1343,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 61 (TC-130, TC-131a)
 
 **Acceptance:**
-- [ ] Tests run the real bench preparation with only the `opencode` binary faked
-- [ ] TC-130 fails before the implementation because arm `roles` is rejected or ignored
-- [ ] No mocks of the project's own code
+- [x] Tests run the real bench preparation with only the `opencode` binary faked
+- [x] TC-130 fails before the implementation because arm `roles` is rejected or ignored
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Medium
