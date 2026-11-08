@@ -1764,7 +1764,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 77: Run the workflow's gate commands through the real ck
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.3, 3.6
 **Description:** Implement TC-21 and TC-33 (b). Render the real `plugin/workflows/spec-implement.js` under the fake runtime (via the bridge) for an `attr_project`, take the thin gate prompt (TC-21) and the task prompt (TC-33b) the script produced, extract the `ck ...` command line from the prompt text, and run it through the real ck on the real repo. TC-21: exit 0 or 1 and JSON valid against `failure.schema.json`. TC-33b: a 3-failure file gives 3 entries.
@@ -1774,9 +1774,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 81 (TC-21, TC-33b: prompts from the real script run through the real ck)
 
 **Acceptance:**
-- [ ] The command comes from the prompt the real script produced and runs through the real CLI; no string-only checks
-- [ ] Tests fail before the implementation because the prompt holds no attributed or `--json` gate command
-- [ ] No mocks of the project's own code
+- [x] The command comes from the prompt the real script produced and runs through the real CLI; no string-only checks
+- [x] Tests fail before the implementation because the prompt holds no attributed or `--json` gate command
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project, schema), Task 2 (bridge rendering)
 **Complexity:** Medium
