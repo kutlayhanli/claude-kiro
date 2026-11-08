@@ -103,7 +103,14 @@ def edge_cases(draw):
     deps = draw(dags(max_tasks=12, dangling=False))
     ids = list(deps)
     task = draw(st.sampled_from(ids))
-    done = [t for t in draw(subsets(ids)) if t != task]
+    # a real run never has a Done task that depends on an unfinished one: draw `done` closed under deps, from
+    # tasks that do not (transitively) depend on `task`, so `task` itself stays unfinished
+    allowed = [t for t in ids if t != task and not reaches(deps, t, task)]
+    done_set: Set[str] = set()
+    for t in draw(subsets(allowed)):
+        done_set.add(t)
+        done_set.update(i for i in ids if reaches(deps, t, i))
+    done = [t for t in ids if t in done_set]
     # extra live edges only run from a higher to a lower id, so deps + liveDeps stay acyclic
     live: Dict[str, List[str]] = {}
     for t in draw(subsets(ids)):
@@ -140,6 +147,8 @@ def edge_cases(draw):
 def test_tc174_p24_live_edge_only_for_missing_command_with_unfinished_provider(bridge, case):
     """P-24 (12.5, 12.6, 12.7): V -> P only for a missing-command failure whose provider P is unfinished and
     would not close a cycle; no provider -> conflict; a cycle -> blocked with the cycle; deps stay acyclic."""
+    # Bridge note: the design models `done` as a Set and `liveDeps` as a task -> Set map; this test sends lists,
+    # so the Task 93 bridge converts them (set(done), {t: set(ds)}) before calling the script.
     v = case["task"]
     done = set(case["done"])
     out = bridge.call("liveEdgeDecision", copy.deepcopy(case))
@@ -260,7 +269,6 @@ def test_tc174_p25_overlapping_write_sets_never_in_flight_together(bridge, drawn
     on = prepare(sc, slots, drop_relink=True)
     on["project"]["owns"] = owns
     on["project"]["overlaps"] = overlaps
-    on["args"]["overlaps"] = overlaps
     out_off = run(bridge, off)
     out_on = run(bridge, on)
 
