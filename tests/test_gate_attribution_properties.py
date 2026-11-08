@@ -1,7 +1,8 @@
 """TC-173: property tests P-1 to P-6 of the unattended-correctness spec.
 
 Decision seams: `claude_kiro.attribution` (`AttributionIndex`, `tc_of_node`, `attribute_failure`, `rerun_plan`,
-`gate_verdict`) and `claude_kiro.failures` (`truncate_message`, `classify_kind`). P-5b alone runs the real CLI.
+`gate_verdict`) and `claude_kiro.failures` (`truncate_message`, `classify_kind`). P-5b (`ck gate`) and the P-3
+selection test (`ck graph --json`, ck-graph/1) run the real CLI.
 Project modules are imported inside the test bodies, so this file collects before the seams exist.
 
 Shapes the design leaves open, fixed here (the impl task follows design.md and reports a conflict if it differs):
@@ -22,7 +23,7 @@ from pathlib import Path
 from hypothesis import HealthCheck, assume, given, settings, strategies as st
 from _pytest.mark.expression import Expression
 
-from unattended_helpers import attr_project, ck_json, commit_all
+from unattended_helpers import attr_project, ck_json, commit_all, init_repo
 
 PROPERTIES = {
     "P-1": ["test_tc173_p1_statuses_partition_and_excused_by", "test_tc173_p1a_tc_selection_over_coverage",
@@ -250,9 +251,9 @@ def test_tc173_p1a_tc_selection_over_coverage(data):
         assert _num_sorted(attr.tasks) == model["selecting"][n]
         extra = set(model["verifies"].get(model["covering"][n], ())) - set(model["selecting"][n])
         assert not extra & set(attr.tasks)
-    elif model["covering"][n] is not None:
+    elif model["covering"][n] is not None and model["verifies"][model["covering"][n]]:
         assert _num_sorted(attr.tasks) == model["verifies"][model["covering"][n]]
-    else:  # unknown TC: file attribution, never an invented task
+    else:  # TC absent from the index (no selector, no covering Verifies): file attribution, never an invented task
         assert _num_sorted(attr.tasks) == model["verifies"][model["files"][owned_file]]
 
 
@@ -356,16 +357,19 @@ def _p3_spec(root, tcs, verifies):
 @settings(**SETTINGS)
 @given(data=st.data())
 def test_tc173_p3_verify_selection_matches_pytest_oracle(data):
-    """P-3: the graph's `Verify -k` edges agree with pytest's `-k` evaluator for every selector form."""
-    from claude_kiro.graph import build_graph
+    """P-3: the graph's `Verify -k` edges agree with pytest's `-k` evaluator for every selector form.
 
+    Edges are read through the specified `ck graph SPEC --json` output (ck-graph/1), not a Python seam.
+    """
     tcs = sorted(data.draw(st.sets(st.integers(1, 9), min_size=3, max_size=6)))
     task_ids = [2, 3, 4]
     verifies = {t: data.draw(verify_commands(tcs)) for t in task_ids}
     with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        spec = _p3_spec(root, tcs, verifies)
-        graph = build_graph(root, spec).to_json()
+        root = init_repo(Path(tmp) / "proj")
+        _p3_spec(root, tcs, verifies)
+        commit_all(root, "p3 spec")
+        code, graph, err = ck_json(root, "graph", "demo", "--json")
+        assert code == 0 and isinstance(graph, dict), f"ck graph demo --json failed ({code}): {err}"
         edges = {(e["src"], e["dst"]) for e in graph["edges"]
                  if e["kind"] == "verifies" and e.get("source") == "Verify -k"}
     for t, cmds in verifies.items():
@@ -488,7 +492,7 @@ def test_tc173_p5a_kind_is_one_of_five(exc, phase, message, timed_out):
         assert kind == "timeout"
     elif phase == "collect":
         assert kind == ("import" if exc in ("ImportError", "ModuleNotFoundError") else "collection")
-    elif exc == "AssertionError":
+    elif exc == "AssertionError" and phase == "call":
         assert kind == "assertion"
     elif exc in ("MyAssertionError", "AssertionErrorX", "Weird", "", "ValueError", "KeyError"):
         assert kind == "error"
