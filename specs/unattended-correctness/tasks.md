@@ -1634,7 +1634,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 71: Parse and validate `opencode.roles` in the OpenCode host
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 14.1, 14.2, 14.3, 14.4
 **Description:** In `opencode/src/models.ts`, add `ROLE_NAMES` (`implementer`, `test_writer`, `reviewer`, `reviewer_risky`, `fixer`, `orchestrator`, `resolver`) and the pure functions `validateRoleRef(value) -> string | null` (an error for a missing provider, missing model, or empty variant in `provider/model[#variant]`) and `resolveRoleRef(role, roles) -> RoleRef | null` (`{provider, model, variant}` or null when the role is unmapped). In `opencode/src/config.ts`, add `CkConfig.roles: Record<RoleName, string>`, accept `"roles"` as a known `opencode` key, layer global then project (project wins per role) and record `sources["roles.<role>"]`; an unknown role or malformed reference throws `ConfigError` at `loadConfig` naming `opencode.roles.<role>` and the value, so the workflow tool refuses to start before any agent runs. Harness Contract owner: item 6's `opencode.roles` and item 11's `loadConfig` roles with `sources["roles.<role>"]`, and the role-resolution seam (design: `resolveRoleRef`; Task 72 completes the contract's `resolveRoleModel` behaviour).
@@ -1645,7 +1645,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 69 (TC-127 to TC-129 and P-28 at the config and model seams)
 
 **Acceptance:**
-- [ ] A mapped role resolves to its provider, model and variant (14.1); an unmapped role returns null so the alias map applies (14.2)
+- [x] A mapped role resolves to its provider, model and variant (14.1); an unmapped role returns null so the alias map applies (14.2) (at the `resolveRoleRef` seam; the agent-call half is Task 72's box)
 - [x] Project config wins over global per role, with the source recorded (14.3)
 - [x] An unknown role or malformed reference is a `ConfigError` naming the key and value, raised at config load (14.4)
 
