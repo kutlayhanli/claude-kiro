@@ -2440,7 +2440,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 107: Red-team right-reason classification (Story 5)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.3, 5.4, 5.7
 **Description:** Try to break Story 5's blocking boundary with adversarial inputs: a wrong-reason failure must block (5.3, 5.7) and an unclear one must never block (5.4). Every way you find to break it becomes a test. Starting points: a test that raises `NotImplementedError` itself (not from project code); an import typo of a project module in the test file (`from calcc import x`); a CLI message (`No such command`) quoted inside an assertion message the test writes; an assert on fixture data reached through an alias, a comprehension, a `with open(...)` block or a helper defined in the same file; an assert on a project call hidden behind a local variable; a pytest fixture argument that only returns a literal (unclear under 5.7, so it must not block); a helper defined in the same file, or imported from a test helper module, that calls project code (unclear under 5.7); ANSI codes, `\r\n` and a reformatted traceback around each message. Seam cases against `failures.classify_not_built` and `assert_reaches_project` are named `test_tc52_redteam_seam_<slug>`; CLI cases through `ck gate demo --task 1 --json` are named `test_tc52_redteam_<slug>`.
@@ -2450,10 +2450,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 29 (seam cases), Task 31 (CLI cases through `ck gate`)
 
 **Acceptance:**
-- [ ] Written from the requirements only, never from the implementation
-- [ ] Every disguised wrong-reason failure blocks and every disguised unclear one does not
-- [ ] Each test fails before the implementation for the right reason
-- [ ] No mocks of the project's own code
+- [x] Written from the requirements only, never from the implementation
+- [x] Every disguised wrong-reason failure blocks and every disguised unclear one does not
+- [x] Each test fails before the implementation for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project, spec_graph_project fixture CLIs)
 **Complexity:** Medium
