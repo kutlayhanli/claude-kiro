@@ -581,3 +581,14 @@ test("tc133_formatPreflight_prints_the_role_lines_even_when_everything_passes", 
   for (const role of SEVEN_ROLES) assert.match(text, new RegExp(`\\b${role}\\b`), text);
   assert.match(text, /fixer.*opencode\/claude-opus-5-5#max.*\broles\b/);
 });
+
+test("tc133_doctor_listRoles_prints_all_seven_roles_with_no_roles_mapped", async (t) => {
+  const fixture = createFixture();
+  t.after(fixture.cleanup);
+  const result = await runPreflight(optionsFor(fixture, fakeExec().exec));
+  const text = formatPreflight(result, { listRoles: true });
+
+  for (const role of SEVEN_ROLES) assert.match(text, new RegExp(`\\b${role}\\b`), text);
+  assert.match(text, /\balias\b/, text);
+  assert.doesNotMatch(text, /\(source: roles\)/, text);
+});

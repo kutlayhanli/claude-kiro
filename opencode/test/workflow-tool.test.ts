@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -20,8 +20,15 @@ test("parseWorkflowInput requires exactly one target and an object args", () => 
   assert.throws(() => parseWorkflowInput(null), /must be an object/);
 });
 
-test("resolveWorkflowTarget maps names and rejects unknown or traversal names", () => {
-  const root = join(import.meta.dirname, "..");
+test("resolveWorkflowTarget maps names and rejects unknown or traversal names", (t) => {
+  // opencode/vendor/ is generated (gitignored, `npm run sync-vendor`), so a fresh checkout has none:
+  // resolve against a package root of our own that has the two shipped workflows vendored.
+  const root = mkdtempSync(join(tmpdir(), "ck-workflow-target-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "vendor", "workflows"), { recursive: true });
+  for (const stem of ["spec-create", "spec-implement"]) {
+    writeFileSync(join(root, "vendor", "workflows", `${stem}.js`), "return 1\n");
+  }
   assert.deepEqual(resolveWorkflowTarget({ name: "spec:spec-create" }, root, root), {
     kind: "file",
     path: join(root, "vendor", "workflows", "spec-create.js"),
