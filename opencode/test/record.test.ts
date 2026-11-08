@@ -198,3 +198,71 @@ test("headless denials are counted separately", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("tc132_rows_record_each_agents_role_model_variant_and_source", () => {
+  const meta = { seq: 1, label: "task 3", phase: "Wave 1", agent: "ck-worker", parentSessionID: "ses_parent" };
+  // A roles-mapped agent: the role's model and variant, not the alias map's.
+  const mapped = agentRowFromOutcome(
+    {
+      ...OUTCOME,
+      resolvedModel: { providerID: "opencode", id: "gpt-5-mini", variant: "max" },
+      resolvedVariant: "max",
+      modelSource: "roles",
+    } as ChildOutcome,
+    { ...meta, role: "implementer" },
+  );
+  assert.equal(mapped.role, "implementer");
+  assert.equal(mapped.resolved?.providerID, "opencode");
+  assert.equal(mapped.resolved?.id, "gpt-5-mini");
+  assert.equal(mapped.resolved?.variant, "max");
+  assert.equal(mapped.variant, "max");
+  assert.equal((mapped as unknown as { modelSource?: string }).modelSource, "roles");
+
+  // An alias-resolved agent keeps its own model, variant and source.
+  const aliased = agentRowFromOutcome(
+    { ...OUTCOME, modelSource: "alias" } as ChildOutcome,
+    { ...meta, seq: 2, label: "review 3", role: "reviewer" },
+  );
+  assert.equal(aliased.role, "reviewer");
+  assert.equal(aliased.resolved?.id, "claude-sonnet-5-5");
+  assert.equal(aliased.variant, "high");
+  assert.equal((aliased as unknown as { modelSource?: string }).modelSource, "alias");
+});
+
+test("tc132_the_written_record_keeps_per_agent_model_and_variant", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ck-record-"));
+  try {
+    const record = writer(dir);
+    record.addAgent(
+      agentRowFromOutcome(
+        {
+          ...OUTCOME,
+          resolvedModel: { providerID: "opencode", id: "gpt-5-mini", variant: "max" },
+          resolvedVariant: "max",
+          modelSource: "roles",
+        } as ChildOutcome,
+        { seq: 1, label: "task 3", phase: "Wave 1", role: "implementer", agent: "ck-worker", parentSessionID: "ses_parent" },
+      ),
+    );
+    record.addAgent(
+      agentRowFromOutcome({ ...OUTCOME, modelSource: "alias" } as ChildOutcome, {
+        seq: 2,
+        label: "review 3",
+        phase: "Wave 1",
+        role: "reviewer",
+        agent: "ck-reviewer",
+        parentSessionID: "ses_parent",
+      }),
+    );
+    const written = JSON.parse(readFileSync(join(dir, "record.json"), "utf8"));
+    const byRole = Object.fromEntries(written.agents.map((row: { role: string }) => [row.role, row]));
+    assert.equal(byRole.implementer.resolved.id, "gpt-5-mini");
+    assert.equal(byRole.implementer.variant, "max");
+    assert.equal(byRole.implementer.modelSource, "roles");
+    assert.equal(byRole.reviewer.resolved.id, "claude-sonnet-5-5");
+    assert.equal(byRole.reviewer.variant, "high");
+    assert.equal(byRole.reviewer.modelSource, "alias");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
