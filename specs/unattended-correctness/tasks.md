@@ -1718,7 +1718,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Complexity:** Medium
 **Risk:** normal
 
-**Implementation notes:** `code` outside {0, 1} with valid JSON is the malformed case in P-7 (a red gate legitimately exits 1). P-34 has a pure-seam test and a run-trace test; P-30 treats the `ck` global path as `real_ck` with a no-output command.
+**Implementation notes:** `code` outside {0, 1} with valid JSON is the malformed case in P-7 (a red gate legitimately exits 1). P-34 has a pure-seam test and a run-trace test; P-30 treats the `ck` global path as `real_ck` with a no-output command. Deliberate strengthening of the P-7 domain: a valid object whose `ok` disagrees with the exit code (`ok: true` exiting 1, `ok: false` exiting 0) is `error`, since the gate's `ok` and exit code agree (0 iff ok); Task 81's `gateOutcome` must honour it. The P-7 generators also cover an entry with `node: null` and `file: null`, a missing or wrong `schema`, and a non-task-ID key in `excusedByTask`. The bridge writes any Set in a response as a sorted array (plain JSON writes `{}`), so `heldByCrossTest`'s `Set<task>` is observable through `{op:'call'}`; the run op also returns `optsList` (every agent call's label and opts, in order), which P-30 checks call by call. The P-34 trace test supplies `testFix` for the finding's file and ends the finding's open window when the test fix lands; held tasks must start after it.
 
 ---
 

@@ -85,7 +85,7 @@ def malformed_calls(draw) -> Dict[str, Any]:
         "bad-status", "bad-exit", "no-node-no-file", "json-null", "compact-regressions-object", "compact-regressions-missing",
         "compact-neg", "compact-str", "compact-float", "compact-failures-key", "entry-not-object", "ok-missing",
         "entry-bad-kind", "entry-bad-tcid", "entry-tasks-nonarray", "entry-long-message", "entry-missing-field",
-        "ok-true-exit-1", "ok-false-exit-0",
+        "ok-true-exit-1", "ok-false-exit-0", "null-node-null-file", "bad-schema", "compact-key-not-task",
     ]))
     full = full_object(entries)
     comp = compact_object(entries)
@@ -125,6 +125,20 @@ def malformed_calls(draw) -> Dict[str, Any]:
         bare = {k: v for k, v in good_entry.items() if k not in ("node", "file")}
         full["failures"] = entries + [bare]
         return call_of(full)
+    if kind == "null-node-null-file":
+        full["failures"] = entries + [{**good_entry, "node": None, "file": None}]
+        return call_of(draw(st.sampled_from([full, {**comp, "regressions": comp["regressions"] + [{**good_entry, "node": None, "file": None}]}])))
+    if kind == "bad-schema":
+        target = draw(st.sampled_from([full, comp]))
+        bad_schema = draw(st.sampled_from(["ck-gate/2", "ck-gate-compact/2", "CK-GATE/1", "", None, 1, "__missing__"]))
+        if bad_schema == "__missing__":
+            target.pop("schema")
+        else:
+            target["schema"] = bad_schema
+        return call_of(target)
+    if kind == "compact-key-not-task":
+        comp["excusedByTask"] = {draw(st.sampled_from(["x", "", "Task 71", "71a", "-1", "1.5"])): 1}
+        return call_of(comp)
     if kind in ("entry-bad-kind", "entry-bad-tcid", "entry-tasks-nonarray", "entry-long-message", "entry-missing-field"):
         bad = dict(good_entry)
         if kind == "entry-bad-kind":
@@ -140,7 +154,8 @@ def malformed_calls(draw) -> Dict[str, Any]:
         full["failures"] = entries + [bad]
         return call_of(draw(st.sampled_from([full, {**comp, "regressions": comp["regressions"] + [bad]}])))
     if kind in ("ok-true-exit-1", "ok-false-exit-0"):
-        # the compact object's ok and exit code equal the full gate's: ok iff exit 0
+        # the compact object's ok and exit code equal the full gate's: ok iff exit 0. An `ok` that disagrees with the
+        # exit code is a deliberate strengthening of the P-7 domain (tasks.md, Task 74 notes): it is `error`.
         green = kind == "ok-true-exit-1"
         full["ok"], comp["ok"] = green, green
         full["failures"] = comp_entries = [] if green else [good_entry]
@@ -247,6 +262,7 @@ def test_tc174_p34_cross_test_hold_is_exactly_the_verified_tasks_trace(bridge, v
     project = {
         "deps": deps, "durations": {k: tick for k in deps},
         "testVerifies": {"tests/test_b.py": verified},
+        "testFix": {"tests/test_b.py": {}},
         "crossTest": [
             {"verdict": "changes", "findings": [{"severity": "blocking", "file": "tests/test_b.py", "test": "tests/test_b.py::test_tc2_x", "issue": "drift"}], "summary": "drift"},
             {"verdict": "approve", "findings": [], "summary": "ok"},
@@ -262,7 +278,9 @@ def test_tc174_p34_cross_test_hold_is_exactly_the_verified_tasks_trace(bridge, v
     ends = [i for i, e in enumerate(trace) if e["ev"] == "end" and e["label"].startswith("cross-test")]
     assert ends, "the cross-test step never ran"
     open_from = ends[0]
-    open_to = ends[1] if len(ends) > 1 else len(trace)
+    # the finding closes when its test fix lands (design: "Test conflict to landed test fix"); held tasks start after
+    fix_lands = [i for i, e in enumerate(trace) if e["ev"] == "start" and e["label"].startswith("land ") and "testfix" in e["label"]]
+    open_to = next((i for i in fix_lands if i > open_from), len(trace))
     starts: Dict[str, int] = {}
     for i, e in enumerate(trace):
         m = re.match(r"^task (\d+)", e["label"])
@@ -270,6 +288,8 @@ def test_tc174_p34_cross_test_hold_is_exactly_the_verified_tasks_trace(bridge, v
             starts.setdefault(m.group(1), i)
     for t in verified:
         assert not (t in starts and open_from < starts[t] < open_to), f"held task {t} started while its finding was open: {trace}"
+        if open_to < len(trace):
+            assert t in starts, f"held task {t} never started after its test fix landed: {trace}"
     for t in set(IMPL) - set(verified):
         assert t in starts, f"task {t} was held although no open finding names a test it verifies: {trace}"
 
@@ -303,22 +323,23 @@ def test_tc174_p30_thin_calls_carry_the_lean_type_and_schema(bridge, sc, direct,
     there is no type and a warning."""
     sc = prepared(sc, runnerAgent=LEAN if runner_available else None)
     out = run_of(bridge, sc, direct)
-    opts = out["opts"]
-    assert opts, "no agent ran"
-    lean = {label: o for label, o in opts.items() if o.get("agentType")}
+    # every recorded call, in order: a repeated label or a non-thin call reusing a thin label is checked on its own
+    calls = [(c["label"], c["opts"]) for c in out["optsList"]]
+    assert calls, "no agent ran"
+    lean = [(label, o) for label, o in calls if o.get("agentType")]
     if direct:
-        assert not lean and not any(THIN.match(label) and (o.get("schema") or {}).get("required") == ["exitCode", "json"] for label, o in opts.items()), "OpenCode path requested a thin agent"
+        assert not lean and not any(THIN.match(label) and (o.get("schema") or {}).get("required") == ["exitCode", "json"] for label, o in calls), "OpenCode path requested a thin agent"
         return
-    thin_labels = [label for label in opts if THIN.match(label)]
-    assert thin_labels, "no thin call ran"
+    thin = [(label, o) for label, o in calls if THIN.match(label)]
+    assert thin, "no thin call ran"
     if runner_available:
         schemas = []
-        for label in thin_labels:
-            o = opts[label]
+        for label, o in thin:
             assert o.get("agentType") == LEAN, (label, o)
             schemas.append(o.get("schema"))
         assert all(s == schemas[0] and s for s in schemas), schemas
-        assert set(lean) == set(thin_labels), f"non-thin calls carry the lean type: {set(lean) - set(thin_labels)}"
+        non_thin_lean = [label for label, o in lean if not THIN.match(label)]
+        assert not non_thin_lean, f"non-thin calls carry the lean type: {non_thin_lean}"
     else:
         assert not lean, lean
         warning = (out["result"].get("thinAgent") or {}).get("warning")
