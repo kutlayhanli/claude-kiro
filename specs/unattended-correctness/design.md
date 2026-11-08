@@ -839,6 +839,11 @@ class ProofVerdict:
 
 Ledger = Mapping[str, Mapping[str, str]]   # <common>/ck/<spec>/testfix-ledger.json: node -> {fix, at, outcome}
 
+# Node canonicalisation (4.8): `fix_allowed`, `ck testfix check` and `ck testfix record` key the ledger by a
+# canonical node, so a re-spelled id names the same entry: strip surrounding whitespace, turn `\` into `/`,
+# normalise the path part (collapse `//`, resolve `.` and `..`, drop a leading `./`), drop a trailing `[param]`
+# id, and compare case-insensitively (the ledger is a refusal list: a false match only sends a node to me).
+
 @dataclass(frozen=True)
 class TestValue:            # fidelity
     test: str
@@ -950,6 +955,10 @@ const CK_CALL = { type: 'object', properties: {
 //                  source: 'conflict'|'cross-test'|'missing-command',
 //                  tests: [node], outcome: 'landed'|'to-me'|'test-correct', proof: ProofVerdict|null,
 //                  scope: ScopeDecision|null, review: { verdict, findings }|null, reason }
+//   The workflow does not trust `in_scope` alone (4.5): a ScopeDecision with a non-empty `outside` or
+//   `spec_docs_edited`, or with `requirements_edited` true, is out of scope whatever `in_scope` says.
+//   A review counts as approved only for verdict 'approve' with no finding of severity 'blocking' (4.6):
+//   an approve verdict that lists a blocking finding, or any other or missing verdict, is rejected.
 // LiveEdge: { task, dependsOn, command, at }
 // TESTFIX schema (test-fixer agent):
 //   { verdict: 'fixed'|'test-correct'|'cannot-fix', changedTests: [{file, test}], commits: string,
