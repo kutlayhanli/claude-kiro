@@ -89,6 +89,136 @@ def test_relinked_plan_has_no_verify_cycle(market):
     assert json.loads(ck(market, "plan", "sim").output)["ready"] == ["40"]
 
 
+# Issue #15: verify-order false positives that `ck relink` would "fix" by taking a task's own oracle off it.
+
+
+def test_module_the_task_itself_lists_is_not_a_cycle(tmp_path):
+    # unattended-correctness Task 36: the tests import names Task 36 adds to a file later tasks also extend.
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_claims.py").write_text(
+        "def test_release():\n    from claude_kiro.worktrees import claim_release_decision\n    assert claim_release_decision\n"
+    )
+    write_spec(
+        tmp_path,
+        block(34, "Claim tests", track="test", status="Done", files=["tests/test_claims.py"], verify="uv run pytest tests/test_claims.py", verifies="Task 36")
+        + block(36, "Claims", files=["src/claude_kiro/worktrees.py"], vby="Task 34", deps="Task 34 (oracle)")
+        + block(37, "Landing", files=["src/claude_kiro/worktrees.py"], deps="Task 36 (reads the claim)"),
+    )
+    assert lint_spec(tmp_path / "specs/sim", tmp_path)["verifyCycles"] == []
+
+
+def test_a_later_owner_still_counts_when_the_task_does_not_list_the_module(tmp_path):
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_claims.py").write_text(
+        "from claude_kiro.landing import land\n\n\ndef test_release():\n    assert land\n"
+    )
+    write_spec(
+        tmp_path,
+        block(34, "Claim tests", track="test", status="Done", files=["tests/test_claims.py"], verify="uv run pytest tests/test_claims.py", verifies="Task 36")
+        + block(36, "Claims", files=["src/claude_kiro/worktrees.py"], vby="Task 34", deps="Task 34 (oracle)")
+        + block(37, "Landing", files=["src/claude_kiro/landing.py", "src/claude_kiro/worktrees.py"], deps="Task 36 (reads the claim)"),
+    )
+    [cycle] = lint_spec(tmp_path / "specs/sim", tmp_path)["verifyCycles"]
+    assert (cycle["task"], cycle["needs"], cycle["module"]) == ("36", "37", "src/claude_kiro/landing.py")
+
+
+def fixture_props(root: Path, top_level: str = "") -> None:
+    # unattended-correctness Task 22: one property file verifies Task 28 (P-13) and Task 48 (P-32), imports in-body.
+    (root / "tests").mkdir(exist_ok=True)
+    (root / "tests/test_fixture_config_properties.py").write_text(
+        top_level
+        + "def test_tc175_p13_config():\n    from claude_kiro.config import fixture_globs\n    assert fixture_globs\n\n\n"
+        + "def test_tc175_p32_lock():\n    from claude_kiro.fixtures import lock_decision\n    assert lock_decision\n"
+    )
+
+
+def fixture_spec(root: Path, verify28: str) -> None:
+    write_spec(
+        root,
+        block(22, "Props", track="test", status="Done", files=["tests/test_fixture_config_properties.py"],
+              verify="uv run pytest -q tests/test_fixture_config_properties.py", verifies="Task 28, Task 48")
+        + block(28, "Config", files=["src/claude_kiro/config.py"], verify=verify28, vby="Task 22", deps="Task 22 (oracle)")
+        + block(48, "Fixture lock", files=["src/claude_kiro/fixtures.py"], vby="Task 22", deps="Task 28 (reads the config), Task 22 (oracle)"),
+    )
+
+
+def test_shared_suite_deferred_and_k_selection_skipping_the_import_is_not_a_cycle(tmp_path):
+    # Task 22 also verifies Task 48, so its suite isn't run at Task 28's gate; Task 28's own -k skips the P-32 test.
+    fixture_props(tmp_path)
+    fixture_spec(tmp_path, 'uv run pytest -q tests/test_fixture_config_properties.py -k "tc175_p13"')
+    assert lint_spec(tmp_path / "specs/sim", tmp_path)["verifyCycles"] == []
+
+
+def test_k_selection_that_runs_the_importing_test_is_a_cycle(tmp_path):
+    fixture_props(tmp_path)
+    fixture_spec(tmp_path, 'uv run pytest -q tests/test_fixture_config_properties.py -k "p13 or p32"')
+    [cycle] = lint_spec(tmp_path / "specs/sim", tmp_path)["verifyCycles"]
+    assert (cycle["task"], cycle["needs"], cycle["module"]) == ("28", "48", "src/claude_kiro/fixtures.py")
+
+
+def test_node_id_selection_is_read_like_k(tmp_path):
+    fixture_props(tmp_path)
+    fixture_spec(tmp_path, "uv run pytest -q tests/test_fixture_config_properties.py::test_tc175_p13_config")
+    assert lint_spec(tmp_path / "specs/sim", tmp_path)["verifyCycles"] == []
+    fixture_spec(tmp_path, "uv run pytest -q tests/test_fixture_config_properties.py::test_tc175_p32_lock")
+    assert [c["needs"] for c in lint_spec(tmp_path / "specs/sim", tmp_path)["verifyCycles"]] == ["48"]
+
+
+def run_extension_spec(root: Path, run_py: str) -> None:
+    # unattended-correctness Task 1 helper -> cli/run.py: Task 19 is verified by Task 1; Task 108 extends run.py.
+    (root / "tests").mkdir(exist_ok=True)
+    (root / "src/claude_kiro/cli").mkdir(parents=True, exist_ok=True)
+    (root / "src/claude_kiro/cli/run.py").write_text(run_py)
+    (root / "tests/helpers.py").write_text("def sandboxed():\n    from claude_kiro.cli.run import sandbox_settings\n    return sandbox_settings\n")
+    (root / "tests/test_helpers.py").write_text("from tests.helpers import sandboxed\n\n\ndef test_sandboxed():\n    assert sandboxed()\n")
+    write_spec(
+        root,
+        block(1, "Harness", track="test", status="Done", files=["tests/helpers.py", "tests/test_helpers.py"], verify="uv run pytest -q tests/test_helpers.py", verifies="Task 19")
+        + block(19, "Gate JSON", files=["src/claude_kiro/gate.py"], vby="Task 1", deps="Task 1 (oracle)")
+        + block(108, "Hooks", files=["src/claude_kiro/cli/run.py"], deps="Task 19 (reads gate JSON)"),
+    )
+
+
+def test_existing_module_that_already_defines_the_name_is_not_a_cycle(tmp_path):
+    run_extension_spec(tmp_path, "def sandbox_settings(project):\n    return {}\n")
+    assert lint_spec(tmp_path / "specs/sim", tmp_path)["verifyCycles"] == []
+
+
+def test_existing_module_missing_the_imported_name_is_a_cycle(tmp_path):
+    run_extension_spec(tmp_path, "def other():\n    return {}\n")
+    [cycle] = lint_spec(tmp_path / "specs/sim", tmp_path)["verifyCycles"]
+    assert (cycle["task"], cycle["needs"], cycle["module"]) == ("19", "108", "src/claude_kiro/cli/run.py")
+
+
+def test_suite_waiting_on_a_dependent_of_y_or_on_a_creator_is_not_a_cycle(tmp_path):
+    # unattended-correctness Task 9: perf tests verify Tasks 12, 20 and 45 and import attribution.py (Task 18)
+    # and protect.py (created by Task 44, extended by Task 51). The suite runs at Task 12's gate only once 12,
+    # 20 and 45 are Done: Task 20 depends on 18, and Task 45 on 44, so both modules exist by then.
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_perf.py").write_text(
+        "def test_budgets():\n    from claude_kiro.attribution import index\n    from claude_kiro.protect import decide\n    assert index and decide\n"
+    )
+    write_spec(
+        tmp_path,
+        block(9, "Perf", track="test", status="Done", files=["tests/test_perf.py"], verify="uv run pytest -q tests/test_perf.py", verifies="Task 12, Task 20, Task 45")
+        + block(12, "Graph", files=["src/claude_kiro/graph.py"], vby="Task 9", deps="Task 9 (oracle)")
+        + block(18, "Attribution", files=["src/claude_kiro/attribution.py"], deps="Task 12 (builds on the graph)")
+        + block(20, "Attributed gate", files=["src/claude_kiro/gate.py"], vby="Task 9", deps="Task 18 (calls it), Task 9 (oracle)")
+        + block(44, "Protect decisions", files=["src/claude_kiro/protect.py"], deps="None")
+        + block(45, "Hooks", files=["src/claude_kiro/hooks.py"], vby="Task 9", deps="Task 44 (decides), Task 20 (gate), Task 9 (oracle)")
+        + block(51, "Audit", files=["src/claude_kiro/protect.py"], deps="Task 45 (audits what the hooks record)"),
+    )
+    assert lint_spec(tmp_path / "specs/sim", tmp_path)["verifyCycles"] == []
+
+
+def test_module_level_import_counts_under_any_selection(tmp_path):
+    # A module-level import runs at collection, whatever -k selects.
+    fixture_props(tmp_path, top_level="from claude_kiro.fixtures import Label\n\n\n")
+    fixture_spec(tmp_path, 'uv run pytest -q tests/test_fixture_config_properties.py -k "tc175_p13"')
+    [cycle] = lint_spec(tmp_path / "specs/sim", tmp_path)["verifyCycles"]
+    assert (cycle["task"], cycle["needs"]) == ("28", "48")
+
+
 def test_dependency_cycle_refuses_and_nothing_is_ready(tmp_path):
     write_spec(tmp_path, block(1, "a", deps="Task 3 (x)") + block(2, "b", deps="Task 1 (x)") + block(3, "c", deps="Task 2 (x)") + block(4, "d"))
     out = ck(tmp_path, "lint", "sim")
