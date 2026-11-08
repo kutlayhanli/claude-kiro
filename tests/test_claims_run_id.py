@@ -105,8 +105,9 @@ def test_tc142_claim_records_the_run_and_status_shows_it(repo):
     code, rows, err = ck_json(repo, "worktree", "status", SPEC, "--json")
     assert code in (0, 3) and isinstance(rows, list), f"status failed: code={code} err={err}"
     by_task = {str(r["task"]): r for r in rows}
-    assert by_task["1"].get("run") == run, by_task["1"]
-    assert not by_task["2"].get("run"), by_task["2"]
+    # status shows the lock reason (which carries the run) in `detail`
+    assert f"run {run}" in str(by_task["1"].get("detail")), by_task["1"]
+    assert " run " not in str(by_task["2"].get("detail")), by_task["2"]
 
 
 # --------------------------------------------------------------------------- TC-143

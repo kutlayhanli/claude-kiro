@@ -756,6 +756,7 @@ class RunStartClaims:
 `claim_release_decision`: `run == starting_run` -> own (16.7); `run` set and liveness `running` -> keep (16.3);
 `run` set and liveness `finished` / `stale` / `missing` / None -> release (16.2, 16.5); `run` None -> release iff
 `age_s > stale_minutes * 60` else keep (16.4).
+`stale_minutes` is the `claim_stale_minutes` key of specs/ck.json. `claim()` treats a lock whose `ClaimInfo.run` equals `--progress-run` as the caller's own claim (16.7), so a same-run reclaim succeeds without `--takeover`.
 
 ### Python (`fixtures.py`, `testfix.py`, `fidelity.py`)
 
