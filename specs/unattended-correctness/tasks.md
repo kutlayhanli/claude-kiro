@@ -112,7 +112,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 4: Red-team the failure list's completeness (Story 3)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.3, 3.5
 **Description:** Try to break each SHALL NOT clause of Story 3 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Clauses: `failures` SHALL never be omitted under `--json` (3.3); an over-long message SHALL never drop its entry (3.5). Starting points through `ck gate --json`: messages of exactly 500 and 501 characters made of emoji, combining marks, CJK and NUL; messages that are pure ANSI escapes or empty; assertion messages containing text that looks like pytest's own summary lines or a JSON `failures` array; 1,000 failing nodes; a test whose name or message contains a newline; a verify command that prints nothing and exits 1; a gate whose only failing check is a config error. Tests named `test_tc30_redteam_<slug>` and `test_tc32_redteam_<slug>`.
@@ -122,10 +122,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 19 (red team of 3.3, 3.5 through `ck gate --json`)
 
 **Acceptance:**
-- [ ] Written from the requirements only, never from the implementation
-- [ ] Tests run the real gate on real pytest output and validate against `failure.schema.json`
-- [ ] Each test fails before the implementation for the right reason
-- [ ] No mocks of the project's own code
+- [x] Written from the requirements only, never from the implementation
+- [x] Tests run the real gate on real pytest output and validate against `failure.schema.json`
+- [x] Each test fails before the implementation for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project, failure.schema.json)
 **Complexity:** Medium
