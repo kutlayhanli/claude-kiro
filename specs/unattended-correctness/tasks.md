@@ -1948,7 +1948,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 85: Red-team cross-test holds (Story 7)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.4
 **Description:** Try to break each SHALL NOT clause of Story 7 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Clause: while a cross-test finding is open, impl tasks its tests verify SHALL not start (7.4). Starting points against the real workflow: a finding that names tests by node ID, by bare function name, by file only, or with `./` and different casing; a finding naming tests of two test tasks; a held task that becomes ready through a retry or a park/unpark (live-edge cases belong to Task 90); a finding raised while the verified task is already running; a finding resolved by a test-fix that fails to land; `heldByCrossTest` called with a `testVerifies` map that has extra or missing entries. Tests named `tc67_redteam ...`.
@@ -1958,10 +1958,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 87 (red team of 7.4)
 
 **Acceptance:**
-- [ ] Written from the requirements only, never from the implementation
-- [ ] Tests run the real workflow script and check the trace for any `task N` request while the finding is open
-- [ ] Each test fails before the implementation for the right reason
-- [ ] No mocks of the project's own code
+- [x] Written from the requirements only, never from the implementation
+- [x] Tests run the real workflow script and check the trace for any `task N` request while the finding is open
+- [x] Each test fails before the implementation for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 2 (crossTest, testVerifies fakes)
 **Complexity:** Medium
