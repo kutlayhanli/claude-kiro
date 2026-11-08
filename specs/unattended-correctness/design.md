@@ -128,13 +128,14 @@ How the PLAN.md decisions shape it:
     used only by `ck worktree approve` (9.8).
   - `create_integration` calls `protect.ensure_hooks` (install only where the git metadata is writable,
     otherwise report the hook state; 9.1, 9.10) and records the baseline protected state on creation and on
-    reuse; its `Outcome.detail` names a hook problem. It creates the `integrate/*` ref with a landing token, as
+    reuse; its `Outcome.detail` names a hook problem.
+    `ck worktree integration SPEC [--base] [--json]` prints `{..., hooks: HookStatus}` (`installed`, `problems`). It creates the `integrate/*` ref with a landing token, as
     every ck-made `integrate/*` update (9.7, 9.12).
   - After every install step ck runs (`create --install`, land's install, `gate --install`) and at the start of
     each `land()`, ck calls `protect.ensure_hooks`: when `core.hooksPath` no longer points at ck's directory (a
     husky `prepare` script resets it to `.husky/_`), the new value becomes the chain target, the hooks are
-    reinstalled where the metadata is writable and the change is logged; otherwise the land result carries a
-    `hooks` warning (9.1, 9.9, 9.10).
+    reinstalled where the metadata is writable, the change is logged and the land result's `hooks` entry reports
+    the re-install; otherwise that entry carries a warning (9.1, 9.9, 9.10).
   - `GateFn` becomes `Callable[[Path, List[str]], Tuple[bool, str, List[dict]]]`.
 - `src/claude_kiro/cli/run.py` - `ck run` runs unsandboxed before it launches the harness, so it calls
   `protect.install_hooks(project)` first (9.1, 9.11): `core.hooksPath` lives in the repository config, which is
