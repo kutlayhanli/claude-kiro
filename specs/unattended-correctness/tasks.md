@@ -1815,7 +1815,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 79: Tag base agent calls with their role on ck() hosts
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 14.1, 14.6
 **Description:** In `plugin/workflows/spec-implement.js`, on hosts that provide the `ck()` global, add `role` (`implementer`, `test_writer`, `reviewer`, `reviewer_risky`, `fixer`, `orchestrator`, `resolver`) to the opts of every base (non-escalated) agent call; escalated ladder steps drop it so the alias map resolves them. Under Claude Code no `role` is passed and the agent opts keep today's aliases (`roleOpts` unchanged). Harness Contract owner: item 7's agent opts `role`. Foundation task: its Verify is a smoke check; 14.1 and 14.6 are verified at Task 82 by Task 75, whose suite also needs the run start and audit that Task 82 adds.
