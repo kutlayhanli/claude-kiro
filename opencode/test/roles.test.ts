@@ -154,6 +154,33 @@ test("tc126_ a mapped reviewer role beats the model alias", async () => {
   }
 });
 
+test("tc126b_ a role's own variant wins over the call's effort, and a variantless role still takes it", async () => {
+  const f = fixture();
+  try {
+    f.writeProject({
+      opencode: { roles: { reviewer: REVIEWER_REF, fixer: "opencode-go/deepseek-v4.1-flash" } },
+    });
+    const { loadConfig } = await import("../src/config.ts");
+    const { config } = loadConfig({ directory: f.project, env: f.env });
+
+    for (const effort of ["high", "low", "inherit"]) {
+      const { outcome, created } = await runOne(config, { role: "reviewer", model: "opus", effort });
+      assert.equal(outcome.resolvedModel.id, "deepseek-v4.1-flash", `effort ${effort}`);
+      assert.equal(outcome.resolvedVariant, "medium", `effort ${effort}`);
+      assert.equal(outcome.requestedEffort, effort, `effort ${effort}`);
+      assert.equal(outcome.modelSource, "roles", `effort ${effort}`);
+      assert.equal(created[0]!.model.variant, "medium", `effort ${effort}`);
+    }
+
+    const variantless = await runOne(config, { role: "fixer", model: "opus", effort: "high" });
+    assert.equal(variantless.outcome.resolvedModel.id, "deepseek-v4.1-flash");
+    assert.equal(variantless.outcome.resolvedVariant, "high");
+    assert.equal(variantless.created[0]!.model.variant, "high");
+  } finally {
+    f.cleanup();
+  }
+});
+
 test("tc127_ an unmapped fixer role resolves through the alias map as before", async () => {
   const f = fixture();
   try {

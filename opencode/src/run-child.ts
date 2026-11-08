@@ -10,9 +10,11 @@
 import type { Plugin } from "@opencode/plugin";
 import { selectAgent, type CkConfig } from "./config.ts";
 import {
+  EFFORTS,
   INHERIT,
   ModelError,
   formatRef,
+  isEffort,
   resolveModel,
   resolveRoleRef,
   type Catalog,
@@ -530,12 +532,23 @@ async function resolveChildModel(options: RunChildOptions): Promise<ChildResolut
         ...(roleRef.variant ? { variant: roleRef.variant } : {}),
       })
     : requestedModel;
+  // A role mapped to `provider/model#variant` runs on that variant: the call's effort must not replace
+  // it. The effort is still validated and recorded. A variantless role keeps effort-to-variant mapping.
+  const roleVariant = roleRef?.variant ?? null;
+  const callEffort = options.effort ?? null;
+  if (roleVariant && callEffort !== null && callEffort !== INHERIT && !isEffort(callEffort)) {
+    throw new ChildError(
+      "model",
+      `unknown effort ${JSON.stringify(callEffort)} (use ${EFFORTS.join(", ")}, or ${INHERIT})`,
+    );
+  }
+
   let resolution: Resolution;
   try {
     resolution = resolveModel(modelRequest, {
       aliases: options.config.models,
       catalog: options.catalog,
-      effort: options.effort ?? null,
+      effort: roleVariant ? null : callEffort,
       efforts: options.config.efforts,
     });
   } catch (error) {
@@ -544,17 +557,23 @@ async function resolveChildModel(options: RunChildOptions): Promise<ChildResolut
   }
 
   if (resolution.resolved) {
+    const requestedEffort = roleVariant ? callEffort : resolution.requestedEffort;
+    const notes = [...resolution.notes];
+    if (roleRef) notes.push(`role ${options.role} runs on ${modelRequest}`);
+    if (roleVariant && callEffort !== null) {
+      notes.push(`effort ${callEffort} does not replace role ${options.role}'s variant ${roleVariant}`);
+    }
     return {
       requested: {
         model: requestedModel,
-        effort: resolution.requested.effort,
+        effort: requestedEffort,
         variant: resolution.variant,
       },
       resolved: resolution.resolved,
-      requestedEffort: resolution.requestedEffort,
+      requestedEffort,
       resolvedEffort: resolution.resolvedEffort,
       modelSource: roleRef ? "roles" : "alias",
-      notes: roleRef ? [...resolution.notes, `role ${options.role} runs on ${modelRequest}`] : resolution.notes,
+      notes,
     };
   }
 
