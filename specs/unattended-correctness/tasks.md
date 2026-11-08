@@ -600,7 +600,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 25: Red-team the fixture validation config and scope (Story 6)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.5, 6.6
 **Description:** Try to break each SHALL NOT clause of Story 6 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Clauses: an invalid `test_track.validate` SHALL not gate as if the key were absent (6.5); an impl-track gate SHALL not run the command (6.6). Starting points: `test_track` itself as a string, list or null; `validate` as `[]`, `[""]`, a list with a nested list, a string of whitespace; the key under a near-miss name (`test-track`, `testTrack`); the key in global config only; a task whose Track line is unusual (`**Track:** Test`, missing Track, `impl ` with trailing space); an impl task that owns test files; a mixed gate of a test task and an impl task. Tests named `test_tc62_redteam_<slug>` and `test_tc63_redteam_<slug>`.
@@ -610,10 +610,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 31 (red team of 6.5, 6.6)
 
 **Acceptance:**
-- [ ] Written from the requirements only, never from the implementation
-- [ ] Tests run the real gate and config load, using a marker file to prove whether the command ran
-- [ ] Each test fails before the implementation for the right reason
-- [ ] No mocks of the project's own code
+- [x] Written from the requirements only, never from the implementation
+- [x] Tests run the real gate and config load, using a marker file to prove whether the command ran
+- [x] Each test fails before the implementation for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project)
 **Complexity:** Low
