@@ -1376,7 +1376,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 60: Property tests for harness name lookup
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 17.1, 17.2
 **Description:** Implement the TC-175 row P-29 at `claude_kiro.harnesses.select` and through the CLI: lookup succeeds iff the name equals a registered name exactly; otherwise the error lists every registered name; `--harness` on `ck bench run --dry-run` and `ck doctor` accepts exactly the same set. Domain: registered names, case variants (`Claude`), whitespace (` claude`), near-misses (`claude-code`, `open-code`, `opencode2`, `dsh` when unregistered) and the empty string. Settings 200 examples for the seam (CLI part capped at 25), derandomized, no database. `PROPERTIES = {"P-29": ...}`, tests `test_tc175_p29_<slug>`.
@@ -1387,11 +1387,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 62 (P-29 at `select` and the CLI)
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the row
-- [ ] Settings are deterministic
-- [ ] Tests call the seam and the real CLI, not a server
-- [ ] They fail before the implementation because the registry does not exist
-- [ ] No mocks of the project's own code
+- [x] Generators cover every surface form and negative listed in the row
+- [x] Settings are deterministic
+- [x] Tests call the seam and the real CLI, not a server
+- [x] They fail before the implementation because the registry does not exist
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Low
