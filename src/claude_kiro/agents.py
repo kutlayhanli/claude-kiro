@@ -87,6 +87,10 @@ DEFAULTS: Dict[str, Dict[str, Any]] = {
             # finish_first: true = a task whose agent is done may land before the others still running
             # (landing order follows finish order); off = land in task order.
             "finish_first": True,
+            # handoff: true = a whole-spec /spec:implement started from a .claude/worktrees/ session hands the run to
+            # `ck run` in the main checkout; false (default) = it runs as a workflow in the session, where its
+            # progress is visible. /spec:create and /spec:review always run in the session.
+            "handoff": False,
             # analytics: record each `ck run` into the local stats database. machine_label: a slug
             # naming this machine in exports (null = unset).
             "analytics": True, "machine_label": None,
@@ -106,7 +110,7 @@ ROLE_KEYS = {
     "fixer": {"model", "effort", "escalate"},
     "orchestrator": {"model", "effort"},
     "resolver": {"model", "effort"},
-    "run": {"max_concurrent", "allowed_domains", "budget_usd", "budget_per_task_usd", "finish_first", "analytics", "machine_label", "notify_command",
+    "run": {"max_concurrent", "allowed_domains", "budget_usd", "budget_per_task_usd", "finish_first", "handoff", "analytics", "machine_label", "notify_command",
             "eta_slip_minutes"},
 }
 UNLIMITED = "unlimited"
@@ -200,7 +204,7 @@ def _coerce(role: str, key: str, value: Any) -> Any:
         return value
     if isinstance(value, str) and value.lower() in ("null", "none", "default"):
         value = None
-    if key in ("ask", "enabled", "complexity_routing", "cross_test", "analytics", "finish_first"):
+    if key in ("ask", "enabled", "complexity_routing", "cross_test", "analytics", "finish_first", "handoff"):
         if value is None and key == "finish_first":
             return None  # reset: the key is removed and the default (true) applies
         if isinstance(value, str):

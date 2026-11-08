@@ -151,9 +151,41 @@ def run_processes_with(log: str):
 def setup(tmp_path):
     root = project(tmp_path)
     wt = worktree_of(root, "bg-1")
-    env = tool_env(tmp_path)
+    env = opt_in(tool_env(tmp_path), tmp_path)
     record = fake_claude(tmp_path)
     return root, wt, env, record
+
+
+def opt_in(env: dict, tmp: Path, on: bool = True) -> dict:
+    """Set run.handoff in a private ck config (the hand-off is off by default)."""
+    conf = tmp / "ck-config"
+    conf.mkdir(exist_ok=True)
+    (conf / "config.json").write_text(json.dumps({"agents": {"run": {"handoff": on}}}))
+    return {**env, "CK_CONFIG_HOME": str(conf)}
+
+
+def test_by_default_implement_leaves_isolation_instead_of_handing_off(tmp_path):
+    root = project(tmp_path)
+    wt = worktree_of(root, "bg-1")
+    env = opt_in(tool_env(tmp_path), tmp_path, on=False)
+    record = fake_claude(tmp_path)
+    done, data = handoff(wt, env, "implement", "demo")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert data["handoff"] is False and data["exitIsolation"] is True, data
+    assert Path(data["mainCheckout"]).resolve() == root.resolve()
+    time.sleep(1.0)
+    assert not record.exists(), "no ck run was launched"
+
+
+def test_force_handoff_hands_off_with_run_handoff_off(tmp_path):
+    root = project(tmp_path)
+    wt = worktree_of(root, "bg-1")
+    env = opt_in(tool_env(tmp_path), tmp_path, on=False)
+    record = fake_claude(tmp_path)
+    done = ck(wt, env, "handoff", "implement", "demo", "--json", "--force-handoff")
+    data = json.loads(done.stdout)
+    assert done.returncode == 0 and data["handoff"] is True and data["launched"] is True, done.stdout + done.stderr
+    assert prompt_of(wait_record(record)) == "/spec:implement demo all"
 
 
 # --------------------------------------------------------------------------- TC-44
@@ -197,7 +229,11 @@ def test_tc45_create_and_review_runs_match_implement(setup):
     for kind in ("create", "review"):
         plan = plans[kind]
         assert plan["argv"][2] == f"/spec:{kind} demo"
-        assert plan["argv"][:2] == base["argv"][:2] and plan["argv"][3:] == base["argv"][3:]
+        assert plan["argv"][:2] == base["argv"][:2]
+        models = {f: plan["argv"][plan["argv"].index(f) + 1] for f in ("--model", "--effort")}
+        assert models == {"--model": "opus", "--effort": "medium"}, models  # create/review agents inherit the session model
+        strip = lambda a: [x for i, x in enumerate(a) if not (x in ("--model", "--effort") or (i and a[i - 1] in ("--model", "--effort")))]
+        assert strip(plan["argv"][3:]) == strip(base["argv"][3:])
         assert plan["env"] == base["env"] and plan["env"].get("CK_RUN_HEADLESS") == "1"
     argv = base["argv"]
     assert argv[argv.index("--permission-mode") + 1] == "auto"
@@ -206,14 +242,15 @@ def test_tc45_create_and_review_runs_match_implement(setup):
     assert "--max-budget-usd" in argv and "--max-turns" in argv
 
 
-def test_tc45_create_and_review_hand_off_with_their_own_prompt(setup):
+def test_create_and_review_run_in_the_session_and_never_hand_off(setup):
     root, wt, env, record = setup
     for kind in ("create", "review"):
         record.unlink(missing_ok=True)
         done, data = handoff(wt, env, kind, "demo")
-        assert done.returncode == 0 and data["launched"] is True, done.stdout + done.stderr
-        assert prompt_of(wait_record(record)) == f"/spec:{kind} demo"
-        time.sleep(3.5)  # let this fake claude finish before the next launch
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert data["handoff"] is False, data
+        time.sleep(1.0)
+        assert not record.exists(), "no ck run was launched"
 
 
 def test_tc45_refusals_apply_to_create_and_review(setup, tmp_path):
@@ -244,7 +281,7 @@ def assert_failed(done, data, root, wt, record):
 
 def test_tc46_sandbox_tools_missing(setup, tmp_path):
     root, wt, _, record = setup
-    env = tool_env(tmp_path, tools=False)
+    env = opt_in(tool_env(tmp_path, tools=False), tmp_path)
     sleeping_fake_claude(tmp_path / "bin", record)
     done, data = handoff(wt, env, "implement", "demo")
     assert_failed(done, data, root, wt, record)

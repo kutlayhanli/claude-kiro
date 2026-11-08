@@ -154,6 +154,24 @@ If that check finds `dsh` can't host the workflow, the phase stops with a findin
 **Rejected:** two phases with a measured rerun between them; splitting into two specs.
 **Decided by:** user
 
+### D16: Where do whole-spec create and review runs execute? (narrows prompt-free-runs D11)
+**Choice:** In the session. From a `.claude/worktrees/` session, `/spec:create` and `/spec:review` no longer hand off to `ck run`; only `/spec:implement` does.
+**Why:** The first `/spec:create` for this spec handed off to `ck run`, whose session ran on Sonnet at low effort, and spec-create's agents inherit the session model. So the spec was written below the planning minimum. Create and review only write spec files, so the isolation refusals behind prompt-free-runs D8 don't apply to them.
+**Rejected:** keeping the hand-off for create and review.
+**Decided by:** user (2026-11-07); implemented directly on this branch, not as a spec task.
+
+### D17: What model does a `ck run` create or review session use by default?
+**Choice:** The planning minimum (`planning.min_model` / `planning.min_effort`, Opus/medium). Implement keeps Sonnet/low, because its session only launches and reports. An explicit `--model` or `--effort` still wins.
+**Why:** Same cause as D16: the session's model is the agents' model for create and review.
+**Rejected:** none.
+**Decided by:** user (2026-11-07); implemented directly on this branch, not as a spec task.
+
+### D18: How do in-session spec runs avoid isolation refusals?
+**Choice:** In-session workflows are the default on Claude Code for create, review and implement, as the user prefers live progress. Create and review run where they are (D16). A whole-spec implement started from an isolated `.claude/worktrees/` session leaves the isolation: `ck handoff` prepares the main checkout as a hand-off would (the same `<spec>-run` branch rules) but launches nothing, and answers `exitIsolation: true`. The skill then calls ExitWorktree (keeping the worktree) and runs the workflow from the main checkout in the session. If the session can't leave, it runs `ck handoff --force-handoff` and follows that run's progress here. `run.handoff: true` restores the old hand-off.
+**Why:** The roughly 985 isolation refusals in prompt-free-runs all came from isolated top-level sessions (884 after EnterWorktree, 94 in background jobs), and none from main-checkout sessions or `ck run`. Claude Code's check can't be changed, and rewording agent instructions didn't help, so the only way to keep the run in the session is to leave isolation. The run's own work happens in `.ck/worktrees/` anyway.
+**Rejected:** handing off with progress followed here - the work isn't in the session; giving each agent its own isolation under `.claude/worktrees/` - unproven, would need a spike first.
+**Decided by:** user (2026-11-07); implemented directly on this branch, not as a spec task.
+
 ## Delegated to Spec
 - The `ck gate --attribute --json` output schema, the failure `kind` taxonomy and how each test runner's node IDs are parsed (pytest first; other runners fall back to file-level attribution, D1).
 - The spec graph's storage and API: built on demand or cached, and how inference fills `provides` and `invokes` edges before falling back to an explicit `**Provides:**` field.

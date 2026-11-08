@@ -6,6 +6,7 @@ TC-47 in `tests/test_handoff.py`. Project modules are imported inside the test b
 
 import re
 import shlex
+import dataclasses
 import string
 
 from hypothesis import HealthCheck, assume, given, settings, strategies as st
@@ -45,6 +46,7 @@ SHA_B = "b" * 40
 
 slugs = st.from_regex(r"[a-z][a-z0-9]{0,6}(-[a-z0-9]{1,6}){0,3}", fullmatch=True)
 kinds = st.sampled_from(["implement", "create", "review"])
+handed_off = st.just("implement")  # create and review run in the session
 task_ids = st.one_of(st.integers(min_value=1, max_value=999).map(str), st.sampled_from(["3", "17", "3_a", "2b", "1x"]))
 rests = st.one_of(
     st.just(()),
@@ -61,7 +63,7 @@ def _facts(**over):
     base = dict(
         kind="implement", args=("demo",), cwd=ROOT, is_linked_worktree=False, main_root=ROOT,
         spec_in_main=True, spec_in_worktree=True, worktree_head=SHA_A, main_head=SHA_B, main_branch="main",
-        main_clean=True, spec_same=True, worktree_spec_dirty=False, run_branch_at=None,
+        main_clean=True, spec_same=True, worktree_spec_dirty=False, run_branch_at=None, opted_in=True,
     )
     base.update(over)
     return HandoffFacts(**base)
@@ -80,12 +82,28 @@ def test_p19_handoff_fires_only_from_a_claude_worktree_for_whole_spec_runs(form,
     cwd, linked, main_root, fires_form = CWD_FORMS[form]
     args = (spec, *rest)
     decision = decide_handoff(_facts(kind=kind, args=args, cwd=cwd, is_linked_worktree=linked, main_root=main_root))
-    expected = fires_form and not _single_task(kind, args)
+    expected = fires_form and kind == "implement" and not _single_task(kind, args)
     assert (decision.action == "handoff") is expected, (form, kind, args, decision)
     if not expected:
         assert decision.action == "none", (form, kind, args, decision)
     if form in ("main_root", "main_subdir"):
         assert decision.action == "none"  # a handed-off run cannot hand off again
+
+
+@SETTINGS
+@given(form=st.sampled_from(sorted(CWD_FORMS)), kind=kinds, spec=slugs, rest=rests)
+def test_without_run_handoff_a_hand_off_becomes_leaving_isolation(form, kind, spec, rest):
+    from claude_kiro.handoff import decide_handoff
+
+    cwd, linked, main_root, _ = CWD_FORMS[form]
+    facts = _facts(kind=kind, args=(spec, *rest), cwd=cwd, is_linked_worktree=linked, main_root=main_root, opted_in=False)
+    full = decide_handoff(dataclasses.replace(facts, opted_in=True))
+    got = decide_handoff(facts)
+    assert got.action != "handoff", got
+    assert got.action == ("exit" if full.action == "handoff" else full.action), (full, got)
+    if got.action == "exit":  # it prepares the main checkout exactly as the hand-off would
+        assert (got.main_checkout, got.run_args, got.rest, got.run_branch, got.start_point) == (
+            full.main_checkout, full.run_args, full.rest, full.run_branch, full.start_point)
 
 
 @SETTINGS
@@ -105,7 +123,7 @@ WORDS = st.one_of(
 
 
 @SETTINGS
-@given(kind=kinds, spec=slugs, rest=st.lists(WORDS, max_size=6))
+@given(kind=handed_off, spec=slugs, rest=st.lists(WORDS, max_size=6))
 def test_p20_rest_args_round_trip_through_shlex(kind, spec, rest):
     from claude_kiro.handoff import decide_handoff
 
@@ -127,7 +145,7 @@ shas = st.one_of(st.none(), st.text(alphabet="0123456789abcdef", min_size=40, ma
 @given(
     spec=slugs, spec_same=tri, main_clean=tri, dirty=tri, in_main=st.booleans(), in_wt=st.booleans(),
     head=shas, other=st.text(alphabet="0123456789abcdef", min_size=40, max_size=40),
-    run_at_kind=st.sampled_from(["none", "head", "other"]), kind=kinds,
+    run_at_kind=st.sampled_from(["none", "head", "other"]), kind=handed_off,
 )
 def test_p31_spec_state_decides_handoff_run_branch_or_refusal(spec, spec_same, main_clean, dirty, in_main, in_wt, head, other,
                                                               run_at_kind, kind):

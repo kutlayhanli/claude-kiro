@@ -6,6 +6,7 @@ the main checkout, or exits 3 with the exact commands to run by hand. See design
 """
 
 import json
+import dataclasses
 import os
 import shlex
 import subprocess
@@ -78,11 +79,22 @@ def _tree(cwd: Path, spec: str) -> Optional[str]:
     return _git(cwd, "rev-parse", "--verify", "-q", f"HEAD:{SPECS_DIR}/{spec}")
 
 
+def _opted_in(cwd: Path) -> bool:
+    """run.handoff from ck config; unreadable config means off (the run stays in the session)."""
+    from .. import agents as ag
+
+    try:
+        return bool(ag.resolve(cwd)["roles"]["run"].get("handoff"))
+    except Exception:
+        return False
+
+
 def gather_facts(kind: str, args: Tuple[str, ...], cwd: Path) -> ho.HandoffFacts:
     linked, main = _linked_main_root(cwd)
+    opted = _opted_in(cwd)
     if not linked or main is None:
-        return ho.HandoffFacts(kind=kind, args=args, cwd=str(cwd), is_linked_worktree=linked)
-    base = dict(kind=kind, args=args, cwd=str(cwd), is_linked_worktree=True, main_root=str(main))
+        return ho.HandoffFacts(kind=kind, args=args, cwd=str(cwd), is_linked_worktree=linked, opted_in=opted)
+    base = dict(kind=kind, args=args, cwd=str(cwd), is_linked_worktree=True, main_root=str(main), opted_in=opted)
     spec = ho._spec_of(ho.HandoffFacts(kind=kind, args=args))
     if spec is None or "/" in spec or spec in (".", ".."):
         return ho.HandoffFacts(**base)
@@ -132,7 +144,9 @@ def _fail(error: str, manual: str, as_json: bool) -> None:
 @click.argument("kind", type=click.Choice(list(ho.HANDOFF_KINDS)))
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 @click.option("--json", "as_json", is_flag=True, help="Print JSON")
-def handoff(kind: str, args: tuple, as_json: bool):
+@click.option("--force-handoff", is_flag=True,
+              help="Hand off to ck run even when run.handoff is off (when the session cannot leave its worktree)")
+def handoff(kind: str, args: tuple, as_json: bool, force_handoff: bool):
     """Hand a whole-spec skill run to `ck run` in the main checkout when this is an isolated worktree session.
 
     \b
@@ -141,6 +155,8 @@ def handoff(kind: str, args: tuple, as_json: bool):
     """
     cwd = Path.cwd().resolve()
     facts = gather_facts(kind, tuple(args), cwd)
+    if force_handoff:
+        facts = dataclasses.replace(facts, opted_in=True)
     decision = ho.decide_handoff(facts)
     if decision.action == "none":
         _emit({"handoff": False, "interactive": not ho.is_headless(os.environ)}, as_json, 0)
@@ -170,6 +186,10 @@ def handoff(kind: str, args: tuple, as_json: bool):
         run_branch = decision.run_branch
     manual = _manual(str(main), spec, run_args, rest)
     note = f" (the main checkout is now on branch {run_branch})" if run_branch else ""
+    if decision.action == "exit":
+        # No launch: the session leaves its worktree (ExitWorktree) and runs the workflow from the main checkout.
+        _emit({"handoff": False, "exitIsolation": True, "mainCheckout": str(main), "runBranch": run_branch,
+               "interactive": not ho.is_headless(os.environ)}, as_json, 0)
 
     try:
         plan = preflight(main, spec, kind, False)

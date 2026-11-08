@@ -55,6 +55,15 @@ def test_extra_arguments_reach_spec_implement_and_session_model_is_settable(tmp_
     assert argv[argv.index("--model") + 1] == "haiku"
 
 
+def test_create_and_review_sessions_default_to_the_planning_minimum(tmp_path):
+    root = repo(tmp_path)
+    for command in ("create", "review"):
+        argv = json.loads(ck(root, "run", "demo", "--command", command, "--dry-run", "--json").output)["argv"]
+        assert (argv[argv.index("--model") + 1], argv[argv.index("--effort") + 1]) == ("opus", "medium"), command
+        argv = json.loads(ck(root, "run", "demo", "--command", command, "--model", "sonnet", "--dry-run", "--json").output)["argv"]
+        assert argv[argv.index("--model") + 1] == "sonnet", "an explicit --model still wins"
+
+
 def test_refuses_inside_a_linked_worktree(tmp_path):
     root = repo(tmp_path)
     wt = root / ".ck" / "worktrees" / "demo-task-1"

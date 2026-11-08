@@ -40,7 +40,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import click
 
@@ -430,11 +430,25 @@ def preflight(cwd: Path, spec: str, command: str, unsandboxed: bool) -> RunPlan:
     return RunPlan(spec_dir.name, command, cwd, spec_dir, not unsandboxed, wt_dir, run_role, warnings)
 
 
+def session_model(cwd: Path, command: str, model: Optional[str], effort: Optional[str]) -> Tuple[str, str]:
+    """The orchestrating session's model and effort. Create and review agents inherit it, so they get the planning minimum."""
+    if command in ("create", "review"):
+        try:
+            planning = ag.resolve(cwd)["roles"]["planning"]
+        except (ag.AgentConfigError, KeyError):
+            planning = {}
+        return model or planning.get("min_model") or "opus", effort or planning.get("min_effort") or "medium"
+    return model or "sonnet", effort or "low"
+
+
 @click.command(context_settings={"ignore_unknown_options": True})
 @click.argument("spec")
 @click.argument("extra", nargs=-1, type=click.UNPROCESSED)
-@click.option("--model", default="sonnet", show_default=True, help="Model of the orchestrating session (it only launches and reports)")
-@click.option("--effort", default="low", show_default=True, help="Effort of the orchestrating session")
+@click.option("--model", default=None,
+              help="Model of the orchestrating session. Default: sonnet for implement (it only launches and reports); "
+                   "the planning minimum (planning.min_model) for create and review, whose agents run on this model")
+@click.option("--effort", default=None,
+              help="Effort of the orchestrating session. Default: low for implement; planning.min_effort for create and review")
 @click.option("--budget", type=click.FloatRange(min=0, min_open=True), default=None,
               help=f"Stop the run once estimated API spend (subagents included) reaches this many USD. Default: "
                    f"run.budget_usd, else run.budget_per_task_usd x the tasks not Done, else {DEFAULT_BUDGET_USD:g} "
@@ -470,6 +484,7 @@ def run(spec: str, extra: tuple, model: str, effort: str, budget: float, max_tur
         click.echo(f"❌ {e.reason}")
         sys.exit(2)
     name, wt_dir, run_role, warnings, sandboxed = plan.name, plan.wt_dir, plan.run_role, plan.warnings, plan.sandboxed
+    model, effort = session_model(cwd, command, model, effort)
     if budget is None:
         budget = run_budget(run_role, plan.spec_dir)
     settings = None

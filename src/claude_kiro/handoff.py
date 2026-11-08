@@ -43,6 +43,7 @@ class HandoffFacts:
     spec_same: Optional[bool] = None           # same specs/<spec> tree id at both HEADs
     worktree_spec_dirty: Optional[bool] = None  # uncommitted changes under specs/<spec> in the worktree
     run_branch_at: Optional[str] = None        # commit of an existing `<spec>-run` branch, if any
+    opted_in: bool = False                     # run.handoff is on (or --force-handoff); off = leave isolation instead
 
 
 @dataclass(frozen=True)
@@ -109,8 +110,31 @@ def _recovery(
 
 
 def decide_handoff(facts: HandoffFacts) -> HandoffDecision:
-    """S11. Never raises for any combination of facts."""
+    """S11, then the session choice: a run that would hand off leaves isolation instead ("exit") unless run.handoff is on.
+
+    "exit" prepares the main checkout exactly as a hand-off would (the same `<spec>-run` branch rules) but launches
+    nothing: the session leaves its worktree and runs the workflow from the main checkout, where isolation never applies.
+    Never raises for any combination of facts.
+    """
+    decision = _decide(facts)
+    if decision.action == "handoff" and not facts.opted_in:
+        return HandoffDecision(
+            "exit",
+            "leave this worktree's isolation and run in the main checkout (set run.handoff to hand off to ck run)",
+            main_checkout=decision.main_checkout,
+            run_args=decision.run_args,
+            rest=decision.rest,
+            run_branch=decision.run_branch,
+            start_point=decision.start_point,
+        )
+    return decision
+
+
+def _decide(facts: HandoffFacts) -> HandoffDecision:
     main = facts.main_root
+    if facts.kind in HANDOFF_KINDS and facts.kind != "implement":
+        # create and review only write spec files, so they run in the session on its own model
+        return HandoffDecision("none", f"{facts.kind} runs in the session", main_checkout=main)
     if facts.kind not in HANDOFF_KINDS or _is_single_task(facts) or not facts.is_linked_worktree:
         return HandoffDecision("none", "no hand-off needed", main_checkout=main)
     spec = _spec_of(facts)
