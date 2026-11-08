@@ -32,11 +32,13 @@ RED = {"regression", "unattributed"}
 # --- P-7 ----------------------------------------------------------------------------------------------------
 
 def entry_of(status: str, i: int, with_node: bool, with_file: bool) -> Dict[str, Any]:
-    e: Dict[str, Any] = {"tcId": f"TC-{i}", "tasks": [str(i)], "kind": "assertion", "message": "m", "status": status, "excusedBy": []}
-    if with_node:
-        e["node"] = f"tests/test_x.py::test_tc{i}_a"
-    if with_file:
-        e["file"] = "tests/test_x.py"
+    e: Dict[str, Any] = {
+        "node": f"tests/test_x.py::test_tc{i}_a" if with_node else None,
+        "tcId": f"TC-{i}", "tasks": [str(i)], "attributedBy": "tc",
+        "file": "tests/test_x.py" if with_file else None,
+        "kind": "assertion", "message": "m", "truncated": False, "command": None,
+        "status": status, "excusedBy": [],
+    }
     return e
 
 
@@ -82,6 +84,8 @@ def malformed_calls(draw) -> Dict[str, Any]:
         "null", "number", "string", "array", "empty", "no-failures", "failures-object", "failures-string", "ok-string",
         "bad-status", "bad-exit", "no-node-no-file", "json-null", "compact-regressions-object", "compact-regressions-missing",
         "compact-neg", "compact-str", "compact-float", "compact-failures-key", "entry-not-object", "ok-missing",
+        "entry-bad-kind", "entry-bad-tcid", "entry-tasks-nonarray", "entry-long-message", "entry-missing-field",
+        "ok-true-exit-1", "ok-false-exit-0",
     ]))
     full = full_object(entries)
     comp = compact_object(entries)
@@ -121,6 +125,27 @@ def malformed_calls(draw) -> Dict[str, Any]:
         bare = {k: v for k, v in good_entry.items() if k not in ("node", "file")}
         full["failures"] = entries + [bare]
         return call_of(full)
+    if kind in ("entry-bad-kind", "entry-bad-tcid", "entry-tasks-nonarray", "entry-long-message", "entry-missing-field"):
+        bad = dict(good_entry)
+        if kind == "entry-bad-kind":
+            bad["kind"] = draw(st.sampled_from(["fail", "Assertion", "", None, 3]))
+        elif kind == "entry-bad-tcid":
+            bad["tcId"] = draw(st.sampled_from(["TC-", "tc-1", "TC-1a", "1", "", 7]))
+        elif kind == "entry-tasks-nonarray":
+            bad["tasks"] = draw(st.sampled_from(["1", 1, None, {"a": "1"}, [1]]))
+        elif kind == "entry-long-message":
+            bad["message"] = "x" * draw(st.integers(501, 800))
+        else:
+            bad.pop(draw(st.sampled_from(["tcId", "tasks", "attributedBy", "kind", "message", "truncated", "command"])))
+        full["failures"] = entries + [bad]
+        return call_of(draw(st.sampled_from([full, {**comp, "regressions": comp["regressions"] + [bad]}])))
+    if kind in ("ok-true-exit-1", "ok-false-exit-0"):
+        # the compact object's ok and exit code equal the full gate's: ok iff exit 0
+        green = kind == "ok-true-exit-1"
+        full["ok"], comp["ok"] = green, green
+        full["failures"] = comp_entries = [] if green else [good_entry]
+        comp["regressions"], comp["unattributed"], comp["flaky"] = comp_entries, [], []
+        return call_of(draw(st.sampled_from([full, comp])), code=1 if green else 0)
     if kind == "entry-not-object":
         full["failures"] = entries + [draw(st.sampled_from([None, 3, "x", []]))]
         return call_of(full)
@@ -152,11 +177,12 @@ def test_tc174_p7_gate_outcome_error_unless_valid_then_red_iff_regression_malfor
 
 
 @SETTINGS
-@given(valid_entries(), st.dictionaries(st.integers(1, 120).map(str), st.integers(0, 40), max_size=4), st.sampled_from([0, 1]))
-def test_tc174_p7_gate_outcome_error_unless_valid_then_red_iff_regression(bridge, entries, excused, code):  # noqa: F811
+@given(valid_entries(), st.dictionaries(st.integers(1, 120).map(str), st.integers(0, 40), max_size=4))
+def test_tc174_p7_gate_outcome_error_unless_valid_then_red_iff_regression(bridge, entries, excused):  # noqa: F811
     """2.6, 2.8, 2.12: valid full and compact objects with the same failures give the same verdict, red iff a
     `regression` or `unattributed` entry exists, and a red gate exiting 1 is a verdict, not an error."""
     expected = verdict_of(entries)
+    code = 0 if expected == "green" else 1  # ok and exit code agree: 0 iff ok
     for js in (full_object(entries), compact_object(entries, excused)):
         out = bridge.call("gateOutcome", call_of(js, code))
         assert out["state"] == expected, (js, out)
