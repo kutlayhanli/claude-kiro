@@ -14,6 +14,7 @@ import {
   ModelError,
   formatRef,
   resolveModel,
+  resolveRoleRef,
   type Catalog,
   type ModelRef,
   type Resolution,
@@ -87,10 +88,14 @@ export interface RunChildOptions {
   prompt: string;
   label: string;
   phase?: string | null;
+  /** The agent's workflow role; a mapped role's model wins over the alias map. */
+  role?: string | null;
   model?: string | null;
   effort?: string | null;
   schema?: unknown;
 }
+
+export type ModelSource = "roles" | "alias" | "inherit";
 
 export interface ChildOutcome {
   value: unknown;
@@ -101,6 +106,8 @@ export interface ChildOutcome {
   requestedVariant: string | null;
   resolvedModel: ModelRef;
   resolvedVariant: string | null;
+  /** Where the model came from: the role's `opencode.roles` entry, the alias map or model ref, or the parent session. */
+  modelSource: ModelSource;
   tokens: TokenUsage;
   cost: number;
   startedAt: number;
@@ -152,6 +159,7 @@ export async function runChild(options: RunChildOptions): Promise<ChildOutcome> 
         requestedVariant: resolved.requested.variant,
         resolvedModel: resolved.resolved,
         resolvedVariant: resolved.resolvedEffort,
+        modelSource: resolved.modelSource,
         tokens: result.info.tokens ?? EMPTY_TOKENS,
         cost: result.info.cost,
         startedAt: result.startedAt,
@@ -170,6 +178,7 @@ export async function runChild(options: RunChildOptions): Promise<ChildOutcome> 
       failure.details.requestedVariant ??= resolved.requested.variant;
       failure.details.resolvedModel ??= resolved.resolved;
       failure.details.resolvedVariant ??= resolved.resolvedEffort;
+      failure.details.modelSource ??= resolved.modelSource;
       failure.details.attempts ??= attempt;
       if (failure.kind !== "result" || attempt === attemptsAllowed) throw failure;
       lastFailure = failure;
@@ -505,14 +514,25 @@ interface ChildResolution {
   resolved: ModelRef;
   requestedEffort: string | null;
   resolvedEffort: string | null;
+  modelSource: ModelSource;
   notes: string[];
 }
 
 async function resolveChildModel(options: RunChildOptions): Promise<ChildResolution> {
   const requestedModel = options.model && options.model !== "" ? options.model : INHERIT;
+  // A mapped role's model wins over whatever the call asked for; an unmapped role falls through to
+  // the alias path exactly as before.
+  const roleRef = options.role ? resolveRoleRef(options.role, options.config.roles) : null;
+  const modelRequest = roleRef
+    ? formatRef({
+        providerID: roleRef.provider,
+        id: roleRef.model,
+        ...(roleRef.variant ? { variant: roleRef.variant } : {}),
+      })
+    : requestedModel;
   let resolution: Resolution;
   try {
-    resolution = resolveModel(requestedModel, {
+    resolution = resolveModel(modelRequest, {
       aliases: options.config.models,
       catalog: options.catalog,
       effort: options.effort ?? null,
@@ -533,7 +553,8 @@ async function resolveChildModel(options: RunChildOptions): Promise<ChildResolut
       resolved: resolution.resolved,
       requestedEffort: resolution.requestedEffort,
       resolvedEffort: resolution.resolvedEffort,
-      notes: resolution.notes,
+      modelSource: roleRef ? "roles" : "alias",
+      notes: roleRef ? [...resolution.notes, `role ${options.role} runs on ${modelRequest}`] : resolution.notes,
     };
   }
 
@@ -571,6 +592,7 @@ async function resolveChildModel(options: RunChildOptions): Promise<ChildResolut
       resolved: inherited.resolved as ModelRef,
       requestedEffort: resolution.requestedEffort,
       resolvedEffort: inherited.resolvedEffort,
+      modelSource: "inherit",
       notes: [...resolution.notes, ...inherited.notes, `inherited ${formatRef(parentRef)} from the parent session`],
     };
   }
@@ -588,6 +610,7 @@ async function resolveChildModel(options: RunChildOptions): Promise<ChildResolut
     resolved: model,
     requestedEffort: resolution.requestedEffort,
     resolvedEffort: model.variant ?? null,
+    modelSource: "inherit",
     notes: [...resolution.notes, `inherited ${formatRef(model)} from the parent session`],
   };
 }

@@ -1656,7 +1656,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 72: Run OpenCode agents on their role's model and record it
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 14.1, 14.2, 14.7
 **Description:** In `opencode/src/run-child.ts`, add `RunChildOptions.role?: string | null`; `resolveChildModel` consults `resolveRoleRef(role, config.roles)` first and falls back to today's alias path; `ChildOutcome` gains `modelSource: "roles" | "alias" | "inherit"`. In `opencode/src/workflow-tool.ts`, `handleAgent` reads `opts.role`, passes it to `runChild`, and sets `AgentMeta.role`, so the run record (`record.ts`, which already has `AgentRow.role`) holds each agent's role and the model and variant it actually ran on. Harness Contract owner: item 11's role-first model resolution and per-agent `model` and `variant` in run records.

@@ -10,7 +10,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { GuardEvent } from "./guard.ts";
-import type { ChildOutcome, TokenUsage } from "./run-child.ts";
+import type { ChildOutcome, ModelSource, TokenUsage } from "./run-child.ts";
 
 export interface RunEnvelope {
   runId: string;
@@ -46,6 +46,8 @@ export interface AgentRow {
   requestedEffort: string | null;
   resolvedEffort: string | null;
   variant: string | null;
+  /** Where the model came from: the role's `opencode.roles` entry, the alias map, or the parent session. */
+  modelSource: ModelSource | null;
   startedAt: number | null;
   endedAt: number | null;
   durationMs: number | null;
@@ -124,6 +126,7 @@ export function agentRowFromOutcome(outcome: ChildOutcome, meta: AgentMeta): Age
     requestedEffort: outcome.requestedEffort,
     resolvedEffort: outcome.resolvedVariant,
     variant: outcome.resolvedVariant,
+    modelSource: outcome.modelSource,
     startedAt: outcome.startedAt,
     endedAt: outcome.endedAt,
     durationMs: outcome.endedAt - outcome.startedAt,
@@ -154,6 +157,7 @@ interface ErrorDetails {
   requestedVariant?: string | null;
   resolvedModel?: { providerID: string; id: string; variant?: string };
   resolvedVariant?: string | null;
+  modelSource?: ModelSource;
 }
 
 export function agentRowFromError(
@@ -185,6 +189,7 @@ export function agentRowFromError(
     requestedEffort: details.requestedEffort ?? null,
     resolvedEffort: details.resolvedVariant ?? null,
     variant: details.resolvedVariant ?? null,
+    modelSource: details.modelSource ?? null,
     startedAt,
     endedAt,
     durationMs: startedAt !== null && endedAt !== null ? endedAt - startedAt : null,
