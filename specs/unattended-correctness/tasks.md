@@ -203,7 +203,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 8: Property tests for the spec graph, command lint and write-set overlap
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 11.2, 11.4, 11.5, 11.7, 11.8, 12.1, 12.2, 13.1
 **Description:** Implement the TC-175 rows P-20, P-21, P-22, P-23 and P-26 at `claude_kiro.graph` (`build_graph`, the invokes scan, `missing_command_edges`, `paths_overlap`, `write_set_overlaps`) and `claude_kiro.relink` (`plan_command_relink`, `apply_command_relink`). P-20: invokes edges equal the longest table command prefixing the invoked argument list, over every listed form (`run_cli`, `main`, `CliRunner().invoke`, `subprocess.run` list and shell string, `shlex.split`, constant-prefix f-strings, leading global options) and near-misses (`newer`, `thesis-new`, an option value equal to a subcommand, assert-message text, comments, another program). P-21: two builds equal; incremental build after edits with mtimes restored equals a fresh copy's build. P-22: malformed sources leave the well-formed subset's graph and name each bad source once. P-23: lint reports exactly the missing (V, P) pairs; after apply none remain except cycle-making ones; a second apply is a no-op. P-26: overlap by witness in a 40-path universe, disjoint literals never overlap, symmetry, with `./`, backticks, ` - description` suffixes, trailing `/`, `*`, `**`, `?`. Settings 200 examples, derandomized, no database. `PROPERTIES = {"P-20": ..., ..., "P-26": ...}`, tests `test_tc175_p<k>_<slug>`.
@@ -214,11 +214,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 12 (P-21, P-22, P-26), Task 13 (P-20 at the invokes scan), Task 33 (P-23 at `plan_command_relink`)
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the rows
-- [ ] Settings are deterministic
-- [ ] Tests call the decision seams on files in `tmp_path`, not a server
-- [ ] They fail before the implementation because `claude_kiro.graph` does not exist
-- [ ] No mocks of the project's own code
+- [x] Generators cover every surface form and negative listed in the rows
+- [x] Settings are deterministic
+- [x] Tests call the decision seams on files in `tmp_path`, not a server
+- [x] They fail before the implementation because `claude_kiro.graph` does not exist
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (spec_graph_project)
 **Complexity:** High
