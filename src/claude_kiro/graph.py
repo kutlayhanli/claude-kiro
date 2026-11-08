@@ -15,10 +15,12 @@ nothing.
 
 import ast
 import hashlib
+import json
 import re
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from .hooks._shared.spec_parser import SpecTask, parse_tasks_text
 from .lint import _imports
@@ -49,6 +51,25 @@ class GraphProblem:
     problem: str
 
 
+@dataclass(frozen=True)
+class MissingEdge:
+    """A test file of a test task verifies `lacking` and invokes `command`, which `provider` provides, while `lacking`
+    does not depend on `provider` (12.1)."""
+
+    test_file: str  # "file:tests/test_x.py"
+    command: str  # "mtr thesis new"
+    provider: str  # "task:5"
+    lacking: str  # "task:2"
+
+
+@dataclass(frozen=True)
+class UnknownCommand:
+    """A command a test invokes that no task provides and no non-test source defines (12.3)."""
+
+    command: str  # "mtr bogus"
+    test_files: Tuple[str, ...]  # ("file:tests/test_x.py",)
+
+
 @dataclass
 class SpecGraph:
     spec: str
@@ -56,6 +77,9 @@ class SpecGraph:
     edges: List[Edge]
     problems: List[GraphProblem]
     programs: List[str] = field(default_factory=list)
+    # test file id -> the task ids its test task verifies. Not part of the ck-graph/1 document; it feeds
+    # `missing_command_edges`.
+    test_verifies: Dict[str, List[str]] = field(default_factory=dict)
 
     def to_json(self) -> dict:
         nodes = sorted(self.nodes, key=lambda n: (n.kind, n.id))
@@ -277,7 +301,11 @@ def _parse_tasks(text: str, source: str, problems: List[GraphProblem]) -> Dict[s
         if value and not value.lower().startswith(("none", "n/a", "-")) and not re.search(r"\d", value):
             problems.append(GraphProblem(f"{source}#Task {num}", f"Dependencies names no task number: {value!r}"))
             continue
-        found.setdefault(num, []).extend(parse_tasks_text(chunk))
+        parsed = parse_tasks_text(chunk)
+        for item in parsed:
+            # A Provides value without backticks is still a command path (`**Provides:** mtr thesis new`).
+            item.provides = _provides_values(chunk)
+        found.setdefault(num, []).extend(parsed)
     tasks: Dict[str, SpecTask] = {}
     for num, items in found.items():
         if len(items) > 1:
@@ -334,6 +362,214 @@ def _verify_tcs(commands: List[str]) -> List[int]:
     return out
 
 
+# --------------------------------------------------------------------------- commands (11.1 to 11.4, 12.1, 12.3)
+
+
+def _provides_values(chunk: str) -> List[str]:
+    """The command paths of a task block's `**Provides:**` field: backticked spans if it has any, else the
+    comma-separated plain values."""
+    match = re.search(r"^\*\*Provides:\*\*\s*(.*)$", chunk, re.MULTILINE)
+    if not match:
+        return []
+    spans = re.findall(r"`([^`]+)`", match.group(1))
+    if spans:
+        return [" ".join(s.split()) for s in spans if s.strip()]
+    return [" ".join(p.split()) for p in match.group(1).split(",") if p.strip()]
+
+
+def _cli_rows(text: str) -> List[Tuple[str, str]]:
+    """(command path, file) for each row of the design's `| Command | File |` table."""
+    rows: List[Tuple[str, str]] = []
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip().startswith("|") and _cells(line)[:1] == ["Command"]:
+            for row in lines[i + 1:]:
+                if not row.strip().startswith("|"):
+                    break
+                cells = _cells(row)
+                if len(cells) >= 2 and cells[0] and not cells[0].startswith("-") and cells[1]:
+                    rows.append((" ".join(cells[0].split()), _norm_entry(cells[1])))
+    return rows
+
+
+def _programs(project_dir: Path, cli_rows: List[Tuple[str, str]], problems: List[GraphProblem]) -> List[str]:
+    """Known programs: the first word of each design CLI row, the `[project.scripts]` keys of pyproject.toml and the
+    `bin` keys of package.json."""
+    found = {cmd.split()[0] for cmd, _ in cli_rows if cmd.split()}
+    pyproject, problem = _read(project_dir / "pyproject.toml")
+    if problem:
+        problems.append(GraphProblem("pyproject.toml", problem))
+    elif pyproject is not None:
+        try:
+            data = tomllib.loads(pyproject.decode("utf-8"))
+            found |= set(((data.get("project") or {}).get("scripts") or {}).keys())
+        except (UnicodeDecodeError, tomllib.TOMLDecodeError) as err:
+            problems.append(GraphProblem("pyproject.toml", f"not valid TOML: {err}"))
+    package, problem = _read(project_dir / "package.json")
+    if problem:
+        problems.append(GraphProblem("package.json", problem))
+    elif package is not None:
+        try:
+            data = json.loads(package.decode("utf-8"))
+            bins = data.get("bin") if isinstance(data, dict) else None
+            if isinstance(bins, dict):
+                found |= set(bins.keys())
+        except (UnicodeDecodeError, ValueError) as err:
+            problems.append(GraphProblem("package.json", f"not valid JSON: {err}"))
+    return sorted(p for p in found if p)
+
+
+def _provides_problem(value: str, programs: Set[str]) -> Optional[str]:
+    """Why a **Provides:** value is malformed (11.8), or None when it is a command path (program and command).
+
+    The program need not be one discovery knows: **Provides:** wins over inference (11.3), and an unreadable
+    design.md (whose CLI table names the programs) must not turn every Provides field into a problem (TC-108)."""
+    del programs  # kept in the signature for callers; an unknown program is not a malformed value
+    words = value.split()
+    if not words:
+        return "Provides names no command"
+    if len(words) < 2:
+        return f"Provides names no command path: {value!r}"
+    return None
+
+
+def _add_command_node(nodes: Dict[str, Node], cmd: str) -> None:
+    nodes.setdefault(f"cmd:{cmd}", Node(f"cmd:{cmd}", "command", cmd))
+
+
+def invoked_commands(source: str, commands: Iterable[str], programs: Iterable[str], lang: str = "py") -> List[str]:
+    """Command paths (program included, e.g. "mtr thesis new") that a test source invokes. A word sequence starting
+    with a known program is a program form (`["mtr", "thesis", "new"]`, `"mtr thesis new --x"`) and goes to the
+    longest known command path it starts with; an unknown path under the program is returned as itself. A list
+    without the program (`CliRunner().invoke(cli, ["thesis", "new"])`) goes to the longest known command path it
+    starts with, never to a group (a path that prefixes a longer known path). Leading options are skipped. Pure:
+    depends only on the source text, the command paths and the programs. Python is scanned with the AST (string
+    constants and list/tuple literals), anything else with regexes."""
+    known = sorted({" ".join(c.split()) for c in commands if len(c.split()) >= 2})
+    progs = {p for p in programs if p}
+    groups = {c for c in known if any(o != c and o.startswith(c + " ") for o in known)}
+    found: Set[str] = set()
+
+    def skip_options(words: List[str]) -> List[str]:
+        i = 0
+        while i < len(words) and words[i].startswith("-"):
+            i += 1
+        return words[i:]
+
+    def program_match(prog: str, rest: List[str]) -> None:
+        words = skip_options(rest)
+        best: Optional[str] = None
+        for c in known:
+            cw = c.split()
+            if cw[0] == prog and words[:len(cw) - 1] == cw[1:] and (best is None or len(cw) > len(best.split())):
+                best = c
+        if best is not None:
+            found.add(best)
+            return
+        path: List[str] = []
+        for w in words:
+            if w.startswith("-"):
+                break
+            path.append(w)
+        if path:
+            found.add(f"{prog} {' '.join(path)}")
+
+    def bare_match(items: List[str]) -> None:
+        words = skip_options(items)
+        best: Optional[str] = None
+        for c in known:
+            if c in groups:
+                continue
+            cw = c.split()
+            if words[:len(cw) - 1] == cw[1:] and (best is None or len(cw) > len(best.split())):
+                best = c
+        if best is not None:
+            found.add(best)
+
+    def text_match(text: str) -> None:
+        words = text.split()
+        if len(words) >= 2 and words[0] in progs:
+            program_match(words[0], words[1:])
+
+    def list_match(items: List[str]) -> None:
+        if not items:
+            return
+        if items[0] in progs:
+            program_match(items[0], items[1:])
+        else:
+            bare_match(items)
+
+    if lang == "py":
+        try:
+            tree = ast.parse(source)
+        except (SyntaxError, ValueError):
+            return []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                text_match(node.value)
+            elif (isinstance(node, (ast.List, ast.Tuple)) and node.elts
+                  and all(isinstance(e, ast.Constant) and isinstance(e.value, str) for e in node.elts)):
+                list_match([e.value for e in node.elts])
+    else:
+        for m in re.finditer(r"""(['"`])((?:\\.|(?!\1).)*)\1""", source):
+            text_match(m.group(2))
+        for m in re.finditer(r"\[([^\[\]]*)\]", source):
+            items = [s for _, s in re.findall(r"""(['"])((?:\\.|(?!\1).)*)\1""", m.group(1))]
+            list_match(items)
+    return sorted(found)
+
+
+def _transitive(start: str, deps: Dict[str, Set[str]]) -> Set[str]:
+    seen: Set[str] = set()
+    stack = list(deps.get(start, ()))
+    while stack:
+        node = stack.pop()
+        if node not in seen:
+            seen.add(node)
+            stack.extend(deps.get(node, ()))
+    return seen
+
+
+def missing_command_edges(graph: SpecGraph) -> List[MissingEdge]:
+    """The (test file, command, provider, lacking task) tuples where a test task's test file verifies task V and
+    invokes a command that task P provides, P is not V, and P is not among V's transitive dependencies (12.1)."""
+    deps: Dict[str, Set[str]] = {}
+    providers: Dict[str, Set[str]] = {}
+    invokes: Dict[str, Set[str]] = {}
+    for e in graph.edges:
+        if e.kind == "depends":
+            deps.setdefault(e.src, set()).add(e.dst)
+        elif e.kind == "provides":
+            providers.setdefault(e.dst, set()).add(e.src)
+        elif e.kind == "invokes":
+            invokes.setdefault(e.src, set()).add(e.dst)
+    out: Set[MissingEdge] = set()
+    for test_file, verified_tasks in graph.test_verifies.items():
+        for verified in verified_tasks:
+            closure = _transitive(verified, deps)
+            for cmd in invokes.get(test_file, ()):
+                for provider in providers.get(cmd, ()):
+                    if provider != verified and provider not in closure:
+                        out.add(MissingEdge(test_file, cmd, provider, verified))
+    return sorted(out, key=lambda m: (m.test_file, m.command, m.provider, m.lacking))
+
+
+def unknown_commands(graph: SpecGraph, source_words: Iterable[str]) -> List[UnknownCommand]:
+    """Command nodes no task provides whose path (program excluded) has a word that is not a string literal of a
+    non-test source file (12.3)."""
+    defined = set(source_words)
+    provided = {e.dst for e in graph.edges if e.kind == "provides"}
+    out: List[UnknownCommand] = []
+    for node in sorted(graph.nodes, key=lambda n: n.id):
+        if node.kind != "command" or node.id in provided:
+            continue
+        if all(w in defined for w in node.label.split()[1:]):
+            continue
+        files = tuple(sorted({e.src for e in graph.edges if e.kind == "invokes" and e.dst == node.id}))
+        out.append(UnknownCommand(node.label, files))
+    return out
+
+
 # --------------------------------------------------------------------------- build
 
 
@@ -353,13 +589,18 @@ def build_graph(project_dir: Path, spec_dir: Path) -> SpecGraph:
             problems.append(GraphProblem(f"{spec_rel}/tasks.md", f"not UTF-8 text (byte {err.start})"))
 
     design_bytes, problem = _read(spec_dir / "design.md")
+    cli_rows: List[Tuple[str, str]] = []
     if problem:
         problems.append(GraphProblem(f"{spec_rel}/design.md", problem))
     elif design_bytes is not None:
         try:
-            _check_design(design_bytes.decode("utf-8"), f"{spec_rel}/design.md", problems)
+            design_text = design_bytes.decode("utf-8")
+            _check_design(design_text, f"{spec_rel}/design.md", problems)
+            cli_rows = _cli_rows(design_text)
         except UnicodeDecodeError as err:
             problems.append(GraphProblem(f"{spec_rel}/design.md", f"not UTF-8 text (byte {err.start})"))
+    programs = _programs(project_dir, cli_rows, problems)
+    prog_set = set(programs)
 
     plan: List[Tuple[int, Tuple[str, ...], str]] = []
     plan_bytes, problem = _read(spec_dir / "test-plan.md")
@@ -389,7 +630,18 @@ def build_graph(project_dir: Path, spec_dir: Path) -> SpecGraph:
             if dep in tasks and dep != num:
                 edges.add(Edge("depends", f"task:{num}", f"task:{dep}", "tasks.md"))
 
+    test_verifies: Dict[str, List[str]] = {}
+    for num in sorted(tasks, key=int):
+        task = tasks[num]
+        if task.track == "test":
+            verified = [f"task:{v}" for v in task.verifies if v in tasks]
+            for path in norm_files[num]:
+                if not _is_glob(path):
+                    test_verifies.setdefault(f"file:{path}", []).extend(verified)
+    test_paths = {p for num, task in tasks.items() if task.track == "test" for p in norm_files[num] if not _is_glob(p)}
+
     scans: Dict[str, _Scan] = {}
+    test_texts: Dict[str, str] = {}
     for path in sorted({p for ps in norm_files.values() for p in ps}):
         if _is_glob(path):
             continue
@@ -403,6 +655,8 @@ def build_graph(project_dir: Path, spec_dir: Path) -> SpecGraph:
         if scan.problem:
             problems.append(GraphProblem(path, scan.problem))
         scans[path] = scan
+        if path in test_paths and scan.problem is None:
+            test_texts[path] = data.decode("utf-8")
 
     # A tc node exists for each TC some test file or test-plan row defines. Its label is the test-plan description
     # when one exists, else "TC-n". A TC that only a Verify -k names has a verifies edge and no node (dangling).
@@ -432,6 +686,60 @@ def build_graph(project_dir: Path, spec_dir: Path) -> SpecGraph:
                 # No tc node for a TC only this -k names: a dangling verifies source (design 11.2, see Task 12).
                 edges.add(Edge("verifies", f"tc:TC-{tc}", f"task:{num}", "Verify -k"))
 
+    # Provides (11.3): a task's **Provides:** field wins over inference for that task, and a command some task
+    # provides explicitly is never inferred for another task. Otherwise a design CLI row naming a file the task owns,
+    # else a backticked command path with a known program in the task's title.
+    explicit: Set[str] = set()
+    for num in sorted(tasks, key=int):
+        for value in tasks[num].provides:
+            problem = _provides_problem(value, prog_set)
+            if problem:
+                problems.append(GraphProblem(f"{spec_rel}/tasks.md#Task {num}", problem))
+                continue
+            cmd = " ".join(value.split())
+            explicit.add(cmd)
+            _add_command_node(nodes, cmd)
+            edges.add(Edge("provides", f"task:{num}", f"cmd:{cmd}", "Provides"))
+
+    inferred: Dict[str, Set[str]] = {}
+    for num in sorted(tasks, key=int):
+        if tasks[num].provides:
+            continue
+        found: List[Tuple[str, str]] = [
+            (cmd, "design.md") for cmd, path in cli_rows if any(paths_overlap(path, owned) for owned in norm_files[num])
+        ]
+        if not found:
+            for span in re.findall(r"`([^`]+)`", tasks[num].title):
+                words = span.split()
+                if len(words) >= 2 and words[0] in prog_set:
+                    path_words: List[str] = []
+                    for w in words:
+                        if w.startswith("-"):
+                            break
+                        path_words.append(w)
+                    if len(path_words) >= 2:
+                        found.append((" ".join(path_words), "tasks.md"))
+        for cmd, source in found:
+            if cmd in explicit:
+                continue
+            inferred.setdefault(cmd, set()).add(num)
+            _add_command_node(nodes, cmd)
+            edges.add(Edge("provides", f"task:{num}", f"cmd:{cmd}", source))
+    for cmd, providers in sorted(inferred.items()):
+        if len(providers) > 1:
+            problems.append(GraphProblem(
+                f"{spec_rel}/design.md",
+                f"command {cmd!r} is inferred as provided by tasks {', '.join(sorted(providers, key=int))}",
+            ))
+
+    # Invokes (11.4): each test file's command invocations, against the design table and the provided commands.
+    known_cmds = sorted({cmd for cmd, _ in cli_rows} | {e.dst[len("cmd:"):] for e in edges if e.kind == "provides"})
+    for path in sorted(test_texts):
+        lang = "py" if path.endswith(".py") else "js"
+        for cmd in invoked_commands(test_texts[path], known_cmds, programs, lang):
+            _add_command_node(nodes, cmd)
+            edges.add(Edge("invokes", f"file:{path}", f"cmd:{cmd}", "scan"))
+
     for src_path, scan in scans.items():
         for target in scan.imports:
             if target != src_path and target in scans:
@@ -446,4 +754,6 @@ def build_graph(project_dir: Path, spec_dir: Path) -> SpecGraph:
         nodes=list(nodes.values()),
         edges=sorted(edges, key=lambda e: (e.kind, e.src, e.dst, e.source)),
         problems=problems,
+        programs=programs,
+        test_verifies={k: sorted(set(v)) for k, v in sorted(test_verifies.items())},
     )
