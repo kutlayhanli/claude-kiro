@@ -1294,7 +1294,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 56: Property tests for conflict normalisation, retry digests and test-fix routing
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.7, 3.8, 4.2, 4.5, 4.6, 4.8, 4.9, 4.11
 **Description:** Implement the TC-174 rows P-8, P-9, P-10, P-11 and P-33. P-33: (a) at `claude_kiro.testfix.proof_decision`, proved iff every outcome passed or failed only as `not-built`, and a skipped, xfailed, deselected or missing node never counts as passed; (b) through the bridge, over all 8 combinations of scope ok/out, proof proved/failed and review approve/reject, with late (0-3 virtual ticks) and contradictory answers, a `worktree land` of the test-fix branch is requested iff all three hold, and every other combination ends in needs-input with no land. P-8: `testConflictsOf` (bridge call) wraps a single `testConflict` equal to a list of one, unions and deduplicates by (file, test), reports entries without `file` as malformed. P-9: `failuresForPrompt(list, 50)` shows the first min(n, 50) in order and per-file counts of the rest sum to n - 50; no entry is both shown and counted. P-10: `claude_kiro.testfix.scope_decision` allows iff every changed path is a test file or fixture of the spec; complement and monotone rules; near-misses `src/tests.py`, `tests_old/x.py`, `src/tests/fixtures.py`, any change to `specs/demo/test-plan.md` (including only a new row), a changed TC token on a test, `specs/demo/requirements.md`, `.claude/x`, `pyproject.toml`, root `conftest.py`, non-ASCII, space and git-quoted forms. P-11: `testFixPlan` puts every conflict exactly once in a per-file group or in `toMe`, prior-fixed nodes never in a group, and removing a node from `alreadyFixed` never moves another to `toMe`. Settings: seams 200 examples, bridge ones 60, derandomized, no database. `PROPERTIES = {"P-8": ..., "P-9": ..., "P-10": ..., "P-11": ..., "P-33": ...}`, tests `test_tc174_p<k>_<slug>` (P-33's parts `test_tc174_p33a_<slug>` and `test_tc174_p33b_<slug>`).
@@ -1305,11 +1305,13 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 57 (P-10 at `scope_decision`, P-33a at `proof_decision`), Task 80 (P-8, P-9), Task 86 (P-11 at `testFixPlan`, P-33b in the workflow)
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the rows
-- [ ] Settings are deterministic
-- [ ] Tests call the decision seams (Python `scope_decision`, JS seams through the bridge), not a server
-- [ ] They fail before the implementation because the seams do not exist
-- [ ] No mocks of the project's own code
+- [x] Generators cover every surface form and negative listed in the rows
+- [x] Settings are deterministic
+- [x] Tests call the decision seams (Python `scope_decision`, JS seams through the bridge), not a server
+- [x] They fail before the implementation because the seams do not exist
+- [x] No mocks of the project's own code
+
+**Implementation notes:** `scope_decision` takes only paths, statuses and plan texts, so the "changed TC token" near-miss cannot be expressed through `Change`; the test covers it as a changed plan or non-test path only. Empty outcome lists in P-33a and empty path sets in P-10 are not generated (vacuous truth is ambiguous). P-33b delays are modelled with task durations (the fake project has no per-label delay); the land of the test-fix branch is detected from the trace labels and prompts. A proof that says proved with a failing outcome counts as not proved.
 
 **Dependencies:** Task 2 (bridge call op)
 **Complexity:** Medium
