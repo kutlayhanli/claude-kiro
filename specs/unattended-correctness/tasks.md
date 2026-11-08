@@ -134,7 +134,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 5: Test the structured failure format in gate and land JSON
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.1, 3.2, 3.3, 3.4, 3.5, 3.9, 3.10
 **Description:** Implement TC-28, TC-29, TC-30, TC-31, TC-32, TC-36 (CLI sources: `ck gate --json`, `ck gate --attribute --json`, `ck worktree land --gate --json` `tasks[].failures`) and TC-37 (land JSON still has every key path in `land-json-keys.json`). TC-29 is a table over real pytest outcomes (bare assert, `AssertionError` subclass, `MyAssertionError(Exception)`, module-level `ImportError`/`ModuleNotFoundError`, `SyntaxError`, setup error, teardown error, `RuntimeError`, verify timeout, `pytest.fail`). TC-183: `ck gate demo --attribute --json --compact` prints `ck-gate-compact/1` (full regression and flaky entries, `excusedByTask` counts, `report` path) and the report file equals a `--json` run's object (timing excluded). TC-191: a passing gated test that runs a nested failing pytest with `os.environ` copied leaves `failures` empty, with and without `-n 2`. Every failure object is validated against `tests/fixtures/unattended/failure.schema.json`. TC-36's CLI sources are separate tests named `test_tc36_gate_json_<slug>`, `test_tc36_gate_attribute_<slug>` and `test_tc36_land_<slug>`, so each runs at the task that adds its source.
@@ -144,10 +144,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 19 (TC-28 to TC-30, TC-32, TC-191 and TC-36's `ck gate --json` source), Task 20 (TC-31, TC-183 and TC-36's `--attribute` source), Task 37 (TC-36's land source and TC-37)
 
 **Acceptance:**
-- [ ] Tests run the real gate and real land on real repos with real pytest
-- [ ] They fail before the implementation because `failures` is missing or `--json` is unknown, not because of test bugs; TC-37 passes before and after
-- [ ] TC-32 checks the 500-character bound on multibyte text and that 120 failing tests give 120 entries
-- [ ] No mocks of the project's own code
+- [x] Tests run the real gate and real land on real repos with real pytest
+- [x] They fail before the implementation because `failures` is missing or `--json` is unknown, not because of test bugs; TC-37 passes before and after
+- [x] TC-32 checks the 500-character bound on multibyte text and that 120 failing tests give 120 entries
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project, failure.schema.json, land-json-keys.json)
 **Complexity:** Medium
