@@ -959,7 +959,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 41: Test the run-end protected-file audit
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 10.1, 10.2, 10.3, 10.4, 10.5
 **Description:** Implement TC-96, TC-97, TC-98 (a), TC-99 and TC-100 with `ck worktree audit demo --json` (`ck-audit/1`). TC-96: ref-file bypass adds `.claude/a`, changes `.mcp.json`, deletes `.claude/settings.json`; `drift` lists exactly those with `added`/`changed`/`deleted`. TC-97: hooks deleted, altered, `core.hooksPath` repointed, never installed; each in `hooks`. TC-98a: `clean: true`, exit 0. TC-99: allow-list and approval landings are not drift. TC-100: delete or corrupt the approved-state record (found by `snapshot_ck_state` diff around `ck worktree integration`): `complete: false`, `clean: false`, exit 3.
@@ -969,9 +969,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 51 (TC-96 to TC-100)
 
 **Acceptance:**
-- [ ] Tests run real git, real landings and the real audit CLI
-- [ ] They fail before the implementation because `ck worktree audit` does not exist
-- [ ] No mocks of the project's own code
+- [x] Tests run real git, real landings and the real audit CLI
+- [x] They fail before the implementation because `ck worktree audit` does not exist
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (hooks_repo, snapshot helpers)
 **Complexity:** Medium
