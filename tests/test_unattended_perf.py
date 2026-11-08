@@ -31,14 +31,14 @@ def _node(k: int, i: int) -> str:
     return f"tests/test_g{k}.py::test_tc{k}_case{i}"
 
 
-def _task_blocks() -> list:
+def _task_blocks(runner: str = "python -m pytest -q") -> list:
     """Test task 2k-1 owns tests/test_g{k}.py and verifies impl task 2k; impl task 2k selects `-k tc{k}_`."""
     from test_lint import block
 
     out = []
     for k in range(1, PAIRS + 1):
         out.append(dict(num=2 * k - 1, title=f"tests {k}", track="test", files=[f"tests/test_g{k}.py"],
-                        verify=f"python -m pytest -q tests/test_g{k}.py", verifies=f"Task {2 * k}",
+                        verify=f"{runner} tests/test_g{k}.py", verifies=f"Task {2 * k}",
                         status="Done" if k % 2 else "Not Started"))
         out.append(dict(num=2 * k, title=f"impl {k}", files=[f"src/mod{k}.py"], deps=f"Task {2 * k - 1}",
                         verify=f'sh stub.sh -k "tc{k}_"', vby=f"Task {2 * k - 1}",
@@ -83,18 +83,34 @@ def test_tc169_attribution_seams_under_two_seconds(tmp_path):
     verdict = attribution.gate_verdict(attributions, {item.key: "failed" for item in plan}, True)
     elapsed = time.perf_counter() - start
 
-    assert verdict.red is not None and len(attributions) == 200
+    assert verdict.red is True and len(attributions) == 200
     assert elapsed < ATTRIBUTION_BUDGET_S, f"attribute + rerun_plan + gate_verdict took {elapsed:.2f}s"
 
 
 @pytest.mark.serial
 def test_tc169_attributed_gate_cli_minus_stub_under_two_seconds(tmp_path):
-    root = h.spec_graph_project(tmp_path, tasks=_task_blocks(), tests=_test_files())
+    # Every command the gate can run (suite, test-task Verify, impl Verify, reruns) goes through the stub, which
+    # prints only the failures its arguments select: the gate sees 200 unique failures and no real test time.
+    root = h.spec_graph_project(tmp_path, tasks=_task_blocks("sh stub.sh"), tests=_test_files())
     recorded = "\n".join(["=== short test summary info ==="] + _failure_lines()
                          + [f"{PAIRS * FAILING_PER_FILE} failed, {PAIRS * (TESTS_PER_FILE - FAILING_PER_FILE)} passed in 3.20s"])
     (root / "recorded.txt").write_text(recorded + "\n")
-    (root / "stub.sh").write_text('#!/bin/sh\necho run >> "$(dirname "$0")/stub-count.txt"\n'
-                                  'cat "$(dirname "$0")/recorded.txt"\nexit 1\n')
+    (root / "stub.sh").write_text(
+        '#!/bin/sh\n'
+        'd="$(dirname "$0")"\n'
+        'echo run >> "$d/stub-count.txt"\n'
+        'pat=""\n'
+        'while [ $# -gt 0 ]; do\n'
+        '  case "$1" in\n'
+        '    -k) shift; pat="test_$1";;\n'
+        '    tests/*) pat="$1::";;\n'
+        '  esac\n'
+        '  shift\n'
+        'done\n'
+        'if [ -z "$pat" ]; then cat "$d/recorded.txt"; exit 1; fi\n'
+        'echo "=== short test summary info ==="\n'
+        'grep -F -- "$pat" "$d/recorded.txt" | grep "^FAILED"\n'
+        'exit 1\n')
     (root / "specs" / "ck.json").write_text(json.dumps({"verify": ["sh stub.sh"]}) + "\n")
     (root / ".gitignore").write_text("stub-count.txt\n")
     h.commit_all(root, "stub verify")
@@ -161,10 +177,11 @@ def test_tc170_integrate_branch_allowed_change_under_one_second(tmp_path):
     h.git(root, "checkout", "-q", "main")
     assert child and child != base
 
-    status = protect.install_hooks(root)
-    assert not status.problems, status.problems
+    # Created before the hooks exist: a creation needs a landing token or an approved state once they do.
     created = h.raw(root, "update-ref", "refs/heads/integrate/demo", base)
     assert created.returncode == 0, created.stderr
+    status = protect.install_hooks(root)
+    assert not status.problems, status.problems
 
     start = time.perf_counter()
     out = h.raw(root, "update-ref", "refs/heads/integrate/demo", child, base)
