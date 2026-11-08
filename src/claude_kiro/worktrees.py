@@ -332,7 +332,11 @@ def release_for_run_start(root: Path, spec: str, run: Optional[str], env: Option
         liveness = progress.run_liveness(info.run, env, now) if info.run and info.run != run else None
         decision = claim_release_decision(info, run, liveness, claim_age(path), minutes)
         if decision == "release":
-            git(root, "worktree", "unlock", str(path))
+            try:
+                git(root, "worktree", "unlock", str(path))
+            except WorktreeError:
+                out.kept.append({"task": num, "run": info.run})
+                continue
             out.released.append({"task": num, "run": info.run, "reason": reason})
         else:
             out.kept.append({"task": num, "run": info.run})

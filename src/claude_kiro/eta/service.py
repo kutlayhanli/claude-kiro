@@ -945,18 +945,21 @@ def send_done_for_superseded(key: str, *, now: datetime, env: Optional[Mapping[s
 # --------------------------------------------------------------------------- spool
 
 
-def _supersede_spool(spool: Path, now: Any) -> None:
-    """End every unfinished run copy under `spool` as superseded (16.2)."""
+def _supersede_spool(spool: Path, spec: str, now: Any) -> None:
+    """End every unfinished run copy of `spec` under `spool` as superseded (16.2)."""
     try:
         if spool.is_symlink() or not spool.is_dir():
             return
         spool_env = {"CK_PROGRESS_DIR": str(spool)}
-        for path in sorted(spool.glob("*.jsonl")):
+        for path in sorted(spool.glob(f"{spec}--*.jsonl")):
             try:
                 evs, _ = progress.read_events(path)
             except OSError:
                 continue
             if any(ev.get("kind") == "end" for ev in evs):
+                continue
+            st = progress._start(evs)
+            if st is not None and st.get("spec") not in (None, spec):
                 continue
             progress.append(path.stem, {"kind": "end", "at": _utc_iso(now), "outcome": "superseded", "merged": None,
                                         "total": None, "usd": None}, spool_env)
@@ -994,7 +997,7 @@ def prepare_spool(main_root: Path, spec: str, env: Optional[Mapping[str, str]] =
     except Exception:  # noqa: BLE001
         return None
     spool = Path(wdir) / ".ck-progress"
-    _supersede_spool(spool, now)
+    _supersede_spool(spool, spec, now)
     try:
         if spool.is_symlink():
             return None

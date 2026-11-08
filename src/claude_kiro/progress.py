@@ -453,6 +453,8 @@ def run_liveness(key: str, env: Optional[Mapping[str, str]], now: datetime) -> s
                 newest = at
     if not found:
         return "missing"
+    if newest is None:
+        return "stale"
     return "stale" if is_stale(newest, now) else "running"
 
 
