@@ -266,7 +266,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 11: Parse the `**Provides:**` field on tasks
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 11.3
 **Description:** In `src/claude_kiro/hooks/_shared/spec_parser.py`, add `SpecTask.provides: List[str]` (default empty), filled from a `**Provides:**` line holding one or more backticked command paths (`**Provides:** \`mtr thesis new\`, \`mtr thesis list\``). Whitespace inside each path is normalized to single spaces; a Provides line with no backticked value yields an empty list and leaves the rest of the task parsed (the graph reports it as a problem in Task 13). Nothing else in the parser changes; existing callers keep working. Foundation task: its Verify is a smoke check (the existing lint and relink suites); 11.3 is verified at Task 13 by Tasks 7 and 17, whose tests need the graph's provides edges.
@@ -275,8 +275,8 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verify:** `uv run pytest -q tests/test_lint.py tests/test_relink.py`
 
 **Acceptance:**
-- [ ] A task with `**Provides:** \`mtr thesis new\`` parses to `provides == ["mtr thesis new"]` (11.3)
-- [ ] Tasks without the field parse exactly as before (`provides == []`)
+- [x] A task with `**Provides:** \`mtr thesis new\`` parses to `provides == ["mtr thesis new"]` (11.3)
+- [x] Tasks without the field parse exactly as before (`provides == []`)
 
 **Dependencies:** None
 **Complexity:** Low
@@ -789,7 +789,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 34: Property tests for the claim release decision
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 16.2, 16.3, 16.4, 16.5, 16.7
 **Description:** Implement the TC-175 row P-27 at `claude_kiro.worktrees.claim_release_decision`: over the full cross product (run ID present or absent; liveness `running`, `finished`, `stale`, `missing`/None; owned by the starting run or not; age 0-300 min with 59, 60, 61 around the threshold; stale threshold 1-120 min), the decision equals the truth table (`own`, `keep`, `release`, and for no run ID `release` iff age > threshold); a running run's claim is never released. Settings 200 examples, derandomized, no database. `PROPERTIES = {"P-27": ...}`, tests `test_tc175_p27_<slug>`.
@@ -800,11 +800,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 36 (P-27 at `claim_release_decision`)
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the row
-- [ ] Settings are deterministic
-- [ ] Tests call the decision seam, not a server
-- [ ] They fail before the implementation because the seam does not exist
-- [ ] No mocks of the project's own code
+- [x] Generators cover every surface form and negative listed in the row
+- [x] Settings are deterministic
+- [x] Tests call the decision seam, not a server
+- [x] They fail before the implementation because the seam does not exist
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Low
@@ -1354,7 +1354,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 59: Test the harness registry in bench and doctor
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 17.1, 17.2, 17.3, 17.4, 17.5
 **Description:** Implement TC-150, TC-151, TC-152 and TC-153. TC-150: `ck bench run cfg.json --harness nope --dry-run` and `ck doctor --harness nope` exit non-zero listing every registered name; `--help` lists exactly the registered names. TC-151: register a fake harness `fakeh` in-process (`claude_kiro.harnesses.register`, `CliRunner`), run `ck bench run cfg.json --harness fakeh` (result written) and `ck doctor --harness fakeh` (adapter's doctor called). TC-152: run the existing bench and doctor tests unchanged, and `--runner` with `--harness opencode` still fails with today's message. TC-153: arm results from the fake claude run, the fake opencode run and `fakeh` have the same key set.
@@ -1364,10 +1364,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 62 (TC-150 to TC-153)
 
 **Acceptance:**
-- [ ] Tests run the real bench and doctor CLIs; only external binaries and the registered fake adapter are fakes
-- [ ] They fail before the implementation because `--harness` is a fixed `click.Choice` with no registry
-- [ ] Existing bench and doctor tests are run, not modified
-- [ ] No mocks of the project's own code
+- [x] Tests run the real bench and doctor CLIs; only external binaries and the registered fake adapter are fakes
+- [x] They fail before the implementation because `--harness` is a fixed `click.Choice` with no registry
+- [x] Existing bench and doctor tests are run, not modified
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Medium
@@ -1376,7 +1376,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 60: Property tests for harness name lookup
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 17.1, 17.2
 **Description:** Implement the TC-175 row P-29 at `claude_kiro.harnesses.select` and through the CLI: lookup succeeds iff the name equals a registered name exactly; otherwise the error lists every registered name; `--harness` on `ck bench run --dry-run` and `ck doctor` accepts exactly the same set. Domain: registered names, case variants (`Claude`), whitespace (` claude`), near-misses (`claude-code`, `open-code`, `opencode2`, `dsh` when unregistered) and the empty string. Settings 200 examples for the seam (CLI part capped at 25), derandomized, no database. `PROPERTIES = {"P-29": ...}`, tests `test_tc175_p29_<slug>`.
@@ -1387,11 +1387,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 62 (P-29 at `select` and the CLI)
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the row
-- [ ] Settings are deterministic
-- [ ] Tests call the seam and the real CLI, not a server
-- [ ] They fail before the implementation because the registry does not exist
-- [ ] No mocks of the project's own code
+- [x] Generators cover every surface form and negative listed in the row
+- [x] Settings are deterministic
+- [x] Tests call the seam and the real CLI, not a server
+- [x] They fail before the implementation because the registry does not exist
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Low
@@ -1465,7 +1465,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 64: Test the cross-test default and opt-out in agent config
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.1, 7.3
 **Description:** Implement TC-64 (a) and TC-66 (a): `ck agents --json` with isolated config shows `reviewer.cross_test: true`; `ck agents set reviewer.cross_test false` globally and then per project shows false.
@@ -1475,9 +1475,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 66 (TC-64a, TC-66a)
 
 **Acceptance:**
-- [ ] Tests use the real `ck agents` CLI with the conftest-isolated config home
-- [ ] TC-64a fails before the implementation because the default is false
-- [ ] No mocks of the project's own code
+- [x] Tests use the real `ck agents` CLI with the conftest-isolated config home
+- [x] TC-64a fails before the implementation because the default is false
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Low
@@ -1532,7 +1532,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 67: Test stats role attribution of the new workflow labels
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 14.7
 **Description:** Extend TC-132's stats side (`ck stats` collect keeps agents per role) to the labels the workflow gains (design "analytics/roles.py"). Commit a run record fixture `tests/fixtures/unattended/stats-labels-record.json` whose agent rows are labelled `testfix 1 (Task 2)`, `testfix review 1`, `run start`, `audit`, `testfix ledger 1` and `testfix prove 1`, plus today's labels (`plan 1`, `land 2`, `full gate @10`, `final gate`, `re-check 1`, `report`, `park 3`, `relink 4`). Run the real `ck stats` collect and show over it with an isolated stats home (the `tests/stats_helpers.py` pattern) and assert that each new label is counted under its role (test-writer, reviewer, gate) and every existing label keeps its role. Tests are named `test_tc132_<slug>`.
@@ -1543,10 +1543,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 68 (TC-132 stats labels)
 
 **Acceptance:**
-- [ ] Tests run the real `ck stats` CLI over a committed record fixture
-- [ ] They fail before the implementation because the new labels map to no role, not because of fixture errors
-- [ ] Existing labels are asserted to keep their roles
-- [ ] No mocks of the project's own code
+- [x] Tests run the real `ck stats` CLI over a committed record fixture
+- [x] They fail before the implementation because the new labels map to no role, not because of fixture errors
+- [x] Existing labels are asserted to keep their roles
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Low
@@ -1574,7 +1574,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 69: Test OpenCode per-role model config and resolution
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 14.1, 14.2, 14.3, 14.4
 **Description:** Implement TC-126, TC-127, TC-128, TC-129 and TC-180 (P-28) in TypeScript with `node --test` against the real `opencode/src/config.ts`, `models.ts` (`ROLE_NAMES`, `resolveRoleRef`, `validateRoleRef`), `run-child.ts` and `workflow-tool.ts`. TC-126: project `opencode.roles.reviewer` resolves an `agent()` call with `role: "reviewer"`, `model: "opus"` to `opencode-go/deepseek-v4.1-flash` variant `medium` with `modelSource: "roles"`. TC-127: unmapped `fixer` resolves through the alias map as today. TC-128: project beats global, `sources["roles.implementer"]` names the project file. TC-129: invalid references throw `ConfigError` naming `opencode.roles.<key>` and the value, and the workflow tool creates no child session. P-28 is table-driven over the 7 role names plus `Implementer`, `test-writer`, `reviewer-risky`, `" reviewer"`, `""`, and the values `opencode-go/deepseek-v4.1-flash#medium`, `opencode-go/muse-spark-1.3-contributor`, `p/m#`, `/m`, `p/`, `p`, `p/m#a#b`, `" p/m "`, `""`, `42`, `null`, `{}`. The file exports `PROPERTIES = { 'P-28': 'tc180_p28 role references are accepted iff valid' }`. Test names start with their TC (`tc126_ ...`, `tc180_p28 ...`) so `--test-name-pattern` can select them.
@@ -1585,10 +1585,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 71 (TC-127 to TC-129 and P-28 at the config and model seams), Task 72 (TC-126)
 
 **Acceptance:**
-- [ ] Tests call the real config loading and model resolution seams, not a server
-- [ ] They fail before the implementation because `opencode.roles` is an unknown config key
-- [ ] The P-28 table covers every surface form and negative listed in the row; it is deterministic (enumerated, no randomness)
-- [ ] No mocks of the project's own code
+- [x] Tests call the real config loading and model resolution seams, not a server
+- [x] They fail before the implementation because `opencode.roles` is an unknown config key
+- [x] The P-28 table covers every surface form and negative listed in the row; it is deterministic (enumerated, no randomness)
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Medium
@@ -2231,7 +2231,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 98: Test the guarded DeepSeek Harness verification record
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 18.1, 18.3, 18.5
 **Description:** Implement TC-154 and TC-156 (the adapter cases TC-155 and TC-157 are Task 105's, written after the verification records the API). Read the verification record `specs/unattended-correctness/dsh-verification.md` and its fenced ```json block (`{repository, version, checkedAt, canHostAgent, canHostCk, missing, evidence}`). TC-154: fields present, repository under `github.com/deepseek-ai/`. TC-156 (when either flag is false): `checked`/`version`/`missing` present, `dsh` not registered, `--harness dsh` refused with the registered list; when both flags are true TC-156 is skipped with that reason. TC-158 is covered by the run's final attributed gate over both `specs/ck.json` verify commands.
@@ -2241,10 +2241,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 99 (TC-154, TC-156)
 
 **Acceptance:**
-- [ ] Tests read the committed evidence and run the real bench and doctor with only the `dsh` binary faked
-- [ ] They fail before the implementation because the evidence file does not exist (TC-154), not because of test bugs
-- [ ] Tests never write the evidence file
-- [ ] No mocks of the project's own code
+- [x] Tests read the committed evidence and run the real bench and doctor with only the `dsh` binary faked
+- [x] They fail before the implementation because the evidence file does not exist (TC-154), not because of test bugs
+- [x] Tests never write the evidence file
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Medium
