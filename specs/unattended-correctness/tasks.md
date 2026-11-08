@@ -2118,9 +2118,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 94 (TC-176 to TC-179, TC-43b; the first task with every piece the smoke runs need)
 
 **Acceptance:**
-- [ ] Every ck call goes to the real CLI on a real repo with real pytest and real hooks; only agents are scripted (no LLM)
-- [ ] They fail before the implementation for missing behaviour (no attributed gate, no test-fix loop, no hooks, no live edge)
-- [ ] No mocks of the project's own code
+- [x] Every ck call goes to the real CLI on a real repo with real pytest and real hooks; only agents are scripted (no LLM)
+- [x] They fail before the implementation for missing behaviour (no attributed gate, no test-fix loop, no hooks, no live edge)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project, spec_graph_project, hooks helpers), Task 2 (realCk bridge, real_agents.mjs)
 **Complexity:** High
