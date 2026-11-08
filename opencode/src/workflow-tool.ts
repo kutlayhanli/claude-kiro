@@ -411,6 +411,7 @@ async function handleAgent(
   const opts = isPlainObject(message.opts) ? message.opts : {};
   const label = typeof opts.label === "string" && opts.label ? opts.label : `agent ${seq}`;
   const phase = typeof opts.phase === "string" ? opts.phase : null;
+  const role = typeof opts.role === "string" && opts.role ? opts.role : null;
   const model = typeof opts.model === "string" ? opts.model : undefined;
   const effort = typeof opts.effort === "string" ? opts.effort : undefined;
   const schema = Object.prototype.hasOwnProperty.call(opts, "schema") ? opts.schema : undefined;
@@ -418,6 +419,7 @@ async function handleAgent(
     seq,
     label,
     phase,
+    role,
     agent: selectAgent(label, runtime.config.agents),
     parentSessionID,
   };
@@ -433,6 +435,7 @@ async function handleAgent(
       prompt: typeof message.prompt === "string" ? message.prompt : "",
       label,
       phase,
+      role,
       model,
       effort,
       schema,
