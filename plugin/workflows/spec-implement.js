@@ -878,7 +878,7 @@ let lastGood = null       // { ready, deps, order } of the last consistent plan:
 let planRun = null          // the plan agent in flight, if any
 let queuedTrigger = null    // a trigger that arrived while one was in flight: one follow-up
 let idleArmed = true
-let recordSeq = 0           // task records seen so far: a landing plan disarms the idle plan only if none arrived while it ran
+let recordSeq = 0           // failed task records seen so far: a landing plan disarms the idle plan only if none arrived while it ran (an ok record waits for its landing, so it changes nothing)
 let deferring = false
 const excluded = () => new Set([...running.keys(), ...failed.keys(), ...parked.keys(), ...mergedInRun])
 function planContext() {
@@ -1065,9 +1065,8 @@ function finishTask(n, rec) {
   releaseSlot(n)
   running.delete(n)
   records[n] = rec
-  recordSeq++
   maybeCrossTest(n)
-  if (!rec.ok) idleArmed = true  // a merged task was already followed by its landing plan; a failed one may change what is ready
+  if (!rec.ok) { idleArmed = true; recordSeq++ }  // only a failure can change what is ready before its landing; a merged task was already followed by its landing plan; a failed one may change what is ready
   if (!rec.ok && rec.needsInput) {
     parked.set(n, rec.needsInput)  // listed apart from failed; never triggers onFailure: halt
     log(`Task ${n}: needs input (${rec.needsInput.action}); independent tasks continue, its dependents wait`)
