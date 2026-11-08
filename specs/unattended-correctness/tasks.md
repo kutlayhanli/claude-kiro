@@ -316,7 +316,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 13: Add CLI commands to the spec graph (programs, provides, invokes)
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 11.1, 11.2, 11.3, 11.4, 12.1, 12.3
 **Description:** Extend `src/claude_kiro/graph.py` with command nodes (`cmd:<path words>`) and the provides and invokes edges, per design "How edges are filled". Programs: `[project.scripts]` keys in pyproject.toml, package.json `bin`, and the first words of the design's CLI table (`SpecGraph.programs`). Provides: a task's `**Provides:**` (from `SpecTask.provides`) wins over inference; otherwise a design.md table row with a backticked command path whose row names a file the task owns, else a backticked command path starting with a known program in the task's title or description; two inferred providers keep both edges and add a `GraphProblem`. Invokes: scan each test file (Python AST string constants and list/tuple literals; regex for JS) for a word sequence starting with a known program (`["mtr", "thesis", "new"]`, `"mtr thesis new --x"`) or a `CliRunner().invoke(..., ["thesis", "new"])`-style list matching a known command path without the program; the edge goes to the longest known command path that prefixes it, and an unknown path under a known program becomes a `cmd:` node with no provider. Add the pure seams `missing_command_edges(graph) -> List[MissingEdge]` (test file of a test task verifying V invokes a command that P provides, P != V, and P is not among V's transitive dependencies) and `unknown_commands(graph, source_words) -> List[UnknownCommand]` (a path exists when every word appears as a string literal in a non-test source file). Malformed Provides values become `GraphProblem`s. Harness Contract owner: item 3's `graph.invoked_commands` (design: the invokes scan; keep it a pure function of source text, command paths and programs).
@@ -326,11 +326,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 7 (TC-102 to TC-104), Task 8 (P-20 at the invokes scan), Task 17 (TC-113b)
 
 **Acceptance:**
-- [ ] Command nodes and provides/invokes edges appear in `ck graph --json` (11.1, 11.2)
-- [ ] A task's `**Provides:**` field takes precedence over the design-table inference (11.3)
-- [ ] A test invoking `mtr thesis new` in any supported form gets one invokes edge to the longest known command path; near-misses add none (11.4)
-- [ ] `missing_command_edges` names the test file, command, providing task and the task lacking the dependency (12.1)
-- [ ] `unknown_commands` reports a command no task provides and the project does not define (12.3)
+- [x] Command nodes and provides/invokes edges appear in `ck graph --json` (11.1, 11.2)
+- [x] A task's `**Provides:**` field takes precedence over the design-table inference (11.3)
+- [x] A test invoking `mtr thesis new` in any supported form gets one invokes edge to the longest known command path; near-misses add none (11.4)
+- [x] `missing_command_edges` names the test file, command, providing task and the task lacking the dependency (12.1)
+- [x] `unknown_commands` reports a command no task provides and the project does not define (12.3)
 
 **Dependencies:** Task 12 (edits graph.py, which Task 12 creates), Task 11 (reads `SpecTask.provides`), Task 7 (its tests are the oracle), Task 8 (its tests are the oracle), Task 17 (its tests are the oracle)
 **Notes (attempt 2):** A `**Provides:**` value whose program discovery does not know is not a malformed value (11.3: the field wins); only an empty value or a bare program is a `GraphProblem`. Needed by `test_tc108_unreadable_sources_become_problems_and_missing_ones_stay_silent` (an unreadable design.md hides the CLI table's programs). Blocked on a test-track fix: `NEAR_MISS_FORMS` entry `'# mtr thesis new'` makes tc104's generated test files a SyntaxError, which 11.8 must report as a problem while tc104 asserts `problems == []`.
