@@ -2172,7 +2172,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 95: Have spec-create write Provides fields and TC-prefixed test names
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.9, 12.4
 **Description:** In `plugin/workflows/spec-create.js`, the impl-track prompt and `TASK_BLOCK` gain a `**Provides:**` field (backticked command paths) on every impl task that adds or changes a CLI command and whose commands ck cannot infer, with an instruction to check with `ck graph` or `ck lint`. The test-track prompt asks for `tcNNN_` test-name prefixes on every test and for fixtures labelled with `ck fixtures mark`.
@@ -2182,8 +2182,8 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 17 (TC-113a)
 
 **Acceptance:**
-- [ ] Impl tasks whose commands ck cannot infer get a `**Provides:**` field (12.4)
-- [ ] Test-track tasks name their tests with `tcNNN_` prefixes (1.9)
+- [x] Impl tasks whose commands ck cannot infer get a `**Provides:**` field (12.4)
+- [x] Test-track tasks name their tests with `tcNNN_` prefixes (1.9)
 
 **Dependencies:** Task 17 (its tests are the oracle)
 **Complexity:** Low
