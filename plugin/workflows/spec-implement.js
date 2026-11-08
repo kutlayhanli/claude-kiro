@@ -1383,7 +1383,7 @@ async function runTask(n) {
       if (action === 'park') {
         let p = null
         const note = JSON.stringify({ file: stop.file, kind: stop.kind || 'test', test: stop.test || '', requirement: stop.requirement || '', decision: entry.decision })
-        const out = await thinCk('park', ['-C', ROOT, 'worktree', 'park', SPEC, n, '--json'], { stdin: note, label: `park ${n}`, phase: phaseOf(n), cwd: ROOT, what: `Parking step for Task ${n} of spec ${SPEC}` })
+        const out = await thinCk('park', ['worktree', 'park', SPEC, n, '--json'], { stdin: note, label: `park ${n}`, phase: phaseOf(n), cwd: ROOT, what: `Parking step for Task ${n} of spec ${SPEC}` })
         p = out.json ? out.json : { parked: false, error: ckError(out) }
         entry.notification = p && p.notification ? p.notification : 'failed'
         entry.notificationDetail = (p && (p.detail || p.error)) || ''
