@@ -35,10 +35,15 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 - `tests/unattended_helpers.py` - shared helpers listed above
 - `tests/test_unattended_helpers.py` - self-checks of the helpers
 - `tests/fixtures/unattended/land-json-keys.json` - captured land JSON key paths
-- `tests/fixtures/unattended/gate-text-baseline/` - captured text gate reports
+- `tests/fixtures/unattended/gate-text-baseline/green-all-done.txt` - captured text gate report
+- `tests/fixtures/unattended/gate-text-baseline/regression-done-tasks.txt` - captured text gate report
+- `tests/fixtures/unattended/gate-text-baseline/excused-unfinished.txt` - captured text gate report
+- `tests/fixtures/unattended/gate-text-baseline/collection-error.txt` - captured text gate report
+- `tests/fixtures/unattended/gate-text-baseline/setup-error-task-scoped.txt` - captured text gate report
 - `tests/fixtures/unattended/failure.schema.json` - D3 failure schema
 - `tests/fixtures/unattended/README.md` - capture commit and regeneration notes
 **Verify:** `uv run pytest -q tests/test_unattended_helpers.py`
+**Deviation:** the Files entry `gate-text-baseline/` (a directory) is listed per baseline file, because the gate's test-files check requires every listed test-path entry to be a file.
 **Verifies:** Task 19 (captures `failure.schema.json` and the text-gate baselines its output is checked against), Task 37 (captures `land-json-keys.json`, the land JSON it must keep)
 
 **Acceptance:**
