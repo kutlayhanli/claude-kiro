@@ -117,11 +117,9 @@ def _record_error(key: str, kind: str, exc: BaseException, env: Optional[Mapping
         path = progress_dir(env) / f"{_check_key(key)}.errors"
         msg = " ".join(str(exc).split())[:ERROR_LIMIT]
         line = f"{_iso(clock_now(env))} {kind} {type(exc).__name__}: {msg}\n"
-        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-        try:
-            os.write(fd, line.encode("utf-8", "replace"))
-        finally:
-            os.close(fd)
+        # Same rules as a run file: the errors file may sit in the spool, which a sandboxed child can write, and
+        # this process may run unsandboxed, so a planted symlink (or FIFO, device) is refused, never followed.
+        _append_line(path, line.encode("utf-8", "replace"))
     except Exception:  # noqa: BLE001 - best effort
         pass
 

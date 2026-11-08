@@ -61,3 +61,29 @@ def test_a_spool_file_not_named_like_a_run_key_is_left_alone(tmp_path):
 
     assert odd.read_text() == "", "prepare_spool appended to a file that is not one of ck's run keys"
     assert stat.S_IMODE(odd.stat().st_mode) == 0o644
+
+
+def test_a_forced_append_error_never_writes_through_a_planted_errors_symlink(tmp_path):
+    # Review finding (Task 36): a child makes the supersede append fail every time (a run file it made read-only, no
+    # `end` line), and plants `<key>.errors` as a symlink to a file outside the sandbox. The unsandboxed parent's
+    # error record must not follow it: the target's bytes and mode stay as they were.
+    from claude_kiro.eta.service import prepare_spool
+
+    root = _repo(tmp_path)
+    spool = _spool(root)
+    key = f"{SPEC}--20260101T000000Z-x"
+    run = spool / f"{key}.jsonl"
+    run.write_text('{"schema":"ck-progress/1","at":"2026-01-01T00:00:00Z","kind":"start"}\n')
+    os.chmod(run, 0o400)
+    target = tmp_path / "bashrc"
+    target.write_text("export PATH=$PATH\n")
+    os.chmod(target, 0o644)
+    (spool / f"{key}.errors").symlink_to(target)
+
+    try:
+        prepare_spool(root, SPEC, dict(os.environ))
+    finally:
+        os.chmod(run, 0o600)
+
+    assert target.read_text() == "export PATH=$PATH\n", "the error record wrote through a planted .errors symlink"
+    assert stat.S_IMODE(target.stat().st_mode) == 0o644, "the error record changed a symlink target's mode"
