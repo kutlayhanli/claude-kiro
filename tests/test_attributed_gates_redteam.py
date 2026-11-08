@@ -461,8 +461,8 @@ def with_(base, **changes):
     return out
 
 
-def call_of(json_value, code=0, stdout=None):
-    return {"code": code, "json": json_value, "stderr": "", "via": "direct", "stdout": stdout}
+def call_of(json_value, code=0):
+    return {"code": code, "json": json_value, "stderr": "", "via": "direct"}
 
 
 def outcome(bridge, call):
@@ -502,6 +502,7 @@ def test_tc25_redteam_summary_contradicting_failures_is_not_green(bridge):
 
 
 def test_tc25_redteam_exit_code_must_agree_with_ok(bridge):
+    """Assumption (design 2.9): gateOutcome cross-checks the exit code against ok; a green needs ok:true and exit 0."""
     assert_not_green(bridge, call_of(green_json(), code=1), "ok:true but exit code 1")
     assert_not_green(bridge, call_of(green_json(), code=2), "ok:true but exit code 2")
     assert_not_green(bridge, call_of(green_json(), code=-1), "ok:true but the process was killed")
@@ -517,16 +518,7 @@ def test_tc25_redteam_a_thin_envelope_whose_json_is_a_string_is_an_error(bridge)
     assert outcome(bridge, call_of(0))["state"] == "error"
 
 
-def test_tc25_redteam_json_followed_by_trailing_text_is_an_error(bridge):
-    text = '{"schema": "ck-gate/1", "ok": true, "failures": []}\nAll done, gate passed!'
-    out = outcome(bridge, call_of(None, stdout=text))
-    assert out["state"] == "error" and not out.get("green")
-
-
-def test_tc25_redteam_two_json_objects_are_an_error(bridge):
-    text = '{"schema": "ck-gate/1", "ok": false, "failures": []}\n{"schema": "ck-gate/1", "ok": true, "failures": []}'
-    out = outcome(bridge, call_of(None, stdout=text))
-    assert out["state"] == "error" and not out.get("green")
+# Trailing text and two JSON objects are covered through the real gateAnswers path by the bridge.run tests below.
 
 
 def test_tc25_redteam_no_json_is_an_error_for_every_exit_code(bridge):
@@ -571,7 +563,7 @@ def test_tc25_redteam_compact_answers_that_lie_are_not_green(bridge):
     assert outcome(bridge, call_of({k: v for k, v in compact.items() if k != "regressions"}))["state"] == "error"
     assert_not_green(bridge, call_of(with_(compact, regressions=[FAILURE])), "compact ok:true with a regression")
     assert_not_green(bridge, call_of(with_(compact, unattributed=[with_(FAILURE, status="unattributed")])), "compact ok:true with unattributed")
-    assert_not_green(bridge, call_of(with_(compact, failedChecks=[{"command": "pytest", "exitCode": 1}])), "compact ok:true with a failed check")
+    assert_not_green(bridge, call_of(with_(compact, failedChecks=[{"name": "Tamper", "ok": False, "detail": "a failing check", "warning": False}])), "compact ok:true with a failed check")
     assert_not_green(bridge, call_of(with_(compact, summary={"regressions": 2, "excused": 0, "flaky": 0, "unattributed": 0})), "compact summary contradicts")
 
 
@@ -588,7 +580,7 @@ MANY = 40  # more answers than any retry or fixer ladder can consume (an exhaust
 
 
 def run_with_gates(bridge, answers, *, full_every=0, deps=None):
-    """The Claude Code path (no `ck` global, a `runnerAgent`): gate calls are thin agent calls answered by `answers`."""
+    """(gateAnswers: the {code, stdout} raw form and the "throw" sentinel are defined by tests/js/fake_project.mjs.) The Claude Code path (no `ck` global, a `runnerAgent`): gate calls are thin agent calls answered by `answers`."""
     out = bridge.run({"deps": deps or {"1": []}, "gateAnswers": answers},
                      args={"runnerAgent": "ck-runner", "fullGateEvery": full_every})
     return out["result"]
