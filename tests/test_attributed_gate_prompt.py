@@ -59,9 +59,20 @@ def test_tc21_thin_gate_prompt_command_runs_through_real_ck(bridge, tmp_path):  
         code, obj, err = run_command(argv, root)
         assert code in (0, 1), (argv, code, err[-500:])
         assert isinstance(obj, dict), f"{argv} did not print JSON: {err[-500:]}"
-        assert isinstance(obj.get("failures"), list), obj
-        assert obj["failures"], "the project has a failing test, so the gate must list it"
-        for entry in obj["failures"]:
+        if "--compact" in argv:
+            # Thin gate calls add --compact (design 2.12): a ck-gate-compact/1 object with no `failures` key.
+            assert obj.get("schema") == "ck-gate-compact/1", obj
+            assert "failures" not in obj, obj
+            assert obj["regressions"], "the project has a failing test, so the gate must list a regression"
+            entries = [e for key in ("regressions", "unattributed", "flaky") for e in obj[key]]
+            report = json.loads(Path(obj["report"]).read_text())
+            assert isinstance(report.get("failures"), list) and report["failures"], report
+            entries += report["failures"]
+        else:
+            assert isinstance(obj.get("failures"), list), obj
+            assert obj["failures"], "the project has a failing test, so the gate must list it"
+            entries = obj["failures"]
+        for entry in entries:
             assert failure_errors(entry) == [], (entry, failure_errors(entry))
 
 
