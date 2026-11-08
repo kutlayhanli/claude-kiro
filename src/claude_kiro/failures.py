@@ -6,12 +6,14 @@ them directly. The readers turn a gate command's output into `Failure` entries: 
 named in the output (`failing_files`).
 """
 
+import ast
 import json
 import re
+import sys
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Literal, Optional, Sequence, Tuple
+from typing import Dict, FrozenSet, Iterable, List, Literal, Mapping, Optional, Sequence, Set, Tuple
 
 Kind = Literal["assertion", "import", "collection", "timeout", "error"]
 KINDS: Tuple[str, ...] = ("assertion", "import", "collection", "timeout", "error")
@@ -312,3 +314,336 @@ def failing_files(output: str, known_files: Iterable[str], command: str) -> List
                 out.append(_failure(node=None, file=path, exc=None, phase=None, message=line.strip(),
                                     crash_path=None, crash_line=None, detail=line, command=command))
     return out
+
+
+# --------------------------------------------------------------------------- right-reason classification (5.2-5.7)
+
+DATA_ERRORS = ("ValidationError", "JSONDecodeError", "YAMLError", "UnicodeDecodeError")
+IMPORT_FAMILY = ("ImportError", "ModuleNotFoundError", "AttributeError")
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+_QUOTE_MAP = str.maketrans({"‘": "'", "’": "'", "“": "'", "”": "'"})
+_NAMED_MODULE = (re.compile(r"No module named '([^']+)'"),
+                 re.compile(r"cannot import name '[^']*' from '([^']+)'"),
+                 re.compile(r"module '([^']+)' has no attribute"))
+_NO_SUCH_OPTION = re.compile(r"No such option: (\S+)")
+_USAGE = re.compile(r"(?i)\busage:")
+_PYTEST_E = re.compile(r"(?m)^[ \t]*E(?=[ \t]{3})[ \t]*")
+
+
+@dataclass(frozen=True)
+class ProjectContext:
+    """What the classifier needs to know about the project; the gate gathers it."""
+    project_modules: FrozenSet[str]   # top-level packages/modules of the project (src/ layout aware)
+    owned_paths: FrozenSet[str]       # files owned by impl tasks, existing or not
+    programs: FrozenSet[str]          # the project's CLI programs
+    test_paths: FrozenSet[str]        # this task's test files and fixtures
+    test_sources: Mapping[str, str]   # source text of this task's test files, keyed by repo-relative path
+
+
+@dataclass(frozen=True)
+class TestResult:
+    node: str
+    passed: bool
+    failure: Optional[Failure]
+
+
+@dataclass(frozen=True)
+class RightReasonVerdict:
+    blocking: Tuple[Failure, ...]     # class "bad" (5.3)
+    unclear: Tuple[Failure, ...]      # reported, not blocking (5.4)
+    already_passing: Tuple[str, ...]  # passing nodes (5.5)
+    require_pass: bool                # all verified tasks Done: today's rule (5.6)
+
+
+def _clean(text: Optional[str]) -> str:
+    """ANSI colour off, CRLF and CR to LF, curly quotes to straight ones."""
+    text = _ANSI.sub("", text or "")
+    return text.replace("\r\n", "\n").replace("\r", "\n").translate(_QUOTE_MAP)
+
+
+def _flat(text: str) -> str:
+    """One line: a message wrapped by a tool still matches its markers."""
+    return re.sub(r"\s+", " ", text)
+
+
+def _module_candidates(mod: str) -> Tuple[str, str]:
+    base = mod.replace(".", "/")
+    return base + ".py", base + "/__init__.py"
+
+
+def _path_matches(mod: str, paths: Iterable[str]) -> bool:
+    cands = _module_candidates(mod)
+    return any(p == c or p.endswith("/" + c) for p in paths for c in cands)
+
+
+def _project_module(mod: str, ctx: ProjectContext) -> bool:
+    return mod.split(".")[0] in ctx.project_modules or _path_matches(mod, ctx.owned_paths)
+
+
+def _test_module(mod: str, ctx: ProjectContext) -> bool:
+    return _path_matches(mod, ctx.test_paths)
+
+
+def _named_module(text: str) -> Optional[str]:
+    for pat in _NAMED_MODULE:
+        m = pat.search(text)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _test_side(path: str, ctx: ProjectContext) -> bool:
+    """A test helper, conftest or fixture file: not project code."""
+    parts = path.split("/")
+    return path in ctx.test_paths or "tests" in parts[:-1] or "fixtures" in parts[:-1] \
+        or parts[-1].startswith("conftest")
+
+
+def _cli_not_built(f: Failure, ctx: ProjectContext) -> bool:
+    """A missing command or option of one of the project's programs, printed by the CLI itself (rule 3)."""
+    if not ctx.programs:
+        return False
+    raw = _clean(f.detail) + "\n" + _clean(f.message)
+    # an assertion's own message can quote a CLI error; only a CLI's usage banner makes it the CLI's output
+    if f.exc_type == "AssertionError" and not _USAGE.search(raw):
+        return False
+    flat = _flat(_PYTEST_E.sub("", raw))  # pytest's "E   " prefix on each traceback line
+    progs = tuple(sorted(ctx.programs))
+    if missing_command(flat, progs) is not None:
+        return True
+    m = _NO_SUCH_OPTION.search(flat)
+    return m is not None and _prefix(flat[:m.start()], progs) is not None
+
+
+# --------------------------------------------------------------------------- reaching project code (5.7)
+
+class _Scope:
+    """Bindings of one scope: name -> [(kind, payload)]. Kinds: expr (value), import (module), param, def, def."""
+
+    def __init__(self, parent: Optional["_Scope"]):
+        self.parent = parent
+        self.names: Dict[str, List[Tuple[str, object]]] = {}
+
+    def add(self, name: str, kind: str, payload: object = None) -> None:
+        self.names.setdefault(name, []).append((kind, payload))
+
+
+def _store_names(target: ast.AST) -> List[str]:
+    return [n.id for n in ast.walk(target) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)]
+
+
+def _all_args(args: ast.arguments) -> List[ast.arg]:
+    out = list(args.posonlyargs) + list(args.args) + list(args.kwonlyargs)
+    if args.vararg:
+        out.append(args.vararg)
+    if args.kwarg:
+        out.append(args.kwarg)
+    return out
+
+
+def _collect(nodes: Sequence[ast.AST], scope: _Scope) -> None:
+    """Record the bindings a body makes in `scope`; nested function and class bodies are their own scopes."""
+    stack = list(nodes)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            scope.add(node.name, "def", node)
+            continue
+        if isinstance(node, ast.ClassDef):
+            scope.add(node.name, "expr", node)
+            continue
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                scope.add(a.asname or a.name.split(".")[0], "import", a.name)
+        elif isinstance(node, ast.ImportFrom):
+            mod = "." * node.level + (node.module or "")
+            for a in node.names:
+                scope.add(a.asname or a.name, "import", mod)
+        elif isinstance(node, ast.Assign):
+            for t in node.targets:
+                for n in _store_names(t):
+                    scope.add(n, "expr", node.value)
+        elif isinstance(node, (ast.AugAssign, ast.AnnAssign)) and node.value is not None:
+            for n in _store_names(node.target):
+                scope.add(n, "expr", node.value)
+        elif isinstance(node, ast.NamedExpr):
+            for n in _store_names(node.target):
+                scope.add(n, "expr", node.value)
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            for n in _store_names(node.target):
+                scope.add(n, "expr", node.iter)
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if item.optional_vars is not None:
+                    for n in _store_names(item.optional_vars):
+                        scope.add(n, "expr", item.context_expr)
+        elif isinstance(node, ast.comprehension):
+            for n in _store_names(node.target):
+                scope.add(n, "expr", node.iter)
+        elif isinstance(node, ast.ExceptHandler) and node.name and node.type is not None:
+            scope.add(node.name, "expr", node.type)
+        stack.extend(ast.iter_child_nodes(node))
+
+
+def _reaches(expr: ast.AST, scope: _Scope, visiting: Set[tuple]) -> bool:
+    for node in ast.walk(expr):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            if _name_reaches(node.id, scope, visiting):
+                return True
+    return False
+
+
+def _name_reaches(name: str, scope: _Scope, visiting: Set[tuple]) -> bool:
+    s: Optional[_Scope] = scope
+    while s is not None:
+        if name in s.names:
+            key = ("name", id(s), name)
+            if key in visiting:
+                return False
+            visiting.add(key)
+            try:
+                return any(_binding_reaches(kind, payload, s, visiting) for kind, payload in s.names[name])
+            finally:
+                visiting.discard(key)
+        s = s.parent
+    return False  # a builtin, or a name nothing binds
+
+
+def _binding_reaches(kind: str, payload: object, s: _Scope, visiting: Set[tuple]) -> bool:
+    if kind == "param":  # a test-function parameter is a pytest fixture, which may call project code
+        return True
+    if kind == "import":  # project, helper and unknown modules reach project code; the standard library does not
+        mod = str(payload)
+        return mod.startswith(".") or mod.split(".")[0] not in sys.stdlib_module_names
+    key = ("binding", id(payload))
+    if key in visiting:
+        return False
+    visiting.add(key)
+    try:
+        if kind == "expr":
+            return _reaches(payload, s, visiting)  # type: ignore[arg-type]
+        return _def_reaches(payload, s, visiting)  # type: ignore[arg-type]
+    finally:
+        visiting.discard(key)
+
+
+def _def_reaches(node: ast.AST, s: _Scope, visiting: Set[tuple]) -> bool:
+    """A same-file function reaches project code when its defaults or its body do."""
+    args = node.args  # type: ignore[attr-defined]
+    for d in list(args.defaults) + [k for k in args.kw_defaults if k is not None]:
+        if _reaches(d, s, visiting):
+            return True
+    fscope = _Scope(s)
+    for a in _all_args(args):
+        fscope.add(a.arg, "param")
+    _collect(node.body, fscope)  # type: ignore[attr-defined]
+    return any(_reaches(stmt, fscope, visiting) for stmt in node.body)  # type: ignore[attr-defined]
+
+
+def assert_reaches_project(test_source: Optional[str], line: Optional[int], ctx: ProjectContext) -> Optional[bool]:
+    """Does the failing assert at `line` run project code or use a project name? None when it cannot be parsed.
+
+    Finds the `assert` statement covering `line` and its enclosing function, then follows every name in the
+    assert back through the function's bindings (assignments, `for`/`with`/comprehension targets, walrus, imports,
+    same-file helpers). `False` means only literals, builtins, the standard library and file-loaded data.
+    """
+    if test_source is None or line is None:
+        return None
+    try:
+        tree = ast.parse(test_source)
+    except (SyntaxError, ValueError):
+        return None
+    target: Optional[ast.Assert] = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assert) and node.lineno <= line <= (node.end_lineno or node.lineno):
+            if target is None or (node.end_lineno or node.lineno) - node.lineno < \
+                    (target.end_lineno or target.lineno) - target.lineno:
+                target = node
+    if target is None:
+        return None
+    func: Optional[ast.AST] = None
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and \
+                node.lineno <= target.lineno <= (node.end_lineno or node.lineno):
+            if func is None or node.lineno > func.lineno:  # the innermost enclosing function
+                func = node
+    module = _Scope(None)
+    _collect(tree.body, module)
+    scope = module
+    if func is not None:
+        scope = _Scope(module)
+        for a in _all_args(func.args):  # type: ignore[attr-defined]
+            scope.add(a.arg, "param")
+        _collect(func.body, scope)  # type: ignore[attr-defined]
+    roots: List[ast.AST] = [target.test] + ([target.msg] if target.msg is not None else [])
+    return any(_reaches(r, scope, set()) for r in roots)
+
+
+# --------------------------------------------------------------------------- the classifier (5.2-5.4, 5.7)
+
+def classify_not_built(failure: Failure, ctx: ProjectContext) -> str:
+    """"not-built" (the feature is not built yet), "bad" (a wrong reason: blocks) or "unclear" (reported only).
+
+    First match wins: NotImplementedError; an import or attribute error naming a project module or owned path
+    (or a test-owned module, which is bad); a missing command or option of a program; data-loading errors, setup
+    errors, an assert failing in a helper or conftest file, and SyntaxError or NameError in the test file (bad);
+    an AssertionError in the test file, bad only when its assert reaches no project code (5.7); otherwise unclear.
+    """
+    exc = failure.exc_type
+    if exc == "NotImplementedError":
+        return "not-built"
+    if exc in IMPORT_FAMILY:
+        mod = _named_module(_clean(failure.message)) or _named_module(_clean(failure.detail))
+        if mod is not None:
+            if _project_module(mod, ctx):
+                return "not-built"
+            if exc != "AttributeError" and _test_module(mod, ctx):
+                return "bad"
+            return "unclear"  # a third-party module
+    if _cli_not_built(failure, ctx):
+        return "not-built"
+    text = _clean(failure.message) + "\n" + _clean(failure.detail)
+    if exc in DATA_ERRORS:
+        return "bad"
+    if exc == "FileNotFoundError" and any(p and p in text for p in ctx.test_paths):
+        return "bad"
+    if failure.phase == "setup":
+        return "bad"
+    if exc == "AssertionError" and failure.crash_path is not None and failure.crash_path != failure.file \
+            and _test_side(failure.crash_path, ctx):
+        return "bad"
+    in_test_file = failure.file is not None and failure.crash_path == failure.file
+    if exc in ("SyntaxError", "NameError") and in_test_file:
+        return "bad"
+    if exc == "AssertionError" and in_test_file:
+        src = ctx.test_sources.get(failure.file or "")
+        reaches = assert_reaches_project(src, failure.crash_line, ctx)
+        return "bad" if reaches is False else "unclear"
+    return "unclear"
+
+
+def right_reason_verdict(results: Sequence[TestResult], all_verified_done: bool,
+                         ctx: Optional[ProjectContext] = None) -> RightReasonVerdict:
+    """The right-reason verdict of a test-track gate. With every verified task Done only a pass is required (5.6).
+
+    Otherwise the failing results are classified with `classify_not_built` (`ctx` is needed for that; without it
+    a failure is unclear and does not block). Passing nodes are listed as already passing (5.5).
+    """
+    if all_verified_done:
+        return RightReasonVerdict(blocking=(), unclear=(), already_passing=(), require_pass=True)
+    blocking: List[Failure] = []
+    unclear: List[Failure] = []
+    passing: List[str] = []
+    for r in results:
+        if r.passed:
+            passing.append(r.node)
+            continue
+        if r.failure is None:
+            continue
+        cls = classify_not_built(r.failure, ctx) if ctx is not None else "unclear"
+        if cls == "bad":
+            blocking.append(r.failure)
+        elif cls == "unclear":
+            unclear.append(r.failure)
+    return RightReasonVerdict(blocking=tuple(blocking), unclear=tuple(unclear),
+                              already_passing=tuple(passing), require_pass=False)
