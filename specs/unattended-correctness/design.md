@@ -107,10 +107,12 @@ How the PLAN.md decisions shape it:
     decides (5.1-5.5); all Done keeps today's "must pass" (5.6). Test-track gates also run the
     `test_track.validate` command (Story 6), the row-fidelity check (Story 8) and the fixture-label check feeding
     the reviewer (15.6).
-- `src/claude_kiro/config.py` - `DEFAULT_CONFIG` gains `"test_track": {"validate": None}` and
+- `src/claude_kiro/config.py` - `DEFAULT_CONFIG` gains `"test_track": {}` (the `validate` key is absent by default, never merged in as null) and
   `"fixtures": {"recorded": [], "labels": "specs/fixture-labels.json"}`; new validators `test_track_validate(config)
   -> List[str]` and `fixture_globs(config) -> List[str]`, both raising `ConfigError` (new) that names the key
-  (6.5, 15.8). `load_config` stays tolerant; only these readers raise.
+  (6.5, 15.8). `load_config` stays tolerant; only these readers raise. A reader treats an absent key as "not
+  declared" (returns []), and a key present with any other non-string, non-list-of-strings value, explicit `null`
+  included, as a config error.
 - `src/claude_kiro/worktrees.py` - claims, merge, land (Stories 9, 10, 15, 16).
   - `claim(..., run=None)`: the lock reason becomes `"{owner} (claim {token} at {time} run {key})"` when a run key
     is given (16.1). New `claim_info(reason) -> ClaimInfo` parses old and new formats.
@@ -622,6 +624,8 @@ How edges are filled (the API delegated by PLAN):
 - **provides:** `**Provides:**` wins (11.3). Otherwise inferred: a design.md table row with a backticked command
   path whose row names a file the task owns; else a backticked command path, starting with a known program, in
   the task's title or description. Ambiguity (two tasks inferred) keeps both edges and adds a GraphProblem.
+  Group commands (`mtr thesis`) follow the same rule: a `cmd:` node exists only when some task provides it or a
+  test invokes it; a table row alone, with no owning task, adds no node.
 - **invokes:** scan of each test file (Python AST string constants and list/tuple literals; regex for JS) for a
   sequence of words that starts with a known program (`["mtr", "thesis", "new"]`, `"mtr thesis new --x"`), or a
   `CliRunner().invoke(..., ["thesis", "new"])`-style list matching a known command path without the program. The
@@ -939,7 +943,7 @@ fixed this run), `gates` (GateRun[]), `thin` (`thinAgentMode` result).
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `test_track.validate` | string or list of strings | null | command(s) run on every test-track gate (Story 6) |
+| `test_track.validate` | string or list of strings | absent (an explicit `null` is a config error) | command(s) run on every test-track gate (Story 6) |
 | `fixtures.recorded` | list of glob strings | [] | recorded-fixture globs to hash-lock (Story 15) |
 | `fixtures.labels` | string | `specs/fixture-labels.json` | the label file (captured / handcrafted) |
 | `agents.reviewer.cross_test` | bool | **true** (was false) | blocking cross-test check (7.1, 7.3) |
@@ -1072,6 +1076,8 @@ Entries for the criteria that state an error, refusal or fallback.
   start` exits 0 and reports it; the workflow logs it, keeps it in `runStart`, and the audit reports hooks inactive.
 - **10.5** Approved state missing, unreadable or its mac fails: `AuditReport.complete = false`, `clean = false`,
   problem "approved state unreadable: <reason>"; exit 3.
+  A validly sealed record whose `ref` is not the audited `into` branch counts as missing (same result), so
+  another spec's or ref's record, or `--into` a branch with no record of its own, is never clean.
 - **11.8** Malformed source: a `GraphProblem` naming the source and problem; the rest is built; `ck lint` prints
   it as a warning.
 - **12.6** Missing command with no provider: `liveEdgeDecision` returns `conflict` with the tests that invoke it
