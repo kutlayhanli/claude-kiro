@@ -461,7 +461,7 @@ gather inputs and act on the output; they never re-implement the rule.
 | `failuresForPrompt(failures, limit = 50)` | workflow decisions block | `-> {shown, more: {file: count}, total}` | 3.8 |
 | `testFixPlan({conflicts, alreadyFixed})` | workflow decisions block | `-> {groups: [{file, conflicts}], toMe: [...]}` | 4.8, 4.9 |
 | `heldByCrossTest({findings, testVerifies})` | workflow decisions block | `-> Set<task>` | 7.4 |
-| `gateOutcome(call)` | workflow decisions block | `CkCallResult -> {state: 'green'\|'red'\|'error', green, regressions, excusedByTask, flaky, report, reason}` (reads `ck-gate/1` or `ck-gate-compact/1`) | 2.6, 2.8, 2.9, 2.12, 19.5 |
+| `gateOutcome(call)` | workflow decisions block | `CkCallResult -> {state: 'green'\|'red'\|'error', green, regressions, excusedByTask, flaky, report, reason}` (reads `ck-gate/1` or `ck-gate-compact/1`; a green needs `ok:true` and exit code 0, so `code` is cross-checked against `ok`) | 2.6, 2.8, 2.9, 2.12, 19.5 |
 | `thinAgentMode({runnerAgent, unavailable, direct})` | workflow decisions block | `-> {mode: 'direct'\|'lean'\|'default', warning}` | 19.1, 19.4, 19.6 |
 | `resolveRoleRef(role, roles)` / `validateRoleRef(value)` | `opencode/src/models.ts` | `-> RoleRef \| null` / `-> string \| null` (error) | 14.1-14.4, 14.6 |
 
@@ -634,7 +634,10 @@ How edges are filled (the API delegated by PLAN):
   test task T, every TC found in T's test files (`def test_tcNNN_`, `test('tcNNN_ ...')`) or in test-plan rows
   whose Test file column names one of T's files, to each task in `T.verifies`. Each edge keeps its origin in
   `source` (`"Verify -k"` or `"Verifies"`). Attribution (1.1) uses a TC's `"Verify -k"` edges; it falls back to
-  its `"Verifies"` edges only when the TC has no `"Verify -k"` edge, so the two are never unioned.
+  its `"Verifies"` edges only when the TC has no `"Verify -k"` edge, so the two are never unioned. A tc node exists
+  only for a TC some test file or test-plan row defines. A TC that only a Verify `-k` names keeps its verifies
+  edge with no tc node: a dangling verifies source, which consumers must accept (the freshness rule of 11.7
+  requires the node to vanish once no test defines the TC).
 - **provides:** `**Provides:**` wins (11.3). Otherwise inferred: a design.md table row with a backticked command
   path whose row names a file the task owns; else a backticked command path, starting with a known program, in
   the task's title or description. Ambiguity (two tasks inferred) keeps both edges and adds a GraphProblem.
@@ -836,6 +839,11 @@ class ProofVerdict:
 
 Ledger = Mapping[str, Mapping[str, str]]   # <common>/ck/<spec>/testfix-ledger.json: node -> {fix, at, outcome}
 
+# Node canonicalisation (4.8): `fix_allowed`, `ck testfix check` and `ck testfix record` key the ledger by a
+# canonical node, so a re-spelled id names the same entry: strip surrounding whitespace, turn `\` into `/`,
+# normalise the path part (collapse `//`, resolve `.` and `..`, drop a leading `./`), drop a trailing `[param]`
+# id, and compare case-insensitively (the ledger is a refusal list: a false match only sends a node to me).
+
 @dataclass(frozen=True)
 class TestValue:            # fidelity
     test: str
@@ -947,6 +955,10 @@ const CK_CALL = { type: 'object', properties: {
 //                  source: 'conflict'|'cross-test'|'missing-command',
 //                  tests: [node], outcome: 'landed'|'to-me'|'test-correct', proof: ProofVerdict|null,
 //                  scope: ScopeDecision|null, review: { verdict, findings }|null, reason }
+//   The workflow does not trust `in_scope` alone (4.5): a ScopeDecision with a non-empty `outside` or
+//   `spec_docs_edited`, or with `requirements_edited` true, is out of scope whatever `in_scope` says.
+//   A review counts as approved only for verdict 'approve' with no finding of severity 'blocking' (4.6):
+//   an approve verdict that lists a blocking finding, or any other or missing verdict, is rejected.
 // LiveEdge: { task, dependsOn, command, at }
 // TESTFIX schema (test-fixer agent):
 //   { verdict: 'fixed'|'test-correct'|'cannot-fix', changedTests: [{file, test}], commits: string,
