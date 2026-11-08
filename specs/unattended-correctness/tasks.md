@@ -1790,7 +1790,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 78: Route mechanical ck calls through `thinCk` (direct or lean agent)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 2.2, 2.3, 19.1, 19.3, 19.4, 19.5, 19.6
 **Description:** In `plugin/workflows/spec-implement.js`: add args `runnerAgent` (string or null: `spec:runner` / `ck-runner`) and `runId` (defaults to `progressRun`); add the shared `CK_CALL` schema (`{exitCode, json, error}`) and the `CkCallResult` shape (`{code, json, stderr, via}`); add `thinAgentMode({runnerAgent, unavailable, direct})` in the `// --- decisions` block (`direct` when the `ck()` global exists, `lean` with a runner agent, otherwise `default` with a warning); add `thinCk(label, argv, ...)` that runs ck directly under OpenCode and, under Claude Code, starts one agent with `{ agentType: RUNNER, schema: CK_CALL, label, phase }` and no model or effort, whose prompt holds the ck command on its own line. Route plan, land, relink, park and report through `thinCk`. A thin answer that does not match `CK_CALL` (missing code, `json` null or not an object) is a failed call, handled as each caller's existing error path. If `runnerAgent` is absent or the first lean `agent()` call throws on the agent type, switch to `default` for the rest of the run, retry that call once, and record `thinAgent: {type, fallback, warning}` in the result. Task, review, fix and resolver agents never carry the lean type. Keep the vendored copy untouched (Task 97). Update the existing assertions this supersedes: in `tests/js/spec_implement.test.mjs`, the cases that pin the orchestrator model and effort on the `plan 1` and `land 1` thin calls (around lines 519-533) now expect `agentType` and `schema: CK_CALL` with no model or effort; in `tests/js/landing_speed.test.mjs`, any case that pins the raw shape of a plan or land answer reads it from the envelope. Harness Contract owner: item 8's thin output schema (design: `CK_CALL`), item 7's `thinResult` (design: `thinAgentMode` and the `CK_CALL` check), the lean-type arg (contract `thinAgent`, design `runnerAgent`), opts `agentType` and result `warnings[]`.
@@ -1802,11 +1802,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 2 (the fake runtime, bridge and `CK_CALL` envelopes its thin routing runs under), Task 74 (P-30 at the thin-routing seam)
 
 **Acceptance:**
-- [ ] Under Claude Code every thin ck call uses the lean agent type and no other call does (19.1)
-- [ ] All thin calls share one output schema (19.3)
-- [ ] With the lean type unavailable, thin calls run as before and the result carries a warning (19.4)
-- [ ] A thin output not matching the schema is a failed call (19.5)
-- [ ] Under OpenCode ck runs directly with no thin agent (19.6, 2.2); under Claude Code it goes through the lean agent (2.3)
+- [x] Under Claude Code every thin ck call uses the lean agent type and no other call does (19.1)
+- [x] All thin calls share one output schema (19.3)
+- [x] With the lean type unavailable, thin calls run as before and the result carries a warning (19.4)
+- [x] A thin output not matching the schema is a failed call (19.5)
+- [x] Under OpenCode ck runs directly with no thin agent (19.6, 2.2); under Claude Code it goes through the lean agent (2.3)
 
 **Dependencies:** Task 2 (its tests are the oracle), Task 74 (its tests are the oracle)
 **Complexity:** High
