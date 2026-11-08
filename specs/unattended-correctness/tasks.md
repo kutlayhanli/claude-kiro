@@ -665,7 +665,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 28: Add the config validators for test-track validation and recorded fixtures
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 6.4, 6.5, 15.7, 15.8
 **Description:** In `src/claude_kiro/config.py`, add `ConfigError(Exception)` (carries the key name), extend `DEFAULT_CONFIG` with `"test_track": {"validate": None}` and `"fixtures": {"recorded": [], "labels": "specs/fixture-labels.json"}`, and add two strict readers: `test_track_validate(config) -> List[str]` (None or absent -> `[]`; a string -> `[s]`; a list of strings -> the list; anything else raises `ConfigError("specs/ck.json: test_track.validate must be a string or a list of strings")`) and `fixture_globs(config) -> List[str]` (absent -> `[]`; a list of strings -> the list; anything else, including a non-string member, raises `ConfigError` naming `fixtures.recorded`). `load_config` stays tolerant; only these readers raise. Harness Contract owner: item 6's config keys `test_track.validate` and `fixtures.recorded` (the strict readers).
@@ -675,13 +675,14 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 22 (P-13 at the config readers)
 
 **Acceptance:**
-- [ ] No `test_track.validate` key gives `[]` (6.4); a string or list of strings is accepted
-- [ ] `42`, `{"a":1}` and `["ok", 3]` raise `ConfigError` naming `test_track.validate` (6.5)
-- [ ] No `fixtures.recorded` gives `[]` (15.7); a non-list or non-string member raises `ConfigError` naming `fixtures.recorded` (15.8)
+- [x] No `test_track.validate` key gives `[]` (6.4); a string or list of strings is accepted
+- [x] `42`, `{"a":1}` and `["ok", 3]` raise `ConfigError` naming `test_track.validate` (6.5)
+- [x] No `fixtures.recorded` gives `[]` (15.7); a non-list or non-string member raises `ConfigError` naming `fixtures.recorded` (15.8)
 
 **Dependencies:** Task 22 (its tests are the oracle)
 **Complexity:** Low
 **Risk:** normal
+**Deviation (task 28):** the task text says an explicit `null` gives `[]`, but P-13 and design.md (`test_track.validate` default: "an explicit `null` is a config error") require a `ConfigError`, so the readers raise on `null`. `DEFAULT_CONFIG`'s `test_track.validate: None` would make an absent key read as `null`, so `load_config` drops that default unless specs/ck.json declares the key.
 
 ---
 
