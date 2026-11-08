@@ -155,7 +155,7 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
     if (m) return m[1].split(/[,\s]+/).filter(Boolean)
     return []
   }
-  const state = { execResults: [], deps: { ...deps }, done: new Set(done), merged: new Set(), events: [], prompts: {}, opts: {}, reviewCount: {}, reviewTasks: {}, relinked: new Set(), relinks: [], attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0, landings: [], parks: [], revises: {}, resolved: new Set(), conflictsHit: {}, execLog: [] }
+  const state = { execResults: [], deps: { ...deps }, done: new Set(done), merged: new Set(), events: [], prompts: {}, opts: {}, optsList: [], reviewCount: {}, reviewTasks: {}, relinked: new Set(), relinks: [], attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0, landings: [], parks: [], revises: {}, resolved: new Set(), conflictsHit: {}, execLog: [] }
   let clock = Date.parse('2026-10-04T10:00:00Z')
   const stamp = () => new Date((clock += 60000)).toISOString().replace('.000', '')
   const ready = exclude => {
@@ -211,6 +211,7 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
     state.events.push(l)
     state.prompts[l] = prompt
     state.opts[l] = opts
+    state.optsList.push({ label: l, opts })  // every call in order: `opts` keeps only the last call of a label
     if (l.startsWith('plan')) {
       state.plans++
       const k = Number((l.match(/^plan (\d+)/) || [])[1])
