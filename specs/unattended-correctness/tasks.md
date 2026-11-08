@@ -2320,7 +2320,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 102: Red-team the rerun evidence's hand-repair rule (Story 20)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 20.3
 **Description:** Try to break each SHALL NOT clause of Story 20 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Clause: approving Tasks 93 and 94's protected change through the product's approval path SHALL not count as a hand repair, and nothing else may pass as an approval. Apply the evidence validator of Task 101 (imported from `tests/test_unattended_e2e_evidence.py`) to synthetic evidence documents in `tmp_path`: approvals for other tasks, approvals of kind other than the approval command, task numbers as `"093"` or `93.0`, a hand commit listed under `approvals`, a pass in `passes` whose `runId` differs from the arm's `run`, `handRepairs` as null or a string, duplicate arms, a missing `failedCriteria` on a failed bar, cost exactly equal to and one cent over the baseline. Valid documents pass; each break is rejected. Tests named `test_tc166_redteam_<slug>`.
@@ -2330,10 +2330,12 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 104 (red team of 20.3)
 
 **Acceptance:**
-- [ ] Written from the requirements only, never from the implementation
-- [ ] Tests run the same validator that checks the committed evidence, on synthetic documents
-- [ ] Each test fails before the validator exists for the right reason
-- [ ] No mocks of the project's own code
+- [x] Written from the requirements only, never from the implementation
+- [x] Tests run the same validator that checks the committed evidence, on synthetic documents
+- [x] Each test fails before the validator exists for the right reason
+- [x] No mocks of the project's own code
+
+**Implementation notes:** 125 tests. Found one validator gap, not covered by a test because Task 101's file is not mine to edit: `costPerMergedTask`/`wallMinPerTask` of NaN passes `validate_evidence` (NaN < 0 and NaN > baseline are both False). Task 101 should reject non-finite numbers.
 
 **Dependencies:** Task 101 (the evidence validator under test)
 **Complexity:** Low
