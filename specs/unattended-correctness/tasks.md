@@ -913,7 +913,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 39: Test the protected-file git hooks, tokens and approval
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9, 9.10, 9.11, NFR sandbox
 **Description:** Implement TC-75, TC-76, TC-77, TC-78, TC-79, TC-80, TC-81, TC-82, TC-83, TC-84 (a, b), TC-85, TC-86, TC-87 and TC-88 on `hooks_repo` with plain git (`raw`). Every refusal asserts the ref did not move. TC-75c uses `ck worktree start demo --json` as the run start. TC-77 parametrizes `update-ref`, `branch -f`, `reset --hard`, `push .`, `commit`, `cherry-pick`, `merge --ff-only`. TC-79 uses `snapshot_ck_state`/`restore_ck_state` to replay ck's state. TC-82: `ck worktree merge` gives `PROTECTED`, exit 3. TC-84a pipes stdin to `ck worktree approve demo 1` (refused); TC-84b drives it through `pty.fork`, typing the printed code. TC-85 chains to `.git/hooks/pre-merge-commit`, `core.hooksPath=.githooks` and a pre-commit hook. TC-86 makes the hooks location read-only and checks `hooks.installed: false` with the reason. TC-87 runs inside `readonly_git_metadata`; TC-88 runs under `sandboxed` (skips only without namespaces). TC-189: on a fresh `hooks_repo`, `ck run demo` with `fake_claude` on `PATH` installs the hooks before the fake `claude` starts and passes `denyWrite` for `<common>/ck/hooks` and `<common>/ck/key` in `--settings`; then inside `readonly_git_metadata`, `ck worktree start demo --json` reports `hooks.installed: true` and `active: true` and a raw protected `git merge --no-verify` is refused; where namespaces exist the same runs under `sandboxed` (that part alone may skip). TC-194: an install command that sets `core.hooksPath .husky/_` runs during `ck worktree land demo 3 --gate --json`; afterwards ck's hooks are active again, `chain.json` names `.husky/_`, the land result reports it, a raw protected merge is refused and the husky hook still runs.
@@ -923,11 +923,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 45 (TC-76 to TC-81, TC-83, TC-85, TC-87, TC-88, TC-194), Task 46 (TC-82), Task 47 (TC-84a, TC-84b), Task 50 (TC-75, TC-86 through run start), Task 108 (TC-189)
 
 **Acceptance:**
-- [ ] Tests run plain git against hooks installed by ck; tests never write hooks themselves, only remove, alter or chmod them
-- [ ] They fail before the implementation because no hooks exist and `ck worktree merge` lands protected files
-- [ ] Every refusal checks the ref value before and after, not just the exit code
-- [ ] TC-88 skips only on a bwrap startup failure, with the reason
-- [ ] No mocks of the project's own code
+- [x] Tests run plain git against hooks installed by ck; tests never write hooks themselves, only remove, alter or chmod them
+- [x] They fail before the implementation because no hooks exist and `ck worktree merge` lands protected files
+- [x] Every refusal checks the ref value before and after, not just the exit code
+- [x] TC-88 skips only on a bwrap startup failure, with the reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (hooks_repo, snapshot helpers, sandboxed, readonly_git_metadata)
 **Complexity:** High
