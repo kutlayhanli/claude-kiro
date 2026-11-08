@@ -1,0 +1,20 @@
+{
+  "runId": "wf_unattended_labels",
+  "name": "spec-implement",
+  "agents": [
+    {"label": "testfix 1 (Task 2)", "model": "claude-sonnet-5-5", "phase": "Test fix", "role": "test-writer", "new": true},
+    {"label": "testfix review 1", "model": "claude-opus-5-5", "phase": "Test fix", "role": "reviewer", "new": true},
+    {"label": "run start", "model": "claude-haiku-5-5", "phase": "Setup", "role": "gate", "new": true},
+    {"label": "audit", "model": "claude-haiku-5-5", "phase": "Audit", "role": "gate", "new": true},
+    {"label": "testfix ledger 1", "model": "claude-haiku-5-5", "phase": "Test fix", "role": "gate", "new": true},
+    {"label": "testfix prove 1", "model": "claude-haiku-5-5", "phase": "Test fix", "role": "gate", "new": true},
+    {"label": "plan 1", "model": "claude-haiku-5-5", "phase": "Wave 1", "role": "plan", "new": false},
+    {"label": "land 2", "model": "claude-haiku-5-5", "phase": "Wave 1", "role": "land", "new": false},
+    {"label": "full gate @10", "model": "claude-haiku-5-5", "phase": "Wave 1", "role": "gate", "new": false},
+    {"label": "final gate", "model": "claude-haiku-5-5", "phase": "Final", "role": "gate", "new": false},
+    {"label": "re-check 1", "model": "claude-haiku-5-5", "phase": "Final", "role": "gate", "new": false},
+    {"label": "report", "model": "claude-haiku-5-5", "phase": "Final", "role": "report", "new": false},
+    {"label": "park 3", "model": "claude-haiku-5-5", "phase": "Wave 1", "role": "orchestrator", "new": false},
+    {"label": "relink 4", "model": "claude-haiku-5-5", "phase": "Wave 1", "role": "plan", "new": false}
+  ]
+}

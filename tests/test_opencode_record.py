@@ -274,3 +274,32 @@ def test_re_ingesting_the_same_record_rewrites_nothing(tmp_path):
     assert second.exit_code == 0, second.output
     assert "unchanged" in second.output
     assert path.read_bytes() == before
+
+
+# --------------------------------------------------------------------------- per-role models (TC-132)
+
+
+def test_tc132_stats_keeps_each_agents_model_and_variant_per_role(tmp_path):
+    agents = [
+        # roles-mapped: the implementer ran on the roles map's model and variant
+        agent(1, "task 3", session="ses_1", model="deepseek-v4.1-flash-free", variant="max",
+              resolved="max", role="implementer", modelSource="roles"),
+        # alias-resolved: the reviewer ran on the alias map's model and variant
+        agent(2, "review 3", session="ses_2", model="muse-spark-1.3-contributor-free", variant="low",
+              resolved="low", role="reviewer", modelSource="alias"),
+    ]
+    out = ingest(tmp_path, record(tmp_path, agents=agents))
+    assert out.exit_code == 0, out.output
+
+    rows = {a["role"]: a for a in load()["agents"]}
+    assert set(rows) == {"implementer", "reviewer"}
+    assert rows["implementer"]["model"] == FREE
+    assert rows["implementer"]["variant"] == "max" and rows["implementer"]["resolvedEffort"] == "max"
+    assert rows["reviewer"]["model"] == FREE_MUSE
+    assert rows["reviewer"]["variant"] == "low" and rows["reviewer"]["resolvedEffort"] == "low"
+
+    shared = build_shareable(load(), record_id="0123456789abcdef")
+    assert validate_shareable(shared) == []
+    by_role = {a["role"]: a for a in shared["agents"]}
+    assert by_role["implementer"]["variant"] == "max"
+    assert by_role["reviewer"]["variant"] == "low"
