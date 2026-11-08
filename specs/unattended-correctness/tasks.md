@@ -1802,11 +1802,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 2 (the fake runtime, bridge and `CK_CALL` envelopes its thin routing runs under), Task 74 (P-30 at the thin-routing seam)
 
 **Acceptance:**
-- [ ] Under Claude Code every thin ck call uses the lean agent type and no other call does (19.1)
-- [ ] All thin calls share one output schema (19.3)
-- [ ] With the lean type unavailable, thin calls run as before and the result carries a warning (19.4)
-- [ ] A thin output not matching the schema is a failed call (19.5)
-- [ ] Under OpenCode ck runs directly with no thin agent (19.6, 2.2); under Claude Code it goes through the lean agent (2.3)
+- [x] Under Claude Code every thin ck call uses the lean agent type and no other call does (19.1)
+- [x] All thin calls share one output schema (19.3)
+- [x] With the lean type unavailable, thin calls run as before and the result carries a warning (19.4)
+- [x] A thin output not matching the schema is a failed call (19.5)
+- [x] Under OpenCode ck runs directly with no thin agent (19.6, 2.2); under Claude Code it goes through the lean agent (2.3)
 
 **Dependencies:** Task 2 (its tests are the oracle), Task 74 (its tests are the oracle)
 **Complexity:** High
