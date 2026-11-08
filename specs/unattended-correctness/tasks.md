@@ -2021,7 +2021,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 88: Property tests for live command edges and write-set scheduling
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 12.5, 12.6, 12.7, 13.1, 13.2, 13.5
 **Description:** Implement the TC-174 rows P-24 and P-25 through the bridge. P-24: `liveEdgeDecision` adds V -> P only for a missing-command failure whose provider is unfinished, returns `conflict` when nothing provides it and `blocked` with the cycle when the edge would cycle; non-missing-command failures (including `git: 'x' is not a git command` and assertion messages quoting "invalid choice") never add an edge; deps stay acyclic. Domain: P-12's CLI message forms, random `dags()`, providers Done, unfinished, self or absent. P-25: running real scenarios with write-sets (12-path universe with `src/a.py`, `src/*.py`, `src/**`, `docs/x.md`, `./src/a.py`), slots 1-6, durations and failures: no two overlapping tasks in flight at once (start to land end), the first to start among overlapping ready tasks is the priority head, and the merge set equals the run with write-sets off. `max_examples=60`, derandomized, no database. `PROPERTIES = {"P-24": ..., "P-25": ...}`, tests `test_tc174_p<k>_<slug>`.
@@ -2032,11 +2032,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 93 (P-24 at `liveEdgeDecision`), Task 94 (P-25)
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the rows
-- [ ] Settings are deterministic
-- [ ] Tests call the decisions-block seam and the real script through the bridge, not a server
-- [ ] They fail before the implementation because the seams and holds do not exist
-- [ ] No mocks of the project's own code
+- [x] Generators cover every surface form and negative listed in the rows
+- [x] Settings are deterministic
+- [x] Tests call the decisions-block seam and the real script through the bridge, not a server
+- [x] They fail before the implementation because the seams and holds do not exist
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 2 (bridge call op, owns/overlaps fakes)
 **Complexity:** High
