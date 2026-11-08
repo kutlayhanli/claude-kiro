@@ -525,6 +525,47 @@ await test('TC-20 batched changes flags one task: only task 3 revises, 2/4 appro
   }
 })
 
+// Issue #16: the runtime drops fields a schema does not define, so a batched finding
+// without `task` once sent every finding to every wave task and failed clean ones.
+const waveRun = async verdict => {
+  const deps = { 1: [], 2: [], 3: [], 4: [] }
+  const reviews = { 2: [verdict, 'approve'], 3: [verdict, 'approve'], 4: [verdict, 'approve'] }
+  const p = project({ deps, ...waveTiming, reviews })
+  const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: reviewArgs(deps) })
+  const revised = ['2', '3', '4'].filter(n => p.state.events.some(e => new RegExp(`^task ${n}( \\[test\\])? revise`).test(e)))
+  return { p, result, logs, revised }
+}
+
+await test('#16 the batched review schema lets a finding name its task', async () => {
+  const { p } = await waveRun('approve')
+  const [wave] = batchesCovering(p, ['2', '3', '4'])
+  const item = p.state.opts[wave].schema.properties.findings.items
+  assert.equal(item.properties.task?.type, 'string', 'findings[].task is in the schema the review-wave agent is given')
+})
+
+await test('#16 a finding without task is attributed from its text: only the named task revises', async () => {
+  const verdict = { verdict: 'changes', findings: [{ severity: 'blocking', file: 'x.py', issue: 'Task 3, P-7. entries lack required fields', fix: 'add them' }] }
+  const { result, revised } = await waveRun(verdict)
+  assert.deepEqual(revised, ['3'], `only task 3 revises (saw ${revised})`)
+  assert.deepEqual(result.merged.sort(), ['1', '2', '3', '4'])
+})
+
+await test('#16 a minor finding on another task does not flag it', async () => {
+  const verdict = { verdict: 'changes', findings: [
+    { task: '3', severity: 'blocking', file: 'x.py', issue: 'blocking on 3', fix: 'fix 3' },
+    { task: '2', severity: 'minor', file: 'y.py', issue: 'style on 2', fix: 'optional' },
+  ] }
+  const { revised } = await waveRun(verdict)
+  assert.deepEqual(revised, ['3'], `only the task with a blocking finding revises (saw ${revised})`)
+})
+
+await test('#16 blocking findings naming no covered task still revise the whole wave, and the run says so', async () => {
+  const verdict = { verdict: 'changes', findings: [{ severity: 'blocking', file: 'x.py', issue: 'something is wrong somewhere', fix: 'fix it' }] }
+  const { logs, revised } = await waveRun(verdict)
+  assert.deepEqual(revised, ['2', '3', '4'], 'an unattributable blocking finding is never dropped')
+  assert.ok(logs.some(l => /name no covered task/.test(l)), 'the wave-wide fallback is logged')
+})
+
 await test('TC-21 batched approve records approval for every covered task (4.5)', async () => {
   const deps = { 1: [], 2: [], 3: [], 4: [] }
   const p = project({ deps, ...waveTiming })
