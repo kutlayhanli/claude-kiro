@@ -1631,7 +1631,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Files:**
 - `opencode/src/models.ts` - `ROLE_NAMES`, `validateRoleRef`, `resolveRoleRef`
 - `opencode/src/config.ts` - `roles` key, layering, sources, validation
-**Verify:** `cd opencode && node --test --test-name-pattern="tc12[789]|tc180" test/roles.test.ts` `cd opencode && node --test test/config.test.ts test/models.test.ts`
+**Verify:** `cd opencode && node --test --test-name-pattern="tc12[89]|tc180" test/roles.test.ts` `cd opencode && node --test test/config.test.ts test/models.test.ts`
 **Verified by:** Task 69 (TC-127 to TC-129 and P-28 at the config and model seams)
 
 **Acceptance:**
