@@ -1465,7 +1465,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 64: Test the cross-test default and opt-out in agent config
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.1, 7.3
 **Description:** Implement TC-64 (a) and TC-66 (a): `ck agents --json` with isolated config shows `reviewer.cross_test: true`; `ck agents set reviewer.cross_test false` globally and then per project shows false.
@@ -1475,9 +1475,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 66 (TC-64a, TC-66a)
 
 **Acceptance:**
-- [ ] Tests use the real `ck agents` CLI with the conftest-isolated config home
-- [ ] TC-64a fails before the implementation because the default is false
-- [ ] No mocks of the project's own code
+- [x] Tests use the real `ck agents` CLI with the conftest-isolated config home
+- [x] TC-64a fails before the implementation because the default is false
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Low
