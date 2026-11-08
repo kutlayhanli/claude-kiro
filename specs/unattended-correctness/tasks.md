@@ -1354,7 +1354,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 59: Test the harness registry in bench and doctor
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 17.1, 17.2, 17.3, 17.4, 17.5
 **Description:** Implement TC-150, TC-151, TC-152 and TC-153. TC-150: `ck bench run cfg.json --harness nope --dry-run` and `ck doctor --harness nope` exit non-zero listing every registered name; `--help` lists exactly the registered names. TC-151: register a fake harness `fakeh` in-process (`claude_kiro.harnesses.register`, `CliRunner`), run `ck bench run cfg.json --harness fakeh` (result written) and `ck doctor --harness fakeh` (adapter's doctor called). TC-152: run the existing bench and doctor tests unchanged, and `--runner` with `--harness opencode` still fails with today's message. TC-153: arm results from the fake claude run, the fake opencode run and `fakeh` have the same key set.
@@ -1364,10 +1364,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 62 (TC-150 to TC-153)
 
 **Acceptance:**
-- [ ] Tests run the real bench and doctor CLIs; only external binaries and the registered fake adapter are fakes
-- [ ] They fail before the implementation because `--harness` is a fixed `click.Choice` with no registry
-- [ ] Existing bench and doctor tests are run, not modified
-- [ ] No mocks of the project's own code
+- [x] Tests run the real bench and doctor CLIs; only external binaries and the registered fake adapter are fakes
+- [x] They fail before the implementation because `--harness` is a fixed `click.Choice` with no registry
+- [x] Existing bench and doctor tests are run, not modified
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Medium
