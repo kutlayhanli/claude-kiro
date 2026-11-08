@@ -556,7 +556,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 23: Test right-reason classification on test-track gates
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7
 **Description:** Implement TC-50, TC-51, TC-52, TC-53, TC-54, TC-56 and TC-57 with real failing tests in a real task worktree branched from `integrate/demo`, running `ck gate demo --task 1 --json`. TC-51 runs a table against the fixture click and argparse CLIs from `spec_graph_project` (click `No such command 'thesis'`, argparse `invalid choice: 'thesis'`, `unrecognized arguments: --since`, click `No such option`, `NotImplementedError` from `calc.py`, `AttributeError` on `calc`). TC-52 asserts on fixture data only (`prices = json.load(...)`; `assert prices["AAPL"] == 4.15`) and must fail as `bad` (5.3, 5.7). TC-181: asserts that reach project code (`assert calc.rate_floor(...) == 0.04` with a stub returning a wrong value, an assert on a pytest fixture argument) and an assert line that cannot be parsed back are `unclear` and the gate passes. Assert failure `class` (`not-built`, `bad`, `unclear`), the right-reason check's ok/warning state, and the already-passing warning (TC-56).
@@ -566,10 +566,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 31 (TC-50 to TC-54, TC-56, TC-57, TC-181)
 
 **Acceptance:**
-- [ ] Tests run real pytest against real fixture CLIs in a real worktree
-- [ ] They fail before the implementation because today's test-track gate passes tests that fail on fixture assertions
-- [ ] TC-57 shows the not-built-yet rule is off when every verified task is Done
-- [ ] No mocks of the project's own code
+- [x] Tests run real pytest against real fixture CLIs in a real worktree
+- [x] They fail before the implementation because today's test-track gate passes tests that fail on fixture assertions
+- [x] TC-57 shows the not-built-yet rule is off when every verified task is Done
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project, spec_graph_project fixture CLIs)
 **Complexity:** Medium
