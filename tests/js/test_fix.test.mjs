@@ -33,9 +33,9 @@ const node = c => `${c.file}::${c.test}`
 const C1 = conflict(FILE_A, 'test_tc4_decay')
 
 // Task 4's first two attempts (the report and the confirmation) return `conflicts`; a later attempt passes.
-async function run(conflicts, { testFix = { [FILE_A]: {} }, deps = { 4: [], 5: ['4'] }, ...rest } = {}) {
+async function run(conflicts, { testFix = { [FILE_A]: {} }, deps = { 4: [], 5: ['4'] }, args = {}, ...rest } = {}) {
   const p = project({ deps, testConflictsList: { 4: { conflicts, attempts: 2 } }, testFix, ...rest })
-  const out = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: AGENTS } })
+  const out = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: AGENTS, ...args } })
   return { p, ...out }
 }
 const requests = trace => trace.filter(e => e.ev === 'request').map(e => e.label)
@@ -76,7 +76,7 @@ await test('tc38_ a confirmed conflict starts one test-fixer in the test-writer 
 
 await test('tc36_ the test-fixer prompt carries the conflicts as schema-valid entries; the thin testfix calls carry the lean agentType', async () => {
   const c2 = conflict(FILE_A, 'test_tc4_other')
-  const { p, trace } = await run([C1, c2])
+  const { p, trace } = await run([C1, c2], { args: { runnerAgent: 'ck-runner' } })
   const entries = jsonArrays(p.state.prompts['testfix 1 (Task 4)']).find(a => a.length === 2)
   assert.ok(entries, 'one array of two entries')
   for (const e of entries) {
@@ -85,8 +85,7 @@ await test('tc36_ the test-fixer prompt carries the conflicts as schema-valid en
   }
   for (const l of ['testfix ledger 1', 'testfix prove 1']) {
     assert.ok(requests(trace).includes(l), `${l} was requested`)
-    assert.equal(typeof p.state.opts[l].agentType, 'string', `${l} carries the lean agentType`)
-    assert.ok(p.state.opts[l].agentType, `${l} agentType is not empty`)
+    assert.equal(p.state.opts[l].agentType, 'ck-runner', `${l} carries the lean agentType`)
   }
 })
 
@@ -128,7 +127,7 @@ await test('tc43_ after approval: land with --gate, then a fresh task agent, the
   const t4 = taskLand(trace, '4')
   assert.ok(t4 > fresh, 'Task 4 merges after its fresh attempt')
   assert.ok(firstReq(trace, /^task 5/) > t4, 'Task 5 starts only after Task 4 merged')
-  assert.deepEqual(result.merged.sort(), ['4', '5'])
+  assert.deepEqual(result.merged.filter(t => !/^testfix/.test(t)).sort(), ['4', '5'])
 })
 
 await test('tc44_ a scope violation: no review agent, needs-input, no land', async () => {
@@ -215,17 +214,18 @@ await test('tc49_ testFixes[] records a landed fix and one sent to me', async ()
   assert.match(String(sent.proof.reason), /PROOF-FAILED-B/)
 })
 
-await test('tc84_ a PROTECTED landing of the test-fix branch goes to needs-input and no agent lands it', async () => {
-  const { p, trace, result } = await run([C1], { protectedTasks: ['testfix1'] })
-  assert.equal(fixLands(trace).length, 1, 'exactly one land request: the one that answered PROTECTED')
+await test('tc84_ a PROTECTED landing parks the task as needs-input kind protected with the approve command, and nothing lands it', async () => {
+  const p = project({ deps: { 4: [], 5: ['4'] }, protectedTasks: ['4'] })
+  const { trace, result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: AGENTS } })
+  const lands4 = requests(trace).filter(l => /^land /.test(l) && l.slice(5).split(' ').includes('4'))
+  assert.equal(lands4.length, 1, 'exactly one land request: the one that answered PROTECTED')
   assert.ok(!requests(trace).some(l => /^(resolve|fix) /.test(l)), 'nothing tries to land it another way')
-  assert.equal(p.state.landings.filter(l => l.some(t => /testfix/.test(t))).length, 1)
-  assert.ok(!p.state.merged.has('testfix1'), 'the fix branch never merged')
-  const e = toMe(result)
+  assert.equal(p.state.landings.filter(l => l.includes('4')).length, 1)
+  assert.ok(!p.state.merged.has('4'), 'Task 4 never merged')
+  const e = (result.needsInput || []).filter(x => String(x.task) === '4')
   assert.equal(e.length, 1, JSON.stringify(result.needsInput))
-  assert.match(JSON.stringify(e[0]), /protected|approve|human/i)
-  assert.ok(!result.merged.includes('4'))
-  assert.ok(!p.state.events.includes('task 5'))
-  const rec = (result.testFixes || []).find(r => r.fix === 'testfix1')
-  assert.ok(rec && rec.outcome === 'to-me', JSON.stringify(result.testFixes))
+  assert.equal(e[0].kind, 'protected')
+  assert.match(JSON.stringify(e[0]), /ck worktree approve demo 4/)
+  assert.ok(!(result.merged || []).includes('4'))
+  assert.ok(!p.state.events.includes('task 5'), 'Task 5 never starts')
 })

@@ -71,17 +71,17 @@ await test('tc39_ a blocking cross-test finding naming 2 tests starts a test-fix
   assert.deepEqual([o.model, o.effort], ['opus', 'high'], 'the test-writer role')
 })
 
-await test('tc65_ a cross-test finding is blocking: turned into conflict entries for the test-fixer; a non-blocking one is not', async () => {
-  const blocking = finding('test_tc7_blocking')
-  const advisory = finding('test_tc7_advisory', { severity: 'minor' })
-  const { p, trace } = await run([blocking, advisory])
+await test('tc65_ every cross-test finding is blocking: turned into conflict entries for the test-fixer; no findings proceeds as today', async () => {
+  const major = finding('test_tc7_blocking')
+  const minor = finding('test_tc7_minor', { severity: 'minor' })
+  const { p, trace } = await run([major, minor])
   assert.equal(fixers(trace).length, 1)
   const prompt = p.state.prompts[fixers(trace)[0]]
   assert.match(prompt, /test_tc7_blocking/)
-  assert.doesNotMatch(prompt, /test_tc7_advisory/, 'the non-blocking finding is not a conflict entry')
-  const none = await run([advisory])
-  assert.deepEqual(fixers(none.trace), [], 'only a blocking finding starts a fixer')
-  assert.ok(none.result.merged.includes('2'), 'a run with no blocking finding proceeds')
+  assert.match(prompt, /test_tc7_minor/, 'a minor finding is a conflict entry too')
+  const none = await run([], { [FILE]: {} }, { crossTest: { verdict: 'approve', findings: [], summary: 'ok' } })
+  assert.deepEqual(fixers(none.trace), [], 'no findings starts no fixer')
+  assert.ok(none.result.merged.includes('2'), 'a run with no findings proceeds')
 })
 
 await test('tc186_ a cross-test fix proves with --held 2 and no --blocked, Task 2 starts after the fix lands, the record says so', async () => {
