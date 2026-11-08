@@ -95,7 +95,12 @@ const SCRIPT_READINESS = !!A.deps && typeof A.deps === 'object' && !Array.isArra
 // orchestrator role sets one; a merge that hits a conflict goes to the resolver.
 const ROLES = A.agents || {}
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
-function roleOpts(name, role, override) {
+// On hosts that provide the ck() global (OpenCode), each base agent call also carries its role
+// (`role` opt), so opencode.roles can map it to a model. Escalated ladder steps drop the tag
+// (see escalated), and Claude Code, which has no ck() global, never sees a role opt.
+const ROLE_TAGS = typeof ck === 'function'
+const ROLE_NAMES = ['implementer', 'test_writer', 'reviewer', 'reviewer_risky', 'fixer', 'orchestrator', 'resolver']
+function roleOpts(name, role, override, tag = name) {
   const model = (override && override.model) || (role && role.model)
   const effort = (override && override.effort) || (role && role.effort)
   const opts = {}
@@ -107,6 +112,7 @@ function roleOpts(name, role, override) {
     if (!EFFORTS.includes(effort)) throw new Error(`spec-implement: unknown effort "${effort}" for ${name} (use ${EFFORTS.join(', ')})`)
     opts.effort = effort
   }
+  if (ROLE_TAGS && ROLE_NAMES.includes(tag)) opts.role = tag
   return opts
 }
 const OVERRIDE = { model: A.model || null, effort: A.effort || null }
@@ -144,7 +150,12 @@ const desc = o => `${o.model || 'inherited'}/${o.effort || 'inherited'}`
 const up = list => (list.length ? ` (escalate ${list.join(' > ')})` : '')
 const baseOpts = n => (TRACKS[n] === 'test' ? TEST : IMPL)
 const baseLadder = n => (TRACKS[n] === 'test' ? TEST_UP : IMPL_UP)
-const escalated = (opts, model) => ({ ...opts, model })
+// An escalated step runs the named model: it drops the role tag so the alias map (or the ck role map) resolves it.
+const escalated = (opts, model) => {
+  const out = { ...opts, model }
+  delete out.role
+  return out
+}
 
 // Risk and complexity routing. Escalation only fires on failures we detect, and
 // the costly bugs (a send path or price tripwire that passes every test) are the
@@ -177,8 +188,9 @@ const ladderOf = n => {
 }
 // The risky reviewer: reviewer.risky_model/risky_effort, never below reviewer.model/effort.
 const RISKY_REVIEW = (() => {
-  const risky = roleOpts('reviewer.risky', { model: REVIEWER.risky_model || REVIEWER.model, effort: REVIEWER.risky_effort || REVIEWER.effort }, null)
+  const risky = roleOpts('reviewer.risky', { model: REVIEWER.risky_model || REVIEWER.model, effort: REVIEWER.risky_effort || REVIEWER.effort }, null, 'reviewer_risky')
   const opts = { ...REVIEW }
+  if (ROLE_TAGS) opts.role = 'reviewer_risky'
   if (risky.model && (!REVIEW.model || rank(risky.model) >= rank(REVIEW.model))) opts.model = risky.model
   if (risky.effort && (!REVIEW.effort || EFFORT_RANK(risky.effort) >= EFFORT_RANK(REVIEW.effort))) opts.effort = risky.effort
   return opts
