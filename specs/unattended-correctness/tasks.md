@@ -1742,7 +1742,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 76: Test attributed periodic, recheck and final gates in the workflow
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.1, 2.2, 2.3, 2.6, 2.7, 2.8, 2.9, 2.10, 2.11, 2.12, 3.6, 3.7, 3.8, 3.9, 19.1, 19.5
 **Description:** Implement TC-18, TC-19, TC-20, TC-22, TC-23, TC-24, TC-25, TC-26 (a), TC-27 (a), TC-33 (a), TC-34, TC-35 and TC-36 (JS sources: retry, fixer and recheck prompts and the result; the test-fix prompt source is asserted in Task 83) against the real `spec-implement.js` under `load_workflow.mjs`. Assert on direct `ck()` argv (`-C <integration dir> gate demo --attribute --json`, `--install` allowed), thin-agent opts (`agentType` = the `runnerAgent` arg, `schema` deep-equal to `CK_CALL`), prompts, the virtual clock (TC-25 hang) and the result's `gates[]` (`kind`, `afterMerges`, `state`, `green`, `regressions`, `excusedByTask`, `flaky`, `report`, `error`), `testConflicts`, and the retry prompt from `failuresForPrompt` (first 50 entries, per-file counts of the rest). TC-24 also asserts that `gates[]` entries carry `green`, `fullGates[]` entries `afterMerges` and `green`, and `finalGate` `green`. TC-184 (2.12): on the Claude Code path every gate prompt's ck command ends with `--compact` and on the OpenCode path the argv has none; a red compact answer's `regressions` reach the fixer prompt; a green one records `excusedByTask` and `report`; a compact answer with `regressions` not an array is a gate `error`.
@@ -1752,10 +1752,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 81 (TC-18 to TC-20, TC-22 to TC-25, TC-26a, TC-27a, TC-33a, TC-34 to TC-36, TC-184)
 
 **Acceptance:**
-- [ ] Tests run the real workflow script source; only the runtime, agents and the `ck` global are faked
-- [ ] They fail before the implementation because periodic and final gates are default agents running a non-attributed gate, not because of harness errors
-- [ ] TC-25 covers all seven gate-error forms and none counts green
-- [ ] No mocks of the project's own code
+- [x] Tests run the real workflow script source; only the runtime, agents and the `ck` global are faked
+- [x] They fail before the implementation because periodic and final gates are default agents running a non-attributed gate, not because of harness errors
+- [x] TC-25 covers all seven gate-error forms and none counts green
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 2 (gateAnswers, taskFailures, testConflictsList)
 **Complexity:** High
