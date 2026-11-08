@@ -15,6 +15,6 @@ const projectDir = argv[2] || process.cwd();
 const packageRoot = join(import.meta.dirname, "..");
 const loaded = loadConfig({ directory: projectDir });
 const result = await runPreflight({ projectDir, packageRoot, config: loaded.config });
-stdout.write(`${formatPreflight(result)}\n`);
+stdout.write(`${formatPreflight(result, { listRoles: true })}\n`);
 stdout.write(`${JSON.stringify(result)}\n`);
 exit(result.ok ? 0 : 1);

@@ -249,7 +249,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 10: Red-team graph freshness and the single mapping (Story 11)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 11.6, 11.7
 **Description:** Try to break each SHALL NOT clause of Story 11 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Clauses: attribution and dependency detection SHALL not use separate mappings (11.6); ck SHALL never serve a graph older than its files (11.7). Starting points: edits that keep size and mtime (`os.utime` with nanosecond precision, same-length replacements); edits through a symlink; a file replaced by rename (new inode, old mtime); edits within the same second across two in-process calls; a test-plan row change that moves a TC's verifies edge while tasks.md is untouched; a Verify selector change that `ck graph`, `ck lint`, `ck plan` and `ck gate --attribute` must all reflect in one step. Tests named `test_tc14_redteam_<slug>` and `test_tc107_redteam_<slug>`.
@@ -259,10 +259,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 12 (11.7 freshness cases (`tc107_redteam`)), Task 53 (11.6 single-mapping cases across graph, lint, plan and gate (`tc14_redteam`))
 
 **Acceptance:**
-- [ ] Written from the requirements only, never from the implementation
-- [ ] Tests run the real CLIs on real files and compare graph, lint, plan and gate outputs
-- [ ] Each test fails before the implementation for the right reason
-- [ ] No mocks of the project's own code
+- [x] Written from the requirements only, never from the implementation
+- [x] Tests run the real CLIs on real files and compare graph, lint, plan and gate outputs
+- [x] Each test fails before the implementation for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (spec_graph_project, attr_project)
 **Complexity:** Medium
@@ -821,7 +821,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 35: Test claim release by run ID at run start
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 16.1, 16.2, 16.3, 16.4, 16.5, 16.6, 16.7
 **Description:** Implement TC-142, TC-143, TC-144, TC-145, TC-146, TC-147 and TC-148 (a) with real git locks and real progress records (`progress_run`, `age_claim`, `legacy_claim` from `tests/test_worktree_cli.py`). TC-142: `ck worktree claim demo 1 --progress-run <key>` records the run, shown in `ck worktree status demo --json`. TC-143: run A ended holds Tasks 1 and 2 with commits; `ck worktree start demo --run B --json` lists both in `releasedClaims` with run A and both branches keep their commits. TC-144: stale run (no end, old last event via `CK_NOW`) released. TC-145: live run's 3-hour-old claim kept, and B's claim of it is BUSY. TC-146: legacy claim kept at 30 min, released at 61, `claim_stale_minutes` honoured. TC-147: deleted run record releases. TC-148a: B's own claim is kept as own and B's claim succeeds without `--takeover`. TC-192: a pass under the spool layout (`CK_PROGRESS_DIR=<worktrees>/.ck-progress`) is killed with no `end` and a 10-minute-old last event; the next pass's `prepare_spool` adds a `superseded` end to the spool copy and `ck worktree start demo --run B --json` releases both claims with commits kept; without `prepare_spool`, `run_liveness` still reads the spool copy.
@@ -831,10 +831,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 36 (TC-142, TC-192's liveness and `prepare_spool` parts), Task 50 (TC-143 to TC-147, TC-148a, TC-192)
 
 **Acceptance:**
-- [ ] Tests use real git locks, real progress records and the real CLI
-- [ ] They fail before the implementation because claims carry no run and `ck worktree start` does not exist
-- [ ] Every release asserts the branch's commits are kept
-- [ ] No mocks of the project's own code
+- [x] Tests use real git locks, real progress records and the real CLI
+- [x] They fail before the implementation because claims carry no run and `ck worktree start` does not exist
+- [x] Every release asserts the branch's commits are kept
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (progress_run, ck_json)
 **Complexity:** Medium
@@ -1678,7 +1678,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 73: Show each role's resolved model in the OpenCode doctor
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 14.8
 **Description:** In `opencode/src/preflight.ts`, add `checkRoles(ctx)` that lists all seven roles with the resolved model and its source (`roles` map, alias map, or default) and include it in the preflight result, so `ck doctor --harness opencode` prints the same lines. Harness Contract owner: item 11's preflight `roles: [{role, model, source}]`.
@@ -1688,7 +1688,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 70 (TC-133)
 
 **Acceptance:**
-- [ ] Preflight and `ck doctor --harness opencode` show each role's resolved model and where it came from (14.8)
+- [x] Preflight and `ck doctor --harness opencode` show each role's resolved model and where it came from (14.8)
 
 **Dependencies:** Task 71 (calls `resolveRoleRef` and reads `config.roles`), Task 70 (its tests are the oracle)
 **Complexity:** Low
