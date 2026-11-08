@@ -260,8 +260,26 @@ def test_argparse_unrecognized_arguments():
 '''
 
 
+# A whole-spec gate runs only the Verify commands of Done tasks ("tests that should already pass"), so the
+# missing-command tests need a Done task whose Verify runs them; without one the gate runs nothing.
+_MISSING_TASK = """### Task 9: Missing-command smoke
+**Status:** Done
+**Track:** impl
+**Files:**
+- `mtr_click_cli.py` - CLI stubs whose `mtr thesis new` is missing
+**Verify:** `python -m pytest -q tests/test_missing_command.py`
+**Dependencies:** None
+
+**Acceptance:**
+- [x] runs the missing-command tests
+
+---
+
+"""
+
+
 def missing_command_project(tmp_path: Path) -> Path:
-    root = attr_project(tmp_path)
+    root = attr_project(tmp_path, extra_tasks=_MISSING_TASK)
     (root / "mtr_click_cli.py").write_text(_CLICK_CLI)
     (root / "mtr_choice_cli.py").write_text(_ARGPARSE_CHOICE_CLI)
     (root / "mtr_unrecognized_cli.py").write_text(_ARGPARSE_UNRECOGNIZED_CLI)
