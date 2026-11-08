@@ -11,7 +11,17 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { EFFORTS, MODELS, isAlias, isEffort, parseRef } from "./models.ts";
+import {
+  EFFORTS,
+  MODELS,
+  ROLE_NAMES,
+  isAlias,
+  isEffort,
+  isRoleName,
+  parseRef,
+  validateRoleRef,
+  type RoleName,
+} from "./models.ts";
 
 export interface AgentRule {
   /** Regular expression source matched (case-insensitively) against the workflow's `label`. */
@@ -59,6 +69,8 @@ export interface EffortConfig {
 
 export interface CkConfig {
   models: Record<string, string>;
+  /** Role -> `provider/model[#variant]`. Unmapped roles are absent, so they use the alias map. */
+  roles: Partial<Record<RoleName, string>>;
   efforts: EffortConfig;
   agents: AgentMapping;
   guard: GuardConfig;
@@ -91,6 +103,7 @@ export const DEFAULT_MODELS: Readonly<Record<string, string>> = Object.freeze({
 export function defaultConfig(): CkConfig {
   return {
     models: { ...DEFAULT_MODELS },
+    roles: {},
     efforts: { default: {}, models: {} },
     agents: {
       default: "ck-worker",
@@ -193,14 +206,15 @@ function mergeLayer(
   if (!isPlainObject(layer)) throw new ConfigError(`${source}: ${CONFIG_KEY} must be an object`);
 
   for (const key of Object.keys(layer)) {
-    if (!["models", "efforts", "agents", "guard", "run"].includes(key)) {
+    if (!["models", "roles", "efforts", "agents", "guard", "run"].includes(key)) {
       throw new ConfigError(
-        `${source}: unknown key ${JSON.stringify(key)} (known: models, efforts, agents, guard, run)`,
+        `${source}: unknown key ${JSON.stringify(key)} (known: models, roles, efforts, agents, guard, run)`,
       );
     }
   }
 
   if (layer.models !== undefined) mergeModels(target, layer.models, source, sources);
+  if (layer.roles !== undefined) mergeRoles(target, layer.roles, source, sources);
   if (layer.efforts !== undefined) mergeEfforts(target, layer.efforts, source, sources);
   if (layer.agents !== undefined) mergeAgents(target, layer.agents, source, sources);
   if (layer.guard !== undefined) mergeGuard(target, layer.guard, source, sources);
@@ -232,6 +246,30 @@ function mergeModels(
     }
     target.models[alias] = ref;
     sources[`models.${alias}`] = source;
+  }
+}
+
+function mergeRoles(
+  target: CkConfig,
+  value: unknown,
+  source: string,
+  sources: Record<string, string>,
+): void {
+  if (!isPlainObject(value)) throw new ConfigError(`${source}: roles must be an object`);
+  for (const [role, ref] of Object.entries(value)) {
+    if (!isRoleName(role)) {
+      throw new ConfigError(
+        `${source}: unknown role opencode.roles.${role} = ${JSON.stringify(ref)} (known roles: ${ROLE_NAMES.join(", ")})`,
+      );
+    }
+    const problem = validateRoleRef(ref);
+    if (problem !== null) {
+      throw new ConfigError(
+        `${source}: opencode.roles.${role} = ${JSON.stringify(ref)} is not a valid model reference: ${problem}`,
+      );
+    }
+    target.roles[role] = ref as string;
+    sources[`roles.${role}`] = source;
   }
 }
 
