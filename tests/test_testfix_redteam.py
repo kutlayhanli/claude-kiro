@@ -9,7 +9,8 @@ Written from the requirements, not the implementation. The clauses under attack 
   attacks.
 - 4.6: a failed proof or a rejected review SHALL not land (workflow cases, `test_tc45_redteam_<slug>`).
 - 4.8: a node that has had one automatic fix SHALL not get another test-fixer, however its id is spelled, and a damaged
-  ledger never grants.
+  ledger never grants. CLI ledger cases are `test_tc47_redteam_<slug>`; the workflow side of 4.8 (no second fixer
+  from the bridge's prior fixes, ledger checked before the fixer starts) is in the `test_tc45_redteam_<slug>` cases.
 
 CLI cases use real git branches, real pytest and the persisted ledger; workflow cases run the real script through the
 bridge and assert that no `worktree land` of the fix branch was requested.
@@ -498,14 +499,14 @@ def test_tc45_redteam_fixer_that_did_not_fix_lands_nothing(bridge, verdict):  # 
     assert not review_calls(out), "nothing was fixed: there is nothing to review"
 
 
-def test_tc47_redteam_prior_fix_starts_no_fixer_and_no_land(bridge):  # noqa: F811
+def test_tc45_redteam_prior_fix_starts_no_fixer_and_no_land(bridge):  # noqa: F811
     out = run_wf(bridge, prior={CONFLICT["file"]: "testfix9"})
     assert fixer_calls(out) == [], f"a second test-fixer was started: {fixer_calls(out)}"
     assert not review_calls(out) and not fix_landed(out)
     sent_to_me(out)
 
 
-def test_tc47_redteam_prior_fix_on_one_file_does_not_block_the_other_but_never_reaches_it(bridge):  # noqa: F811
+def test_tc45_redteam_prior_fix_on_one_file_does_not_block_the_other(bridge):  # noqa: F811
     out = run_wf(bridge, testfix={SECOND["file"]: {}}, prior={CONFLICT["file"]: "testfix9"}, conflicts=[CONFLICT, SECOND])
     calls = fixer_calls(out)
     assert len(calls) == 1, f"exactly one fixer (for the unfixed file): {calls}"
@@ -514,7 +515,7 @@ def test_tc47_redteam_prior_fix_on_one_file_does_not_block_the_other_but_never_r
     assert "4" not in out["result"]["merged"], "the blocked task cannot merge while one conflict is unresolved"
 
 
-def test_tc47_redteam_ledger_is_consulted_before_the_fixer_starts(bridge):  # noqa: F811
+def test_tc45_redteam_ledger_is_consulted_before_the_fixer_starts(bridge):  # noqa: F811
     out = run_wf(bridge)
     events = [e for e in out["events"] if isinstance(e, str)]
     ledger = [i for i, e in enumerate(events) if e.startswith("testfix ledger")]
