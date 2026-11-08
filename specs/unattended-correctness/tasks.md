@@ -2086,7 +2086,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 91: Red-team write-set holds (Story 13)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 13.1, 13.6
 **Description:** Try to break each SHALL NOT clause of Story 13 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Clauses: tasks with overlapping write-sets SHALL not run at the same time (13.1); holding a task SHALL not change its dependencies (13.6). Starting points against the real workflow: overlap only through `./src/a.py` vs `src/a.py`, a trailing `/` directory, backticked paths with ` - description` suffixes, case differences, `**` vs `*`; three tasks pairwise overlapping; an overlap that appears only after a retry or a live edge; a held task released by its blocker parking rather than merging; plan answers whose `overlaps` map is asymmetric. Also run `ck plan demo --json` (real CLI) and compare tasks.md bytes before and after a run. Tests named `tc120_redteam ...` and `tc124_redteam ...`.
@@ -2096,10 +2096,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 94 (red team of 13.1, 13.6)
 
 **Acceptance:**
-- [ ] Written from the requirements only, never from the implementation
-- [ ] Tests run the real workflow script and check in-flight intervals from the trace
-- [ ] Each test fails before the implementation for the right reason
-- [ ] No mocks of the project's own code
+- [x] Written from the requirements only, never from the implementation
+- [x] Tests run the real workflow script and check in-flight intervals from the trace
+- [x] Each test fails before the implementation for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 2 (owns, overlaps fakes)
 **Complexity:** Medium
