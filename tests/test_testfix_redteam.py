@@ -51,12 +51,16 @@ def prove(root: Path, *extra: str, nodes: Optional[List[str]] = None, mode: str 
     return code, obj, err
 
 
-def assert_not_proved(code: int, obj: Any, err: str, why: str) -> None:
+def assert_not_proved(code: int, obj: Any, err: str, why: str, may_refuse: bool = False) -> None:
     """The command answers in JSON, the fix is in scope (so only the proof is under test), and the proof is
     absent or reports proved false. Never proved true."""
     assert obj is not None, f"{why}: no JSON (exit {code}): {err}"
-    assert obj["scope"]["in_scope"] is True, f"{why}: the scope check refused a test-only fix: {obj['scope']}"
     proof = obj.get("proof")
+    if may_refuse and obj["scope"]["in_scope"] is False:
+        # A deleted test no longer carries its TC token, so the design's scope rule may refuse the fix: refused before any proof.
+        assert proof is None, f"{why}: a fix refused as out of scope was still proved: {obj}"
+        return
+    assert obj["scope"]["in_scope"] is True, f"{why}: the scope check refused a test-only fix: {obj['scope']}"
     assert not (proof and proof.get("proved")), f"{why}: the fix was proved: {obj}"
 
 
@@ -118,7 +122,7 @@ def test_tc41_redteam_proof_that_does_not_run_is_not_proof(tmp_path, key):
     root = make_scenario(tmp_path, base={TEST_FILE: feat4_test(41)}, fix={TEST_FILE: NOT_RUNNING[key]()},
                          task4=ANSWER_42)
     code, obj, err = prove(root)
-    assert_not_proved(code, obj, err, key)
+    assert_not_proved(code, obj, err, key, may_refuse=key == "deleted-function")
 
 
 def test_tc41_redteam_deleted_test_file_is_not_proof(tmp_path):
@@ -129,7 +133,7 @@ def test_tc41_redteam_deleted_test_file_is_not_proof(tmp_path):
     from unattended_helpers import commit_all
     commit_all(task_worktree(root, "testfix1"), "delete the test file")
     code, obj, err = prove(root)
-    assert_not_proved(code, obj, err, "deleted file")
+    assert_not_proved(code, obj, err, "deleted file", may_refuse=True)
 
 
 def test_tc41_redteam_deselecting_conftest_is_not_proof(tmp_path):
@@ -420,7 +424,7 @@ def sent_to_me(out: Dict[str, Any]) -> str:
     assert "4" not in result["merged"], result["merged"]
     assert "4" in [str(e["task"]) for e in result.get("needsInput", [])], f"task 4 not in needs-input: {result.get('needsInput')}"
     assert "task 5" not in out["events"], "a dependent started although the fix did not land"
-    records = [r for r in result.get("testFixes", []) if str(r.get("blocked", r.get("task", r.get("blockedTask")))) == "4"]
+    records = [r for r in result.get("testFixes", []) if str(r.get("blocked")) == "4"]
     assert records and all(r.get("outcome") != "landed" for r in records), result.get("testFixes")
     return json.dumps({"needsInput": result["needsInput"], "testFixes": result["testFixes"]})
 
@@ -440,7 +444,7 @@ def test_tc45_redteam_control_proved_in_scope_approved_fix_does_land(bridge):  #
 def test_tc45_redteam_failed_proof_never_lands(bridge, proof):  # noqa: F811
     out = run_wf(bridge, {CONFLICT["file"]: {"proof": proof}})
     assert not fix_landed(out), "a fix whose proof did not hold was landed"
-    assert not review_calls(out) or not fix_landed(out)
+    assert not review_calls(out), "a failed proof must get no review"
     assert "MARK-PROOF" in sent_to_me(out), "needs-input must carry the proof result"
 
 
@@ -451,7 +455,7 @@ def test_tc45_redteam_failed_proof_never_lands(bridge, proof):  # noqa: F811
     {"verdict": "approve-ish", "findings": ["MARK-REVIEW"], "summary": "unclear"},
     {"findings": ["MARK-REVIEW"], "summary": "no verdict at all"},
     {"verdict": None, "findings": ["MARK-REVIEW"], "summary": "null verdict"},
-    {"verdict": "approve", "findings": ["MARK-REVIEW blocking finding"], "summary": "approve but lists a finding"},
+    {"verdict": "approve", "findings": [{"severity": "blocking", "issue": "MARK-REVIEW blocking finding"}], "summary": "approve but lists a finding"},
 ])
 def test_tc45_redteam_rejected_or_unclear_review_never_lands(bridge, review):  # noqa: F811
     out = run_wf(bridge, {CONFLICT["file"]: {"review": review}})
