@@ -525,7 +525,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 22: Property tests for config validators and fixture drift
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.5, 15.2, 15.3, 15.4, 15.8
 **Description:** Implement the TC-175 rows P-13 and P-32. P-13: `claude_kiro.config.test_track_validate` and `fixture_globs` accept iff the value is a string or list of strings (for globs: a list of strings), else raise `ConfigError` naming the key, over `st.recursive` JSON (strings, empty string, mixed lists, nested lists, dicts, numbers, bools, null). P-32: `claude_kiro.fixtures.lock_decision` over 1-8 events on 5 files (3 matching the globs) with handcraft labels whose reasons are `""`, `" "`, `"\t\n"` or real text: drift is exactly the locked files changed without a label with a non-blank reason. Settings 200 examples, derandomized, no database. `PROPERTIES = {"P-13": ..., "P-32": ...}`, tests `test_tc175_p<k>_<slug>`.
@@ -536,11 +536,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 28 (P-13 at the config readers), Task 48 (P-32 at `lock_decision`)
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the rows
-- [ ] Settings are deterministic
-- [ ] Tests call the decision seams, not a server
-- [ ] They fail before the implementation because the seams do not exist
-- [ ] No mocks of the project's own code
+- [x] Generators cover every surface form and negative listed in the rows
+- [x] Settings are deterministic
+- [x] Tests call the decision seams, not a server
+- [x] They fail before the implementation because the seams do not exist
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Low
