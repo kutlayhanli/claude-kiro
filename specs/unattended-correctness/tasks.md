@@ -1815,7 +1815,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 79: Tag base agent calls with their role on ck() hosts
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 14.1, 14.6
 **Description:** In `plugin/workflows/spec-implement.js`, on hosts that provide the `ck()` global, add `role` (`implementer`, `test_writer`, `reviewer`, `reviewer_risky`, `fixer`, `orchestrator`, `resolver`) to the opts of every base (non-escalated) agent call; escalated ladder steps drop it so the alias map resolves them. Under Claude Code no `role` is passed and the agent opts keep today's aliases (`roleOpts` unchanged). Harness Contract owner: item 7's agent opts `role`. Foundation task: its Verify is a smoke check; 14.1 and 14.6 are verified at Task 82 by Task 75, whose suite also needs the run start and audit that Task 82 adds.
@@ -1824,8 +1824,8 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verify:** `uv run pytest -q tests/test_workflow_scripts.py -k "spec_implement"`
 
 **Acceptance:**
-- [ ] Under OpenCode each base agent call carries its role, so `opencode.roles` applies (14.1)
-- [ ] Under Claude Code agent opts carry only Claude aliases (14.6)
+- [x] Under OpenCode each base agent call carries its role, so `opencode.roles` applies (14.1)
+- [x] Under Claude Code agent opts carry only Claude aliases (14.6)
 
 **Dependencies:** Task 78 (both edit spec-implement.js; Task 78 runs first), Task 72 (the OpenCode host consumes the `role` opt)
 **Complexity:** Low
