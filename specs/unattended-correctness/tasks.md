@@ -181,7 +181,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 7: Test `ck graph` nodes, edges, freshness and problems
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8
 **Description:** Implement TC-102, TC-103, TC-104, TC-105, TC-14, TC-107 and TC-108 on `spec_graph_project` with `ck graph demo --json` (`ck-graph/1`). TC-102 compares node kinds (`task`, `tc`, `test_file`, `source_file`, `command`) and edge kinds (`depends`, `verifies`, `owns`, `provides`, `invokes`, `imports`) with exact expected sets. TC-103: design-table inference and `**Provides:**` precedence. TC-104: every P-20 invocation form and near-miss in one file. TC-105: byte-identical output sorted by (kind, id). TC-14: moving `tc3_` from Task 3's Verify to Task 8's changes the verifies edge and `ck gate --attribute --json`'s `tasks` together. TC-107: edits with `os.utime` restoring mtimes are reflected. TC-108: malformed task blocks and a syntax-error test file appear in `problems`, the rest equals the clean subset's graph.
@@ -191,10 +191,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 12 (TC-105, TC-107, TC-108), Task 13 (TC-102 to TC-104), Task 20 (TC-14 through `ck gate --attribute`)
 
 **Acceptance:**
-- [ ] Tests run the real CLI on real files
-- [ ] They fail before the implementation because `ck graph` does not exist
-- [ ] TC-14 checks graph and gate change in the same step (one mapping)
-- [ ] No mocks of the project's own code
+- [x] Tests run the real CLI on real files
+- [x] They fail before the implementation because `ck graph` does not exist
+- [x] TC-14 checks graph and gate change in the same step (one mapping)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (spec_graph_project, attr_project)
 **Complexity:** High
