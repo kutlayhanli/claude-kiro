@@ -128,7 +128,7 @@ const never = () => new Promise(() => {})
 //   testFix: {file: {verdict: 'fixed'|'test-correct'|'cannot-fix', proof, scope, review, finding}}
 //                                          answers `testfix <k> (Task n)` (the k-th file), `testfix review <k>`,
 //                                          `testfix prove <k>` and `ck testfix prove`
-//   priorFixes: {file: truthy}             `ck testfix check` answers alreadyFixed for those files
+//   priorFixes: {file: truthy}             `ck testfix check ... --test NODE` answers {allowed, alreadyFixed: [{node, at, fix}]}
 //   crossTest: answer | [answers]          replaces the cross-test reviewer's answer (a list: one per call, the last repeats)
 //   fidelity: json                         answer of `ck lint --fidelity`
 //   fixtureStatus: json                    answer of `ck fixtures status`
@@ -394,18 +394,24 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
     if (l.startsWith('re-check')) return { green: rechecksLeftRed-- <= 0 }
     if (l.startsWith('full gate')) return { green: !fullRed }
     if (l === 'final gate') return { green: true }
-    if (l === 'run start') return runStart ?? { ok: true, hooks: { installed: true, problems: [] }, claimsReleased: [], problems: [] }
+    if (l === 'run start') return runStart ?? { integration: { branch: 'integrate/demo', state: 'ok' }, hooks: { installed: true, active: true, intact: true, chainedTo: null, problems: [] }, baseline: { commit: 'abc1234', files: 0 }, releasedClaims: [], keptClaims: [], warnings: [] }
     if (l === 'audit') {
       if (audit === 'throw') throw new Error('audit failed')
-      return audit ?? { schema: 'ck-audit/1', ok: true, complete: true, protected: [], hooks: { active: true, altered: false }, fixtures: { drift: [], lockTampered: false, handcrafted: [] }, problems: [] }
+      return audit ?? { schema: 'ck-audit/1', complete: true, clean: true, drift: [], hooks: { installed: true, active: true, intact: true, chainedTo: null, problems: [] }, fixtures: { drift: [], lockTampered: false, handcrafted: [] }, problems: [] }
     }
     if (l.startsWith('testfix ledger ')) {
-      const file = fileOfArgs(prompt, priorFixes)
-      return { alreadyFixed: file !== null && !!priorFixes[file], file }
+      // `ck testfix check SPEC --test NODE ...`: a node is already fixed when its file part is in priorFixes.
+      const nodes = [...String(prompt).matchAll(/--test[ =](\S+)/g)].map(m => m[1].replace(/^["']|["']$/g, ''))
+      const fixed = n => Object.keys(priorFixes).find(f => priorFixes[f] && n.split('::')[0] === f)
+      const alreadyFixed = nodes.filter(fixed).map(node => ({ node, at: 'abc1234', fix: fixed(node) }))
+      return { allowed: nodes.filter(n => !fixed(n)), alreadyFixed }
     }
     if (l.startsWith('testfix prove ')) {
       const file = fileOfArgs(prompt, testFix) ?? Object.keys(testFix)[0]
-      return (file && testFix[file] && testFix[file].proof) || { verdict: 'proved', reason: 'the test fails on the base and passes on the fix' }
+      const t = (file && testFix[file]) || {}
+      const scope = { in_scope: true, outside: [], requirements_edited: false, spec_docs_edited: false, reason: 'in scope', ...(t.scope || {}) }
+      const proof = scope.in_scope === false ? null : { proved: true, against: 'base', outcomes: {}, reason: 'the test fails on the base and passes on the fix', ...(t.proof || {}) }
+      return { scope, proof, changedTests: [], against: 'base' }
     }
     if (l.startsWith('testfix review ')) {
       const file = testFileOf(l)
@@ -449,6 +455,8 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
       return { exitCode: e.ok === false ? 1 : 0, json: e }
     }
     const out = await rawAgent(prompt, opts)
+    // audit: exit 0 clean, 3 incomplete, 1 drift or hook problems (design.md ck-audit/1).
+    if (l === 'audit' && out && typeof out === 'object') return { exitCode: out.complete === false ? 3 : out.clean === false ? 1 : 0, json: out }
     return wrap ? { exitCode: 0, json: out } : out
   }
   const thinCall = async (label, argv) => {
@@ -485,9 +493,9 @@ export function directCk(p) {
     if (rest[0] === 'testfix' && rest[1] === 'check') return p.thinCall(`testfix ledger ${++ledgers}`, rest)
     if (rest[0] === 'testfix' && rest[1] === 'prove') return p.thinCall(`testfix prove ${++proves}`, rest)
     if (rest[0] === 'testfix' && rest[1] === 'record') return ok({ recorded: true })
-    if (rest[0] === 'fixtures' && rest[1] === 'status') return ok(p.extras.fixtureStatus ?? { drift: [], lockTampered: false, handcrafted: [] })
-    if (rest[0] === 'lint' && rest.includes('--fidelity')) return ok(p.extras.fidelity ?? { ok: true, findings: [] })
-    if (rest[0] === 'graph') return ok({ nodes: [], edges: [], problems: [], ...(p.extras.missingCommand ? { missingCommand: p.extras.missingCommand } : {}) })
+    if (rest[0] === 'fixtures' && rest[1] === 'status') return ok(p.extras.fixtureStatus ?? { locked: [], drift: [], unlabeled: [], configError: null })
+    if (rest[0] === 'lint' && rest.includes('--fidelity')) return ok(p.extras.fidelity ?? { checked: [], mismatches: [], unparsed: [], unmatched: [] })
+    if (rest[0] === 'graph') return ok({ spec: rest[1] ?? null, nodes: [], edges: [], problems: [], ...(p.extras.missingCommand ? { missingCommand: p.extras.missingCommand } : {}) })
     return { code: 2, stdout: '', stderr: `unknown ck command: ${argv.join(' ')}`, json: null }
   }
   return { fn, calls }
