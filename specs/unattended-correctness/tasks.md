@@ -890,7 +890,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 38: Property tests for the protect decision, landing tokens and the audit
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 9.2, 9.3, 9.4, 9.7, 9.8, 10.1, 10.3, 10.4, 10.5
 **Description:** Implement the TC-175 rows P-17, P-18, P-19, P-35 and P-36. P-35 at `protect.approval_decision`: true iff both TTY flags hold and the typed code equals the expected one exactly (one trailing newline stripped); near-miss codes, whitespace, case, prefixes, doubled codes, `yes`, empty and look-alikes are false. P-36 at `protect.audit_decision`: a missing, corrupt, other-spec, other-ref or mac-failing approved state always gives `complete: false` and `clean: false`, and `clean` is true only when complete with no drift, hooks installed, active and intact, and no fixture drift or tampering. P-17 at `claude_kiro.protect.ref_update_decision` (and the protected-path filter it uses): any ref outside `refs/heads/integrate/` is allowed; for integrate refs the refused files are exactly the protected and not-allowed changed paths; complements and monotone rules; refs and near-miss refs, protected paths and near-misses (`claude/x`, `.claude-notes/x`, `specs/ck.json.bak`, `specs/demo/ck.json`, `x.mcp.json`, `.envrc.example`), non-ASCII, space and git-quoted forms, the 4 allow-list shapes. P-18: Hypothesis stateful machine on real git and real ck (`hooks_repo`): rules land(allowed), land(clean), raw(kind, target in {protected, allowed, clean, previous}), restore(snapshot k), reset-back; invariant: `integrate/demo` only moves to commits whose protected changes are allowed or that ck landed, and a passing ck landing always succeeds (`max_examples=25`, `stateful_step_count=8`). P-19: stateful on real git (`max_examples=20`): the audit's drift equals the oracle set of protected paths differing from the last approved state, with kinds; approved changes never appear. Derandomized, no database. `PROPERTIES = {"P-17": ..., "P-18": ..., "P-19": ..., "P-35": ..., "P-36": ...}`, tests `test_tc175_p<k>_<slug>`.
@@ -901,11 +901,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 44 (P-17 at `ref_update_decision`, P-35 at `approval_decision`, P-36 at `audit_decision`), Task 46 (P-18 on real git and real landings), Task 51 (P-19 on the real audit)
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the rows
-- [ ] Settings are deterministic
-- [ ] P-17 calls the decision seam; P-18 and P-19 drive real git and the real ck, never a server
-- [ ] They fail before the implementation because the seam, hooks and audit do not exist
-- [ ] No mocks of the project's own code
+- [x] Generators cover every surface form and negative listed in the rows
+- [x] Settings are deterministic
+- [x] P-17 calls the decision seam; P-18 and P-19 drive real git and the real ck, never a server
+- [x] They fail before the implementation because the seam, hooks and audit do not exist
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (hooks_repo, snapshot helpers)
 **Complexity:** High
@@ -1079,7 +1079,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Status:** Not Started
 **Track:** impl
 **Requirements:** 9.2, 9.6, 9.7, 10.4
-**Description:** In `worktrees.py`: fix `protected_changes` so non-ASCII and space-containing paths are compared unquoted (`git diff --name-only --no-renames -z`); `merge()` runs the same check as `land()` (`protected_changes` against `land_allow_paths(target)`) and returns state `PROTECTED` with the files instead of merging (9.6); `land()` and `merge()` record the approved protected state with `protect.record_approved_state` after every landing they make (`by: "allow-list"` for covered protected files), and `create_integration` records the baseline state (`by: "baseline"`) on creation and on reuse when none exists (10.4); add the keyword `land(..., approved: Optional[Dict[str, List[str]]] = None)` that lets exactly those task -> protected files through, issues the token for that update and records them as `by: "approval"` (used only by `ck worktree approve`, Task 47). In `cli/worktree.py`, `merge_cmd` treats `PROTECTED` as a bad state (exit 3) and names the files. No existing test pins `ck worktree merge` landing protected files (the merge cases in `tests/test_worktree_cli.py` and `tests/test_worktree_land.py` use no protected paths), so no existing test changes; they stay in this task's Verify as preservation checks. Harness Contract owner: item 5's PROTECTED detail in `ck worktree land/merge --json`.
+**Description:** In `worktrees.py`: fix `protected_changes` so non-ASCII and space-containing paths are compared unquoted (`git diff --name-only --no-renames -z`); `merge()` runs the same check as `land()` (`protected_changes` against `land_allow_paths(target)`) and returns state `PROTECTED` with the files instead of merging (9.6); `land()` and `merge()` record, with `protect.record_approved_state` after every landing they make, only the protected paths the landed tasks changed (never the whole protected state, so bypass writes are not laundered) (`by: "allow-list"` for covered protected files), and `create_integration` records the baseline state (`by: "baseline"`) on creation and on reuse when none exists (10.4); add the keyword `land(..., approved: Optional[Dict[str, List[str]]] = None)` that lets exactly those task -> protected files through, issues the token for that update and records them as `by: "approval"` (used only by `ck worktree approve`, Task 47). In `cli/worktree.py`, `merge_cmd` treats `PROTECTED` as a bad state (exit 3) and names the files. No existing test pins `ck worktree merge` landing protected files (the merge cases in `tests/test_worktree_cli.py` and `tests/test_worktree_land.py` use no protected paths), so no existing test changes; they stay in this task's Verify as preservation checks. Harness Contract owner: item 5's PROTECTED detail in `ck worktree land/merge --json`.
 **Files:**
 - `src/claude_kiro/worktrees.py` - unquoted `protected_changes`; `merge()` PROTECTED check; approved-state recording; baseline; `land(approved=)`
 - `src/claude_kiro/cli/worktree.py` - `merge_cmd` exit 3 on PROTECTED
