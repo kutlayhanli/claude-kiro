@@ -1903,7 +1903,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 83: Test the automatic test-fix loop in the workflow
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 4.10, 4.11, 7.2, 7.4, 9.8
 **Description:** Implement TC-38, TC-39, TC-40, TC-42, TC-43 (a), TC-44 (b), TC-45, TC-46, TC-47 (b), TC-48, TC-49, TC-65, TC-84 (c) and TC-186 against the real workflow, in two files so each runs whole at the task that builds its behaviour: `tests/js/test_fix.test.mjs` holds TC-38, TC-40, TC-42 to TC-49 and TC-84c (the test-fix loop, Task 86, and the protected park, Task 82); `tests/js/test_fix_cross.test.mjs` holds TC-39, TC-65 and TC-186 (cross-test fixes, Task 87). Case names start with their TC ID (`tc38_ ...`), and `test_fix.test.mjs` has a TC argv filter like `tests/js/deterministic_plan.test.mjs`'s: with `tc<N>_` arguments only the cases whose names start with one of them run, so Task 82 can run `node tests/js/test_fix.test.mjs tc84_`. Assert: one `testfix <k> (Task <n>)` agent with the test-writer's model and effort and a `ck worktree create ... --base <INTO>` branch; structured conflict entries in its prompt; `testfix review <k>` with the reviewer's `risky_model`/`risky_effort` and the test-plan rows and guard checklist; land with `--gate` then a fresh task agent then dependents; out-of-scope, failed proof or rejected review go to needs-input with no land; `test-correct` retries the task with the finding as a failure; `priorFixes` nodes go to me; one fixer per file; `testFixes[]` records (`fix`, `blocked`, `source`, `tests`, `outcome`, `proof`, `scope`, `review`); cross-test findings become conflict entries; a PROTECTED landing goes to needs-input and no agent lands it; TC-186: a cross-test fix's `testfix prove` carries `--held <task>` and no `--blocked`, the held task starts only after the fix lands, and the record has `source: 'cross-test'`, `blocked: null`, `held`. Also assert TC-36's test-fix source (the test-fixer prompt carries the conflicts as schema-valid entries) and, on the Claude Code path, that the `testfix ledger <k>` and `testfix prove <k>` thin calls carry the lean `agentType`.
@@ -1914,10 +1914,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 86 (TC-38, TC-40, TC-42 to TC-49: the whole of `test_fix.test.mjs`), Task 82 (TC-84c via `tc84_`), Task 87 (TC-39, TC-65, TC-186 in `test_fix_cross.test.mjs`)
 
 **Acceptance:**
-- [ ] Tests run the real workflow script; only the runtime, agents and `ck` answers are faked
-- [ ] They fail before the implementation because a confirmed conflict ends in a report only
-- [ ] Every "no land" case asserts no `worktree land` request in the trace
-- [ ] No mocks of the project's own code
+- [x] Tests run the real workflow script; only the runtime, agents and `ck` answers are faked
+- [x] They fail before the implementation because a confirmed conflict ends in a report only
+- [x] Every "no land" case asserts no `worktree land` request in the trace
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 2 (testFix, priorFixes, crossTest fakes)
 **Complexity:** High
