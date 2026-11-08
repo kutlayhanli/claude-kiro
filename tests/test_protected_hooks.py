@@ -461,7 +461,7 @@ def test_tc84a_approval_with_a_pipe_as_stdin_is_refused(tmp_path):
                              env=h._ck_env(root, None), input=typed, capture_output=True, text=True, timeout=120,
                              start_new_session=True)  # no controlling terminal to fall back to
         assert "No such command" not in out.stderr, "ck worktree approve does not exist"
-        assert out.returncode != 0, f"approval through a pipe succeeded:\n{out.stdout}{out.stderr}"
+        assert out.returncode == 2, f"approval through a pipe succeeded:\n{out.stdout}{out.stderr}"
         assert integ_ref(root) == before, "approval through a pipe moved the ref"
         assert h.raw(root, "cat-file", "-e", f"{PROTECTED_REF}:.claude/CLAUDE.md").returncode != 0
 
@@ -597,7 +597,9 @@ def test_tc86_integration_reports_that_hooks_are_not_installed_with_the_reason(u
     assert status["installed"] is False, status
     assert status["problems"], f"no reason for the failed install: {status}"
     assert REASON.search(json.dumps(doc)), f"the report must name the reason: {doc}"
-    assert not hooks_dir(root).exists()
+    assert not (hooks_dir(root) / "reference-transaction").exists(), "no hook may be written (never half-install)"
+    assert not any(hooks_dir(root).iterdir()), "no hook may be written (never half-install)"
+    assert h.raw(root, "config", "--get", "core.hooksPath").stdout.strip() == "", "core.hooksPath must stay unset"
 
 
 def test_tc86_run_start_reports_that_hooks_are_not_installed_with_the_reason(unwritable_hooks_location):
