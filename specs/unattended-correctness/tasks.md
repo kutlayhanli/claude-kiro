@@ -660,7 +660,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 28: Add the config validators for test-track validation and recorded fixtures
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 6.4, 6.5, 15.7, 15.8
 **Description:** In `src/claude_kiro/config.py`, add `ConfigError(Exception)` (carries the key name), extend `DEFAULT_CONFIG` with `"test_track": {"validate": None}` and `"fixtures": {"recorded": [], "labels": "specs/fixture-labels.json"}`, and add two strict readers: `test_track_validate(config) -> List[str]` (None or absent -> `[]`; a string -> `[s]`; a list of strings -> the list; anything else raises `ConfigError("specs/ck.json: test_track.validate must be a string or a list of strings")`) and `fixture_globs(config) -> List[str]` (absent -> `[]`; a list of strings -> the list; anything else, including a non-string member, raises `ConfigError` naming `fixtures.recorded`). `load_config` stays tolerant; only these readers raise. Harness Contract owner: item 6's config keys `test_track.validate` and `fixtures.recorded` (the strict readers).
