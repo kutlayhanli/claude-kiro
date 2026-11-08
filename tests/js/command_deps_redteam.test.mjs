@@ -171,15 +171,21 @@ await test('tc114_redteam the edge already in deps (a liveEdges record written b
   assert.deepEqual(result.testFixes ?? [], [])
 })
 
-await test('tc114_redteam a task that waits does not spend retries even when it waits for a chain of providers', async () => {
+// Two waits in a row: attempt 1 misses Task 5's command; after Task 5 merged, attempt 2 misses Task 6's command
+// (Task 6 depends on Task 5, so it had not even started when attempt 1 ran). Neither wait spends a retry.
+await test('tc114_redteam a task that waits twice in a row (a second missing command surfaces after the first provider merged) spends no retries', async () => {
   const deps = { 2: [], 5: [], 6: ['5'] }
   const p = project({ deps, failUntil: { 2: 2 }, durations: { 2: 5, 5: 30, 6: 30 }, mergeDurations: { 5: 5, 6: 5 },
-    taskFailures: { 2: [failure(MESSAGES.plain, ['5']), failure('Error: No such command ‘other’.', ['6'], 'mtr thesis list')] } })
-  const { result } = await run(p, { ...baseArgs, ...graphArgs(deps), maxRetries: 0, maxConcurrent: 3, mergeBatch: 1 })
-  assert.deepEqual(retryLabels(p.state.events), [])
-  assert.deepEqual(result.testFixes ?? [], [])
+    taskFailures: { 2: [[failure(MESSAGES.plain, ['5'])], [failure('Error: No such command ‘other’.', ['6'], 'mtr thesis list')]] } })
+  const { result, trace } = await run(p, { ...baseArgs, ...graphArgs(deps), maxRetries: 0, maxConcurrent: 3, mergeBatch: 1 })
+  assert.deepEqual(retryLabels(p.state.events), [], `no retry label: ${p.state.events.join(', ')}`)
+  assertNoTestConflict(result, '2')
+  assert.ok(Array.isArray(result.liveEdges), 'the result lists liveEdges')
   assert.deepEqual(result.liveEdges.filter(e => e.task === '2').map(e => e.dependsOn).sort(), ['5', '6'])
-  assert.ok(result.merged.includes('2'))
+  const reqs = task2Requests(trace)
+  assert.equal(reqs.length, 3, `three attempts (fail, wait, fail, wait, pass): ${p.state.events.join(', ')}`)
+  assert.ok(reqs[1] > landEndIdx(trace, '5') && reqs[2] > landEndIdx(trace, '6'), 'each re-request comes after the land of the provider it waited for')
+  assert.ok(result.merged.includes('2'), `merged: ${result.merged}`)
 })
 
 // ================= 12.7 =================

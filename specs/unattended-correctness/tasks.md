@@ -2070,6 +2070,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Description:** Try to break each SHALL NOT clause of Story 12 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Clauses: a missing-command failure for another unfinished task's command SHALL not raise a test conflict or use a retry (12.5); a live edge that would create a cycle SHALL not be added (12.7). Starting points against the real workflow: missing-command text with click's curly quotes, ANSI colour, wrapped lines, or inside an assertion on an exit code; a command provided by two tasks, by a Done task, or by the failing task itself; a longer cycle through three tasks; a cycle formed only with a previously added live edge; the same failure reported twice (edge added twice); a `liveEdges[]` record from a prior run fed back in. Tests named `tc114_redteam ...` and `tc117_redteam ...`.
 **Files:**
 - `tests/js/command_deps_redteam.test.mjs` - adversarial 12.5, 12.7 cases
+- `tests/js/fake_project.mjs` - per-attempt `taskFailures` lists (test-plan Test Infrastructure item 3)
 **Verify:** `node tests/js/command_deps_redteam.test.mjs` `uv run pytest -q tests/test_workflow_scripts.py -k command_deps_redteam`
 **Verifies:** Task 93 (red team of 12.5, 12.7)
 
