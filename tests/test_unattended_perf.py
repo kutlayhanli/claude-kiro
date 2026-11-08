@@ -33,8 +33,6 @@ def _node(k: int, i: int) -> str:
 
 def _task_blocks(runner: str = "python -m pytest -q") -> list:
     """Test task 2k-1 owns tests/test_g{k}.py and verifies impl task 2k; impl task 2k selects `-k tc{k}_`."""
-    from test_lint import block
-
     out = []
     for k in range(1, PAIRS + 1):
         out.append(dict(num=2 * k - 1, title=f"tests {k}", track="test", files=[f"tests/test_g{k}.py"],
@@ -43,7 +41,6 @@ def _task_blocks(runner: str = "python -m pytest -q") -> list:
         out.append(dict(num=2 * k, title=f"impl {k}", files=[f"src/mod{k}.py"], deps=f"Task {2 * k - 1}",
                         verify=f'sh stub.sh -k "tc{k}_"', vby=f"Task {2 * k - 1}",
                         status="Done" if k % 2 else "Not Started"))
-    assert block  # imported only to fail loudly when the helper module is missing
     return out
 
 
@@ -91,6 +88,9 @@ def test_tc169_attribution_seams_under_two_seconds(tmp_path):
 def test_tc169_attributed_gate_cli_minus_stub_under_two_seconds(tmp_path):
     # Every command the gate can run (suite, test-task Verify, impl Verify, reruns) goes through the stub, which
     # prints only the failures its arguments select: the gate sees 200 unique failures and no real test time.
+    # Selectors: `-k <expr>` selects `test_<expr>`, a full node ID (`file::name`) selects exactly that node (the
+    # FAILED line has a space after it), a bare test file selects `<file>::`. Every selector is kept, so a batched
+    # rerun of N node IDs reprints exactly those N FAILED lines. No selector: the whole recorded run.
     root = h.spec_graph_project(tmp_path, tasks=_task_blocks("sh stub.sh"), tests=_test_files())
     recorded = "\n".join(["=== short test summary info ==="] + _failure_lines()
                          + [f"{PAIRS * FAILING_PER_FILE} failed, {PAIRS * (TESTS_PER_FILE - FAILING_PER_FILE)} passed in 3.20s"])
@@ -99,29 +99,35 @@ def test_tc169_attributed_gate_cli_minus_stub_under_two_seconds(tmp_path):
         '#!/bin/sh\n'
         'd="$(dirname "$0")"\n'
         'echo run >> "$d/stub-count.txt"\n'
-        'pat=""\n'
+        'pats=""\n'
+        'add() { if [ -z "$pats" ]; then pats="$1"; else pats="$pats\n$1"; fi; }\n'
         'while [ $# -gt 0 ]; do\n'
         '  case "$1" in\n'
-        '    -k) shift; pat="test_$1";;\n'
-        '    tests/*) pat="$1::";;\n'
+        '    -k) shift; add "test_$1";;\n'
+        '    tests/*::*) add "$1 ";;\n'
+        '    tests/*) add "$1::";;\n'
         '  esac\n'
         '  shift\n'
         'done\n'
-        'if [ -z "$pat" ]; then cat "$d/recorded.txt"; exit 1; fi\n'
+        'if [ -z "$pats" ]; then cat "$d/recorded.txt"; exit 1; fi\n'
         'echo "=== short test summary info ==="\n'
-        'grep -F -- "$pat" "$d/recorded.txt" | grep "^FAILED"\n'
+        'grep -F -- "$pats" "$d/recorded.txt" | grep "^FAILED"\n'
         'exit 1\n')
     (root / "specs" / "ck.json").write_text(json.dumps({"verify": ["sh stub.sh"]}) + "\n")
     (root / ".gitignore").write_text("stub-count.txt\n")
     h.commit_all(root, "stub verify")
 
-    # What one stub run costs on this machine, measured the way the gate starts it.
-    runs = []
-    for _ in range(5):
-        t = time.perf_counter()
-        subprocess.run(["sh", "stub.sh"], cwd=root, capture_output=True, text=True)
-        runs.append(time.perf_counter() - t)
-    per_run = statistics.median(runs)
+    # What one stub run costs on this machine, measured the way the gate starts it. A selecting run (a pipeline of
+    # two greps) costs more than the full-output run (one cat), so the larger of the two medians is used per run.
+    def median_run(*args: str) -> float:
+        runs = []
+        for _ in range(5):
+            t = time.perf_counter()
+            subprocess.run(["sh", "stub.sh", *args], cwd=root, capture_output=True, text=True)
+            runs.append(time.perf_counter() - t)
+        return statistics.median(runs)
+
+    per_run = max(median_run(), median_run("tests/test_g1.py"), median_run(_node(1, 0), _node(1, 1)))
     (root / "stub-count.txt").unlink()
 
     start = time.perf_counter()
