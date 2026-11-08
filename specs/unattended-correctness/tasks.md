@@ -88,7 +88,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 3: Property tests for attribution, failure format and reruns
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.8, 1.10, 2.4, 2.5, 3.2, 3.5
 **Description:** Implement TC-173 (P-1 to P-6) with Hypothesis at the decision seams `claude_kiro.attribution` (`AttributionIndex`, `tc_of_node`, `attribute_failure`, `rerun_plan`, `gate_verdict`) and `claude_kiro.failures` (`truncate_message`, `classify_kind`). P-1: statuses partition the failures, `excusedBy` is exactly the unfinished attributed tasks; P-1a: a TC selected by some Verify gets exactly the selecting tasks (never the covering test task's extra Verifies), and a TC no Verify selects gets the covering test task's Verifies; P-1b: a wrapper `hint` never changes tasks, status or `excusedBy`. P-2: Done monotonicity. P-3: TC tokens equal `tc<digits>_` in the function name only (case-insensitive, padded numbers normalised, near-misses rejected), and Verify selection agrees with pytest's own `_pytest.mark.expression.Expression` as oracle over every selector form listed. P-4: determinism under input permutation. P-5a: truncation bound, prefix, flag, no split surrogate or grapheme; P-5b: through the real CLI on generated failing tests, every `kind` in the 5 and counts equal (`max_examples=25`). P-6: rerun targets are exactly the candidates, each once; red iff a regression or unattributed remains. Settings `@settings(derandomize=True, max_examples=200, database=None, deadline=None)` (P-5b 25). The file declares `PROPERTIES = {"P-1": ..., ..., "P-6": ...}` mapping each P-id to its test name(s), named `test_tc173_p<k>_<slug>`. P-5 tests are named `test_tc173_p5a_<slug>` (truncation and kind seams) and `test_tc173_p5b_<slug>` (real CLI).
@@ -99,11 +99,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 6 (P-5a at the truncation and kind seams), Task 18 (P-1 to P-4, P-6 at the attribution seams), Task 19 (P-5b through the real CLI)
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the P-1 to P-6 rows (node forms, selector forms, text lengths 0/1/499/500/501/5000, exception classes, phases)
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] Tests call the decision seams (P-5b alone runs the real CLI), not a server
-- [ ] They fail before the implementation because the seams do not exist
-- [ ] No mocks of the project's own code
+- [x] Generators cover every surface form and negative listed in the P-1 to P-6 rows (node forms, selector forms, text lengths 0/1/499/500/501/5000, exception classes, phases)
+- [x] Settings are deterministic (derandomized, no database)
+- [x] Tests call the decision seams (P-5b alone runs the real CLI), not a server
+- [x] They fail before the implementation because the seams do not exist
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project for P-5b)
 **Complexity:** High
