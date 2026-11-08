@@ -384,7 +384,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 16: Red-team flaky reruns and gate errors (Story 2)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.4, 2.5, 2.9
 **Description:** Try to break each SHALL NOT clause of Story 2 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Clauses: a flaky test SHALL not make the gate red nor reach the fixer (2.4); excused failures SHALL not be rerun (2.5); a gate that cannot run or prints no parseable JSON SHALL not count green (2.9). Starting points: CLI cases with node IDs containing brackets, spaces, `::` in params, and unicode, so a rerun command could select the wrong node or none; a test that passes on rerun only because the rerun selected nothing; an excused test sharing a file with a candidate; workflow cases (bridge `run` and `call` on `gateOutcome`) with JSON followed by trailing text, two JSON objects, a valid-looking `ck-gate/1` with `ok: true` but a `regression` entry, `summary` counts contradicting `failures`, a previous green answer replayed for a later gate, and a thin envelope whose `json` is a string of JSON. Tests named `test_tc15_redteam_<slug>`, `test_tc17_redteam_<slug>`, `test_tc25_redteam_<slug>`. CLI cases use the `tc15_redteam` and `tc17_redteam` names; workflow cases use `tc25_redteam`.
@@ -394,10 +394,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 20 (CLI cases for 2.4, 2.5), Task 81 (workflow cases for 2.9)
 
 **Acceptance:**
-- [ ] Written from the requirements only, never from the implementation
-- [ ] CLI cases use real pytest counters to prove rerun counts; workflow cases run the real script
-- [ ] Each test fails before the implementation for the right reason
-- [ ] No mocks of the project's own code
+- [x] Written from the requirements only, never from the implementation
+- [x] CLI cases use real pytest counters to prove rerun counts; workflow cases run the real script
+- [x] Each test fails before the implementation for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project), Task 2 (bridge call and gateAnswers)
 **Complexity:** Medium

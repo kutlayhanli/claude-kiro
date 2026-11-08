@@ -461,7 +461,7 @@ gather inputs and act on the output; they never re-implement the rule.
 | `failuresForPrompt(failures, limit = 50)` | workflow decisions block | `-> {shown, more: {file: count}, total}` | 3.8 |
 | `testFixPlan({conflicts, alreadyFixed})` | workflow decisions block | `-> {groups: [{file, conflicts}], toMe: [...]}` | 4.8, 4.9 |
 | `heldByCrossTest({findings, testVerifies})` | workflow decisions block | `-> Set<task>` | 7.4 |
-| `gateOutcome(call)` | workflow decisions block | `CkCallResult -> {state: 'green'\|'red'\|'error', green, regressions, excusedByTask, flaky, report, reason}` (reads `ck-gate/1` or `ck-gate-compact/1`) | 2.6, 2.8, 2.9, 2.12, 19.5 |
+| `gateOutcome(call)` | workflow decisions block | `CkCallResult -> {state: 'green'\|'red'\|'error', green, regressions, excusedByTask, flaky, report, reason}` (reads `ck-gate/1` or `ck-gate-compact/1`; a green needs `ok:true` and exit code 0, so `code` is cross-checked against `ok`) | 2.6, 2.8, 2.9, 2.12, 19.5 |
 | `thinAgentMode({runnerAgent, unavailable, direct})` | workflow decisions block | `-> {mode: 'direct'\|'lean'\|'default', warning}` | 19.1, 19.4, 19.6 |
 | `resolveRoleRef(role, roles)` / `validateRoleRef(value)` | `opencode/src/models.ts` | `-> RoleRef \| null` / `-> string \| null` (error) | 14.1-14.4, 14.6 |
 
