@@ -181,7 +181,9 @@ def test_create_then_claim_again_gives_exactly_one_start_event(env, repo):
 def test_a_busy_claim_appends_nothing(env, repo):
     run, file = start_run(env, repo)
     create_worktrees(repo, 4)
-    assert "CLAIMED" in h.claim_event(env, repo, "demo", 4, run=run, now=at(1)).output
+    # Held by someone else: a claim without --progress-run is not this run's own (unattended-correctness 16.7;
+    # a same-run reclaim is CLAIMED by design, TC-148a), so the run's claim below is refused.
+    assert "CLAIMED" in worktree(repo, "claim", "demo", "4", now=at(1)).output
     before = file.read_bytes()
     again = h.claim_event(env, repo, "demo", 4, run=run, now=at(2))
     assert "BUSY" in again.output
