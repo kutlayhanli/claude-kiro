@@ -1555,7 +1555,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 68: Teach stats the new agent labels
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 14.7
 **Description:** In `src/claude_kiro/analytics/roles.py`, extend the label grammar so stats attribute the new workflow labels to roles: `testfix <k> (Task <n>)` -> test-writer, `testfix review <k>` -> reviewer, and `run start`, `audit`, `testfix ledger <k>`, `testfix prove <k>` -> gate (thin ck calls). Existing labels (`plan <k>`, `land ...`, `full gate @N`, `final gate`, `re-check <k>`, `report`, `park <n>`, `relink <n>`) keep their roles, so stats and bench reports can compare agents by role. Verified through TC-132's stats side (Task 67), which runs the real `ck stats` over a record carrying these labels.
@@ -1565,7 +1565,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 67 (TC-132 stats labels)
 
 **Acceptance:**
-- [ ] Each new label maps to its role, and existing labels map as before (14.7)
+- [x] Each new label maps to its role, and existing labels map as before (14.7)
 
 **Dependencies:** Task 67 (its tests are the oracle)
 **Complexity:** Low
