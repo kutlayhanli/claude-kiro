@@ -2043,7 +2043,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 89: Test live command edges and write-set scheduling in the workflow
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 12.5, 12.6, 12.7, 12.8, 13.1, 13.2, 13.3, 13.4, 13.5, 13.6
 **Description:** Implement TC-114, TC-116, TC-117, TC-118, TC-120, TC-121, TC-122 (a), TC-123 and TC-124 (a) against the real workflow. Assert: a missing-command failure for unfinished Task 5's command adds no conflict, uses no retry, logs a live edge, and re-requests Task 2 only after Task 5's land ends; no provider becomes a test conflict through confirmation then the test-fixer; a cycle (`2 -> 5 -> 2`) adds no edge and blocks Task 2 naming it; `liveEdges[]` has `{task, dependsOn, command}`; overlapping Tasks 2 and 3 run in priority order with Task 3 after Task 2's land; disjoint Task 4 fills a free slot and `writeSetHolds` names 3 waiting on 2; a task with no Files is not held; when the running task fails, the next held task starts and the run terminates; plan `deps` unchanged and no relink for overlap.
@@ -2053,9 +2053,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 94 (TC-114, TC-116 to TC-118, TC-120 to TC-124a; the suite needs live edges and write-set holds)
 
 **Acceptance:**
-- [ ] Tests run the real workflow script under the fake runtime and virtual clock
-- [ ] They fail before the implementation because there are no live edges or write-set holds
-- [ ] No mocks of the project's own code
+- [x] Tests run the real workflow script under the fake runtime and virtual clock
+- [x] They fail before the implementation because there are no live edges or write-set holds
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 2 (owns, overlaps, provides, missingCommand fakes)
 **Complexity:** High
