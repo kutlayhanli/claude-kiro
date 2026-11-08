@@ -429,7 +429,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 18: Attribute failures to tasks through the graph
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.7, 1.8, 1.10, 2.4, 2.5, 3.4, 11.6
 **Description:** Create `src/claude_kiro/attribution.py` with `Attribution`, `AttributionIndex`, `RerunItem` and `GateVerdict` from design "Data Models". `AttributionIndex.from_graph(graph, tasks)` builds `tc_tasks` from the graph's verifies edges: a TC's `"Verify -k"` edges when it has any, else its `"Verifies"` (test-task coverage) edges, never their union (1.1), `file_owner` and `test_task_verifies` from owns edges and Verifies fields, and `command_owner` (Verify command -> tasks listing it); attribution must use only the graph's edges (11.6). Pure seams: `tc_of_node(node_id) -> Optional[str]` (reads `tcNNN_` tokens from the test function name only, case-insensitive, numeric value normalised, ignoring param ids, class names, files and directories); `attribute_failure(failure, index, done, gated) -> Attribution` (TC id -> tasks, `by="tc"`; no TC id or unknown TC id -> the node's own file's owning test task's verified tasks, `by="file"`, with warning `unknown TC id TC-77 in <node>` for 1.8; neither -> `by="none"`, candidate, no excuse, and when the node's parameter ID names an owned file (`param_owned_file(node_id, file_owner)`, such as `[thin_agents.test.mjs]` -> `tests/js/thin_agents.test.mjs`; design "Data Models") a `hint` naming that file and its owning test task, which changes neither tasks, `by`, status nor excuse (1.5); a command-level failure from a non-pytest runner with no files -> `command_owner` with today's per-test-task rule, `by="command"`, warning "attribution unavailable for `<command>`"; candidate iff every attributed task is in done ∪ gated, else excused with `excused_by` sorted numerically); `rerun_plan(attributions) -> List[RerunItem]` (each regression candidate and unattributed failure exactly once, never an excused one; collection/import failures keyed `collect:<file>`); `rerun_command(prefix, nodes)` (launcher prefix + `-q -p no:cacheprovider` + quoted node ids, chunked under the argument limit); `gate_verdict(attributions, reruns, other_checks_ok) -> GateVerdict` (rerun failed -> regression, passed -> flaky, `unavailable` counts the first result; red iff regressions + unattributed > 0 or another check failed). Output ordering is canonical (command order, then node) and independent of input order (1.10). Harness Contract owner: item 3's `attribution.tc_ids`, `attribute`, `rerun_targets` and `settle` (design: `tc_of_node`, `attribute_failure`, `rerun_plan` and `gate_verdict`).
@@ -439,13 +439,13 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 3 (P-1 to P-4, P-6 at the attribution seams)
 
 **Acceptance:**
-- [ ] A failure is excused iff at least one attributed task is outside done ∪ gated, and `excused_by` lists exactly those tasks (1.2, 1.3)
-- [ ] A TC selected by any Verify maps to exactly the selecting tasks; only a TC no Verify selects maps to its test task's coverage (1.1)
-- [ ] No TC id falls back to the owning test task with `by="file"`; nothing to attribute gives `by="none"` and a candidate, with a `hint` (never an excuse) when a wrapper's parameter ID names an owned file (1.4, 1.5)
-- [ ] An unknown TC id falls back to file attribution with a warning naming it (1.8); a non-pytest command with no readable files uses the per-test-task rule with a warning (1.7)
-- [ ] `rerun_plan` lists each candidate once and never an excused failure (2.4, 2.5, NFR rerun bound)
-- [ ] `gate_verdict` marks each failure regression, excused, flaky or unattributed (3.4)
-- [ ] The same inputs in any order give identical output (1.10)
+- [x] A failure is excused iff at least one attributed task is outside done ∪ gated, and `excused_by` lists exactly those tasks (1.2, 1.3)
+- [x] A TC selected by any Verify maps to exactly the selecting tasks; only a TC no Verify selects maps to its test task's coverage (1.1)
+- [x] No TC id falls back to the owning test task with `by="file"`; nothing to attribute gives `by="none"` and a candidate, with a `hint` (never an excuse) when a wrapper's parameter ID names an owned file (1.4, 1.5)
+- [x] An unknown TC id falls back to file attribution with a warning naming it (1.8); a non-pytest command with no readable files uses the per-test-task rule with a warning (1.7)
+- [x] `rerun_plan` lists each candidate once and never an excused failure (2.4, 2.5, NFR rerun bound)
+- [x] `gate_verdict` marks each failure regression, excused, flaky or unattributed (3.4)
+- [x] The same inputs in any order give identical output (1.10)
 
 **Dependencies:** Task 12 (builds the index from `SpecGraph`), Task 6 (consumes `Failure`), Task 3 (its tests are the oracle)
 **Complexity:** High
