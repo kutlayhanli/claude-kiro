@@ -303,11 +303,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 
 **Acceptance:**
 - [ ] The graph has task, tc, test_file and source_file nodes and depends, verifies, owns and imports edges (11.1, 11.2)
-- [ ] `ck graph SPEC --json` is byte-identical across two runs, sorted by kind and id (11.5, NFR determinism)
-- [ ] An edit to tasks.md, a test file or a source file between two builds shows in the second build, even with mtimes restored (11.7)
-- [ ] A malformed source is named in `problems` and every other node and edge is present (11.8)
-- [ ] `write_set_overlaps` reports glob overlaps and gives no entry to a task without Files (13.1, 13.4)
-- [ ] A 100-task, 200-test-file spec builds in under 3 s (NFR graph build time)
+- [x] `ck graph SPEC --json` is byte-identical across two runs, sorted by kind and id (11.5, NFR determinism)
+- [x] An edit to tasks.md, a test file or a source file between two builds shows in the second build, even with mtimes restored (11.7)
+- [x] A malformed source is named in `problems` and every other node and edge is present (11.8)
+- [x] `write_set_overlaps` reports glob overlaps and gives no entry to a task without Files (13.1, 13.4)
+- [x] A 100-task, 200-test-file spec builds in under 3 s (NFR graph build time)
 
 **Dependencies:** Task 7 (its tests are the oracle), Task 8 (its tests are the oracle), Task 9 (its tests are the oracle), Task 10 (its tests are the oracle)
 **Complexity:** High
