@@ -73,11 +73,28 @@ def _run_arm(tmp_path, arm_conf: dict) -> tuple[dict, dict]:
 
 
 def _effective(oc: dict, role: str) -> str:
-    """The model a role resolves to: the role map first, then the alias map (as the plugin does)."""
+    """The model a role resolves to: the role map first, else the role's own alias in the alias map."""
     roles = oc.get("roles") or {}
     if role in roles:
         return roles[role]
-    return oc["models"]["sonnet"]
+    return oc["models"][ROLE_ALIAS[role]]
+
+
+# Each role's alias, as in claude_kiro.agents DEFAULTS (test_writer follows the implementer).
+ROLE_ALIAS = {
+    "implementer": "sonnet",
+    "test_writer": "sonnet",
+    "orchestrator": "sonnet",
+    "reviewer": "opus",
+    "reviewer_risky": "opus",
+    "fixer": "opus",
+    "resolver": "opus",
+}
+
+
+def _assert_aliases_on_arm_model(oc: dict) -> None:
+    """No alias (haiku, sonnet, opus, fable) may be rewritten to carry the reviewer."""
+    assert set(oc["models"].values()) == {ARM_MODEL}, oc["models"]
 
 
 def test_tc130_arm_roles_map_the_reviewer_and_leave_the_rest_on_the_arm_model(tmp_path):
@@ -85,6 +102,7 @@ def test_tc130_arm_roles_map_the_reviewer_and_leave_the_rest_on_the_arm_model(tm
     assert result["source"] == "opencode"
     oc = seen["opencode"]
     assert oc["roles"]["reviewer"] == REVIEWER
+    _assert_aliases_on_arm_model(oc)
     for role in ROLES:
         if role != "reviewer":
             assert _effective(oc, role) == ARM_MODEL, role
@@ -93,6 +111,7 @@ def test_tc130_arm_roles_map_the_reviewer_and_leave_the_rest_on_the_arm_model(tm
 
 def test_tc130_arm_without_roles_keeps_every_role_on_the_arm_model(tmp_path):
     _, seen = _run_arm(tmp_path, {})
+    _assert_aliases_on_arm_model(seen["opencode"])
     for role in ROLES:
         assert _effective(seen["opencode"], role) == ARM_MODEL, role
 
