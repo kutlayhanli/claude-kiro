@@ -425,8 +425,8 @@ gather inputs and act on the output; they never re-implement the rule.
 
 | Seam | Module (owner) | Input -> output | Decides |
 |---|---|---|---|
-| `classify_kind(exc_type, phase, message, timed_out)` | `failures.py` | `str, str, str, bool -> Kind` | 3.2: the five kinds; unknown -> `error` |
-| `truncate_message(text, limit=500)` | `failures.py` | `str, int -> (str, bool)` | 3.5, NFR message limit; never drops |
+| `classify_kind(exc_type, phase, message, timed_out)` | `failures.py` | `str, str, str, bool -> Kind` | 3.2: the five kinds; unknown -> `error`; `timed_out` wins, then phase `collect` maps `ImportError`/`ModuleNotFoundError` to `import` and anything else to `collection` |
+| `truncate_message(text, limit=500)` | `failures.py` | `str, int -> (str, bool)` | 3.5, NFR message limit; never drops. The kept prefix is non-empty and cut on a grapheme boundary (not before a combining mark or ZWJ/VS16, not after a ZWJ, not inside CRLF or a regional-indicator pair); a marker may follow. When no boundary exists in 1..limit, a hard cut at `limit` is the fallback |
 | `missing_command(text, programs)` | `failures.py` | `str, Sequence[str] -> Optional[str]` | 12.5: unknown subcommand / unrecognized arguments / invalid choice -> the command path |
 | `classify_not_built(failure, ctx)` | `failures.py` | `Failure, ProjectContext -> "not-built" \| "bad" \| "unclear"` | 5.2-5.4, 5.7 |
 | `assert_reaches_project(test_source, line, ctx)` | `failures.py` | `str, int, ProjectContext -> Optional[bool]` | 5.7: does the failing assert's expression reach project code (None: cannot parse) |
@@ -434,8 +434,8 @@ gather inputs and act on the output; they never re-implement the rule.
 | `tc_of_node(node_id)` | `attribution.py` | `str -> Optional[str]` | 1.1: `tcNNN_` -> `TC-N` |
 | `param_owned_file(node_id, file_owner)` | `attribution.py` | `str, Mapping[str, str] -> Optional[str]` | 1.5 hint only: a wrapper node whose parameter ID names an owned file (never attributes or excuses) |
 | `attribute_failure(failure, index, done, gated)` | `attribution.py` | `Failure, AttributionIndex, FrozenSet[str], FrozenSet[str] -> Attribution` | 1.1-1.8: tasks, by-what, candidate or excused |
-| `rerun_plan(attributions)` | `attribution.py` | `List[Attribution] -> List[RerunItem]` | 2.4, 2.5, NFR: each candidate once, excused never |
-| `gate_verdict(attributions, reruns, other_checks_ok)` | `attribution.py` | `-> GateVerdict` | 2.4, 2.6, 2.8, 3.4: regression / flaky / excused / unattributed, red or green |
+| `rerun_plan(pairs)` | `attribution.py` | `List[Tuple[Failure, Attribution]] -> List[RerunItem]` (`RerunItem.key` is the failure's node, or `collect:<file>` for a file-level failure) | 2.4, 2.5, NFR: each candidate once, excused never |
+| `gate_verdict(pairs, reruns, other_checks_ok)` | `attribution.py` | `List[Tuple[Failure, Attribution]], Mapping[str, bool], bool -> GateVerdict` (`reruns` maps each failure key, as above, to whether its rerun passed; `GateVerdict.statuses` is keyed the same way) | 2.4, 2.6, 2.8, 3.4: regression / flaky / excused / unattributed, red or green |
 | `ref_update_decision(update, protected_changed, allow, token, approved)` | `protect.py` | `RefUpdate, List[str], List[str], Optional[TokenCheck], Optional[Mapping[str, str]] -> RefDecision` | 9.2-9.4, 9.12 |
 | `token_matches(token, update, used, mac_ok)` | `protect.py` | `TokenRecord, RefUpdate, bool, bool -> bool` | 9.3: one-shot, this ref, this target |
 | `merge_commit_decision(head_ref, changed, allow, token_present)` | `protect.py` | `-> RefDecision` | 9.5 |

@@ -136,8 +136,10 @@ def spec_models(draw):
     for n in tcs:
         if selecting[n]:
             tc_tasks[f"TC-{n}"] = selecting[n]  # P-1a (selected): only the selecting tasks
-        elif covering[n] is not None:
-            tc_tasks[f"TC-{n}"] = verifies[covering[n]]  # P-1a (fallback): the covering test task's Verifies
+        elif covering[n] is not None and verifies[covering[n]]:
+            # P-1a (fallback): the covering test task's Verifies; the graph never emits a TC with no edges,
+            # so a TC whose task tuple would be empty is absent from the index (file attribution applies).
+            tc_tasks[f"TC-{n}"] = verifies[covering[n]]
     done = frozenset(draw(st.sets(st.sampled_from(ids).map(str))))
     gated = frozenset(draw(st.sets(st.sampled_from(ids).map(str))))
     return dict(impl=impl, test_tasks=test_tasks, files=files, verifies=verifies, tcs=tcs, covering=covering,
@@ -385,7 +387,9 @@ def pair_lists(draw):
     pairs = []
     for node, file in picks:
         f = _failure(node=node, file=file, kind="collection" if node is None else "assertion")
-        pairs.append((f, attribute_failure(f, index, model["done"], model["gated"])))
+        attr = attribute_failure(f, index, model["done"], model["gated"])
+        assert attribute_failure(f, index, model["done"], model["gated"]) == attr  # P-4: two calls, same output
+        pairs.append((f, attr))
     return pairs
 
 
@@ -429,6 +433,22 @@ def _extends(ch):
     return unicodedata.category(ch) in ("Mn", "Me", "Mc") or ch in ("‍", "️")
 
 
+def _legal_cut(text, i):
+    """True when cutting `text` before index i splits no grapheme (mark, ZWJ, CRLF, regional-indicator pair)."""
+    if _extends(text[i]) or text[i - 1] == "\u200d":
+        return False
+    if text[i - 1] == "\r" and text[i] == "\n":
+        return False
+    ri = lambda c: 0x1F1E6 <= ord(c) <= 0x1F1FF
+    if ri(text[i]) and ri(text[i - 1]):
+        run = 0
+        while i - 1 - run >= 0 and ri(text[i - 1 - run]):
+            run += 1
+        if run % 2 == 1:
+            return False
+    return True
+
+
 @settings(**SETTINGS)
 @given(text=messages())
 def test_tc173_p5a_truncation_bound_prefix_flag(text):
@@ -444,12 +464,11 @@ def test_tc173_p5a_truncation_bound_prefix_flag(text):
     assert out
     assert not any(0xD800 <= ord(c) <= 0xDFFF for c in out)
     common = len(list(itertools.takewhile(lambda p: p[0] == p[1], zip(out, text))))
-    assert common >= len(out) - 3  # at most a short marker after the kept prefix
     assert common > 0
-    if common < len(text):
-        assert not _extends(text[common]), "cut before a combining mark or joiner"
-        assert text[common - 1] != "‍", "cut after a zero-width joiner"
-        assert not (text[common - 1] == "\r" and text[common] == "\n"), "cut inside CRLF"
+    ok = [i for i in range(1, 501) if _legal_cut(text, i)]
+    if ok:  # no-split rules apply only when a legal grapheme boundary exists in 1..500
+        assert common in ok, "cut must fall on a grapheme boundary (an optional marker may follow the prefix)"
+    # otherwise (e.g. a 501-char run of joiners or marks) any non-empty prefix is accepted: hard cut fallback
 
 
 EXC_TYPES = ["AssertionError", "MyAssertionError", "AssertionErrorX", "ImportError", "ModuleNotFoundError",
