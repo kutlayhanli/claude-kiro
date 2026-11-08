@@ -227,7 +227,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 9: Test the attribution, hook and graph performance budgets
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 9.4, 11.1
 **Description:** Implement TC-169, TC-170 and TC-109, all `@pytest.mark.serial`. TC-169: a parsed result of 2,000 tests and 200 failures over a generated 100-task spec (graph and `AttributionIndex` built before the clock starts); `attribute_failure` over all failures plus `rerun_plan` and `gate_verdict` take under 2 s; and `ck gate --attribute --json` with a stub verify command printing pre-recorded pytest output, minus the stub's own time, is under 2 s. TC-170: on `equity_sized_repo`, median of 20 `git update-ref refs/heads/x` with hooks minus without is under 50 ms; for `integrate/demo` (allowed change) under 1 s. TC-109: 100 tasks and 200 test files, `ck graph demo --json` wall time minus `ck --version` under 3 s.
@@ -237,10 +237,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 12 (TC-109), Task 20 (TC-169), Task 45 (TC-170)
 
 **Acceptance:**
-- [ ] Timings run the real seams, real CLI and real git hooks
-- [ ] They fail before the implementation because the seams, hooks and `ck graph` do not exist
-- [ ] Inputs are generated deterministically (fixed seeds)
-- [ ] No mocks of the project's own code
+- [x] Timings run the real seams, real CLI and real git hooks
+- [x] They fail before the implementation because the seams, hooks and `ck graph` do not exist
+- [x] Inputs are generated deterministically (fixed seeds)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (equity_sized_repo, spec_graph_project)
 **Complexity:** Medium
