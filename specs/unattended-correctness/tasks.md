@@ -406,7 +406,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 17: Test command dependencies in lint, relink, plan and spec-create
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 12.1, 12.2, 12.3, 12.4, 12.5, 12.9, 13.1, 13.4, 13.6
 **Description:** Implement TC-110, TC-111, TC-112, TC-113 (a and b), TC-115, TC-119, TC-122 (b), TC-124 (b) and TC-125. TC-110: `ck lint demo --json` `commandEdges` names the test file, `mtr thesis new`, Task 5 and Task 2. TC-111: `ck relink demo --commands --apply --json` adds the dependency; a second lint is clean and a second relink changes nothing. TC-112: `mtr bogus` in `unknownCommands`, `mtr version` not. TC-113a (JS): the real `spec-create.js` tasks-writing prompt asks for `**Provides:**` and a check with `ck graph` or `ck lint`; TC-113b: `ck graph` on such a tasks.md has the provides edge. TC-115: failure entries carry `missingCommand.command == "mtr thesis new"` for click `No such command`, `unrecognized arguments` and `invalid choice`. TC-119: the existing lint and relink tests run unchanged. TC-122b: `noWriteSet` for a task with no Files. TC-124b: `ck plan demo --json` leaves tasks.md byte-identical. TC-125: `overlaps` for `src/*.py`/`src/a.py` and `src/**`/`src/x/y.py`, none for `src/a.py`/`src/ab.py`. TC-119's existing lint and relink suites run unchanged in Task 33's Verify.
@@ -417,10 +417,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 13 (TC-113b), Task 19 (TC-115), Task 53 (TC-110 to TC-112, TC-122b, TC-124b, TC-125), Task 95 (TC-113a)
 
 **Acceptance:**
-- [ ] Tests run the real lint, relink, plan and gate CLIs on real files and the real spec-create script
-- [ ] They fail before the implementation because the new lint keys, `--commands` and `missingCommand` do not exist
-- [ ] TC-119's existing files are run, not modified
-- [ ] No mocks of the project's own code
+- [x] Tests run the real lint, relink, plan and gate CLIs on real files and the real spec-create script
+- [x] They fail before the implementation because the new lint keys, `--commands` and `missingCommand` do not exist
+- [x] TC-119's existing files are run, not modified
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (spec_graph_project; TC-113a uses the existing `tests/js/fake_create.mjs`)
 **Complexity:** High
