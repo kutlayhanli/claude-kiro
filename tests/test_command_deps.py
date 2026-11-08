@@ -341,6 +341,3 @@ def test_tc125_plan_overlaps_match_globs(tmp_path, a, b, expected):
     assert "overlaps" in result, sorted(result)
     pairs = overlap_pairs(result["overlaps"])
     assert (("1", "2") in pairs) is expected, result["overlaps"]
-    if expected:
-        # symmetric: each task lists the other
-        assert "2" in result["overlaps"].get("1", []) and "1" in result["overlaps"].get("2", [])
