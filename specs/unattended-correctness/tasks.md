@@ -785,11 +785,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 8 (P-23 at `plan_command_relink`)
 
 **Acceptance:**
-- [ ] `lint_spec` reports each missing command dependency with test file, command, provider and dependent task (12.1)
-- [ ] Commands no task provides and the project does not define are warned about (12.3)
-- [ ] Untagged test functions are warned about, naming the owning test task (1.9); tasks with no Files are warned about (13.4); graph problems are listed (11.8)
-- [ ] `plan_command_relink` adds exactly the missing edges and refuses one that would close a cycle (12.2, 12.7)
-- [ ] Existing import-based and Verify-cycle results are unchanged (12.9)
+- [x] `lint_spec` reports each missing command dependency with test file, command, provider and dependent task (12.1)
+- [x] Commands no task provides and the project does not define are warned about (12.3)
+- [x] Untagged test functions are warned about, naming the owning test task (1.9); tasks with no Files are warned about (13.4); graph problems are listed (11.8)
+- [x] `plan_command_relink` adds exactly the missing edges and refuses one that would close a cycle (12.2, 12.7)
+- [x] Existing import-based and Verify-cycle results are unchanged (12.9)
 
 **Dependencies:** Task 13 (calls `missing_command_edges` and `unknown_commands`), Task 8 (its tests are the oracle)
 **Complexity:** Medium
