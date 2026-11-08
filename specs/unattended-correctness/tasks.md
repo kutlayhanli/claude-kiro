@@ -1574,7 +1574,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 69: Test OpenCode per-role model config and resolution
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 14.1, 14.2, 14.3, 14.4
 **Description:** Implement TC-126, TC-127, TC-128, TC-129 and TC-180 (P-28) in TypeScript with `node --test` against the real `opencode/src/config.ts`, `models.ts` (`ROLE_NAMES`, `resolveRoleRef`, `validateRoleRef`), `run-child.ts` and `workflow-tool.ts`. TC-126: project `opencode.roles.reviewer` resolves an `agent()` call with `role: "reviewer"`, `model: "opus"` to `opencode-go/deepseek-v4.1-flash` variant `medium` with `modelSource: "roles"`. TC-127: unmapped `fixer` resolves through the alias map as today. TC-128: project beats global, `sources["roles.implementer"]` names the project file. TC-129: invalid references throw `ConfigError` naming `opencode.roles.<key>` and the value, and the workflow tool creates no child session. P-28 is table-driven over the 7 role names plus `Implementer`, `test-writer`, `reviewer-risky`, `" reviewer"`, `""`, and the values `opencode-go/deepseek-v4.1-flash#medium`, `opencode-go/muse-spark-1.3-contributor`, `p/m#`, `/m`, `p/`, `p`, `p/m#a#b`, `" p/m "`, `""`, `42`, `null`, `{}`. The file exports `PROPERTIES = { 'P-28': 'tc180_p28 role references are accepted iff valid' }`. Test names start with their TC (`tc126_ ...`, `tc180_p28 ...`) so `--test-name-pattern` can select them.
@@ -1585,10 +1585,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 71 (TC-127 to TC-129 and P-28 at the config and model seams), Task 72 (TC-126)
 
 **Acceptance:**
-- [ ] Tests call the real config loading and model resolution seams, not a server
-- [ ] They fail before the implementation because `opencode.roles` is an unknown config key
-- [ ] The P-28 table covers every surface form and negative listed in the row; it is deterministic (enumerated, no randomness)
-- [ ] No mocks of the project's own code
+- [x] Tests call the real config loading and model resolution seams, not a server
+- [x] They fail before the implementation because `opencode.roles` is an unknown config key
+- [x] The P-28 table covers every surface form and negative listed in the row; it is deterministic (enumerated, no randomness)
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Medium
