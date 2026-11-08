@@ -843,7 +843,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 36: Record and release claims by run ID
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 16.1, 16.2, 16.3, 16.4, 16.5, 16.7
 **Description:** In `src/claude_kiro/progress.py`, add `run_liveness(key, env, now) -> Liveness` (`running`: some copy of the run record exists, no copy has `end`, newest event within `STALE_MIN`; `finished`: some copy has `end`; `stale`: no end and newest event too old; `missing`: no copy) using `run_file`, `read_events` and `is_stale`. It reads every copy it can: the spool copy under `CK_PROGRESS_DIR` when set, and the data-dir copy when readable. In `src/claude_kiro/eta/service.py`, `prepare_spool` appends the `superseded` end event it writes to data-dir copies to every spool copy (`<worktrees>/.ck-progress`) of a run it supersedes. In `src/claude_kiro/worktrees.py`: `claim(..., run=None)` writes the lock reason `"{owner} (claim {token} at {time} run {key})"` when a run key is given; add `ClaimInfo` and `claim_info(reason)` parsing old and new formats; add the pure seam `claim_release_decision(claim, starting_run, liveness, age_s, stale_minutes) -> "release" | "keep" | "own"` (run == starting run -> own; run set and running -> keep; run set and finished/stale/missing/None -> release; no run -> release iff older than `stale_minutes`, default 60); add `RunStartClaims` and `release_for_run_start(root, spec, run, env, now)` that applies the decision to every claimed task worktree of the spec and only unlocks (commits stay). A claim owned by the starting run is treated as its own, so the run can claim it without `--takeover`. In `cli/worktree.py`, `claim_cmd` passes `--progress-run` to `claim(run=...)`, and `ck worktree status --json` shows the claim's `run`. Harness Contract owner: item 3's `worktrees.claim_decision` (design: `claim_release_decision`) and item 5's `ck worktree claim --progress-run` with `run` in `ck worktree status --json`.
@@ -856,10 +856,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 34 (P-27 at `claim_release_decision`), Task 35 (TC-142, TC-192's liveness parts), Task 106 (seam cases of the Story 16 red team)
 
 **Acceptance:**
-- [ ] A claim made with `--progress-run KEY` records the run ID, visible in status (16.1)
-- [ ] Claims of finished, stale or missing runs are released with commits kept; live runs' claims are kept (16.2, 16.3, 16.5)
-- [ ] Claims with no run ID follow the 60-minute rule and `claim_stale_minutes` (16.4)
-- [ ] A claim by the starting run is its own (16.7)
+- [x] A claim made with `--progress-run KEY` records the run ID, visible in status (16.1)
+- [x] Claims of finished, stale or missing runs are released with commits kept; live runs' claims are kept (16.2, 16.3, 16.5)
+- [x] Claims with no run ID follow the 60-minute rule and `claim_stale_minutes` (16.4)
+- [x] A claim by the starting run is its own (16.7)
 
 **Dependencies:** Task 34 (its tests are the oracle), Task 35 (its tests are the oracle), Task 106 (its tests are the oracle)
 **Complexity:** Medium
