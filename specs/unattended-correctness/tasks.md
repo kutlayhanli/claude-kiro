@@ -88,7 +88,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 3: Property tests for attribution, failure format and reruns
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.8, 1.10, 2.4, 2.5, 3.2, 3.5
 **Description:** Implement TC-173 (P-1 to P-6) with Hypothesis at the decision seams `claude_kiro.attribution` (`AttributionIndex`, `tc_of_node`, `attribute_failure`, `rerun_plan`, `gate_verdict`) and `claude_kiro.failures` (`truncate_message`, `classify_kind`). P-1: statuses partition the failures, `excusedBy` is exactly the unfinished attributed tasks; P-1a: a TC selected by some Verify gets exactly the selecting tasks (never the covering test task's extra Verifies), and a TC no Verify selects gets the covering test task's Verifies; P-1b: a wrapper `hint` never changes tasks, status or `excusedBy`. P-2: Done monotonicity. P-3: TC tokens equal `tc<digits>_` in the function name only (case-insensitive, padded numbers normalised, near-misses rejected), and Verify selection agrees with pytest's own `_pytest.mark.expression.Expression` as oracle over every selector form listed. P-4: determinism under input permutation. P-5a: truncation bound, prefix, flag, no split surrogate or grapheme; P-5b: through the real CLI on generated failing tests, every `kind` in the 5 and counts equal (`max_examples=25`). P-6: rerun targets are exactly the candidates, each once; red iff a regression or unattributed remains. Settings `@settings(derandomize=True, max_examples=200, database=None, deadline=None)` (P-5b 25). The file declares `PROPERTIES = {"P-1": ..., ..., "P-6": ...}` mapping each P-id to its test name(s), named `test_tc173_p<k>_<slug>`. P-5 tests are named `test_tc173_p5a_<slug>` (truncation and kind seams) and `test_tc173_p5b_<slug>` (real CLI).
@@ -99,11 +99,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 6 (P-5a at the truncation and kind seams), Task 18 (P-1 to P-4, P-6 at the attribution seams), Task 19 (P-5b through the real CLI)
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the P-1 to P-6 rows (node forms, selector forms, text lengths 0/1/499/500/501/5000, exception classes, phases)
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] Tests call the decision seams (P-5b alone runs the real CLI), not a server
-- [ ] They fail before the implementation because the seams do not exist
-- [ ] No mocks of the project's own code
+- [x] Generators cover every surface form and negative listed in the P-1 to P-6 rows (node forms, selector forms, text lengths 0/1/499/500/501/5000, exception classes, phases)
+- [x] Settings are deterministic (derandomized, no database)
+- [x] Tests call the decision seams (P-5b alone runs the real CLI), not a server
+- [x] They fail before the implementation because the seams do not exist
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project for P-5b)
 **Complexity:** High
@@ -156,7 +156,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 6: Add the D3 failure model and the pytest report plugin
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.6, 3.1, 3.2, 3.5, 12.5
 **Description:** Create `src/claude_kiro/failures.py` with the D3 model from design "Data Models / Python (failures.py)": the `Kind` literal (`assertion`, `import`, `collection`, `timeout`, `error`) and the frozen `Failure` dataclass (node, file, kind, message, truncated, command, exc_type, phase, crash_path, detail, missing_command) with an `as_json()` that emits the `ck-gate/1` failure keys (`node`, `tcId`, `tasks`, `attributedBy`, `file`, `kind`, `message`, `truncated`, `command`, `missingCommand`; `detail` is never emitted). Add the pure seams `classify_kind(exc_type, phase, message, timed_out) -> Kind` (AssertionError and subclasses by name -> assertion; ImportError/ModuleNotFoundError at collect -> import; other collect errors incl. SyntaxError -> collection; timed_out -> timeout; everything else, including a class merely named `MyAssertionError`, -> error), `truncate_message(text, limit=500) -> (str, bool)` (counts characters, safe for multibyte text, never drops the entry) and `missing_command(text, programs) -> Optional[str]` (click `No such command 'x'`, argparse `invalid choice: 'x'` and `unrecognized arguments`, returning the command path such as `mtr thesis new`). Add the readers the gate will use: `read_report(path, command)` for the JSON-lines report the plugin writes, `parse_short_summary(output, command)` for pytest's `FAILED`/`ERROR collecting` summary lines, and `failing_files(output, known_files, command)` for non-pytest runners (file-level entries). Create `src/claude_kiro/resources/pytest_plugin/ck_pytest_report.py`: a pytest plugin loaded with `-p ck_pytest_report` that appends one JSON line per failed or errored report (node id, phase, exception type, innermost crash path and line, first line of the crash message, longer detail up to 4000 chars) to `$CK_GATE_REPORT`, and, when `CK_GATE_COLLECT` is set, one line per collected node ID; under xdist only the controller writes; it does nothing when the variable is unset and never touches the network. In `pytest_configure` it reads `CK_GATE_REPORT`, `CK_GATE_ROOT` and `CK_GATE_COLLECT`, then removes them and its own `-p ck_pytest_report` token from `os.environ` (including `PYTEST_ADDOPTS`), so a nested pytest started by a test inherits nothing, and it writes only when `config.rootpath` equals `CK_GATE_ROOT` (design Public Interfaces). `Failure` gains `crash_line` (5.7). Make sure the plugin directory ships with the package. Harness Contract owner: item 2 (the failure entry, with design's keys) and item 3's `failures.KINDS`, `failures.MESSAGE_LIMIT` and `failures.truncate` (design: `Kind`, the 500-character limit and `truncate_message`).
@@ -168,11 +168,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 3 (P-5a at the truncation and kind seams)
 
 **Acceptance:**
-- [ ] `classify_kind` returns exactly one of the five kinds, and `error` for anything it cannot classify (3.2)
-- [ ] `truncate_message` returns at most 500 characters with `truncated` true iff the input was longer, and never drops an entry (3.5, NFR message limit)
-- [ ] An import or syntax error during collection yields a file-level failure with kind `import` or `collection` (1.6)
-- [ ] `missing_command` returns the command path for click `No such command`, argparse `invalid choice` and `unrecognized arguments` (12.5)
-- [ ] The plugin writes one JSON line per failing node only when `CK_GATE_REPORT` is set, once per node under xdist
+- [x] `classify_kind` returns exactly one of the five kinds, and `error` for anything it cannot classify (3.2)
+- [x] `truncate_message` returns at most 500 characters with `truncated` true iff the input was longer, and never drops an entry (3.5, NFR message limit)
+- [x] An import or syntax error during collection yields a file-level failure with kind `import` or `collection` (1.6)
+- [x] `missing_command` returns the command path for click `No such command`, argparse `invalid choice` and `unrecognized arguments` (12.5)
+- [x] The plugin writes one JSON line per failing node only when `CK_GATE_REPORT` is set, once per node under xdist
 
 **Dependencies:** Task 3 (its tests are the oracle)
 **Complexity:** Medium
@@ -203,7 +203,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 8: Property tests for the spec graph, command lint and write-set overlap
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 11.2, 11.4, 11.5, 11.7, 11.8, 12.1, 12.2, 13.1
 **Description:** Implement the TC-175 rows P-20, P-21, P-22, P-23 and P-26 at `claude_kiro.graph` (`build_graph`, the invokes scan, `missing_command_edges`, `paths_overlap`, `write_set_overlaps`) and `claude_kiro.relink` (`plan_command_relink`, `apply_command_relink`). P-20: invokes edges equal the longest table command prefixing the invoked argument list, over every listed form (`run_cli`, `main`, `CliRunner().invoke`, `subprocess.run` list and shell string, `shlex.split`, constant-prefix f-strings, leading global options) and near-misses (`newer`, `thesis-new`, an option value equal to a subcommand, assert-message text, comments, another program). P-21: two builds equal; incremental build after edits with mtimes restored equals a fresh copy's build. P-22: malformed sources leave the well-formed subset's graph and name each bad source once. P-23: lint reports exactly the missing (V, P) pairs; after apply none remain except cycle-making ones; a second apply is a no-op. P-26: overlap by witness in a 40-path universe, disjoint literals never overlap, symmetry, with `./`, backticks, ` - description` suffixes, trailing `/`, `*`, `**`, `?`. Settings 200 examples, derandomized, no database. `PROPERTIES = {"P-20": ..., ..., "P-26": ...}`, tests `test_tc175_p<k>_<slug>`.
@@ -214,11 +214,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 12 (P-21, P-22, P-26), Task 13 (P-20 at the invokes scan), Task 33 (P-23 at `plan_command_relink`)
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the rows
-- [ ] Settings are deterministic
-- [ ] Tests call the decision seams on files in `tmp_path`, not a server
-- [ ] They fail before the implementation because `claude_kiro.graph` does not exist
-- [ ] No mocks of the project's own code
+- [x] Generators cover every surface form and negative listed in the rows
+- [x] Settings are deterministic
+- [x] Tests call the decision seams on files in `tmp_path`, not a server
+- [x] They fail before the implementation because `claude_kiro.graph` does not exist
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (spec_graph_project)
 **Complexity:** High
@@ -249,7 +249,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 10: Red-team graph freshness and the single mapping (Story 11)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 11.6, 11.7
 **Description:** Try to break each SHALL NOT clause of Story 11 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Clauses: attribution and dependency detection SHALL not use separate mappings (11.6); ck SHALL never serve a graph older than its files (11.7). Starting points: edits that keep size and mtime (`os.utime` with nanosecond precision, same-length replacements); edits through a symlink; a file replaced by rename (new inode, old mtime); edits within the same second across two in-process calls; a test-plan row change that moves a TC's verifies edge while tasks.md is untouched; a Verify selector change that `ck graph`, `ck lint`, `ck plan` and `ck gate --attribute` must all reflect in one step. Tests named `test_tc14_redteam_<slug>` and `test_tc107_redteam_<slug>`.
@@ -259,10 +259,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 12 (11.7 freshness cases (`tc107_redteam`)), Task 53 (11.6 single-mapping cases across graph, lint, plan and gate (`tc14_redteam`))
 
 **Acceptance:**
-- [ ] Written from the requirements only, never from the implementation
-- [ ] Tests run the real CLIs on real files and compare graph, lint, plan and gate outputs
-- [ ] Each test fails before the implementation for the right reason
-- [ ] No mocks of the project's own code
+- [x] Written from the requirements only, never from the implementation
+- [x] Tests run the real CLIs on real files and compare graph, lint, plan and gate outputs
+- [x] Each test fails before the implementation for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (spec_graph_project, attr_project)
 **Complexity:** Medium
@@ -298,7 +298,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 - `src/claude_kiro/graph.py` - new: graph model, `build_graph` (tasks, tcs, files, depends/owns/verifies/imports), memo, problems, `to_json`, `paths_overlap`, `write_set_overlaps`
 - `src/claude_kiro/cli/graph.py` - new: `ck graph SPEC [--json]`
 - `src/claude_kiro/cli/main.py` - register the `graph` command
-**Verify:** `uv run pytest -q tests/test_spec_graph.py -k "tc105_ or tc107_ or tc108_"` `uv run pytest -q tests/test_spec_graph_properties.py -k "tc175_p21 or tc175_p22 or tc175_p26"` `uv run pytest -q tests/test_spec_graph_redteam.py -k "tc107_redteam"` `uv run pytest -q -m serial tests/test_unattended_perf.py -k "tc109_"`
+**Verify:** `uv run pytest -q tests/test_spec_graph.py -k "(tc105_ or tc107_ or tc108_) and not tc107_edits_with_restored_mtimes"` `uv run pytest -q tests/test_spec_graph_properties.py -k "tc175_p21 or tc175_p22 or tc175_p26"` `uv run pytest -q tests/test_spec_graph_redteam.py -k "tc107_redteam and not source_file_same_size_same_mtime"` `uv run pytest -q -m serial tests/test_unattended_perf.py -k "tc109_"`
 **Verified by:** Task 7 (TC-105, TC-107, TC-108), Task 8 (P-21, P-22, P-26), Task 9 (TC-109), Task 10 (11.7 freshness cases (`tc107_redteam`))
 
 **Acceptance:**
@@ -322,7 +322,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Description:** Extend `src/claude_kiro/graph.py` with command nodes (`cmd:<path words>`) and the provides and invokes edges, per design "How edges are filled". Programs: `[project.scripts]` keys in pyproject.toml, package.json `bin`, and the first words of the design's CLI table (`SpecGraph.programs`). Provides: a task's `**Provides:**` (from `SpecTask.provides`) wins over inference; otherwise a design.md table row with a backticked command path whose row names a file the task owns, else a backticked command path starting with a known program in the task's title or description; two inferred providers keep both edges and add a `GraphProblem`. Invokes: scan each test file (Python AST string constants and list/tuple literals; regex for JS) for a word sequence starting with a known program (`["mtr", "thesis", "new"]`, `"mtr thesis new --x"`) or a `CliRunner().invoke(..., ["thesis", "new"])`-style list matching a known command path without the program; the edge goes to the longest known command path that prefixes it, and an unknown path under a known program becomes a `cmd:` node with no provider. Add the pure seams `missing_command_edges(graph) -> List[MissingEdge]` (test file of a test task verifying V invokes a command that P provides, P != V, and P is not among V's transitive dependencies) and `unknown_commands(graph, source_words) -> List[UnknownCommand]` (a path exists when every word appears as a string literal in a non-test source file). Malformed Provides values become `GraphProblem`s. Harness Contract owner: item 3's `graph.invoked_commands` (design: the invokes scan; keep it a pure function of source text, command paths and programs).
 **Files:**
 - `src/claude_kiro/graph.py` - programs discovery, command nodes, provides (field + inference), invokes scan, `missing_command_edges`, `unknown_commands`
-**Verify:** `uv run pytest -q tests/test_spec_graph.py -k "tc102_ or tc103_ or tc104_"` `uv run pytest -q tests/test_spec_graph_properties.py -k "tc175_p20"` `uv run pytest -q tests/test_command_deps.py -k "tc113_"`
+**Verify:** `uv run pytest -q tests/test_spec_graph.py -k "tc102_ or tc103_ or tc104_"` `uv run pytest -q tests/test_spec_graph_properties.py -k "tc175_p20"` `uv run pytest -q tests/test_command_deps.py -k "tc113_"` `uv run pytest -q tests/test_spec_graph.py::test_tc107_edits_with_restored_mtimes_are_reflected`
 **Verified by:** Task 7 (TC-102 to TC-104), Task 8 (P-20 at the invokes scan), Task 17 (TC-113b)
 
 **Acceptance:**
@@ -622,7 +622,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 26: Test row fidelity against the test plan and design models
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 8.1, 8.2, 8.3, 8.4, 8.5, 8.6
 **Description:** Implement TC-69, TC-70, TC-71 (a), TC-72, TC-73 (a) and TC-74 with real spec files. Run `ck lint demo --fidelity --task 1 --json` and a test-track gate. TC-69: threshold 4.50 vs a test using 4.15, and `side="Buy"` vs design `Side` {BUY, SELL}; mismatches with `expected`/`allowed`, and the gate fails with failure entries `check: "row-fidelity"`. TC-70: dates and range upper bound. TC-71a: `base * 1.1` lands in `unparsed`. TC-72: no TC ID, and TC-77 with no row, in `unmatched`. TC-73a: all lists empty. TC-74: file hashes unchanged and `git status --porcelain` empty. Gate-side cases (TC-69's gate failure and TC-74's after-gate check) are named `test_tc69_ongate_<slug>` and `test_tc74_ongate_<slug>`; every other case runs `ck lint --fidelity` and has no `ongate` in its name.
@@ -632,9 +632,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 32 (the gate-side TC-69 and TC-74 cases (`ongate`)), Task 53 (TC-69 to TC-74 through `ck lint --fidelity`)
 
 **Acceptance:**
-- [ ] Tests run the real CLI and gate on real spec and test files
-- [ ] They fail before the implementation because `--fidelity` does not exist
-- [ ] No mocks of the project's own code
+- [x] Tests run the real CLI and gate on real spec and test files
+- [x] They fail before the implementation because `--fidelity` does not exist
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project)
 **Complexity:** Medium
@@ -643,7 +643,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 27: Red-team row fidelity's reviewer items and read-only rule (Story 8)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 8.3, 8.6
 **Description:** Try to break each SHALL NOT clause of Story 8 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Clauses: values the script checked SHALL not reach the reviewer (8.3); the check SHALL not modify the test plan, design or tests (8.6). Starting points via `ck lint demo --fidelity --json` and a test-track gate: the same literal appearing both checked and in a runtime expression; a row with a value inside backticks, a footnote, or a markdown table cell with a pipe; read-only spec files; a test file with CRLF line endings, a BOM or a non-UTF-8 byte; a symlinked test-plan; a fidelity output fed back as a test-plan row. Assert byte-identical files and modes after the run. Tests named `test_tc71_redteam_<slug>` and `test_tc74_redteam_<slug>`. Cases that run a test-track gate carry `ongate` in their name (`test_tc74_redteam_ongate_<slug>`); the `ck lint --fidelity` cases do not.
@@ -653,10 +653,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 32 (gate-side cases (`ongate`)), Task 53 (8.3, 8.6 through `ck lint --fidelity`)
 
 **Acceptance:**
-- [ ] Written from the requirements only, never from the implementation
-- [ ] Tests run the real CLI on real files and compare hashes, modes and `git status`
-- [ ] Each test fails before the implementation for the right reason
-- [ ] No mocks of the project's own code
+- [x] Written from the requirements only, never from the implementation
+- [x] Tests run the real CLI on real files and compare hashes, modes and `git status`
+- [x] Each test fails before the implementation for the right reason
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project)
 **Complexity:** Low
@@ -665,7 +665,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 28: Add the config validators for test-track validation and recorded fixtures
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 6.4, 6.5, 15.7, 15.8
 **Description:** In `src/claude_kiro/config.py`, add `ConfigError(Exception)` (carries the key name), extend `DEFAULT_CONFIG` with `"test_track": {"validate": None}` and `"fixtures": {"recorded": [], "labels": "specs/fixture-labels.json"}`, and add two strict readers: `test_track_validate(config) -> List[str]` (None or absent -> `[]`; a string -> `[s]`; a list of strings -> the list; anything else raises `ConfigError("specs/ck.json: test_track.validate must be a string or a list of strings")`) and `fixture_globs(config) -> List[str]` (absent -> `[]`; a list of strings -> the list; anything else, including a non-string member, raises `ConfigError` naming `fixtures.recorded`). `load_config` stays tolerant; only these readers raise. Harness Contract owner: item 6's config keys `test_track.validate` and `fixtures.recorded` (the strict readers).
@@ -675,18 +675,19 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 22 (P-13 at the config readers)
 
 **Acceptance:**
-- [ ] No `test_track.validate` key gives `[]` (6.4); a string or list of strings is accepted
-- [ ] `42`, `{"a":1}` and `["ok", 3]` raise `ConfigError` naming `test_track.validate` (6.5)
-- [ ] No `fixtures.recorded` gives `[]` (15.7); a non-list or non-string member raises `ConfigError` naming `fixtures.recorded` (15.8)
+- [x] No `test_track.validate` key gives `[]` (6.4); a string or list of strings is accepted
+- [x] `42`, `{"a":1}` and `["ok", 3]` raise `ConfigError` naming `test_track.validate` (6.5)
+- [x] No `fixtures.recorded` gives `[]` (15.7); a non-list or non-string member raises `ConfigError` naming `fixtures.recorded` (15.8)
 
 **Dependencies:** Task 22 (its tests are the oracle)
 **Complexity:** Low
 **Risk:** normal
+**Deviation (task 28):** the task text says an explicit `null` gives `[]`, but P-13 and design.md (`test_track.validate` default: "an explicit `null` is a config error") require a `ConfigError`, so the readers raise on `null`. `DEFAULT_CONFIG`'s `test_track.validate: None` would make an absent key read as `null`, so `load_config` drops that default unless specs/ck.json declares the key.
 
 ---
 
 ### Task 29: Add the right-reason classifier
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 5.2, 5.3, 5.4, 5.5, 5.6, 5.7
 **Description:** Extend `src/claude_kiro/failures.py` with `ProjectContext` (including `test_sources`), `TestResult` and `RightReasonVerdict` (design "Data Models") and three pure seams. `classify_not_built(failure, ctx) -> "not-built" | "bad" | "unclear"` applies design's rules, first match wins: (1) `NotImplementedError` anywhere -> not-built; (2) ImportError family, `cannot import name`, or `AttributeError: module 'x' has no attribute 'y'` naming a module in `ctx.project_modules` or a path in `ctx.owned_paths` -> not-built, a third-party module -> unclear; (3) `missing_command(detail, programs)` matches, or click `No such command` / `No such option`, argparse `invalid choice` / `unrecognized arguments` for one of `ctx.programs` (including inside an assertion on a CLI exit code) -> not-built; (4) data loading errors (`ValidationError`, `JSONDecodeError`, `yaml.YAMLError`, `UnicodeDecodeError`, `FileNotFoundError` for a path in `ctx.test_paths`), any error in phase `setup`, an `AssertionError` whose crash path is a helper, conftest or fixture file other than the test file, and `SyntaxError` / `NameError` in the test file -> bad; (5) an `AssertionError` whose crash path is the test file -> `assert_reaches_project(ctx.test_sources[file], failure.crash_line, ctx)`: `False` (the assert expression, followed back through assignments and `for`/`with` targets in its test function, uses only literals, builtins, the standard library and file-loaded data) -> bad; `True` (it reaches a name imported from a project module or owned path, a test-function parameter such as a pytest fixture, or a call on one) or `None` (cannot parse) -> unclear (5.7); (6) everything else -> unclear. `right_reason_verdict(results, all_verified_done) -> RightReasonVerdict`: when `all_verified_done`, `require_pass` is true and no class applies (5.6); otherwise `blocking` holds the bad failures, `unclear` the unclear ones, `already_passing` the passing nodes. Harness Contract owner: item 3's `rightreason.classify` (design: `failures.classify_not_built`, classes `not-built`, `bad`, `unclear`).
@@ -696,10 +697,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 21 (P-12 at `classify_not_built`), Task 107 (seam cases of the Story 5 red team)
 
 **Acceptance:**
-- [ ] Missing project modules or names, missing CLI commands or subcommands, unrecognized arguments, invalid choices and `NotImplementedError` classify as not-built (5.2)
-- [ ] Fixture assertion errors and schema or validation errors while loading fixtures classify as bad (5.3); a test-body `AssertionError` is bad (blocks) only when its failing assert runs no project code and uses no name imported from the project's own code (only literals or file-loaded data); one that reaches project code, a project import, a fixture argument or cannot be parsed is unclear, passes and is reported (5.4, 5.7; PLAN D19, V2)
-- [ ] Unclassifiable failures are unclear and do not block (5.4); passing tests are listed as already passing (5.5)
-- [ ] With all verified tasks Done the verdict requires a pass and applies no class (5.6)
+- [x] Missing project modules or names, missing CLI commands or subcommands, unrecognized arguments, invalid choices and `NotImplementedError` classify as not-built (5.2)
+- [x] Fixture assertion errors and schema or validation errors while loading fixtures classify as bad (5.3); a test-body `AssertionError` is bad (blocks) only when its failing assert runs no project code and uses no name imported from the project's own code (only literals or file-loaded data); one that reaches project code, a project import, a fixture argument or cannot be parsed is unclear, passes and is reported (5.4, 5.7; PLAN D19, V2)
+- [x] Unclassifiable failures are unclear and do not block (5.4); passing tests are listed as already passing (5.5)
+- [x] With all verified tasks Done the verdict requires a pass and applies no class (5.6)
 
 **Dependencies:** Task 6 (edits failures.py, which Task 6 creates), Task 21 (its tests are the oracle), Task 107 (its tests are the oracle)
 **Complexity:** Medium
@@ -779,7 +780,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Files:**
 - `src/claude_kiro/lint.py` - graph-based `commandEdges`, `unknownCommands`, `untaggedTests`, `noWriteSet`, `graphProblems`
 - `src/claude_kiro/relink.py` - `plan_command_relink`, `apply_command_relink`
-**Verify:** `uv run pytest -q tests/test_lint.py tests/test_relink.py` `uv run pytest -q tests/test_spec_graph_properties.py -k "tc175_p23"`
+**Verify:** `uv run pytest -q tests/test_lint.py tests/test_relink.py` `uv run pytest -q tests/test_spec_graph_properties.py -k "tc175_p23"` `uv run pytest -q tests/test_spec_graph_redteam.py::test_tc107_redteam_source_file_same_size_same_mtime`
 **Verified by:** Task 8 (P-23 at `plan_command_relink`)
 
 **Acceptance:**
@@ -820,7 +821,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 35: Test claim release by run ID at run start
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 16.1, 16.2, 16.3, 16.4, 16.5, 16.6, 16.7
 **Description:** Implement TC-142, TC-143, TC-144, TC-145, TC-146, TC-147 and TC-148 (a) with real git locks and real progress records (`progress_run`, `age_claim`, `legacy_claim` from `tests/test_worktree_cli.py`). TC-142: `ck worktree claim demo 1 --progress-run <key>` records the run, shown in `ck worktree status demo --json`. TC-143: run A ended holds Tasks 1 and 2 with commits; `ck worktree start demo --run B --json` lists both in `releasedClaims` with run A and both branches keep their commits. TC-144: stale run (no end, old last event via `CK_NOW`) released. TC-145: live run's 3-hour-old claim kept, and B's claim of it is BUSY. TC-146: legacy claim kept at 30 min, released at 61, `claim_stale_minutes` honoured. TC-147: deleted run record releases. TC-148a: B's own claim is kept as own and B's claim succeeds without `--takeover`. TC-192: a pass under the spool layout (`CK_PROGRESS_DIR=<worktrees>/.ck-progress`) is killed with no `end` and a 10-minute-old last event; the next pass's `prepare_spool` adds a `superseded` end to the spool copy and `ck worktree start demo --run B --json` releases both claims with commits kept; without `prepare_spool`, `run_liveness` still reads the spool copy.
@@ -830,10 +831,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 36 (TC-142, TC-192's liveness and `prepare_spool` parts), Task 50 (TC-143 to TC-147, TC-148a, TC-192)
 
 **Acceptance:**
-- [ ] Tests use real git locks, real progress records and the real CLI
-- [ ] They fail before the implementation because claims carry no run and `ck worktree start` does not exist
-- [ ] Every release asserts the branch's commits are kept
-- [ ] No mocks of the project's own code
+- [x] Tests use real git locks, real progress records and the real CLI
+- [x] They fail before the implementation because claims carry no run and `ck worktree start` does not exist
+- [x] Every release asserts the branch's commits are kept
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (progress_run, ck_json)
 **Complexity:** Medium
@@ -889,7 +890,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 38: Property tests for the protect decision, landing tokens and the audit
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 9.2, 9.3, 9.4, 9.7, 9.8, 10.1, 10.3, 10.4, 10.5
 **Description:** Implement the TC-175 rows P-17, P-18, P-19, P-35 and P-36. P-35 at `protect.approval_decision`: true iff both TTY flags hold and the typed code equals the expected one exactly (one trailing newline stripped); near-miss codes, whitespace, case, prefixes, doubled codes, `yes`, empty and look-alikes are false. P-36 at `protect.audit_decision`: a missing, corrupt, other-spec, other-ref or mac-failing approved state always gives `complete: false` and `clean: false`, and `clean` is true only when complete with no drift, hooks installed, active and intact, and no fixture drift or tampering. P-17 at `claude_kiro.protect.ref_update_decision` (and the protected-path filter it uses): any ref outside `refs/heads/integrate/` is allowed; for integrate refs the refused files are exactly the protected and not-allowed changed paths; complements and monotone rules; refs and near-miss refs, protected paths and near-misses (`claude/x`, `.claude-notes/x`, `specs/ck.json.bak`, `specs/demo/ck.json`, `x.mcp.json`, `.envrc.example`), non-ASCII, space and git-quoted forms, the 4 allow-list shapes. P-18: Hypothesis stateful machine on real git and real ck (`hooks_repo`): rules land(allowed), land(clean), raw(kind, target in {protected, allowed, clean, previous}), restore(snapshot k), reset-back; invariant: `integrate/demo` only moves to commits whose protected changes are allowed or that ck landed, and a passing ck landing always succeeds (`max_examples=25`, `stateful_step_count=8`). P-19: stateful on real git (`max_examples=20`): the audit's drift equals the oracle set of protected paths differing from the last approved state, with kinds; approved changes never appear. Derandomized, no database. `PROPERTIES = {"P-17": ..., "P-18": ..., "P-19": ..., "P-35": ..., "P-36": ...}`, tests `test_tc175_p<k>_<slug>`.
@@ -900,11 +901,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 44 (P-17 at `ref_update_decision`, P-35 at `approval_decision`, P-36 at `audit_decision`), Task 46 (P-18 on real git and real landings), Task 51 (P-19 on the real audit)
 
 **Acceptance:**
-- [ ] Generators cover every surface form and negative listed in the rows
-- [ ] Settings are deterministic
-- [ ] P-17 calls the decision seam; P-18 and P-19 drive real git and the real ck, never a server
-- [ ] They fail before the implementation because the seam, hooks and audit do not exist
-- [ ] No mocks of the project's own code
+- [x] Generators cover every surface form and negative listed in the rows
+- [x] Settings are deterministic
+- [x] P-17 calls the decision seam; P-18 and P-19 drive real git and the real ck, never a server
+- [x] They fail before the implementation because the seam, hooks and audit do not exist
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (hooks_repo, snapshot helpers)
 **Complexity:** High
@@ -1029,7 +1030,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Description:** Create `src/claude_kiro/protect.py` with `RefUpdate`, `TokenRecord`, `RefDecision`, `HookStatus`, `ApprovedState` and `AuditReport` (design "Data Models / Python (protect.py)"). Pure seams: `ref_update_decision(update, protected_changed, allow, token, approved)` (non-`refs/heads/integrate/` ref -> allow; delete -> allow; create -> allow when the new commit's protected files equal `approved` (the ref's approved state, path -> blob oid), else, and when there is no approved state, only with a matching token (9.12); otherwise protected paths minus allow-list empty -> allow; else allow only with a matching token; the message names the files and `ck worktree approve SPEC TASK`); `token_matches(token, update, used, mac_ok)` (unused, mac valid, same ref, same old, same new tree and parents); `merge_commit_decision(head_ref, changed, allow, token_present)`; `approval_decision(stdin_tty, stdout_tty, typed, expected)`; `audit_decision(approved, current, allow, hooks, fixtures)` (fixtures passed as a mapping; drift = protected files added, changed or deleted against the approved state; incomplete when the state is missing or its mac fails; clean only when complete with no drift, hooks installed, active and intact, and no fixture drift or lock tampering). State in `<git-common-dir>/ck/`: an HMAC key (`key`, mode 0600, created on first use; `install_hooks` uses it first, so under `ck run` it exists before the sandbox, which denies writes to it, starts), `issue_token(root, ref, old, tree, parents, reason, files)` writing `tokens/<id>.json`, `consume_token(root, id, update)` renaming it to `used/` (a token bound to `old` can never match a later update even if the rename fails), and `read_approved_state` / `record_approved_state(root, spec, ref, commit, files, approval)` for the sealed `<spec>/protected.json`, plus the `<common>/ck/refs.json` index (ref -> spec) the hook uses to find a ref's approved state; the state outlives a deleted ref (9.12). Paths compared with `PROTECTED_PATHS` must be unquoted (use `git diff -z` / `core.quotePath=false` in any helper that lists changes). No network. Harness Contract owner: item 3's `protect.refuse_paths` (design: `ref_update_decision` with the protected-path filter) and item 10's tokens and approved state.
 **Files:**
 - `src/claude_kiro/protect.py` - new: models, decision seams, HMAC key, token issue/consume, sealed approved state
-**Verify:** `uv run pytest -q tests/test_protected_hooks_properties.py -k "tc175_p17 or tc175_p35 or tc175_p36"`
+**Verify:** `uv run pytest -q tests/test_protected_hooks_properties.py -k "(tc175_p17 or tc175_p35 or tc175_p36) and not real_audit"`
 **Verified by:** Task 38 (P-17 at `ref_update_decision`, P-35 at `approval_decision`, P-36 at `audit_decision`)
 
 **Acceptance:**
@@ -1078,7 +1079,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Status:** Not Started
 **Track:** impl
 **Requirements:** 9.2, 9.6, 9.7, 10.4
-**Description:** In `worktrees.py`: fix `protected_changes` so non-ASCII and space-containing paths are compared unquoted (`git diff --name-only --no-renames -z`); `merge()` runs the same check as `land()` (`protected_changes` against `land_allow_paths(target)`) and returns state `PROTECTED` with the files instead of merging (9.6); `land()` and `merge()` record the approved protected state with `protect.record_approved_state` after every landing they make (`by: "allow-list"` for covered protected files), and `create_integration` records the baseline state (`by: "baseline"`) on creation and on reuse when none exists (10.4); add the keyword `land(..., approved: Optional[Dict[str, List[str]]] = None)` that lets exactly those task -> protected files through, issues the token for that update and records them as `by: "approval"` (used only by `ck worktree approve`, Task 47). In `cli/worktree.py`, `merge_cmd` treats `PROTECTED` as a bad state (exit 3) and names the files. No existing test pins `ck worktree merge` landing protected files (the merge cases in `tests/test_worktree_cli.py` and `tests/test_worktree_land.py` use no protected paths), so no existing test changes; they stay in this task's Verify as preservation checks. Harness Contract owner: item 5's PROTECTED detail in `ck worktree land/merge --json`.
+**Description:** In `worktrees.py`: fix `protected_changes` so non-ASCII and space-containing paths are compared unquoted (`git diff --name-only --no-renames -z`); `merge()` runs the same check as `land()` (`protected_changes` against `land_allow_paths(target)`) and returns state `PROTECTED` with the files instead of merging (9.6); `land()` and `merge()` record, with `protect.record_approved_state` after every landing they make, only the protected paths the landed tasks changed (never the whole protected state, so bypass writes are not laundered) (`by: "allow-list"` for covered protected files), and `create_integration` records the baseline state (`by: "baseline"`) on creation and on reuse when none exists (10.4); add the keyword `land(..., approved: Optional[Dict[str, List[str]]] = None)` that lets exactly those task -> protected files through, issues the token for that update and records them as `by: "approval"` (used only by `ck worktree approve`, Task 47). In `cli/worktree.py`, `merge_cmd` treats `PROTECTED` as a bad state (exit 3) and names the files. No existing test pins `ck worktree merge` landing protected files (the merge cases in `tests/test_worktree_cli.py` and `tests/test_worktree_land.py` use no protected paths), so no existing test changes; they stay in this task's Verify as preservation checks. Harness Contract owner: item 5's PROTECTED detail in `ck worktree land/merge --json`.
 **Files:**
 - `src/claude_kiro/worktrees.py` - unquoted `protected_changes`; `merge()` PROTECTED check; approved-state recording; baseline; `land(approved=)`
 - `src/claude_kiro/cli/worktree.py` - `merge_cmd` exit 3 on PROTECTED
@@ -1189,7 +1190,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Files:**
 - `src/claude_kiro/protect.py` - `audit()` input gathering
 - `src/claude_kiro/cli/worktree.py` - `ck worktree audit`
-**Verify:** `uv run pytest -q tests/test_protected_audit.py tests/test_protected_audit_redteam.py` `uv run pytest -q tests/test_protected_hooks_redteam.py -k "tc92_"` `uv run pytest -q tests/test_fixture_lock.py -k "tc135_ or tc138_ or tc140_"` `uv run pytest -q tests/test_protected_hooks_properties.py -k "tc175_p19"`
+**Verify:** `uv run pytest -q tests/test_protected_audit.py tests/test_protected_audit_redteam.py` `uv run pytest -q tests/test_protected_hooks_redteam.py -k "tc92_"` `uv run pytest -q tests/test_fixture_lock.py -k "tc135_ or tc138_ or tc140_"` `uv run pytest -q tests/test_protected_hooks_properties.py -k "tc175_p19 or real_audit"`
 **Verified by:** Task 38 (P-19 on the real audit), Task 40 (TC-92, bypasses reported by the audit), Task 41 (TC-96 to TC-100), Task 42 (red team of 10.5), Task 43 (TC-135, TC-138, TC-140 (audit side))
 
 **Acceptance:**
@@ -1656,7 +1657,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 72: Run OpenCode agents on their role's model and record it
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 14.1, 14.2, 14.7
 **Description:** In `opencode/src/run-child.ts`, add `RunChildOptions.role?: string | null`; `resolveChildModel` consults `resolveRoleRef(role, config.roles)` first and falls back to today's alias path; `ChildOutcome` gains `modelSource: "roles" | "alias" | "inherit"`. In `opencode/src/workflow-tool.ts`, `handleAgent` reads `opts.role`, passes it to `runChild`, and sets `AgentMeta.role`, so the run record (`record.ts`, which already has `AgentRow.role`) holds each agent's role and the model and variant it actually ran on. Harness Contract owner: item 11's role-first model resolution and per-agent `model` and `variant` in run records.
@@ -1667,8 +1668,8 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 69 (TC-126), Task 70 (TC-132)
 
 **Acceptance:**
-- [ ] An agent call with a mapped `role` runs on the role's model and variant (14.1); an unmapped role uses the alias map as today (14.2)
-- [ ] The run record has each agent's role, model and variant (14.7)
+- [x] An agent call with a mapped `role` runs on the role's model and variant (14.1); an unmapped role uses the alias map as today (14.2)
+- [x] The run record has each agent's role, model and variant (14.7)
 
 **Dependencies:** Task 71 (calls `resolveRoleRef` and reads `config.roles`), Task 69 (its tests are the oracle), Task 70 (its tests are the oracle)
 **Complexity:** Medium
@@ -1677,7 +1678,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 73: Show each role's resolved model in the OpenCode doctor
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 14.8
 **Description:** In `opencode/src/preflight.ts`, add `checkRoles(ctx)` that lists all seven roles with the resolved model and its source (`roles` map, alias map, or default) and include it in the preflight result, so `ck doctor --harness opencode` prints the same lines. Harness Contract owner: item 11's preflight `roles: [{role, model, source}]`.
@@ -1687,7 +1688,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 70 (TC-133)
 
 **Acceptance:**
-- [ ] Preflight and `ck doctor --harness opencode` show each role's resolved model and where it came from (14.8)
+- [x] Preflight and `ck doctor --harness opencode` show each role's resolved model and where it came from (14.8)
 
 **Dependencies:** Task 71 (calls `resolveRoleRef` and reads `config.roles`), Task 70 (its tests are the oracle)
 **Complexity:** Low

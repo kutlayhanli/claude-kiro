@@ -121,14 +121,14 @@ How the PLAN.md decisions shape it:
   - `merge()` gains the protected check (`protected_changes` against `land_allow_paths(target)`), state
     `PROTECTED` with the files (9.6), and runs its `git merge` with a landing token in the environment (9.7).
   - `land()` issues a landing token for each `git merge` and `git reset` it runs on an `integrate/*` target
-    (9.7), records the approved protected state after the batch (10.4), records new recorded-fixture locks and
+    (9.7), records, after the batch, only the protected paths the landed tasks changed as approved (10.4; the rest of the state is never re-recorded at head), records new recorded-fixture locks and
     reports fixture drift per task (`Landed.fixtureDrift`), and, through `GateFn`, carries `failures` on RED
     entries (`Landed.failures`).
   - New keyword `land(..., approved: Optional[Dict[str, List[str]]] = None)`: task -> protected files I approved,
     used only by `ck worktree approve` (9.8).
   - `create_integration` calls `protect.ensure_hooks` (install only where the git metadata is writable,
-    otherwise report the hook state; 9.1, 9.10) and records the baseline protected state on creation and on
-    reuse; its `Outcome.detail` names a hook problem.
+    otherwise report the hook state; 9.1, 9.10) and records the baseline protected state only when no approved
+    state exists for the ref (never on reuse, which would launder bypass writes; 10.1); its `Outcome.detail` names a hook problem.
     `ck worktree integration SPEC [--base] [--json]` prints `{..., hooks: HookStatus}` (`installed`, `problems`). It creates the `integrate/*` ref with a landing token, as
     every ck-made `integrate/*` update (9.7, 9.12).
   - After every install step ck runs (`create --install`, land's install, `gate --install`) and at the start of
@@ -426,8 +426,8 @@ gather inputs and act on the output; they never re-implement the rule.
 
 | Seam | Module (owner) | Input -> output | Decides |
 |---|---|---|---|
-| `classify_kind(exc_type, phase, message, timed_out)` | `failures.py` | `str, str, str, bool -> Kind` | 3.2: the five kinds; unknown -> `error` |
-| `truncate_message(text, limit=500)` | `failures.py` | `str, int -> (str, bool)` | 3.5, NFR message limit; never drops |
+| `classify_kind(exc_type, phase, message, timed_out)` | `failures.py` | `str, str, str, bool -> Kind` | 3.2: the five kinds; unknown -> `error`; `timed_out` wins, then phase `collect` maps `ImportError`/`ModuleNotFoundError` to `import` and anything else to `collection` |
+| `truncate_message(text, limit=500)` | `failures.py` | `str, int -> (str, bool)` | 3.5, NFR message limit; never drops. The kept prefix is non-empty and cut on a grapheme boundary (not before a combining mark or ZWJ/VS16, not after a ZWJ, not inside CRLF or a regional-indicator pair); a marker may follow. When no boundary exists in 1..limit, a hard cut at `limit` is the fallback |
 | `missing_command(text, programs)` | `failures.py` | `str, Sequence[str] -> Optional[str]` | 12.5: unknown subcommand / unrecognized arguments / invalid choice -> the command path |
 | `classify_not_built(failure, ctx)` | `failures.py` | `Failure, ProjectContext -> "not-built" \| "bad" \| "unclear"` | 5.2-5.4, 5.7 |
 | `assert_reaches_project(test_source, line, ctx)` | `failures.py` | `str, int, ProjectContext -> Optional[bool]` | 5.7: does the failing assert's expression reach project code (None: cannot parse) |
@@ -435,13 +435,14 @@ gather inputs and act on the output; they never re-implement the rule.
 | `tc_of_node(node_id)` | `attribution.py` | `str -> Optional[str]` | 1.1: `tcNNN_` -> `TC-N` |
 | `param_owned_file(node_id, file_owner)` | `attribution.py` | `str, Mapping[str, str] -> Optional[str]` | 1.5 hint only: a wrapper node whose parameter ID names an owned file (never attributes or excuses) |
 | `attribute_failure(failure, index, done, gated)` | `attribution.py` | `Failure, AttributionIndex, FrozenSet[str], FrozenSet[str] -> Attribution` | 1.1-1.8: tasks, by-what, candidate or excused |
-| `rerun_plan(attributions)` | `attribution.py` | `List[Attribution] -> List[RerunItem]` | 2.4, 2.5, NFR: each candidate once, excused never |
-| `gate_verdict(attributions, reruns, other_checks_ok)` | `attribution.py` | `-> GateVerdict` | 2.4, 2.6, 2.8, 3.4: regression / flaky / excused / unattributed, red or green |
+| `rerun_plan(pairs)` | `attribution.py` | `List[Tuple[Failure, Attribution]] -> List[RerunItem]` (`RerunItem.key` is the failure's node, or `collect:<file>` for a file-level failure) | 2.4, 2.5, NFR: each candidate once, excused never |
+| `gate_verdict(pairs, reruns, other_checks_ok)` | `attribution.py` | `List[Tuple[Failure, Attribution]], Mapping[str, bool], bool -> GateVerdict` (`reruns` maps each failure key, as above, to whether its rerun passed; `GateVerdict.statuses` is keyed the same way) | 2.4, 2.6, 2.8, 3.4: regression / flaky / excused / unattributed, red or green |
 | `ref_update_decision(update, protected_changed, allow, token, approved)` | `protect.py` | `RefUpdate, List[str], List[str], Optional[TokenCheck], Optional[Mapping[str, str]] -> RefDecision` | 9.2-9.4, 9.12 |
 | `token_matches(token, update, used, mac_ok)` | `protect.py` | `TokenRecord, RefUpdate, bool, bool -> bool` | 9.3: one-shot, this ref, this target |
 | `merge_commit_decision(head_ref, changed, allow, token_present)` | `protect.py` | `-> RefDecision` | 9.5 |
 | `approval_decision(stdin_tty, stdout_tty, typed, expected)` | `protect.py` | `bool, bool, str, str -> bool` | 9.8 |
-| `audit_decision(approved, current, allow, hooks, fixtures)` | `protect.py` | `Optional[ApprovedState], Dict[str,str], List[str], HookStatus, FixtureReport -> AuditReport` | 10.1-10.5, 15.5 |
+| `audit_decision(approved, current, allow, hooks, fixtures)` | `protect.py` | `Optional[ApprovedState], Dict[str,str], List[str], HookStatus, Mapping[str, object] (a FixtureReport as dict) -> AuditReport` | 10.1-10.5, 15.5 |
+| `refuse_paths(ref, changed, allow)` | `protect.py` | `str, Sequence[str], Sequence[str] -> List[str]` | 9.2: the protected-filter part of `ref_update_decision`; accepts git-quoted names (unquoted before comparing) |
 | `claim_release_decision(claim, starting_run, liveness, age_s, stale_minutes)` | `worktrees.py` | `ClaimInfo, Optional[str], Optional[Liveness], float, float -> "release" \| "keep" \| "own"` | 16.2-16.5, 16.7 |
 | `missing_command_edges(graph)` | `graph.py` | `SpecGraph -> List[MissingEdge]` | 12.1, 12.2 |
 | `unknown_commands(graph, source_words)` | `graph.py` | `SpecGraph, FrozenSet[str] -> List[UnknownCommand]` | 12.3 |
@@ -554,16 +555,22 @@ class ProjectContext:            # classify_not_built inputs, gathered by the ga
 no name imported from the project's own code; every other test-body `AssertionError` is unclear, passes, and is
 reported:
 
-1. `NotImplementedError` anywhere in the chain -> not-built.
+1. `NotImplementedError` anywhere in the chain -> not-built. "Anywhere" means an exception line of a traceback
+   (`NotImplementedError: x` at the start of a line, also in a chained traceback); a message that only quotes the
+   name mid-line (`AssertionError: NotImplementedError: ...`) is not a chain.
 2. `ModuleNotFoundError` / `ImportError` / `cannot import name` / `AttributeError: module 'x' has no attribute 'y'`
    naming a module in `project_modules` or a path in `owned_paths` -> not-built. Naming a third-party module ->
-   unclear.
+   unclear. Naming a test helper module (a path in `test_paths`, such as `tests/helpers.py`) -> bad: a broken
+   helper is a test-side wrong reason.
 3. `missing_command(detail, programs)` returns a command, or the detail holds click's `No such command`,
-   argparse's `invalid choice` / `unrecognized arguments` for one of `programs` (including inside an assertion
-   on a CLI exit code) -> not-built.
+   argparse's `invalid choice` / `unrecognized arguments` for one of `programs` -> not-built. An
+   `AssertionError` (a CLI exit code checked with `assert`) counts only when the text carries the program's usage
+   banner (`usage:`): the banner stops an assertion's own message that quotes a CLI error from passing as the
+   CLI's output (anti-spoof; such a message falls through to rule 5).
 4. Schema/validation errors while loading data (`ValidationError`, `JSONDecodeError`, `yaml.YAMLError`,
    `UnicodeDecodeError`, `FileNotFoundError` for a path in `test_paths`), any error in phase `setup`, an
-   `AssertionError` whose `crash_path` is a test helper, conftest or fixture file other than the test file itself,
+   `AssertionError` whose `crash_path` is a test helper, conftest or fixture file other than the test file itself (a
+   path in `test_paths`, a conftest, or a `tests/` or `fixtures/` file that is not in `owned_paths` and not under `src/`),
    and `SyntaxError` / `NameError` in the test file -> bad.
 5. An `AssertionError` whose `crash_path` is the test file (5.7): `assert_reaches_project(test_sources[file],
    crash_line, ctx)` parses the test file with `ast`, finds the `assert` statement at `crash_line` and its
@@ -575,7 +582,13 @@ reported:
    the same way, and reaches project code when its body does; a call to a name imported from any other module
    of the repository (a test helper such as `tests/helpers.py`) reaches project code, because the parse cannot
    see what it runs (5.7: "no call into project code"). Builtins, literals, the standard library (`json`, `pathlib`, `open`, `csv`, `datetime`, ...)
-   and third-party data readers do not count. `False` (only literals or file-loaded data, for example
+   and third-party data readers installed outside the repository (`packaging`, `pytest`) do not count. Four
+   exceptions reach project code, since they run a program or project code: `subprocess`, `runpy`, `importlib`,
+   `pty`, `multiprocessing` and `os.system` / `os.popen` / `os.exec*` / `os.spawn*` (the CLI run through a
+   standard-library module); the builtins `__import__`, `eval`, `exec` and `compile`. A name that nothing in its
+   scope binds and that is not a builtin (for example one a `from X import *` supplies, or a global the parse
+   cannot see) reaches project code, so an ambiguity stays unclear, never bad. A `lambda`'s own parameters are
+   values, not fixtures. `False` (only literals or file-loaded data, for example
    `prices = json.load(open("tests/fixtures/prices.json")); assert prices["AAPL"] == 4.15`) -> bad. `True` (for
    example `assert rate_floor(prices) == 0.04`, where a stub may return a wrong value) or `None` (the source or
    line cannot be parsed) -> unclear.
@@ -634,7 +647,10 @@ How edges are filled (the API delegated by PLAN):
   `cmd:` node with no provider (12.3).
 - **imports:** `lint._imports` / `_module_candidates`, unchanged.
 - **Freshness (11.7):** built on demand from files on every call; the only memo is in-process, keyed by each
-  input's `(path, size, mtime_ns)`. No on-disk cache.
+  input's `(path, size, mtime_ns, st_ctime_ns, st_ino)`. `os.utime` can restore size and mtime_ns but not
+  `st_ctime_ns` or `st_ino` (an atomic replace changes the inode), so a same-size, same-mtime rewrite within one
+  second still misses the memo. If a build cannot rely on these (a filesystem with coarse ctime), hash the
+  content instead of trusting stat. No on-disk cache.
 - **Malformed sources (11.8):** a task block that fails to parse, a test file with a syntax error, or an
   unreadable design.md adds a `GraphProblem` and the rest is built.
 - `unknown_commands` treats a path as existing when every word of it appears as a string literal in a non-test
@@ -683,7 +699,7 @@ class HookStatus:
 class ApprovedState:         # <common>/ck/<spec>/protected.json, sealed with a mac
     ref: str
     commit: str
-    files: Mapping[str, str]                 # protected path -> blob oid at `commit`
+    files: Mapping[str, str]                 # protected path -> approved blob oid; land() re-records only the paths its landed tasks changed, so this is not the whole tree at `commit`
     approvals: Tuple[Mapping[str, object], ...]  # {at, task, files, by: "allow-list"|"approval"|"baseline", commit}
     # The hook finds the approved state of a ref through <common>/ck/refs.json (ref -> spec), written with it.
     # The state outlives a deleted ref, so a re-created ref is checked against it (9.12).
@@ -757,6 +773,7 @@ class RunStartClaims:
 `claim_release_decision`: `run == starting_run` -> own (16.7); `run` set and liveness `running` -> keep (16.3);
 `run` set and liveness `finished` / `stale` / `missing` / None -> release (16.2, 16.5); `run` None -> release iff
 `age_s > stale_minutes * 60` else keep (16.4).
+`stale_minutes` is the `claim_stale_minutes` key of specs/ck.json. `claim()` treats a lock whose `ClaimInfo.run` equals `--progress-run` as the caller's own claim (16.7), so a same-run reclaim succeeds without `--takeover`.
 
 ### Python (`fixtures.py`, `testfix.py`, `fidelity.py`)
 
@@ -1279,7 +1296,7 @@ Entries for the criteria that state an error, refusal or fallback.
 | 11.4 | invokes scan |
 | 11.5 | `ck graph --json`, sorted |
 | 11.6 | `AttributionIndex` built from the graph; lint/relink/plan read the same graph |
-| 11.7 | on-demand build, in-process memo keyed by size/mtime |
+| 11.7 | on-demand build, in-process memo keyed by size/mtime/ctime/inode |
 | 11.8 | `GraphProblem` |
 | 12.1 | `missing_command_edges`; `lint_spec.commandEdges` |
 | 12.2 | `ck relink --commands`, `plan_command_relink` |
