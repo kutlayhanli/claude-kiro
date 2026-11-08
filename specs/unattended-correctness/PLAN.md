@@ -172,6 +172,14 @@ If that check finds `dsh` can't host the workflow, the phase stops with a findin
 **Rejected:** handing off with progress followed here - the work isn't in the session; giving each agent its own isolation under `.claude/worktrees/` - unproven, would need a spike first.
 **Decided by:** user (2026-11-07); implemented directly on this branch, not as a spec task.
 
+### D19: Answers to the spec review's open questions (2026-11-07)
+- **V1:** a failing TC maps to the impl tasks whose Verify selects it; the test task's coverage is used only when no Verify selects it (1.1 reworded, P-1a added).
+- **V2:** a test-body `AssertionError` is bad (blocks the test-track task) only when the failing assert runs no project code and uses no name imported from the project's own code; otherwise it is unclear, passes and is reported (5.3, 5.4, 5.7).
+- **C1.9:** a wrapper test with no TC ID in an unowned file stays unattributed and red (1.5); when its parameter ID names an owned file, the entry gets a hint naming the owning test task, and nothing is excused through the parameter.
+- **C1.10:** the lean runner omits CLAUDE.md only where Claude Code documents a frontmatter key for it (19.2 relaxed); otherwise the gap is recorded and TC-160 accepts the recorded gap.
+- **C2.1:** a test fix may not change test-plan.md at all, a new row included; it is refused before the proof (4.5 amended to match D4).
+**Decided by:** user
+
 ## Delegated to Spec
 - The `ck gate --attribute --json` output schema, the failure `kind` taxonomy and how each test runner's node IDs are parsed (pytest first; other runners fall back to file-level attribution, D1).
 - The spec graph's storage and API: built on demand or cached, and how inference fills `provides` and `invokes` edges before falling back to an explicit `**Provides:**` field.

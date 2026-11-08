@@ -62,8 +62,8 @@ covers **So that** a real regression is not hidden in a suite that also covers u
 - 1.1 WHEN `ck gate` runs with attribution, THE SYSTEM SHALL run every verify suite that the gate would
   excuse today, as well as the suites it already runs. It SHALL read the node ID of each failing test and
   map it to its TC ID (`tcNNN_` in the test name). It SHALL then map the TC ID to its attributed tasks: the
-  impl tasks whose Verify selects that TC ID, and the impl tasks that the test task covering that TC ID
-  verifies.
+  impl tasks whose Verify selects that TC ID. Only WHEN no impl task's Verify selects it SHALL the attributed
+  tasks be the impl tasks that the test task covering that TC ID verifies.
 - 1.2 WHEN every attributed task of a failing test is Done, or is being gated as Done, THE SYSTEM SHALL
   count the failure as a regression candidate (subject to the rerun in Story 2).
 - 1.3 WHEN at least one attributed task of a failing test is not Done, THE SYSTEM SHALL count the failure as
@@ -73,7 +73,9 @@ covers **So that** a real regression is not hidden in a suite that also covers u
   task that owns the file and the impl tasks that test task verifies. The failure SHALL be marked as
   attributed by file.
 - 1.5 WHEN a failing test has neither a TC ID nor an owning test task, THE SYSTEM SHALL count it as a
-  regression candidate marked "unattributed". No unfinished task can excuse it.
+  regression candidate marked "unattributed". No unfinished task can excuse it. WHEN such a test is a wrapper
+  whose parameter ID names a file a test task owns, THE SYSTEM SHALL add a hint to the entry naming that file
+  and its owning test task. The hint SHALL not change the status or excuse the failure.
 - 1.6 WHEN a test file fails to import or collect, so no test node exists, THE SYSTEM SHALL attribute the
   failure by file as in 1.4, with kind `collection` or `import` (Story 3).
 - 1.7 WHEN a verify command's runner is not pytest, THE SYSTEM SHALL attribute its failures at file level,
@@ -171,12 +173,13 @@ runs no longer stop for hand repairs of tests.
   fix SHALL not land without that proof.
 - 4.3 WHEN the proof holds, THE SYSTEM SHALL have a reviewer at the risky tier (the reviewer's risky model
   and effort) check the fix's diff against the test-plan row of each changed test. The reviewer checks that
-  no test was weakened and that the requirements document and existing test-plan rows were not edited.
+  no test was weakened and that the requirements document and the test-plan document were not edited.
 - 4.4 WHEN the reviewer approves, THE SYSTEM SHALL land the fix through `ck worktree land`, with its gate and
   protected-file checks. It SHALL then retry the blocked task, and release the dependents that were waiting
   on it.
-- 4.5 WHEN the fix's diff changes anything other than test files and test fixtures, or edits the requirements
-  document or an existing test-plan row, THE SYSTEM SHALL refuse the fix before review and send the
+- 4.5 WHEN the fix's diff changes anything other than test files and test fixtures, or changes the
+  requirements document or the test-plan document in any way (adding a new test-plan row included; D4: no
+  requirement or test-plan edits), THE SYSTEM SHALL refuse the fix before the proof and review and send the
   conflict to me.
 - 4.6 WHEN the proof fails or the reviewer rejects the fix, THE SYSTEM SHALL not land it. It SHALL send the
   conflict to me (needs-input) with the proof result or the review findings.
@@ -206,11 +209,15 @@ invalid fixtures and wrong values are caught before an implementer ever sees the
 - 5.2 THE SYSTEM SHALL count these as "not built yet": a missing module or importable name from the code
   under test, a missing CLI command or unknown subcommand, an unrecognized argument or invalid choice of the
   project's CLI, and an explicit not-implemented error.
-- 5.3 WHEN any failure is not "not built yet" (for example an assertion error on fixture data, or a schema
-  or validation error raised while loading a fixture), THE SYSTEM SHALL keep the task from landing. It SHALL
+- 5.3 WHEN any failure is not "not built yet" (for example an `AssertionError` whose failing assert runs no
+  project code and uses no name imported from the project's own code, so it compares only fixture data or
+  literals (5.7), or a schema or validation error raised while loading a fixture), THE SYSTEM SHALL keep the
+  task from landing. It SHALL
   send the task back to the test writer with the D3 failure list, marking which entries failed the check.
-- 5.4 WHEN a failure's class is unclear, THE SYSTEM SHALL count it as "not built yet" and report it as
-  unclear in the gate's checks. Unclear failures do not block.
+- 5.4 WHEN a failure's class is unclear (including an `AssertionError` whose failing assert reaches project
+  code, a name imported from the project's own code or a pytest fixture argument, or cannot be parsed, 5.7),
+  THE SYSTEM SHALL count it as "not built yet" and report it as unclear in the gate's checks. Unclear failures
+  do not block.
 - 5.5 WHEN a new test already passes against the integration branch, THE SYSTEM SHALL report it as a
   warning. It does not block.
 - 5.6 WHEN every task the test-track task verifies is already Done, THE SYSTEM SHALL require its tests to
@@ -491,8 +498,10 @@ they stop paying for context they never use.
 - 19.1 WHEN the workflow under Claude Code starts a thin ck agent (the attributed gate of Story 2 and the
   other agents that only run a ck command), THE SYSTEM SHALL start it as the dedicated lean agent type,
   never as a default subagent.
-- 19.2 THE SYSTEM SHALL define the lean agent type with Bash as its only tool, no project or user CLAUDE.md,
-  Haiku at low effort, and a turn limit of at most 5.
+- 19.2 THE SYSTEM SHALL define the lean agent type with Bash as its only tool, Haiku at low effort, and a turn
+  limit of at most 5. Where Claude Code supports it (a documented agent frontmatter key), the lean agent type
+  SHALL load no project or user CLAUDE.md; where it does not, THE SYSTEM SHALL record that gap, with its source,
+  and report it to me.
 - 19.3 THE SYSTEM SHALL give all thin ck agents one shared output schema.
 - 19.4 WHEN the lean agent type is not available at run start (for example a stale vendored copy), THE SYSTEM
   SHALL report that, and run thin ck calls as before, with a warning in the run's results.
@@ -582,7 +591,8 @@ across two models and three harnesses.
 
 - The guards stay as they are: never weaken a test, never edit the requirements document or existing
   test-plan rows. The test-fixer and its reviewer enforce them (4.3, 4.5), and nothing in this spec relaxes
-  them.
+  them. A test fix is stricter still: it may not change the test-plan document at all, not even to add a row
+  (4.5, PLAN D19).
 - ck stays project-agnostic. Project-specific validation and fixture globs come from the project's ck
   config (Stories 6, 15).
 - Node-level attribution is for pytest only. Other runners get file-level attribution or the fallback in 1.7.

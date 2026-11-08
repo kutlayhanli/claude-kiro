@@ -19,7 +19,9 @@ type under Claude Code), routes structured results, and runs the agents that wri
 How the PLAN.md decisions shape it:
 
 - **D1 (per-test attribution by TC ID).** A new `attribution.py` maps each failing pytest node to its TC ID
-  (`tcNNN_` in the test name), then through the spec graph's `verifies` edges to impl tasks. All Done (or being
+  (`tcNNN_` in the test name), then through the spec graph's `verifies` edges to impl tasks: the edges from
+  impl tasks' Verify selectors, or, only when no Verify selects the TC, the edges from its test task's
+  coverage (1.1). All Done (or being
   gated as Done) means regression candidate; otherwise excused, listing the unfinished tasks. No TC ID: file
   attribution through the owning test task. Non-pytest runners: file level, else today's per-test-task rule plus
   a warning. Node IDs come from a tiny pytest report plugin ck injects through `PYTEST_ADDOPTS` (commands are never
@@ -428,7 +430,7 @@ gather inputs and act on the output; they never re-implement the rule.
 | `assert_reaches_project(test_source, line, ctx)` | `failures.py` | `str, int, ProjectContext -> Optional[bool]` | 5.7: does the failing assert's expression reach project code (None: cannot parse) |
 | `right_reason_verdict(results, all_verified_done)` | `failures.py` | `List[TestResult], bool -> RightReasonVerdict` | 5.1, 5.3-5.6: block, warn, or require pass |
 | `tc_of_node(node_id)` | `attribution.py` | `str -> Optional[str]` | 1.1: `tcNNN_` -> `TC-N` |
-| `param_owned_file(node_id, file_owner)` | `attribution.py` | `str, Mapping[str, str] -> Optional[str]` | 1.4: a wrapper node whose parameter ID names an owned file |
+| `param_owned_file(node_id, file_owner)` | `attribution.py` | `str, Mapping[str, str] -> Optional[str]` | 1.5 hint only: a wrapper node whose parameter ID names an owned file (never attributes or excuses) |
 | `attribute_failure(failure, index, done, gated)` | `attribution.py` | `Failure, AttributionIndex, FrozenSet[str], FrozenSet[str] -> Attribution` | 1.1-1.8: tasks, by-what, candidate or excused |
 | `rerun_plan(attributions)` | `attribution.py` | `List[Attribution] -> List[RerunItem]` | 2.4, 2.5, NFR: each candidate once, excused never |
 | `gate_verdict(attributions, reruns, other_checks_ok)` | `attribution.py` | `-> GateVerdict` | 2.4, 2.6, 2.8, 3.4: regression / flaky / excused / unattributed, red or green |
@@ -492,20 +494,24 @@ class Attribution:
     candidate: bool              # regression candidate (1.2, 1.5) vs excused (1.3)
     excused_by: Tuple[str, ...]  # unfinished attributed tasks (1.3)
     warnings: Tuple[str, ...]    # unknown TC id (1.8), attribution unavailable (1.7)
+    hint: Optional[str]          # by="none" only: owning test task of the file a wrapper's parameter ID names (1.5)
 
 @dataclass(frozen=True)
 class AttributionIndex:          # built from SpecGraph once per gate
-    tc_tasks: Mapping[str, Tuple[str, ...]]        # TC id -> impl tasks (verifies edges)
+    tc_tasks: Mapping[str, Tuple[str, ...]]        # TC id -> impl tasks (1.1): its "Verify -k" verifies edges;
+                                                   # only when it has none, its "Verifies" (test-task coverage) edges
     file_owner: Mapping[str, str]                  # test file -> owning test task
     test_task_verifies: Mapping[str, Tuple[str, ...]]  # test task -> impl tasks it verifies
     command_owner: Mapping[str, Tuple[str, ...]]   # Verify command -> tasks that list it (1.7 fallback)
 
-# File attribution (1.4) first tries the node's own file. When that file has no owning test task and the
-# node's parameter ID names a file a test task owns (a pytest wrapper that runs other suites, such as
-# `tests/test_workflow_scripts.py::test_workflow_control_flow[thin_agents.test.mjs]`), `param_owned_file`
-# resolves it: the parameter ID (or a `/`-separated part of it) must equal an owned file's path or its unique
-# basename among owned files. The failure is then attributed by that file, `by="file"`, and `Failure.file`
-# keeps the wrapper's path. The parameter ID is never read for TC IDs (P-3).
+# File attribution (1.4) uses only the node's own file. A node with no TC ID whose file has no owning test
+# task is unattributed (1.5, `by="none"`, candidate, never excused), even when it is a pytest wrapper that runs
+# other suites, such as `tests/test_workflow_scripts.py::test_workflow_control_flow[thin_agents.test.mjs]`.
+# For such a node `param_owned_file` only builds a hint: when the parameter ID (or a `/`-separated part of it)
+# equals an owned file's path or its unique basename among owned files, `hint` names that file and its owning
+# test task ("parameter names tests/js/thin_agents.test.mjs, owned by test Task 6"), so the fixer is pointed at
+# the right task. The hint never adds tasks, never changes `by` or the status, and never excuses. The
+# parameter ID is never read for TC IDs (P-3).
 
 @dataclass(frozen=True)
 class RerunItem:
@@ -540,7 +546,10 @@ class ProjectContext:            # classify_not_built inputs, gathered by the ga
     test_sources: Mapping[str, str]   # source text of this task's test files (5.7), read by the gate
 ```
 
-`classify_not_built` rules, first match wins (conservative per the PLAN risk):
+`classify_not_built` rules, first match wins (conservative per the PLAN risk). For a test-body `AssertionError`
+(PLAN D19, V2) the split is rule 5: bad, and blocking, only when the failing assert runs no project code and uses
+no name imported from the project's own code; every other test-body `AssertionError` is unclear, passes, and is
+reported:
 
 1. `NotImplementedError` anywhere in the chain -> not-built.
 2. `ModuleNotFoundError` / `ImportError` / `cannot import name` / `AttributeError: module 'x' has no attribute 'y'`
@@ -607,7 +616,9 @@ How edges are filled (the API delegated by PLAN):
 - **depends, owns:** `parse_tasks` (Files globs kept as written; a trailing `/` means `dir/**`).
 - **verifies:** for each impl task, every `tcNNN_` term in a Verify `-k` expression not preceded by `not`; for each
   test task T, every TC found in T's test files (`def test_tcNNN_`, `test('tcNNN_ ...')`) or in test-plan rows
-  whose Test file column names one of T's files, to each task in `T.verifies`.
+  whose Test file column names one of T's files, to each task in `T.verifies`. Each edge keeps its origin in
+  `source` (`"Verify -k"` or `"Verifies"`). Attribution (1.1) uses a TC's `"Verify -k"` edges; it falls back to
+  its `"Verifies"` edges only when the TC has no `"Verify -k"` edge, so the two are never unioned.
 - **provides:** `**Provides:**` wins (11.3). Otherwise inferred: a design.md table row with a backticked command
   path whose row names a file the task owns; else a backticked command path, starting with a known program, in
   the task's title or description. Ambiguity (two tasks inferred) keeps both edges and adds a GraphProblem.
@@ -781,7 +792,8 @@ class ScopeDecision:
     reason: str
 
 # scope_decision: in scope iff every changed path is a test file or test fixture of the spec AND neither the
-# spec's requirements.md nor its test-plan.md changed in any way. Adding a row is a change too: a test-fixer
+# spec's requirements.md nor its test-plan.md changed in any way (4.5 as amended by PLAN D19, C2.1). Adding a
+# row is a change too: a test-fixer
 # never needs one, and a re-tagged test with a new, looser row would slip past row fidelity and the reviewer.
 # A fix that changes a test's TC token (renames `test_tc52_x` to `test_tc999_x`) is out of scope as well:
 # every TC ID a changed test carried before the fix must still be carried after it.
@@ -848,6 +860,8 @@ value with no name, or a non-Python test -> unparsed. It never writes a file (8.
 - `failures` is always present under `--json` (empty on pass, 3.3) and is never truncated (NFR).
 - With `--attribute`, the object also carries `report`: the absolute path of the report file holding this same
   object (`<git-common-dir>/ck/<spec>/gate-reports/...`, 2.8), or null when it could not be written (with a warning).
+- `hint` (string or absent) only with `--attribute`, on an `unattributed` entry whose wrapper parameter ID names
+  an owned file: it names that file and its owning test task (1.5). It never changes the status.
 - `status`, `excusedBy`, `rerun` only with `--attribute` (3.4). `rerun`: `failed`, `passed` (-> `flaky`),
   `unavailable` (non-pytest file-level failure: counted on the first result), or absent (excused, never rerun).
 - `class` is set by the right-reason check (`not-built`, `bad`, `unclear`); `check` is `right-reason`,
@@ -1117,7 +1131,7 @@ Entries for the criteria that state an error, refusal or fallback.
 - **Graph build:** regex/AST scans of test files, no imports executed; 100 tasks / 200 test files < 3 s.
 - **Gate cost:** the attributed gate runs only every `fullGateEvery` merges and at the end; landing gates stay
   scoped. The test-track gate now runs the task's own (small) Verify instead of skipping it.
-- **Lean thin agents:** Bash only, Haiku low, no project CLAUDE.md, at most 5 turns; `ck plan --compact` and
+- **Lean thin agents:** Bash only, Haiku low, no project CLAUDE.md where Claude Code supports it (19.2), at most 5 turns; `ck plan --compact` and
   `ck gate --json --compact` keep the copied JSON small (a mid-spec periodic gate with hundreds of excused failures
   copies only counts per task).
 - **Covered Verify commands:** distinct task Verify commands are collected once per attributed gate, in parallel
@@ -1154,20 +1168,23 @@ Entries for the criteria that state an error, refusal or fallback.
   (`agent_type_files`), except `maxTurns`, which Task 66 checks against Claude Code's sub-agent documentation.
 - **`omitClaudeMd`.** Not confirmed: the same reference says only that some built-in agent types (Explore, Plan)
   omit CLAUDE.md. Task 66 checks Claude Code's sub-agent documentation for a frontmatter key that omits CLAUDE.md
-  and records the answer, with the source, in `specs/unattended-correctness/claude-code-agent-keys.md`. When no
-  such key exists, `runner.md` leaves it out, 19.2's "no project or user CLAUDE.md" is recorded there as not met,
-  and the NFR thin-agent context figure (TC-167) measures what the lean agent still saves; this is reported to me,
-  not hidden. `agent_type_files` writes `maxTurns` (and the key when it exists) into the vendored `ck-runner.md`.
+  and records the answer, with the source, in `specs/unattended-correctness/claude-code-agent-keys.md`. 19.2
+  asks for no CLAUDE.md only where Claude Code supports it (PLAN D19, C1.10). When the key is documented,
+  `runner.md` sets it. When no such key exists, `runner.md` leaves it out, the file records the gap (no
+  documented key, the source checked, 19.2's CLAUDE.md part not available), and the NFR thin-agent context figure
+  (TC-167) measures what the lean agent still saves; this meets 19.2 and is reported to me, not hidden. TC-160
+  accepts either state and nothing else: the documented key set in the frontmatter, or the recorded gap with no
+  CLAUDE.md key in the frontmatter. `agent_type_files` writes `maxTurns` (and the key when it exists) into the vendored `ck-runner.md`.
 
 ## Requirements Traceability
 
 | Criterion | Design element |
 |---|---|
-| 1.1 | `gate.run_gate(attribute=True)` command set, covered-by-node-ID rule (`CK_GATE_COLLECT`, `--collect-only`); `ck_pytest_report` (env removed for nested runs, `CK_GATE_ROOT`); `attribution.tc_of_node`, `attribute_failure`; graph `verifies` edges |
+| 1.1 | `gate.run_gate(attribute=True)` command set, covered-by-node-ID rule (`CK_GATE_COLLECT`, `--collect-only`); `ck_pytest_report` (env removed for nested runs, `CK_GATE_ROOT`); `attribution.tc_of_node`, `attribute_failure`; graph `verifies` edges (`AttributionIndex.tc_tasks`: Verify-selecting tasks, test-task coverage only as fallback) |
 | 1.2 | `attribute_failure` (done ∪ gated) -> candidate; `gate_verdict` |
 | 1.3 | `attribute_failure` excused with `excused_by`; `gate_verdict` never red for excused |
-| 1.4 | `attribute_failure` file fallback via `AttributionIndex.file_owner` / `test_task_verifies`, `by="file"`; `param_owned_file` for wrapper nodes whose parameter ID names an owned file |
-| 1.5 | `attribute_failure` `by="none"`, candidate; status `unattributed` |
+| 1.4 | `attribute_failure` file fallback via `AttributionIndex.file_owner` / `test_task_verifies`, `by="file"` (the node's own file only) |
+| 1.5 | `attribute_failure` `by="none"`, candidate; status `unattributed`; `param_owned_file` adds only a `hint` naming the owning test task when a wrapper's parameter ID names an owned file |
 | 1.6 | plugin collect reports / summary `ERROR collecting`; `classify_kind` -> `import`/`collection`; file attribution |
 | 1.7 | `failures` output fallbacks; `command_owner` per-test-task rule; warning in `ck-gate/1.warnings` |
 | 1.8 | `attribute_failure` unknown TC -> file fallback + warning |
@@ -1199,7 +1216,7 @@ Entries for the criteria that state an error, refusal or fallback.
 | 3.10 | additive `ck-gate/1` (check fields unchanged) and land JSON |
 | 4.1 | workflow test-fix loop; `TEST` opts + role `test_writer`; `ck worktree create SPEC testfix<k> --base INTO`; conflicts passed as `TestConflict[]` |
 | 4.2 | `ck testfix prove --blocked`, `testfix.prove`, `proof_decision` |
-| 4.3 | reviewer call with `RISKY_REVIEW` and test-plan rows; prompt checks no weakening / no requirement or row edits |
+| 4.3 | reviewer call with `RISKY_REVIEW` and test-plan rows; prompt checks no weakening / no requirement or test-plan edits |
 | 4.4 | `thinCk('land', ... testfix<k> --gate)` with `testfix.gate_scope` mapping the landing gate to the owning test tasks; retry blocked task; dependents released when it merges |
 | 4.5 | `scope_decision`; needs-input path |
 | 4.6 | needs-input with `ProofVerdict` / review findings |
@@ -1306,7 +1323,7 @@ Entries for the criteria that state an error, refusal or fallback.
 | 18.4 | `Harness.available()` in doctor and bench |
 | 18.5 | `dsh` code is separate modules registered only when built |
 | 19.1 | `thinCk` lean path with `agentType` |
-| 19.2 | `plugin/agents/runner.md` frontmatter (Bash, haiku, low, maxTurns 5, no CLAUDE.md); keys checked per "Claude Code interfaces checked" |
+| 19.2 | `plugin/agents/runner.md` frontmatter (Bash, haiku, low, maxTurns 5, and the documented no-CLAUDE.md key where Claude Code has one); keys checked and any gap recorded in `claude-code-agent-keys.md` per "Claude Code interfaces checked" |
 | 19.3 | `CK_CALL` |
 | 19.4 | `thinAgentMode` fallback + warning |
 | 19.5 | schema mismatch -> failed call (`gateOutcome` error) |
