@@ -55,7 +55,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 2: Extend the JS workflow harness and bridge
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 2.2, 2.3, 3.6, 19.3
 **Description:** Build the workflow-side infrastructure (test-plan "To add" items 3-6). In `tests/js/fake_project.mjs` add, leaving existing options unchanged: `gateAnswers` (`[json | {code, stdout} | 'throw' | 'hang']`, consumed in order through `directCk` `gate` argv or the thin labels `full gate @k`, `re-check k`, `final gate`), `taskFailures`, `testConflictsList`, `testFix` (`{file: {verdict: 'fixed'|'test-correct'|'cannot-fix', proof, scope, review, finding}}`), `priorFixes` (answers `ck testfix check`'s `alreadyFixed`), `crossTest`, `fidelity`, `fixtureStatus`, `owns`/`overlaps`/`testVerifies`/`provides` (in plan answers), `missingCommand`, `audit` (json or `'throw'`) and `runStart` (the `ck worktree start` answer). `directCk` must answer `gate`, `graph`, `worktree start`, `worktree audit`, `testfix check|prove|record` and `fixtures status` argv, and the thin labels `run start`, `audit`, `testfix ledger <k>`, `testfix prove <k>` with `CK_CALL` envelopes `{exitCode, json}`. For the existing thin labels (`plan <k>`, `land ...`, `report`, `park <n>`, `relink <n>`, `full gate @k`, `re-check k`, `final gate`), whenever the agent call carries `schema: CK_CALL` or an `agentType`, wrap today's answer in the envelope `{exitCode: 0, json: <today's answer>}` (gate labels: `json` is the `gateAnswers` entry, or today's `{green}` answer turned into a `ck-gate/1` object); calls without them get today's answers unchanged, so the wrap is invisible before Task 78 and the existing suites keep passing after it. `gateAnswers` entries may also be `ck-gate-compact/1` objects (2.12). In `tests/js/load_decisions.mjs` add `UNATTENDED_NAMES = ['gateOutcome', 'thinAgentMode', 'failuresForPrompt', 'testConflictsOf', 'testFixPlan', 'heldByCrossTest', 'liveEdgeDecision', 'writeSetHold']`, loaded only through `extra`. In `tests/js/bridge.mjs` add `{op:'call', name, args}` and `{op:'run', ..., realCk:{cmd, cwd, env}}`, and mirror both in `tests/landing_bridge.py`. Create `tests/js/real_agents.mjs` (scripted agents: claim with the prompt's command, write `scenario.files[n]`, commit, run the prompt's gate command through real ck, return the RESULT built from ck's JSON; no LLM). Add `tests/js/harness_self.test.mjs`, which checks that the existing suites' options still behave and that the new options answer as specified. Harness Contract item 13 (the bridge) is test infrastructure owned here.
@@ -70,11 +70,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 78 (the fake runtime, bridge and `CK_CALL` envelopes its thin routing runs under)
 
 **Acceptance:**
-- [ ] Every existing `tests/js/*.test.mjs` suite still passes unchanged with the extended fake project
-- [ ] `loadDecisions()` without `extra` still loads only today's names, so existing suites stay green before the workflow gains the new seams
-- [ ] Existing thin labels are answered in a `CK_CALL` envelope exactly when the call carries `schema: CK_CALL` or an `agentType`; `harness_self.test.mjs` checks both forms
-- [ ] `realCk` routes direct `ck()` calls to the real CLI subprocess with the given cwd and env
-- [ ] The fakes stand in only for the Workflow runtime and agents; no project code is mocked
+- [x] Every existing `tests/js/*.test.mjs` suite still passes unchanged with the extended fake project
+- [x] `loadDecisions()` without `extra` still loads only today's names, so existing suites stay green before the workflow gains the new seams
+- [x] Existing thin labels are answered in a `CK_CALL` envelope exactly when the call carries `schema: CK_CALL` or an `agentType`; `harness_self.test.mjs` checks both forms
+- [x] `realCk` routes direct `ck()` calls to the real CLI subprocess with the given cwd and env
+- [x] The fakes stand in only for the Workflow runtime and agents; no project code is mocked
 
 **Dependencies:** None
 **Complexity:** High
