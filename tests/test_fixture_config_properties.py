@@ -66,7 +66,7 @@ REASONS = ["", " ", "\t\n", "captured by hand from the vendor page", "x"]
 _SHA = st.sampled_from([None, BASE, "1" * 64, "2" * 64])
 _EVENT = st.fixed_dictionaries({
     "changes": st.dictionaries(st.sampled_from(FILES), _SHA, min_size=1),
-    "reasons": st.dictionaries(st.sampled_from(FILES), st.sampled_from(REASONS)),
+    "marks": st.dictionaries(st.sampled_from(FILES), st.sampled_from(REASONS)),
 })
 
 
@@ -79,8 +79,10 @@ def test_tc175_p32_drift_is_locked_files_changed_without_a_reasoned_label(events
             for f in LOCKED}
     reported, oracle = set(), set()
     for event in events:
-        labels = {f: Label(source="handcrafted", reason=r, sha256=None, capture=None)
-                  for f, r in event["reasons"].items()}
+        # Each label covers the content it was written for (design 15.4): its hash
+        # matches the change; a label for an unchanged file covers nothing and is not read.
+        labels = {f: Label(source="handcrafted", reason=r, sha256=event["changes"].get(f), capture=None)
+                  for f, r in event["marks"].items()}
         report = lock_decision(lock, event["changes"], labels)
         reported |= {d["file"] for d in report.drift}
         oracle |= {f for f, sha in event["changes"].items()
