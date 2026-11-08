@@ -81,7 +81,20 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # Git ref the tamper check diffs against. null = merge-base with origin/HEAD,
     # main, or master, whichever exists.
     "base": None,
+    # Test-track validation command(s), run on every test-track gate (Story 6).
+    # Absent (no key) = no check; an explicit null is a config error.
+    "test_track": {},
+    # Recorded-fixture globs to hash-lock (Story 15) and the label file.
+    "fixtures": {"recorded": [], "labels": "specs/fixture-labels.json"},
 }
+
+
+class ConfigError(Exception):
+    """A specs/ck.json value the strict readers refuse. `key` names the setting."""
+
+    def __init__(self, key: str, message: Optional[str] = None):
+        self.key = key
+        super().__init__(message or f"specs/ck.json: {key} is invalid")
 
 
 def load_config(project_dir: Path) -> Dict[str, Any]:
@@ -103,6 +116,58 @@ def load_config(project_dir: Path) -> Dict[str, Any]:
     if isinstance(config["verify"], str):
         config["verify"] = [config["verify"]]
     return config
+
+
+def _is_str_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def test_track_validate(config: Dict[str, Any]) -> List[str]:
+    """The test-track validation command(s): [] when absent, else a list of strings.
+
+    Raises ConfigError naming test_track.validate for any other value, null included,
+    and when the test_track section itself is present but is not an object.
+    """
+    section = config.get("test_track", {})
+    if not isinstance(section, dict):
+        raise ConfigError(
+            "test_track.validate",
+            "specs/ck.json: test_track must be an object to set test_track.validate",
+        )
+    if "validate" not in section:
+        return []
+    value = section["validate"]
+    if isinstance(value, str):
+        return [value]
+    if _is_str_list(value):
+        return list(value)
+    raise ConfigError(
+        "test_track.validate",
+        "specs/ck.json: test_track.validate must be a string or a list of strings",
+    )
+
+
+def fixture_globs(config: Dict[str, Any]) -> List[str]:
+    """The recorded-fixture globs: [] when absent, else a list of strings.
+
+    Raises ConfigError naming fixtures.recorded for any other value, including a
+    non-string member, and when the fixtures section itself is not an object.
+    """
+    section = config.get("fixtures", {})
+    if not isinstance(section, dict):
+        raise ConfigError(
+            "fixtures.recorded",
+            "specs/ck.json: fixtures must be an object to set fixtures.recorded",
+        )
+    if "recorded" not in section:
+        return []
+    value = section["recorded"]
+    if _is_str_list(value):
+        return list(value)
+    raise ConfigError(
+        "fixtures.recorded",
+        "specs/ck.json: fixtures.recorded must be a list of glob strings",
+    )
 
 
 def _present(path: Path) -> bool:
