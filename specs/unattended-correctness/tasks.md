@@ -2231,7 +2231,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 98: Test the guarded DeepSeek Harness verification record
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 18.1, 18.3, 18.5
 **Description:** Implement TC-154 and TC-156 (the adapter cases TC-155 and TC-157 are Task 105's, written after the verification records the API). Read the verification record `specs/unattended-correctness/dsh-verification.md` and its fenced ```json block (`{repository, version, checkedAt, canHostAgent, canHostCk, missing, evidence}`). TC-154: fields present, repository under `github.com/deepseek-ai/`. TC-156 (when either flag is false): `checked`/`version`/`missing` present, `dsh` not registered, `--harness dsh` refused with the registered list; when both flags are true TC-156 is skipped with that reason. TC-158 is covered by the run's final attributed gate over both `specs/ck.json` verify commands.
@@ -2241,10 +2241,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 99 (TC-154, TC-156)
 
 **Acceptance:**
-- [ ] Tests read the committed evidence and run the real bench and doctor with only the `dsh` binary faked
-- [ ] They fail before the implementation because the evidence file does not exist (TC-154), not because of test bugs
-- [ ] Tests never write the evidence file
-- [ ] No mocks of the project's own code
+- [x] Tests read the committed evidence and run the real bench and doctor with only the `dsh` binary faked
+- [x] They fail before the implementation because the evidence file does not exist (TC-154), not because of test bugs
+- [x] Tests never write the evidence file
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Medium
