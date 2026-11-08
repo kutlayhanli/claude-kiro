@@ -709,7 +709,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 30: Add the row-fidelity checker
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 8.1, 8.2, 8.3, 8.4, 8.5, 8.6
 **Description:** Create `src/claude_kiro/fidelity.py` with `TestValue`, `FidelityResult` and the read-only functions `extract_test_values(source, path)` (Python AST: literal enums/strings, numbers, ISO dates and `date(...)` calls a test asserts or feeds in, with the field, keyword or dict key they are compared with or fed as), `parse_row(test_plan_md, tc_id) -> Optional[RowFacts]` (the TC row's thresholds, ranges, enum values and dates), `parse_models(design_md) -> ModelFacts` (allowed sets per field from the design's data models) and the pure seam `check_values(values, row, models) -> FidelityResult` with design's rules: an enum value outside a field's allowed set -> mismatch with `allowed`; a threshold-like number (comparison operand, or a name containing threshold/min/max/limit/cutoff) when the row states exactly one threshold and the test's threshold-like numbers do not include it (percent and fraction forms both accepted; both ends of a range checked) -> mismatch with `expected`; an ISO date fed by the test that is not among the row's dates -> mismatch; a row with several thresholds, a value with no name, or a non-Python test -> unparsed. Tests with no TC id (use `attribution.tc_of_node`) or whose TC id has no row go to `unmatched`. Add `check_task(project_dir, spec_dir, task) -> FidelityResult` that reads the task's test files, test-plan.md and design.md. Nothing in this module writes a file (8.6). Harness Contract owner: item 3's `fidelity.check` (design: `check_values` and `check_task`).
