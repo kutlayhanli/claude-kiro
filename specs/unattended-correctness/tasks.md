@@ -362,7 +362,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 15: Red-team excused failures in attribution (Story 1)
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.3
 **Description:** Try to break each SHALL NOT clause of Story 1 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. The clause: an excused failure SHALL not make the gate red, and conversely nothing outside 1.3 may be excused. Starting points through `ck gate --attribute --json` on `attr_project`: a test named so its TC token belongs to a Done task but a near-miss token (`tc12_` vs `tc1_`, `TC012_`, token in the param ID) points at an unfinished one; an unowned file or unknown TC sneaking an excuse; a Verify with `not tc3_` or two `-k` options; a test task that verifies a task not in tasks.md; a task status written in an unusual form; feeding a previous gate's `failures` node IDs back as test names. Tests are named `test_tc4_redteam_<slug>` (or the TC of the row each attacks).
@@ -372,10 +372,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 20 (red team of 1.3 through `ck gate --attribute`)
 
 **Acceptance:**
-- [ ] Written from the requirements only, never from the implementation
-- [ ] Tests exercise the real gate CLI on real repos with real pytest
-- [ ] Each test fails before the implementation for the right reason (missing behaviour)
-- [ ] No mocks of the project's own code
+- [x] Written from the requirements only, never from the implementation
+- [x] Tests exercise the real gate CLI on real repos with real pytest
+- [x] Each test fails before the implementation for the right reason (missing behaviour)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project)
 **Complexity:** Medium
@@ -556,7 +556,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 23: Test right-reason classification on test-track gates
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7
 **Description:** Implement TC-50, TC-51, TC-52, TC-53, TC-54, TC-56 and TC-57 with real failing tests in a real task worktree branched from `integrate/demo`, running `ck gate demo --task 1 --json`. TC-51 runs a table against the fixture click and argparse CLIs from `spec_graph_project` (click `No such command 'thesis'`, argparse `invalid choice: 'thesis'`, `unrecognized arguments: --since`, click `No such option`, `NotImplementedError` from `calc.py`, `AttributeError` on `calc`). TC-52 asserts on fixture data only (`prices = json.load(...)`; `assert prices["AAPL"] == 4.15`) and must fail as `bad` (5.3, 5.7). TC-181: asserts that reach project code (`assert calc.rate_floor(...) == 0.04` with a stub returning a wrong value, an assert on a pytest fixture argument) and an assert line that cannot be parsed back are `unclear` and the gate passes. Assert failure `class` (`not-built`, `bad`, `unclear`), the right-reason check's ok/warning state, and the already-passing warning (TC-56).
@@ -566,10 +566,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 31 (TC-50 to TC-54, TC-56, TC-57, TC-181)
 
 **Acceptance:**
-- [ ] Tests run real pytest against real fixture CLIs in a real worktree
-- [ ] They fail before the implementation because today's test-track gate passes tests that fail on fixture assertions
-- [ ] TC-57 shows the not-built-yet rule is off when every verified task is Done
-- [ ] No mocks of the project's own code
+- [x] Tests run real pytest against real fixture CLIs in a real worktree
+- [x] They fail before the implementation because today's test-track gate passes tests that fail on fixture assertions
+- [x] TC-57 shows the not-built-yet rule is off when every verified task is Done
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project, spec_graph_project fixture CLIs)
 **Complexity:** Medium
@@ -578,7 +578,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 24: Test the project-declared fixture validation command
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.1, 6.2, 6.3, 6.4, 6.5, 6.6
 **Description:** Implement TC-58, TC-59 (a), TC-60, TC-61, TC-62 and TC-63. Use `specs/ck.json` `"test_track": {"validate": "python scripts/validate.py"}` with a script that writes its cwd to a marker, prints 60 lines and exits 1, or sleeps past `verify_timeout: 1`. TC-61 compares checks with the same project gated without the key. TC-62 covers `42`, `{"a":1}`, `["ok", 3]`, `null` (config error naming `test_track.validate`, no test command ran) and `["a", "b"]` (both run). TC-63 gates an impl task and asserts the marker is absent.
@@ -588,10 +588,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 31 (TC-58 to TC-63)
 
 **Acceptance:**
-- [ ] Tests run real subprocesses through the real gate and config load
-- [ ] They fail before the implementation because the key is ignored (no marker)
-- [ ] TC-61 passes before and after (preservation)
-- [ ] No mocks of the project's own code
+- [x] Tests run real subprocesses through the real gate and config load
+- [x] They fail before the implementation because the key is ignored (no marker)
+- [x] TC-61 passes before and after (preservation)
+- [x] No mocks of the project's own code
 
 **Dependencies:** Task 1 (attr_project, counters)
 **Complexity:** Medium
@@ -1518,7 +1518,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 66: Add the lean runner agent type and turn cross-test on by default
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 7.1, 7.3, 19.2
 **Description:** First check Claude Code's sub-agent documentation for the frontmatter keys `maxTurns` and a key that omits CLAUDE.md (the design names `omitClaudeMd`, unconfirmed; design "Claude Code interfaces checked"), and record the answer with its source in `specs/unattended-correctness/claude-code-agent-keys.md`; a key that does not exist is left out of the file and recorded as a gap (for the CLAUDE.md key: no documented key, the source checked, and 19.2's CLAUDE.md part not available; 19.2 asks for it only where Claude Code supports it, PLAN D19, C1.10, and the gap is reported to me). Create `plugin/agents/runner.md`, the lean thin ck agent: frontmatter `tools: Bash` (no other tool), `model: haiku`, `effort: low`, `maxTurns: 5`, the documented CLAUDE.md key set to true only when one exists (never an undocumented `omitClaudeMd`), and a short body (run the one ck command given, return its exit code and the JSON it printed exactly, never edit files). In `src/claude_kiro/plugin.py`, add `"runner": None` to `AGENT_ROLES` (no role settings). In `src/claude_kiro/agents.py`, have `agent_type_files` write the `runner` agent with its fixed frontmatter instead of role settings (vendored as `.claude/agents/ck-runner.md` by `ck agents sync`), and set `DEFAULTS["reviewer"]["cross_test"] = True`; a global or project value of false keeps it off. `agent_type_files` also writes `maxTurns` and the CLAUDE.md key into the vendored runner file. Update the existing test that pins `cross_test` off by default (`tests/test_agents.py`, the `assert r["reviewer"]["cross_test"] is False` case and its "off by default" comment) to the new default (7.1), in this task. The vendored `.claude/agents/ck-runner.md` itself is written in Task 97. Harness Contract owner: item 9's lean agent file and item 5's `reviewer.cross_test` default in `ck agents --json`. The `ck doctor` check for a missing vendored `ck-runner.md` is Task 96's.
@@ -1532,8 +1532,8 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 64 (TC-64a, TC-66a), Task 65 (TC-160)
 
 **Acceptance:**
-- [ ] `ck agents --json` shows `reviewer.cross_test: true` with no config (7.1); setting it false globally or per project turns it off (7.3)
-- [ ] The runner agent has Bash as its only tool, Haiku at low effort and at most 5 turns, in the plugin and in the generated agent file; it omits CLAUDE.md through the documented key, or `claude-code-agent-keys.md` records the gap with its source (19.2)
+- [x] `ck agents --json` shows `reviewer.cross_test: true` with no config (7.1); setting it false globally or per project turns it off (7.3)
+- [x] The runner agent has Bash as its only tool, Haiku at low effort and at most 5 turns, in the plugin and in the generated agent file; it omits CLAUDE.md through the documented key, or `claude-code-agent-keys.md` records the gap with its source (19.2)
 
 **Dependencies:** Task 64 (its tests are the oracle), Task 65 (its tests are the oracle)
 **Complexity:** Low
@@ -1634,7 +1634,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 71: Parse and validate `opencode.roles` in the OpenCode host
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 14.1, 14.2, 14.3, 14.4
 **Description:** In `opencode/src/models.ts`, add `ROLE_NAMES` (`implementer`, `test_writer`, `reviewer`, `reviewer_risky`, `fixer`, `orchestrator`, `resolver`) and the pure functions `validateRoleRef(value) -> string | null` (an error for a missing provider, missing model, or empty variant in `provider/model[#variant]`) and `resolveRoleRef(role, roles) -> RoleRef | null` (`{provider, model, variant}` or null when the role is unmapped). In `opencode/src/config.ts`, add `CkConfig.roles: Record<RoleName, string>`, accept `"roles"` as a known `opencode` key, layer global then project (project wins per role) and record `sources["roles.<role>"]`; an unknown role or malformed reference throws `ConfigError` at `loadConfig` naming `opencode.roles.<role>` and the value, so the workflow tool refuses to start before any agent runs. Harness Contract owner: item 6's `opencode.roles` and item 11's `loadConfig` roles with `sources["roles.<role>"]`, and the role-resolution seam (design: `resolveRoleRef`; Task 72 completes the contract's `resolveRoleModel` behaviour).
@@ -1645,9 +1645,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 69 (TC-127 to TC-129 and P-28 at the config and model seams)
 
 **Acceptance:**
-- [ ] A mapped role resolves to its provider, model and variant (14.1); an unmapped role returns null so the alias map applies (14.2)
-- [ ] Project config wins over global per role, with the source recorded (14.3)
-- [ ] An unknown role or malformed reference is a `ConfigError` naming the key and value, raised at config load (14.4)
+- [x] A mapped role resolves to its provider, model and variant (14.1); an unmapped role returns null so the alias map applies (14.2) (at the `resolveRoleRef` seam; the agent-call half is Task 72's box)
+- [x] Project config wins over global per role, with the source recorded (14.3)
+- [x] An unknown role or malformed reference is a `ConfigError` naming the key and value, raised at config load (14.4)
 
 **Dependencies:** Task 69 (its tests are the oracle)
 **Complexity:** Medium
