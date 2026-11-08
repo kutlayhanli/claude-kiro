@@ -5,15 +5,18 @@
   `testFixPlan` (P-11) and the whole test-fix loop of `spec-implement.js` under the fake runtime (P-33b).
 Every property is derandomized, has no example database and no per-example deadline. Nothing here mocks project code.
 
-Shapes assumed from design.md: `testConflictsOf(result)` returns the conflict list (a dict with `conflicts` and
-`malformed` is accepted too); `failuresForPrompt` returns `{shown, more: {file: count}, total}`; `testFixPlan` returns
+Shapes from design.md: `testConflictsOf(result)` returns an array of TestConflict (design.md's seam table gives no other
+shape and no `malformed` field); `scope_decision` reads `config["tests"]["dirs"|"files"]` (as `is_test_file` does) and
+`config["fixtures"]["recorded"]`; `failuresForPrompt` returns `{shown, more: {file: count}, total}`; `testFixPlan` returns
 `{groups: [{file, conflicts}], toMe: [conflict]}` and takes `alreadyFixed` as `[{node, at, fix}]`.
 """
 
+import json
 import re
 from collections import Counter
 from typing import Any, Dict, List
 
+import pytest
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 from landing_bridge import bridge  # noqa: F401  (module-scoped fixture)
@@ -50,23 +53,15 @@ entry_st = st.one_of(conflict_st, conflict_st, no_file_st)
 
 def conflicts_of(bridge, result):
     out = bridge.call("testConflictsOf", result)
-    if isinstance(out, dict):
-        return list(out.get("conflicts") or []), list(out.get("malformed") or [])
-    return list(out), []
-
-
-def split(out_conflicts, malformed):
-    """Valid entries (with a file) and the malformed ones reported by the seam, either apart or flagged in the list."""
-    valid = [c for c in out_conflicts if isinstance(c, dict) and c.get("file") and not c.get("malformed")]
-    reported = list(malformed) + [c for c in out_conflicts if not (isinstance(c, dict) and c.get("file") and not c.get("malformed"))]
-    return valid, reported
+    assert isinstance(out, list), f"testConflictsOf must return TestConflict[] (design.md seam table), got {out!r}"
+    return out
 
 
 @given(c=conflict_st)
 @settings(**BRIDGE)
 def test_tc174_p8_single_conflict_equals_list_of_one(bridge, c):  # noqa: F811
     assert conflicts_of(bridge, {"testConflict": c}) == conflicts_of(bridge, {"testConflicts": [c]})
-    assert [key(x) for x in conflicts_of(bridge, {"testConflict": c})[0]] == [key(c)]
+    assert [key(x) for x in conflicts_of(bridge, {"testConflict": c})] == [key(c)]
 
 
 @given(
@@ -80,20 +75,15 @@ def test_tc174_p8_conflicts_of_normalises_one_or_many(bridge, single, many):  # 
         result["testConflict"] = single
     if many is not None:
         result["testConflicts"] = many
-    valid, reported = split(*conflicts_of(bridge, result))
+    out = conflicts_of(bridge, result)
     entries = ([single] if single is not None else []) + (many or [])
-    objects = [e for e in entries if isinstance(e, dict)]
-    good = [e for e in objects if e.get("file")]
-    bad = [e for e in entries if not (isinstance(e, dict) and e.get("file"))]
-    # union, deduplicated by (file, test)
+    good = [e for e in entries if isinstance(e, dict) and e.get("file")]
+    # design.md does not say how an entry without a file is reported, so only the array of valid entries is pinned:
+    # the valid entries, deduplicated by (file, test), each once. Anything else the seam adds must be a non-conflict.
+    valid = [c for c in out if isinstance(c, dict) and c.get("file")]
     keys = [key(c) for c in valid]
     assert len(keys) == len(set(keys)), keys
     assert set(keys) == {key(e) for e in good}
-    # entries without a file are reported, never silently dropped
-    if bad:
-        assert reported, f"malformed entries {bad} were dropped silently"
-    else:
-        assert not reported
 
 
 # ----------------------------------------------------------------------------------------------- P-9
@@ -125,60 +115,101 @@ def test_tc174_p9_default_limit_is_fifty(bridge, failures):  # noqa: F811
 
 # ---------------------------------------------------------------------------------------------- P-10
 
-TEST_PATHS = ["tests/test_x.py", "tests/sub/conftest.py", "tests/fixtures/a.json", "tests/test_calc_tc.py", "tests/ä.py",
-              "tests/my test.py", "tests/fixtures/sub dir/data.json", '"tests/\\303\\244.py"']
-NON_TEST = ["src/tests.py", "tests_old/x.py", "src/tests/fixtures.py", "specs/demo/test-plan.md", "specs/demo/requirements.md",
-            "specs/other/test-plan.md", ".claude/x", "pyproject.toml", "conftest.py", "src/app.py", "src/ä.py", "my file.py",
-            '"src/\\303\\244.py"', "README.md", "specs/demo/tasks.md", "mytests/test_x.py", "tests.py"]
+# Two configs: the same default-like test globs, with and without `conftest.py` among the file globs.
+FIXTURES = ["tests/fixtures/*"]
+CONFIG_WITH_CONFTEST = {"tests": {"dirs": ["tests"], "files": ["test_*.py", "conftest.py"]}, "fixtures": {"recorded": FIXTURES}}
+CONFIG_NO_CONFTEST = {"tests": {"dirs": ["tests"], "files": ["test_*.py"]}, "fixtures": {"recorded": FIXTURES}}
+CONFIGS = [CONFIG_WITH_CONFTEST, CONFIG_NO_CONFTEST]
+
+PATHS = ["tests/test_x.py", "tests/sub/conftest.py", "tests/fixtures/a.json", "tests/test_calc_tc.py", "tests/ä.py",
+         "tests/my test.py", "tests/fixtures/sub dir/data.json", "tests/data.json", "tests/__pycache__/x.pyc",
+         "src/tests.py", "tests_old/x.py", "tests_old/test_x.py", "mytests/test_x.py", "mytests/helper.py", "tests.py",
+         "specs/demo/test-plan.md", "specs/demo/requirements.md", "specs/other/test-plan.md", "specs/demo/tasks.md",
+         ".claude/x", "pyproject.toml", "conftest.py", "src/app.py", "src/ä.py", "my file.py", "README.md"]
+
+
+def is_test_or_fixture(path, config):
+    """The expected verdict for one path, derived from the config: a test file per the project's test globs, or a
+    recorded fixture, and never a spec document."""
+    from fnmatch import fnmatch
+
+    from claude_kiro.hooks._shared.test_heuristics import is_test_file
+
+    if path.startswith("specs/"):
+        return False
+    return is_test_file(path, config) or any(fnmatch(path, g) for g in config["fixtures"]["recorded"])
+
+
+def test_tc174_p10_the_two_configs_disagree_exactly_on_root_conftest():
+    # Root conftest.py is allowed only when the test globs match it: both ways, the expectation comes from the config.
+    assert is_test_or_fixture("conftest.py", CONFIG_WITH_CONFTEST) is True
+    assert is_test_or_fixture("conftest.py", CONFIG_NO_CONFTEST) is False
+    from claude_kiro.testfix import Change, scope_decision
+
+    assert scope_decision([Change("conftest.py", "M")], PLAN, PLAN, CONFIG_WITH_CONFTEST).in_scope is True
+    assert scope_decision([Change("conftest.py", "M")], PLAN, PLAN, CONFIG_NO_CONFTEST).in_scope is False
+
+
 PLAN = "# Test Plan\n\n| ID | Criterion |\n| TC-1 | 1.1 |\n"
 PLAN_NEW_ROW = PLAN + "| TC-2 | 1.2 |\n"
 
 
-def decide(paths, before=PLAN, after=PLAN, statuses=None):
+def decide(paths, before=PLAN, after=PLAN, statuses=None, config=CONFIG_WITH_CONFTEST):
     from claude_kiro.testfix import Change, scope_decision
 
     statuses = statuses or ["M"] * len(paths)
-    return scope_decision([Change(p, s) for p, s in zip(paths, statuses)], before, after, {})
+    return scope_decision([Change(p, s) for p, s in zip(paths, statuses)], before, after, config)
 
 
-path_st = st.sampled_from(TEST_PATHS + NON_TEST)
+path_st = st.sampled_from(PATHS)
 status_st = st.sampled_from(["A", "M", "D", "R"])
+config_st = st.sampled_from(CONFIGS)
 
 
-@given(paths=st.lists(path_st, min_size=1, max_size=6), statuses=st.lists(status_st, min_size=6, max_size=6))
+@given(paths=st.lists(path_st, min_size=1, max_size=6), statuses=st.lists(status_st, min_size=6, max_size=6), config=config_st)
 @settings(**SEAM)
-def test_tc174_p10_scope_decision_allows_only_test_paths(paths, statuses):
-    want = all(p in TEST_PATHS for p in paths)
-    got = decide(paths, statuses=statuses[: len(paths)])
+def test_tc174_p10_scope_decision_allows_only_test_paths(paths, statuses, config):
+    want = all(is_test_or_fixture(p, config) for p in paths)
+    got = decide(paths, statuses=statuses[: len(paths)], config=config)
     assert got.in_scope is want, (paths, got)
     if not want:
         assert got.outside, got  # the files that are not test files or fixtures are named
 
 
-@given(allowed=st.lists(st.sampled_from(TEST_PATHS), min_size=1, max_size=4), bad=st.sampled_from(NON_TEST), pos=st.integers(0, 4))
+@given(data=st.data(), config=config_st)
 @settings(**SEAM)
-def test_tc174_p10_complement_a_non_test_path_makes_it_refused(allowed, bad, pos):
-    assert decide(allowed).in_scope is True
+def test_tc174_p10_complement_a_non_test_path_makes_it_refused(data, config):
+    allowed_pool = [p for p in PATHS if is_test_or_fixture(p, config)]
+    bad_pool = [p for p in PATHS if not is_test_or_fixture(p, config)]
+    allowed = data.draw(st.lists(st.sampled_from(allowed_pool), min_size=1, max_size=4))
+    bad = data.draw(st.sampled_from(bad_pool))
+    pos = data.draw(st.integers(0, 4))
+    assert decide(allowed, config=config).in_scope is True
     mixed = list(allowed)
     mixed.insert(min(pos, len(mixed)), bad)
-    assert decide(mixed).in_scope is False
+    assert decide(mixed, config=config).in_scope is False
 
 
-@given(refused=st.lists(st.sampled_from(NON_TEST), min_size=1, max_size=3), extra=st.lists(st.sampled_from(TEST_PATHS), min_size=1, max_size=3))
+@given(data=st.data(), config=config_st)
 @settings(**SEAM)
-def test_tc174_p10_monotone_adding_a_test_path_never_allows(refused, extra):
-    assert decide(refused).in_scope is False
-    assert decide(refused + extra).in_scope is False
-    assert decide(extra + refused).in_scope is False
+def test_tc174_p10_monotone_adding_a_test_path_never_allows(data, config):
+    allowed_pool = [p for p in PATHS if is_test_or_fixture(p, config)]
+    bad_pool = [p for p in PATHS if not is_test_or_fixture(p, config)]
+    refused = data.draw(st.lists(st.sampled_from(bad_pool), min_size=1, max_size=3))
+    extra = data.draw(st.lists(st.sampled_from(allowed_pool), min_size=1, max_size=3))
+    assert decide(refused, config=config).in_scope is False
+    assert decide(refused + extra, config=config).in_scope is False
+    assert decide(extra + refused, config=config).in_scope is False
 
 
-@given(paths=st.lists(st.sampled_from(TEST_PATHS), min_size=0, max_size=3), row=st.sampled_from([PLAN_NEW_ROW, PLAN.replace("1.1", "9.9"), PLAN + "\n"]))
+@given(data=st.data(), config=config_st, row=st.sampled_from([PLAN_NEW_ROW, PLAN.replace("1.1", "9.9"), PLAN + "\n"]))
 @settings(**SEAM)
-def test_tc174_p10_any_change_to_the_test_plan_is_out_of_scope(paths, row):
+def test_tc174_p10_any_change_to_the_test_plan_is_out_of_scope(data, config, row):
     # Only a new row (or any edit at all) in the plan, with every changed path a test file: still refused.
-    got = decide(paths, PLAN, row)
+    paths = data.draw(st.lists(st.sampled_from([p for p in PATHS if is_test_or_fixture(p, config)]), min_size=0, max_size=3))
+    got = decide(paths, PLAN, row, config=config)
     assert got.in_scope is False, got
-    assert decide(paths + ["specs/demo/test-plan.md"], PLAN, PLAN).in_scope is False
+    assert decide(paths + ["specs/demo/test-plan.md"], PLAN, PLAN, config=config).in_scope is False
 
 
 # ---------------------------------------------------------------------------------------------- P-11
@@ -233,6 +264,9 @@ def test_tc174_p11_removing_a_prior_fix_never_moves_another_to_me(bridge, confli
 
 # ---------------------------------------------------------------------------------------------- P-33a
 
+# Gap in design.md: ProofOutcome(node, passed, cls) has no status for skipped, xfailed, deselected or missing nodes
+# (`cls` is classify_not_built's "not-built" | "bad" | "unclear"). These four stand for "not passed, not not-built";
+# task 57 or a design amendment must settle how they are represented (a status field, or the requested nodes passed in).
 outcome_st = st.sampled_from([
     (True, None), (False, "not-built"), (False, "bad"), (False, "unclear"),
     (False, "skipped"), (False, "xfailed"), (False, "deselected"), (False, "missing"),
@@ -265,36 +299,48 @@ def test_tc174_p33a_a_skipped_xfailed_deselected_or_missing_node_is_never_proved
 
 CONFLICT = {"file": "tests/test_x.py", "test": "test_tc1_x", "criterion": "1.1", "reason": "can never pass", "fix": "fix it"}
 LAND_RE = re.compile(r"worktree land \S+ testfix\d+|^land\b.*testfix", re.S)
+COMBOS = [(scope_ok, proved, approve) for scope_ok in (True, False) for proved in (True, False) for approve in (True, False)]
 
 
 def landed_testfix(run) -> bool:
+    # Only the thin `land ...` request labels count; prompt text that merely mentions a land is not a land.
     labels = [e["label"] for e in run["trace"] if e.get("ev") == "request"]
-    return any(LAND_RE.search(label) for label in labels) or any(LAND_RE.search(p) for p in run["prompts"].values())
+    return any(LAND_RE.search(label) for label in labels)
 
 
-@given(scope_ok=st.booleans(), proved=st.booleans(), approve=st.booleans(), delay=st.integers(0, 3), contradictory=st.booleans())
+@pytest.mark.parametrize("scope_ok,proved,approve", COMBOS)
+@given(delay=st.integers(0, 3), contradictory=st.booleans())
 @settings(**BRIDGE)
 def test_tc174_p33b_land_iff_scope_proof_and_review_all_hold(bridge, scope_ok, proved, approve, delay, contradictory):  # noqa: F811
     f = CONFLICT["file"]
     node = f"{f}::{CONFLICT['test']}"
-    proof: Dict[str, Any] = {"proved": proved, "reason": "decided"}
-    if proved and contradictory:
+    proof: Dict[str, Any] = {"proved": proved, "reason": "PROOFREASON"}
+    if (proved and contradictory) or not proved:
         # a proof that says proved with a failing outcome is not a proof
         proof["outcomes"] = [{"node": node, "passed": False, "cls": "bad"}]
-    if not proved:
-        proof["outcomes"] = [{"node": node, "passed": False, "cls": "bad"}]
-    review = {"verdict": "approve", "findings": [], "summary": "ok"} if approve else {"verdict": "changes", "findings": [{"severity": "blocking", "test": CONFLICT["test"]}], "summary": "no"}
-    scope = {"in_scope": True} if scope_ok else {"in_scope": False, "outside": ["src/app.py"], "reason": "source changed"}
+    review = {"verdict": "approve", "findings": [], "summary": "ok"} if approve else {"verdict": "changes", "findings": [{"severity": "blocking", "test": CONFLICT["test"], "issue": "REVIEWFINDING"}], "summary": "REVIEWSUMMARY"}
+    scope = {"in_scope": True} if scope_ok else {"in_scope": False, "outside": ["src/app.py"], "reason": "SCOPEREASON source changed"}
     project = {
         "deps": {"1": []},
         "testConflicts": {"1": {"conflict": CONFLICT}},
         "testFix": {f: {"verdict": "fixed", "proof": proof, "scope": scope, "review": review}},
         "durations": {"1": 1 + delay},
         "mergeDurations": {"1": 1 + delay},
+        "reviewDurations": {"1": delay},
     }
     run = bridge.run(project, args={"onFailure": "continue"}, clock="virtual")
     effective_proved = proved and not contradictory
     should_land = scope_ok and effective_proved and approve
     assert landed_testfix(run) is should_land, (scope_ok, proved, approve, contradictory, run["result"].get("needsInput"))
     if not should_land:
-        assert run["result"].get("needsInput"), "a refused or unproven fix must end in needs-input"
+        entries = run["result"].get("needsInput") or []
+        assert entries, "a refused or unproven fix must end in needs-input"
+        entry = next((e for e in entries if e.get("kind") == "test-fix"), None)
+        assert entry is not None, f"needs-input must be the test-fix entry (kind 'test-fix'): {entries}"
+        text = json.dumps(entry)
+        if not scope_ok:
+            assert "src/app.py" in text, entry  # the files that are out of scope (4.5)
+        elif not effective_proved:
+            assert "PROOFREASON" in text or node in text, entry  # carries the proof result (4.6)
+        else:
+            assert "REVIEWFINDING" in text or "REVIEWSUMMARY" in text, entry  # carries the review findings (4.6)
