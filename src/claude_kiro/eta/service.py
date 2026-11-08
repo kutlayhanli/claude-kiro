@@ -945,6 +945,25 @@ def send_done_for_superseded(key: str, *, now: datetime, env: Optional[Mapping[s
 # --------------------------------------------------------------------------- spool
 
 
+def _supersede_spool(spool: Path, now: Any) -> None:
+    """End every unfinished run copy under `spool` as superseded (16.2)."""
+    try:
+        if spool.is_symlink() or not spool.is_dir():
+            return
+        spool_env = {"CK_PROGRESS_DIR": str(spool)}
+        for path in sorted(spool.glob("*.jsonl")):
+            try:
+                evs, _ = progress.read_events(path)
+            except OSError:
+                continue
+            if any(ev.get("kind") == "end" for ev in evs):
+                continue
+            progress.append(path.stem, {"kind": "end", "at": _utc_iso(now), "outcome": "superseded", "merged": None,
+                                        "total": None, "usd": None}, spool_env)
+    except Exception:  # noqa: BLE001 - spool preparation continues
+        pass
+
+
 def prepare_spool(main_root: Path, spec: str, env: Optional[Mapping[str, str]] = None) -> Optional[Path]:
     """Supersede unfinished data-dir runs of `spec` (sending their done notice), then make the git-ignored spool."""
     e = dict(_environ(env))
@@ -975,6 +994,7 @@ def prepare_spool(main_root: Path, spec: str, env: Optional[Mapping[str, str]] =
     except Exception:  # noqa: BLE001
         return None
     spool = Path(wdir) / ".ck-progress"
+    _supersede_spool(spool, now)
     try:
         if spool.is_symlink():
             return None

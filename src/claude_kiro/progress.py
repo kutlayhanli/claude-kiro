@@ -428,6 +428,34 @@ def is_stale(last_event_at: Optional[datetime], now: datetime) -> bool:
     return now - last_event_at > timedelta(minutes=STALE_MIN)
 
 
+def run_liveness(key: str, env: Optional[Mapping[str, str]], now: datetime) -> str:
+    """"running", "finished", "stale" or "missing" for run `key`, read across the spool and data-dir copies."""
+    e = dict(_environ(env))
+    envs = [e]
+    if e.get("CK_PROGRESS_DIR"):
+        envs.append({k: v for k, v in e.items() if k != "CK_PROGRESS_DIR"})
+    found = False
+    newest: Optional[datetime] = None
+    for copy_env in envs:
+        try:
+            path = run_file(key, copy_env)
+            if not path.is_file():
+                continue
+            evs, _ = read_events(path)
+        except (OSError, ValueError):
+            continue
+        found = True
+        for ev in evs:
+            if ev.get("kind") == "end":
+                return "finished"
+            at = _parse(ev.get("at"))
+            if at is not None and (newest is None or at > newest):
+                newest = at
+    if not found:
+        return "missing"
+    return "stale" if is_stale(newest, now) else "running"
+
+
 def _runs(env: Optional[Mapping[str, str]], prefix: str = "") -> List[Tuple[Path, List[dict]]]:
     try:
         d = progress_dir(env)

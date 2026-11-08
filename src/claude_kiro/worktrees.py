@@ -43,6 +43,7 @@ class Outcome:
     detail: str = ""
     path: str = ""
     branch: str = ""
+    run: Optional[str] = None  # progress run recorded by the claim (status only)
 
     def line(self) -> str:
         parts = [self.state, self.task]
@@ -55,7 +56,10 @@ class Outcome:
         return " ".join(parts)
 
     def as_dict(self) -> Dict[str, str]:
-        return asdict(self)
+        out = asdict(self)
+        if out.get("run") is None:
+            out.pop("run", None)
+        return out
 
 
 def git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -211,10 +215,33 @@ def dirty_files(path: Path, tracked_only: bool = False) -> List[str]:
     return [line for line in lines if not _is_generated_status_line(line)]
 
 
+def _unquote_c(text: str) -> str:
+    """Undo git's C-style quoting of porcelain values (non-ASCII bytes become octal escapes inside quotes)."""
+    if len(text) < 2 or not (text.startswith('"') and text.endswith('"')):
+        return text
+    body, out, i = text[1:-1], bytearray(), 0
+    simple = {"n": 10, "t": 9, "r": 13, "a": 7, "b": 8, "f": 12, "v": 11, "\\": 92, '"': 34}
+    while i < len(body):
+        ch = body[i]
+        if ch != "\\" or i + 1 >= len(body):
+            out += ch.encode("utf-8")
+            i += 1
+        elif body[i + 1] in "01234567":
+            j = i + 1
+            while j < len(body) and j < i + 4 and body[j] in "01234567":
+                j += 1
+            out.append(int(body[i + 1:j], 8) & 255)
+            i = j
+        else:
+            out.append(simple.get(body[i + 1], ord(body[i + 1])))
+            i += 2
+    return out.decode("utf-8", "replace")
+
+
 def lock_reason(root: Path, path: Path) -> Optional[str]:
     info = worktree_table(root).get(str(path.resolve()))
     if info and "locked" in info:
-        return info["locked"] if info["locked"] != "yes" else "locked"
+        return _unquote_c(info["locked"]) if info["locked"] != "yes" else "locked"
     return None
 
 
@@ -248,6 +275,68 @@ def stale_claim(root: Path, path: Path) -> Optional[str]:
         return None
     minutes = load_config(root).get("claim_stale_minutes", CLAIM_STALE_MINUTES)
     return reason if claim_age(path) > float(minutes) * 60 else None
+
+
+@dataclass(frozen=True)
+class ClaimInfo:
+    owner: str
+    token: Optional[str]
+    at: Optional[str]
+    run: Optional[str]  # progress run key; None for older claims and hand-made locks
+
+
+_CLAIM_SUFFIX = re.compile(r"^(?P<owner>.*) \(claim (?P<token>\S+) at (?P<at>\S+)(?: run (?P<run>.*))?\)$", re.DOTALL)
+
+
+def claim_info(reason: Optional[str]) -> ClaimInfo:
+    """Parse a lock reason: only the trailing `(claim TOKEN at TIME[ run KEY])` ck wrote counts, never owner text."""
+    text = reason or ""
+    m = _CLAIM_SUFFIX.match(text)
+    if not m:
+        return ClaimInfo(text, None, None, None)
+    return ClaimInfo(m.group("owner"), m.group("token"), m.group("at"), m.group("run") or None)
+
+
+def claim_release_decision(claim: ClaimInfo, starting_run: Optional[str], liveness: Optional[str], age_s: float,
+                           stale_minutes: float = CLAIM_STALE_MINUTES) -> str:
+    """"own" (the starting run's claim), "keep" or "release" (16.2-16.5, 16.7)."""
+    if claim.run is not None:
+        if starting_run is not None and claim.run == starting_run:
+            return "own"
+        return "keep" if liveness == "running" else "release"
+    return "release" if age_s > float(stale_minutes) * 60 else "keep"
+
+
+@dataclass
+class RunStartClaims:
+    released: List[Dict[str, Optional[str]]] = field(default_factory=list)  # {task, run, reason}
+    kept: List[Dict[str, Optional[str]]] = field(default_factory=list)      # {task, run}
+
+
+def release_for_run_start(root: Path, spec: str, run: Optional[str], env: Optional[Mapping[str, str]] = None,
+                          now: Optional[datetime.datetime] = None) -> RunStartClaims:
+    """Unlock the claims of runs that are over (commits stay); keep live runs' and the starting run's own."""
+    from claude_kiro import progress
+
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    minutes = float(load_config(root).get("claim_stale_minutes", CLAIM_STALE_MINUTES))
+    out = RunStartClaims()
+    prefix = f"{spec}-task-"
+    paths = [p for d in dict.fromkeys((configured_dir(root), root / LEGACY_WORKTREES_DIR)) for p in d.glob(f"{prefix}*") if p.is_dir()]
+    for path in sorted(paths, key=lambda p: p.name):
+        num = path.name[len(prefix):]
+        reason = lock_reason(root, path)
+        if not reason:
+            continue
+        info = claim_info(reason)
+        liveness = progress.run_liveness(info.run, env, now) if info.run and info.run != run else None
+        decision = claim_release_decision(info, run, liveness, claim_age(path), minutes)
+        if decision == "release":
+            git(root, "worktree", "unlock", str(path))
+            out.released.append({"task": num, "run": info.run, "reason": reason})
+        else:
+            out.kept.append({"task": num, "run": info.run})
+    return out
 
 
 def heartbeat(path: Path) -> None:
@@ -338,22 +427,23 @@ def create_integration(root: Path, spec: str, base: Optional[str] = None) -> Out
     return Outcome("integration", "CREATED", f"from {base}", rel, branch)
 
 
-def claim(root: Path, spec: str, num: str, owner: str, takeover: bool = False) -> Outcome:
+def claim(root: Path, spec: str, num: str, owner: str, takeover: bool = False, run: Optional[str] = None) -> Outcome:
     path, branch = task_path(root, spec, num), task_branch(spec, num)
     rel = rel_path(root, path)
     if not path.exists():
         return Outcome(num, "MISSING", "no worktree; run `ck worktree create` first", rel, branch)
     reason = lock_reason(root, path)
     stale = stale_claim(root, path) if reason else None
-    if reason and not takeover and not stale:
+    own = bool(reason and run and claim_info(reason).run == run)  # the same run's claim is its own (16.7)
+    if reason and not takeover and not stale and not own:
         return Outcome(num, "BUSY", f"claimed: {reason}", rel, branch)
     if reason:
         git(root, "worktree", "unlock", str(path))
-    owner = f"{owner} (claim {secrets.token_hex(4)} at {_now()})"
+    owner = f"{owner} (claim {secrets.token_hex(4)} at {_now()}{f' run {run}' if run else ''})"
     git(root, "worktree", "lock", "--reason", owner, str(path))
     if unpark(root, spec, num):  # a fresh attempt clears the park note; the decision note stays
         _record_unpark(root, spec, num)
-    took = f" (took over stale claim: {stale})" if stale else " (took over)" if reason else ""
+    took = f" (took over stale claim: {stale})" if stale else " (took over)" if reason and not own else ""
     return Outcome(num, "CLAIMED", owner + took, rel, branch)
 
 
@@ -912,7 +1002,8 @@ def status(root: Path, spec: str) -> List[Outcome]:
         if branch_exists(root, branch):
             ahead = git(root, "rev-list", "--count", f"{base}..{branch}").stdout.strip()
             bits.append(f"{ahead} ahead of {base}")
-        outcomes.append(Outcome(num, "BUSY" if reason else "EXISTS", ", ".join(bits), rel_path(root, path), branch))
+        outcomes.append(Outcome(num, "BUSY" if reason else "EXISTS", ", ".join(bits), rel_path(root, path), branch,
+                                run=(claim_info(reason).run or None) if reason else None))
     return outcomes
 
 
