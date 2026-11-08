@@ -121,14 +121,14 @@ How the PLAN.md decisions shape it:
   - `merge()` gains the protected check (`protected_changes` against `land_allow_paths(target)`), state
     `PROTECTED` with the files (9.6), and runs its `git merge` with a landing token in the environment (9.7).
   - `land()` issues a landing token for each `git merge` and `git reset` it runs on an `integrate/*` target
-    (9.7), records the approved protected state after the batch (10.4), records new recorded-fixture locks and
+    (9.7), records, after the batch, only the protected paths the landed tasks changed as approved (10.4; the rest of the state is never re-recorded at head), records new recorded-fixture locks and
     reports fixture drift per task (`Landed.fixtureDrift`), and, through `GateFn`, carries `failures` on RED
     entries (`Landed.failures`).
   - New keyword `land(..., approved: Optional[Dict[str, List[str]]] = None)`: task -> protected files I approved,
     used only by `ck worktree approve` (9.8).
   - `create_integration` calls `protect.ensure_hooks` (install only where the git metadata is writable,
-    otherwise report the hook state; 9.1, 9.10) and records the baseline protected state on creation and on
-    reuse; its `Outcome.detail` names a hook problem.
+    otherwise report the hook state; 9.1, 9.10) and records the baseline protected state only when no approved
+    state exists for the ref (never on reuse, which would launder bypass writes; 10.1); its `Outcome.detail` names a hook problem.
     `ck worktree integration SPEC [--base] [--json]` prints `{..., hooks: HookStatus}` (`installed`, `problems`). It creates the `integrate/*` ref with a landing token, as
     every ck-made `integrate/*` update (9.7, 9.12).
   - After every install step ck runs (`create --install`, land's install, `gate --install`) and at the start of
@@ -441,7 +441,8 @@ gather inputs and act on the output; they never re-implement the rule.
 | `token_matches(token, update, used, mac_ok)` | `protect.py` | `TokenRecord, RefUpdate, bool, bool -> bool` | 9.3: one-shot, this ref, this target |
 | `merge_commit_decision(head_ref, changed, allow, token_present)` | `protect.py` | `-> RefDecision` | 9.5 |
 | `approval_decision(stdin_tty, stdout_tty, typed, expected)` | `protect.py` | `bool, bool, str, str -> bool` | 9.8 |
-| `audit_decision(approved, current, allow, hooks, fixtures)` | `protect.py` | `Optional[ApprovedState], Dict[str,str], List[str], HookStatus, FixtureReport -> AuditReport` | 10.1-10.5, 15.5 |
+| `audit_decision(approved, current, allow, hooks, fixtures)` | `protect.py` | `Optional[ApprovedState], Dict[str,str], List[str], HookStatus, Mapping[str, object] (a FixtureReport as dict) -> AuditReport` | 10.1-10.5, 15.5 |
+| `refuse_paths(ref, changed, allow)` | `protect.py` | `str, Sequence[str], Sequence[str] -> List[str]` | 9.2: the protected-filter part of `ref_update_decision`; accepts git-quoted names (unquoted before comparing) |
 | `claim_release_decision(claim, starting_run, liveness, age_s, stale_minutes)` | `worktrees.py` | `ClaimInfo, Optional[str], Optional[Liveness], float, float -> "release" \| "keep" \| "own"` | 16.2-16.5, 16.7 |
 | `missing_command_edges(graph)` | `graph.py` | `SpecGraph -> List[MissingEdge]` | 12.1, 12.2 |
 | `unknown_commands(graph, source_words)` | `graph.py` | `SpecGraph, FrozenSet[str] -> List[UnknownCommand]` | 12.3 |
@@ -634,7 +635,10 @@ How edges are filled (the API delegated by PLAN):
   `cmd:` node with no provider (12.3).
 - **imports:** `lint._imports` / `_module_candidates`, unchanged.
 - **Freshness (11.7):** built on demand from files on every call; the only memo is in-process, keyed by each
-  input's `(path, size, mtime_ns)`. No on-disk cache.
+  input's `(path, size, mtime_ns, st_ctime_ns, st_ino)`. `os.utime` can restore size and mtime_ns but not
+  `st_ctime_ns` or `st_ino` (an atomic replace changes the inode), so a same-size, same-mtime rewrite within one
+  second still misses the memo. If a build cannot rely on these (a filesystem with coarse ctime), hash the
+  content instead of trusting stat. No on-disk cache.
 - **Malformed sources (11.8):** a task block that fails to parse, a test file with a syntax error, or an
   unreadable design.md adds a `GraphProblem` and the rest is built.
 - `unknown_commands` treats a path as existing when every word of it appears as a string literal in a non-test
@@ -683,7 +687,7 @@ class HookStatus:
 class ApprovedState:         # <common>/ck/<spec>/protected.json, sealed with a mac
     ref: str
     commit: str
-    files: Mapping[str, str]                 # protected path -> blob oid at `commit`
+    files: Mapping[str, str]                 # protected path -> approved blob oid; land() re-records only the paths its landed tasks changed, so this is not the whole tree at `commit`
     approvals: Tuple[Mapping[str, object], ...]  # {at, task, files, by: "allow-list"|"approval"|"baseline", commit}
     # The hook finds the approved state of a ref through <common>/ck/refs.json (ref -> spec), written with it.
     # The state outlives a deleted ref, so a re-created ref is checked against it (9.12).
@@ -757,6 +761,7 @@ class RunStartClaims:
 `claim_release_decision`: `run == starting_run` -> own (16.7); `run` set and liveness `running` -> keep (16.3);
 `run` set and liveness `finished` / `stale` / `missing` / None -> release (16.2, 16.5); `run` None -> release iff
 `age_s > stale_minutes * 60` else keep (16.4).
+`stale_minutes` is the `claim_stale_minutes` key of specs/ck.json. `claim()` treats a lock whose `ClaimInfo.run` equals `--progress-run` as the caller's own claim (16.7), so a same-run reclaim succeeds without `--takeover`.
 
 ### Python (`fixtures.py`, `testfix.py`, `fidelity.py`)
 
@@ -1279,7 +1284,7 @@ Entries for the criteria that state an error, refusal or fallback.
 | 11.4 | invokes scan |
 | 11.5 | `ck graph --json`, sorted |
 | 11.6 | `AttributionIndex` built from the graph; lint/relink/plan read the same graph |
-| 11.7 | on-demand build, in-process memo keyed by size/mtime |
+| 11.7 | on-demand build, in-process memo keyed by size/mtime/ctime/inode |
 | 11.8 | `GraphProblem` |
 | 12.1 | `missing_command_edges`; `lint_spec.commandEdges` |
 | 12.2 | `ck relink --commands`, `plan_command_relink` |
