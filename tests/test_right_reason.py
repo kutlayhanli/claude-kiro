@@ -116,6 +116,7 @@ def test_tc50_import_error_of_unbuilt_name_is_not_built(tmp_path):
     assert len(es) == 1, obj["failures"]
     assert es[0]["class"] == "not-built"
     assert code == 0 and obj["ok"] is True
+    assert rr_checks(obj), obj["checks"]
     assert all(c["ok"] for c in rr_checks(obj)), obj["checks"]
 
 
@@ -224,6 +225,7 @@ def test_tc54_third_party_import_and_test_built_keyerror_are_unclear(tmp_path):
     assert code == 0 and obj["ok"] is True
     assert rr_checks(obj), obj["checks"]
     assert all(c["ok"] or c.get("warning") for c in rr_checks(obj))
+    assert any(c["ok"] is True and c.get("warning") is True for c in rr_checks(obj)), obj["checks"]
 
 
 # --- TC-56 ---------------------------------------------------------------------------------------
@@ -293,3 +295,4 @@ def test_tc181_assert_reaching_project_code_or_unparsable_is_unclear(tmp_path, c
     assert es[0]["class"] == "unclear", es[0]
     assert code == 0 and obj["ok"] is True, obj["checks"]
     assert rr_checks(obj), obj["checks"]
+    assert any(c["ok"] is True and c.get("warning") is True for c in rr_checks(obj)), obj["checks"]
