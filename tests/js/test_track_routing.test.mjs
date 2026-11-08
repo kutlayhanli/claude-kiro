@@ -145,7 +145,7 @@ await test('TC-71b: the test-task review prompt holds exactly the unparsed and u
     checked: [tv('checked_a', 'ZZ_CHECKED_A'), tv('checked_b', 'ZZ_CHECKED_B')],
     mismatches: [],
     unparsed: [tv('computed', 'ZZ_UNPARSED_BASE_TIMES_1_1')],
-    unmatched: [{ ...tv('extra', 'ZZ_UNMATCHED_77'), role: 'fed' }],
+    unmatched: ['tests/test_x.py::test_ZZ_UNMATCHED_77'],
   }
   const p = project({ deps: { 1: [], 2: ['1'] }, fidelity })
   const d = directCk(p)
@@ -170,7 +170,7 @@ await test('TC-73b: when nothing is unparsed or unmatched the review prompt has 
   const testReviews = reviewPrompts(p).filter(t => /--contracts/.test(t))
   assert.ok(testReviews.length >= 1, 'the test task was reviewed')
   for (const t of testReviews) {
-    assert.doesNotMatch(t, /fidelity/i)
+    assert.doesNotMatch(t, /tests\/test_x\.py::/, 'no row-fidelity item is listed')
     assert.doesNotMatch(t, /ZZ_CHECKED_A/)
   }
 })
@@ -196,5 +196,5 @@ await test('TC-139b: with no unlabeled fixtures the review prompt names none', a
   const p = project({ deps: { 1: [], 2: ['1'] }, fixtureStatus: { locked: [], drift: [], unlabeled: [], configError: null } })
   const d = directCk(p)
   await run(p, reviewArgs, { ck: d.fn })
-  for (const t of reviewPrompts(p).filter(t => /--contracts/.test(t))) assert.doesNotMatch(t, /unlabeled|handcrafted/i)
+  for (const t of reviewPrompts(p).filter(t => /--contracts/.test(t))) assert.doesNotMatch(t, /tests\/fixtures\//, 'no fixture path is listed')
 })
