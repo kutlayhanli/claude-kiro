@@ -1597,7 +1597,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 70: Test per-agent model records, role preflight and direct gates under the OpenCode runner
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 14.7, 14.8, 19.6, 2.2
 **Description:** Implement TC-132, TC-133 and TC-164 (b). TC-132: `opencode/test/record.test.ts` asserts the run record has each agent's model and variant (roles-mapped and alias-resolved); `tests/test_opencode_record.py` runs `ck stats` collect over such a record and keeps them per role. TC-133: `opencode/test/preflight.test.ts` asserts `checkRoles` lists the 7 roles with model and source (`roles`, `alias`, `inherit`); `tests/test_doctor_opencode.py` asserts `ck doctor --harness opencode` prints the same lines. TC-164b: `opencode/test/runner.test.ts` runs the real `runner.mjs` with the real spec-implement and `$CK_BIN` pointing at a recording shim, and asserts `gate ... --attribute --json` was called directly. Create the shim `opencode/test/fixtures/ck-shim.mjs` (writes argv to a file, prints canned JSON). Add new cases only; existing cases stay unchanged. Test names carry their TC (`tc132_`, `tc133_`, `tc164_`; Python `test_tc133_<slug>`) so earlier tasks can exclude the cases that need later code.
@@ -1612,10 +1612,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 72 (TC-132), Task 73 (TC-133), Task 81 (TC-164b: the real runner calls the attributed gate directly)
 
 **Acceptance:**
-- [ ] Tests run the real record, preflight and runner modules and the real `ck stats`/`ck doctor`
-- [ ] They fail before the implementation because records carry no per-agent variant and preflight has no roles
-- [ ] Existing cases in the extended files are not changed or weakened
-- [ ] No mocks of the project's own code
+- [x] Tests run the real record, preflight and runner modules and the real `ck stats`/`ck doctor`
+- [x] They fail before the implementation because records carry no per-agent variant and preflight has no roles
+- [x] Existing cases in the extended files are not changed or weakened
+- [x] No mocks of the project's own code
 
 **Dependencies:** None
 **Complexity:** Medium
