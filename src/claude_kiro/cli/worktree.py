@@ -567,6 +567,71 @@ def land_cmd(spec, tasks, into, do_gate, do_install, release_claims, keep, progr
         sys.exit(1)
 
 
+@worktree.command("approve")
+@click.argument("spec")
+@click.argument("task")
+@click.option("--into", help="Target branch (default: integrate/SPEC if it exists, else the main checkout's branch)")
+def approve_cmd(spec, task, into):
+    """Approve landing TASK's protected files (needs a real terminal; only I can type the code).
+
+    \b
+    Prints the protected files the task changes and a random 6-character code. Type the code to
+    land the task with those files; anything else, or a stdin/stdout that is not a terminal,
+    refuses with exit 2 and changes nothing. There is no --json and no code on the command line.
+    """
+    import secrets
+    from .. import protect
+
+    stdin_tty, stdout_tty = sys.stdin.isatty(), sys.stdout.isatty()
+    if not (stdin_tty and stdout_tty):
+        click.echo("❌ refused: approval needs a real terminal on stdin and stdout")
+        sys.exit(2)
+    root = _root()
+    name = _spec_name(spec)
+    try:
+        integ = wt.integration_branch(name)
+        target_branch = into or (integ if wt.branch_exists(root, integ) else wt.current_branch(root))
+        target = wt.checkout_of(root, target_branch)
+        if target is None:
+            raise wt.WorktreeError(f"branch {target_branch} is not checked out anywhere")
+        base = wt.git(target, "rev-parse", "HEAD").stdout.strip()
+        branch = wt.task_branch(name, task)
+        if not wt.branch_exists(root, branch):
+            raise wt.WorktreeError(f"no branch {branch}")
+        files = wt.protected_changes(root, base, branch, wt.land_allow_paths(target))
+        if target_branch.startswith("integrate/") and protect.read_approved_state(root, name, f"refs/heads/{target_branch}") is None:
+            raise wt.WorktreeError(f"the approved state for {target_branch} is missing or unreadable; nothing can be recorded")
+        tip = wt.git(root, "rev-parse", branch).stdout.strip()
+    except (wt.WorktreeError, OSError) as e:
+        click.echo(f"❌ refused: {e}")
+        sys.exit(2)
+    if not files:
+        click.echo(f"❌ refused: task {task} changes no protected files that need approval")
+        sys.exit(2)
+    code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(6))
+    click.echo(f"Task {task} of {name} changes protected files:")
+    for f in files:
+        click.echo(f"  {f}")
+    click.echo(f"To approve landing them (branch tip {tip[:10]}) on {target_branch}, type the code {code}:")
+    typed = sys.stdin.readline()
+    if not protect.approval_decision(stdin_tty, stdout_tty, typed, code):
+        click.echo("❌ refused: the code did not match; nothing landed")
+        sys.exit(2)
+    try:
+        if wt.git(root, "rev-parse", branch).stdout.strip() != tip:
+            click.echo(f"❌ refused: {branch} changed after the prompt (was {tip[:10]}); nothing landed")
+            sys.exit(2)
+        result = wt.land(root, name, [task], into=target_branch, approved={task: files})
+    except (wt.WorktreeError, OSError) as e:
+        click.echo(f"❌ {e}")
+        sys.exit(3)
+    for item in result["tasks"]:
+        click.echo(wt.Landed(**item).line())
+    states = {t["state"] for t in result["tasks"]}
+    if states != {"MERGED"}:
+        sys.exit(3)
+
+
 @worktree.command("status")
 @click.argument("spec")
 @click.option("--json", "as_json", is_flag=True)

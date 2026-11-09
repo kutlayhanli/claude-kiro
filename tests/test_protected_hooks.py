@@ -148,7 +148,7 @@ def hook_status_of(obj: Any) -> Dict[str, Any]:
     return statuses[0]
 
 
-def approve_in_pty(root: Path, spec: str, task: str, into: str, answer: Optional[str] = None,
+def approve_in_pty(root: Path, spec: str, task: str, into: Optional[str], answer: Optional[str] = None,
                    timeout: float = 90) -> Tuple[int, str]:
     """Run `ck worktree approve SPEC TASK --into INTO` on a real pseudo-terminal (`pty.fork`) and type the answer.
 
@@ -157,7 +157,9 @@ def approve_in_pty(root: Path, spec: str, task: str, into: str, answer: Optional
     env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")
     env["TERM"] = "dumb"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
-    argv = [*h.CK_ARGV, "worktree", "approve", spec, task, "--into", into]
+    argv = [*h.CK_ARGV, "worktree", "approve", spec, task]
+    if into is not None:
+        argv += ["--into", into]
     pid, fd = pty.fork()
     if pid == 0:  # child: its stdin, stdout and controlling terminal are the pty
         try:
@@ -475,6 +477,14 @@ def test_tc84b_approval_typed_at_a_pseudo_terminal_lands_task_1_with_a_token(tmp
     assert after != before, f"the ref did not move:\n{text}"
     assert h.raw(root, "cat-file", "-e", f"{PROTECTED_REF}:.claude/CLAUDE.md").returncode == 0
     assert h.raw(root, "merge-base", "--is-ancestor", before, after).returncode == 0
+
+
+def test_tc84b_approval_without_into_lands_on_the_integration_branch(tmp_path):
+    root = h.hooks_repo(tmp_path)
+    before = integ_ref(root)
+    code, text = approve_in_pty(root, "demo", "1", None)
+    assert code == 0, f"approval without --into failed ({code}):\n{text}"
+    assert integ_ref(root) != before, f"integrate/demo did not receive the task:\n{text}"
 
 
 def test_tc84b_a_wrong_code_at_the_terminal_lands_nothing(tmp_path):

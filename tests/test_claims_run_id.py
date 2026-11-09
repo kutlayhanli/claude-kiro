@@ -147,8 +147,9 @@ def test_tc144_a_stale_run_releases_its_claim(repo):
 
 
 def test_tc145_a_live_runs_old_claim_is_kept_and_busy_for_another_run(repo):
-    run_a = progress_run(SPEC, "A", ended=False, last_event_age_min=1, cwd=repo)
+    # `ck progress begin` supersedes every unfinished run of the spec, so the run that must stay live is begun last.
     run_b = progress_run(SPEC, "B", ended=False, last_event_age_min=0, cwd=repo)
+    run_a = progress_run(SPEC, "A", ended=False, last_event_age_min=1, cwd=repo)
     head = make_task(repo, 1, run=run_a)
     age_claim(wt(repo, 1), 3 * 60 * MIN)  # the claim and its last commit are 3 hours old; the run is live
 
