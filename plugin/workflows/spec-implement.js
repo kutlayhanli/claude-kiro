@@ -900,7 +900,14 @@ function gateOutcome(out) {
   if (isPlainObj(j.summary)) {
     const want = { regressions: regressions.length, unattributed: unattributed.length, flaky: flaky.length, excused }
     for (const k of Object.keys(want)) {
-      if (j.summary[k] !== undefined && j.summary[k] !== want[k]) return fail(`the gate summary says ${k}=${j.summary[k]} but the entries hold ${want[k]}`)
+      if (j.summary[k] === undefined) continue
+      // The compact form sums one count per excusing task, while summary.excused counts failures: a failure excused by
+      // two tasks gives 2 here and 1 there. So compact only requires the sum to be at least the summary count.
+      if (k === 'excused' && j.schema === 'ck-gate-compact/1') {
+        if (typeof j.summary[k] !== 'number' || want[k] < j.summary[k]) return fail(`the gate summary says ${k}=${j.summary[k]} but the excusedByTask counts hold ${want[k]}`)
+        continue
+      }
+      if (j.summary[k] !== want[k]) return fail(`the gate summary says ${k}=${j.summary[k]} but the entries hold ${want[k]}`)
     }
   }
   if (j.ok && (regressions.length || unattributed.length)) return fail('the gate says ok but lists regressions')
