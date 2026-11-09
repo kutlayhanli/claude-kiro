@@ -758,7 +758,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 32: Run the row-fidelity check on test-track gates
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 8.1, 8.2, 8.6
 **Description:** In `gate.run_gate`, on every test-track gate, call `fidelity.check_task` for the gated test task. Mismatches make a failing check "Task N tests match their test-plan rows" and add one failure entry per mismatch (`check: "row-fidelity"`, kind `assertion`, message naming the value and the expected value or allowed set, node and TC id of the test). Unparsed and unmatched items do not fail the gate; they are left for the reviewer (Task 87). The gate must not write to the test plan, design or tests.
@@ -766,10 +766,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 - `src/claude_kiro/gate.py` - row-fidelity check on test-track gates
 **Verify:** `uv run pytest -q tests/test_row_fidelity.py tests/test_row_fidelity_redteam.py -k "ongate"`
 **Verified by:** Task 26 (the gate-side TC-69 and TC-74 cases (`ongate`)), Task 27 (gate-side cases (`ongate`))
+**Deviations:** Changes outside the listed file, each needed by this task's Verify. `src/claude_kiro/fidelity.py`: enum membership is exact unless the row states the member (reconciles TC-69 with P-14; design.md's `check_values` rules updated), Data Models table rows type their fields, and literal assignments to named locals are extracted. `src/claude_kiro/cli/worktree.py`: `ck lint --fidelity [--task N] --json` as Task 53 describes it, because the control step of `test_tc71_redteam_ongate_unparsed_items_are_not_gate_failures` calls it. Task 53 still owns the rest of its work, including the `not ongate` cases.
 
 **Acceptance:**
-- [ ] A test-track gate with a mismatched value fails, with D3 entries marked `row-fidelity` (8.1, 8.2)
-- [ ] After the gate the test plan, design and tests are unchanged (8.6)
+- [x] A test-track gate with a mismatched value fails, with D3 entries marked `row-fidelity` (8.1, 8.2)
+- [x] After the gate the test plan, design and tests are unchanged (8.6)
 
 **Dependencies:** Task 31 (extends the test-track check path Task 31 adds to `run_gate`), Task 30 (calls `fidelity.check_task`), Task 26 (its tests are the oracle), Task 27 (its tests are the oracle)
 **Complexity:** Low
