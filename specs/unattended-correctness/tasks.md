@@ -486,6 +486,8 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Files:**
 - `src/claude_kiro/gate.py` - attributed command set with node-ID coverage, attribution, one rerun per candidate, `gate_verdict`, `--install`, `to_compact` and the report file
 - `src/claude_kiro/cli/main.py` - `ck gate --attribute`, `--install`, `--compact`
+- `src/claude_kiro/attribution.py` - a selecting task counts for a failing node only if its last `-k` can accept that node (design: How edges are filled)
+- `tests/test_attribution_node_filter.py` - the node-level filter at the `attribute_failure` seam
 **Verify:** `uv run pytest -q tests/test_gate_attribution.py -k "not tc11_"` `uv run pytest -q tests/test_gate_attribution_redteam.py` `uv run pytest -q tests/test_attributed_gates_redteam.py -k "tc15_redteam or tc17_redteam"` `uv run pytest -q tests/test_gate_failures.py -k "tc31_ or tc36_gate_attribute or tc183_"` `uv run pytest -q tests/test_spec_graph.py -k "tc14_"` `uv run pytest -q -m serial tests/test_unattended_perf.py -k "tc169_"` `uv run pytest -q tests/test_gate_failures.py -k "tc191_"` `uv run pytest -q tests/test_gate_failures_redteam.py -k "long_message_under_attribute or (under_every_flag and args1)"` `uv run pytest -q tests/test_gate_attribution_properties.py -k "tc173_p5b"`
 **Verified by:** Task 5 (TC-31, TC-183 and TC-36's `--attribute` source), Task 7 (TC-14 through `ck gate --attribute`), Task 9 (TC-169), Task 14 (TC-1 to TC-10, TC-12, TC-13, TC-15 to TC-17, TC-26b, TC-27b, TC-193, TC-195), Task 15 (red team of 1.3 through `ck gate --attribute`), Task 16 (CLI cases for 2.4, 2.5), Task 3 (P-5b through `ck gate --attribute`), Task 4 (its `--attribute` red-team cases)
 

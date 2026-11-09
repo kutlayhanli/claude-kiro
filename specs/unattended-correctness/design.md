@@ -504,6 +504,8 @@ class Attribution:
 class AttributionIndex:          # built from SpecGraph once per gate
     tc_tasks: Mapping[str, Tuple[str, ...]]        # TC id -> impl tasks (1.1): its "Verify -k" verifies edges;
                                                    # only when it has none, its "Verifies" (test-task coverage) edges
+    task_selectors: Mapping[str, Tuple[str, ...]]  # impl task -> its last `-k` expression per Verify command
+    selected_tc_coverage: Mapping[str, Tuple[str, ...]]  # TC attributed through "Verify -k" -> its "Verifies" tasks
     file_owner: Mapping[str, str]                  # test file -> owning test task
     test_task_verifies: Mapping[str, Tuple[str, ...]]  # test task -> impl tasks it verifies
     command_owner: Mapping[str, Tuple[str, ...]]   # Verify command -> tasks that list it (1.7 fallback)
@@ -634,7 +636,10 @@ How edges are filled (the API delegated by PLAN):
   test task T, every TC found in T's test files (`def test_tcNNN_`, `test('tcNNN_ ...')`) or in test-plan rows
   whose Test file column names one of T's files, to each task in `T.verifies`. Each edge keeps its origin in
   `source` (`"Verify -k"` or `"Verifies"`). Attribution (1.1) uses a TC's `"Verify -k"` edges; it falls back to
-  its `"Verifies"` edges only when the TC has no `"Verify -k"` edge, so the two are never unioned. A tc node exists
+  its `"Verifies"` edges only when the TC has no `"Verify -k"` edge, so the two are never unioned. For a failing
+  node it keeps only the selecting tasks whose last `-k` expression can accept that node's id (`-k "tc3_ and tc4_"`
+  names TC-3 but never runs a test carrying only `tc3_`, so it must not excuse one, 1.2); when none can, the TC's
+  `"Verifies"` edges, else file attribution with a warning. The edges themselves stay TC-level. A tc node exists
   only for a TC some test file or test-plan row defines. A TC that only a Verify `-k` names keeps its verifies
   edge with no tc node: a dangling verifies source, which consumers must accept (the freshness rule of 11.7
   requires the node to vanish once no test defines the TC).
