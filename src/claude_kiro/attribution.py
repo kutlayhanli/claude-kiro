@@ -44,7 +44,14 @@ class AttributionIndex:
     command_owner: Mapping[str, Tuple[str, ...]] = field(default_factory=dict)   # Verify command -> tasks
 
     @classmethod
-    def from_graph(cls, graph: "SpecGraph", tasks: "Mapping[str, SpecTask]") -> "AttributionIndex":
+    def from_graph(cls, graph: "SpecGraph", tasks: "Mapping[str, SpecTask]",
+                   known_tcs: Optional[Iterable[str]] = None) -> "AttributionIndex":
+        """`known_tcs` (e.g. "TC-3" for each test-plan row) limits TC attribution: any other TC id is unknown (1.1).
+
+        `tasks` is the task-number map, or the parsed task list (`parse_tasks`) which is keyed here.
+        """
+        if not isinstance(tasks, Mapping):
+            tasks = {task.num: task for task in tasks}
         selecting: Dict[str, Set[str]] = {}
         covering: Dict[str, Set[str]] = {}
         owners: Dict[str, Set[str]] = {}
@@ -61,10 +68,11 @@ class AttributionIndex:
 
         # A TC is attributed to the tasks whose Verify -k selects it; only a TC no Verify selects falls back to
         # its test task's coverage (the Verifies edges), never the union of the two (1.1).
+        known = None if known_tcs is None else set(known_tcs)
         tc_tasks: Dict[str, Tuple[str, ...]] = {}
         for tc in sorted(set(selecting) | set(covering)):
             chosen = selecting.get(tc) or covering.get(tc)
-            if chosen:
+            if chosen and (known is None or tc in known):
                 tc_tasks[tc] = _nums(chosen)
         file_owner = {path: min(nums, key=int) for path, nums in owners.items() if nums}
         test_task_verifies = {
@@ -158,7 +166,7 @@ def attribute_failure(failure: Failure, index: AttributionIndex, done: Iterable[
     owner = index.file_owner.get(file) if file else None
     if owner is not None:
         tasks = _nums(index.test_task_verifies.get(owner, ()))
-        return _finish(None, tasks, "file", finished, warnings)
+        return _finish(tc, tasks, "file", finished, warnings)  # an unknown TC keeps its id; only `by` says file (1.8)
 
     hint = None
     path = param_owned_file(node, index.file_owner)

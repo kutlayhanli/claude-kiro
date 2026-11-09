@@ -1106,7 +1106,10 @@ def upgrade(dry_run: bool, no_migrate: bool, allow_downgrade: bool, to_vendor: b
 @click.option("--task", "-t", "tasks", multiple=True, help="Task number to verify (repeatable). Default: every Done task.")
 @click.option("--no-reuse", is_flag=True, help="With --task: run the commands even if this exact tree already passed them")
 @click.option("--json", "as_json", is_flag=True, help="Print only the ck-gate/1 JSON object (with a failures list); same exit codes")
-def gate(spec: str, tasks: tuple, no_reuse: bool, as_json: bool):
+@click.option("--attribute", is_flag=True, help="Run every Verify command the spec has, attribute each failure to its tasks, rerun regression candidates once")
+@click.option("--install", "do_install", is_flag=True, help="Run the install command first; a failure is a red check")
+@click.option("--compact", is_flag=True, help="With --json: print ck-gate-compact/1 and write the full ck-gate/1 object to a report file")
+def gate(spec: str, tasks: tuple, no_reuse: bool, as_json: bool, attribute: bool, do_install: bool, compact: bool):
     """Run the verification gate for SPEC (a name in specs/ or a path).
 
     Checks acceptance boxes, runs the verify commands from specs/ck.json and the
@@ -1117,7 +1120,8 @@ def gate(spec: str, tasks: tuple, no_reuse: bool, as_json: bool):
     earlier --task gate, or the done-verify hook when the task was marked Done)
     reuses that pass instead of running them again; the other checks still run.
     """
-    from ..gate import run_gate
+    from ..gate import run_gate, write_report
+    from ..config import install_command, load_config
 
     project_dir = Path.cwd()
     candidate = Path(spec)
@@ -1133,10 +1137,20 @@ def gate(spec: str, tasks: tuple, no_reuse: bool, as_json: bool):
     from ..worktrees import heartbeat
 
     heartbeat(project_dir)  # a gate run in a claimed task worktree keeps the claim fresh
+    install = install_command(load_config(project_dir), project_dir) if do_install else None
     result = run_gate(project_dir, candidate, [t.removeprefix("Task ").strip() for t in tasks] or None,
-                      reuse=bool(tasks) and not no_reuse)
+                      reuse=bool(tasks) and not no_reuse, attribute=attribute, install=install)
     if as_json:
-        click.echo(json.dumps(result.to_json(), ensure_ascii=False))
+        report = write_report(result, project_dir) if (attribute or compact) else None
+        if compact and report is not None:
+            payload = result.to_compact(str(report))
+        else:
+            if compact:
+                result.warnings.append("gate report not written: printing the full ck-gate/1 object instead")
+            payload = result.to_json()
+            if report is not None:
+                payload["report"] = str(report)
+        click.echo(json.dumps(payload, ensure_ascii=False))
         sys.exit(0 if result.ok else 1)
     if not result.tasks and not result.checks:
         click.echo("ℹ️  No Done tasks to verify. Pass --task N to verify a specific task.")

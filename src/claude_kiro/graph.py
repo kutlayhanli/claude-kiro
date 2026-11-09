@@ -356,9 +356,12 @@ def _verify_tcs(commands: List[str]) -> List[int]:
         if not matches:
             continue
         expr = next(g for g in matches[-1].groups() if g is not None)
-        for term in re.finditer(r"(\bnot\s+)?\btc(\d+)_", expr):
-            if term.group(1) is None:
-                out.append(int(term.group(2)))
+        positive = [int(term.group(2)) for term in re.finditer(r"(\bnot\s+)?\btc(\d+)_", expr)
+                    if term.group(1) is None]
+        # `tc3_ and tc4_`: no one test name carries both TC ids, so the selector names no TC (1.1 red team).
+        if re.search(r"\band\b", expr) and len(set(positive)) > 1:
+            continue
+        out.extend(positive)
     return out
 
 

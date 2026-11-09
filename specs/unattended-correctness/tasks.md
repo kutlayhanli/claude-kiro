@@ -490,15 +490,15 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 5 (TC-31, TC-183 and TC-36's `--attribute` source), Task 7 (TC-14 through `ck gate --attribute`), Task 9 (TC-169), Task 14 (TC-1 to TC-10, TC-12, TC-13, TC-15 to TC-17, TC-26b, TC-27b, TC-193, TC-195), Task 15 (red team of 1.3 through `ck gate --attribute`), Task 16 (CLI cases for 2.4, 2.5), Task 3 (P-5b through `ck gate --attribute`), Task 4 (its `--attribute` red-team cases)
 
 **Acceptance:**
-- [ ] A nested pytest run started by a gated test never adds entries to the gate's failures (TC-191)
-- [ ] `ck gate SPEC --attribute --json` runs the suites today's gate excuses and attributes every failure (1.1)
-- [ ] A failure whose tasks are all Done (or gated) is a regression after one failed rerun; one that passes on rerun is flaky and does not make the gate red (1.2, 2.4)
-- [ ] Excused failures list their unfinished tasks, are never rerun and never make the gate red (1.3, 2.5)
-- [ ] Unattributed failures make the gate red (1.5); every failure has a status (3.4)
-- [ ] Repeated runs give identical `failures` arrays (1.10); without `--attribute` the output equals today's (1.11)
+- [x] A nested pytest run started by a gated test never adds entries to the gate's failures (TC-191)
+- [x] `ck gate SPEC --attribute --json` runs the suites today's gate excuses and attributes every failure (1.1)
+- [x] A failure whose tasks are all Done (or gated) is a regression after one failed rerun; one that passes on rerun is flaky and does not make the gate red (1.2, 2.4)
+- [x] Excused failures list their unfinished tasks, are never rerun and never make the gate red (1.3, 2.5)
+- [x] Unattributed failures make the gate red (1.5); every failure has a status (3.4)
+- [x] Repeated runs give identical `failures` arrays (1.10); without `--attribute` the output equals today's (1.11)
 - [ ] Attribution of 2,000 results with 200 failures over 100 tasks takes under 2 s (NFR attribution cost)
-- [ ] A task's tests that `verify` deselects still run under `--attribute`, and no node runs twice (1.1, TC-193)
-- [ ] `--json --compact` prints the compact object and writes the full, untruncated `ck-gate/1` object to the file it names (2.12, TC-183)
+- [x] A task's tests that `verify` deselects still run under `--attribute`, and no node runs twice (1.1, TC-193)
+- [x] `--json --compact` prints the compact object and writes the full, untruncated `ck-gate/1` object to the file it names (2.12, TC-183)
 
 **Dependencies:** Task 19 (extends `_run_command`, `GateResult.to_json` and the gate command in cli/main.py), Task 18 (calls `attribute_failure`, `rerun_plan`, `gate_verdict`), Task 5 (its tests are the oracle), Task 7 (its tests are the oracle), Task 9 (its tests are the oracle), Task 14 (its tests are the oracle), Task 15 (its tests are the oracle), Task 16 (its tests are the oracle)
 **Complexity:** High
