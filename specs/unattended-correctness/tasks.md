@@ -1875,11 +1875,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 16 (workflow cases for 2.9), Task 70 (TC-164b: the real runner calls the attributed gate directly), Task 74 (P-7, P-31), Task 76 (TC-18 to TC-20, TC-22 to TC-25, TC-26a, TC-27a, TC-33a, TC-34 to TC-36), Task 77 (TC-21, TC-33b: prompts from the real script run through the real ck)
 
 **Acceptance:**
-- [ ] An attributed gate runs at every Nth merge and after the last merge (2.1, 2.11)
-- [ ] OpenCode runs it directly; Claude Code through the lean agent, using its JSON unchanged (2.2, 2.3)
-- [ ] Regressions go to the fixer as structured entries, and rechecks are attributed gates (2.6, 3.9); a red gate after the ladder stops the run as today (2.7)
-- [ ] A green gate records excused failures with their tasks and flaky tests (2.8); flaky tests never reach the fixer (2.4)
-- [ ] A gate with no parseable JSON is an error, never green (2.9, 19.5); landing gates stay task-scoped (2.10)
+- [x] An attributed gate runs at every Nth merge and after the last merge (2.1, 2.11)
+- [x] OpenCode runs it directly; Claude Code through the lean agent, using its JSON unchanged (2.2, 2.3)
+- [x] Regressions go to the fixer as structured entries, and rechecks are attributed gates (2.6, 3.9); a red gate after the ladder stops the run as today (2.7)
+- [x] A green gate records excused failures with their tasks and flaky tests (2.8); flaky tests never reach the fixer (2.4)
+- [x] A gate with no parseable JSON is an error, never green (2.9, 19.5); landing gates stay task-scoped (2.10)
 
 **Dependencies:** Task 80 (calls `failuresForPrompt` and edits spec-implement.js after it), Task 20 (runs `ck gate --attribute --install --json`), Task 16 (its tests are the oracle), Task 70 (its tests are the oracle), Task 74 (its tests are the oracle), Task 76 (its tests are the oracle), Task 77 (its tests are the oracle)
 **Complexity:** High
