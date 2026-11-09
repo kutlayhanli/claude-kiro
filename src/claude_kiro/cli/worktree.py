@@ -570,7 +570,7 @@ def land_cmd(spec, tasks, into, do_gate, do_install, release_claims, keep, progr
 @worktree.command("approve")
 @click.argument("spec")
 @click.argument("task")
-@click.option("--into", help="Target branch (default: the main checkout's branch)")
+@click.option("--into", help="Target branch (default: integrate/SPEC if it exists, else the main checkout's branch)")
 def approve_cmd(spec, task, into):
     """Approve landing TASK's protected files (needs a real terminal; only I can type the code).
 
@@ -589,7 +589,8 @@ def approve_cmd(spec, task, into):
     root = _root()
     name = _spec_name(spec)
     try:
-        target_branch = into or wt.current_branch(root)
+        integ = wt.integration_branch(name)
+        target_branch = into or (integ if wt.branch_exists(root, integ) else wt.current_branch(root))
         target = wt.checkout_of(root, target_branch)
         if target is None:
             raise wt.WorktreeError(f"branch {target_branch} is not checked out anywhere")
@@ -598,6 +599,9 @@ def approve_cmd(spec, task, into):
         if not wt.branch_exists(root, branch):
             raise wt.WorktreeError(f"no branch {branch}")
         files = wt.protected_changes(root, base, branch, wt.land_allow_paths(target))
+        if target_branch.startswith("integrate/") and protect.read_approved_state(root, name, f"refs/heads/{target_branch}") is None:
+            raise wt.WorktreeError(f"the approved state for {target_branch} is missing or unreadable; nothing can be recorded")
+        tip = wt.git(root, "rev-parse", branch).stdout.strip()
     except (wt.WorktreeError, OSError) as e:
         click.echo(f"❌ refused: {e}")
         sys.exit(2)
@@ -608,12 +612,15 @@ def approve_cmd(spec, task, into):
     click.echo(f"Task {task} of {name} changes protected files:")
     for f in files:
         click.echo(f"  {f}")
-    click.echo(f"To approve landing them on {target_branch}, type the code {code}:")
+    click.echo(f"To approve landing them (branch tip {tip[:10]}) on {target_branch}, type the code {code}:")
     typed = sys.stdin.readline()
     if not protect.approval_decision(stdin_tty, stdout_tty, typed, code):
         click.echo("❌ refused: the code did not match; nothing landed")
         sys.exit(2)
     try:
+        if wt.git(root, "rev-parse", branch).stdout.strip() != tip:
+            click.echo(f"❌ refused: {branch} changed after the prompt (was {tip[:10]}); nothing landed")
+            sys.exit(2)
         result = wt.land(root, name, [task], into=target_branch, approved={task: files})
     except (wt.WorktreeError, OSError) as e:
         click.echo(f"❌ {e}")
