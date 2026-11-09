@@ -49,8 +49,18 @@ from claude_kiro.attribution import (
     rerun_plan,
     _launcher,
 )
-from claude_kiro.config import collect_command, install_command, load_config
-from claude_kiro.failures import Failure, failing_files, parse_short_summary, read_collected, read_report
+from claude_kiro.config import ConfigError, collect_command, install_command, load_config, test_track_validate
+from claude_kiro.failures import (
+    Failure,
+    ProjectContext,
+    TestResult,
+    classify_not_built,
+    failing_files,
+    parse_short_summary,
+    read_collected,
+    read_report,
+    right_reason_verdict,
+)
 from claude_kiro.graph import _plan_rows, build_graph
 from claude_kiro.hooks._shared import git_utils
 from claude_kiro.hooks._shared.spec_parser import SpecTask, parse_tasks
@@ -91,6 +101,8 @@ class GateResult:
     reruns: Dict[str, str] = field(default_factory=dict)  # failure key -> passed | failed | unavailable
     warnings: List[str] = field(default_factory=list)
     duration_s: float = 0.0
+    # id(failure) -> extra entry keys ("class"/"check" for right-reason and validate entries)
+    marks: Dict[int, Dict[str, Any]] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -119,6 +131,7 @@ class GateResult:
                 attributed_by=attr.by if attr else None,
             )
             entry["missingCommand"] = self._missing_command(failure)
+            entry.update(self.marks.get(id(failure), {}))
             if self.verdict is not None:
                 key = failure_key(failure)
                 entry["status"] = self.verdict.statuses.get(key)
@@ -538,6 +551,123 @@ def write_report(result: GateResult, project_dir: Path) -> Optional[Path]:
     return path
 
 
+def _project_context(project_dir: Path, graph, config: Dict[str, Any], task: SpecTask) -> ProjectContext:
+    """What the right-reason classifier needs: project modules (src layout aware), owned paths, programs, and
+    this task's test files and fixtures with the source text of its test files (5.7)."""
+    modules = set()
+    for rel in _known_files(project_dir):
+        if is_test_path(rel, config):
+            continue
+        parts = rel.split("/")
+        if parts[0] == "src" and len(parts) >= 3:
+            modules.add(parts[1])
+        elif parts[0] == "src" and len(parts) == 2 and rel.endswith(".py"):
+            modules.add(parts[1][:-3])
+        elif len(parts) == 1 and rel.endswith(".py"):
+            modules.add(rel[:-3])
+        elif len(parts) == 2 and parts[1] == "__init__.py":
+            modules.add(parts[0])
+    owned = {e.dst[len("file:"):] for e in graph.edges if e.kind == "owns"}
+    mine = {e.dst[len("file:"):] for e in graph.edges if e.kind == "owns" and e.src == f"task:{task.num}"}
+    test_paths = {p for p in mine if not any(c in p for c in "*?[") and (is_test_path(p, config) or "fixtures" in p)}
+    sources = {}
+    for rel in sorted(test_paths):
+        path = project_dir / rel
+        if is_test_path(rel, config) and path.is_file():
+            sources[rel] = path.read_text(errors="replace")
+    return ProjectContext(
+        project_modules=frozenset(modules),
+        owned_paths=frozenset(owned),
+        programs=frozenset(graph.programs),
+        test_paths=frozenset(test_paths),
+        test_sources=sources,
+    )
+
+
+def _right_reason(result: GateResult, project_dir: Path, spec_dir: Path, config: Dict[str, Any], task: SpecTask,
+                  commands: List[str], timeout: int, env: Dict[str, str], report_dir: Path) -> None:
+    """A test-track task whose verified tasks are not all Done: its Verify runs now, and each failure must fail
+    for the right reason (Story 5). Bad failures fail the check; unclear ones and passing tests only warn."""
+    name = f"Task {task.num} tests fail for the right reason"
+    try:
+        graph = build_graph(project_dir, spec_dir)
+    except Exception as exc:  # fail closed: the classifier cannot run without the graph
+        result.checks.append(Check(name, False, f"the spec graph could not be built: {exc}"))
+        return
+    known = set(_known_files(project_dir))
+    results: Dict[str, TestResult] = {}
+    for command in commands:
+        run = _run_command(command, project_dir, timeout, env, report_dir, collect=True)
+        failures = _command_failure(run, command, known)
+        failed = set()
+        for failure in failures:
+            node = failure.node or failure.file or failure_key(failure)
+            failed.add(node)
+            results.setdefault(node, TestResult(node, False, failure))
+        for node in run.collected:
+            if node not in failed:
+                results.setdefault(node, TestResult(node, True, None))
+    # Built after the run: the test sources are read as the run left them (5.7).
+    ctx = _project_context(project_dir, graph, config, task)
+    # The collection check already failed this task's test file (an import error at collection): the same failure
+    # is classified here, so it is not left unmarked.
+    for failure in result.failures:
+        node = failure.node or failure.file or failure_key(failure)
+        if failure.file in ctx.test_paths and node not in results:
+            results[node] = TestResult(node, False, failure)
+    if not results:
+        result.checks.append(Check(name, True, "no test ran under this task's Verify", warning=True))
+        return
+
+    by_key = {failure_key(f): f for f in result.failures}
+    for r in results.values():
+        if r.passed or r.failure is None:
+            continue
+        key = failure_key(r.failure)
+        target = by_key.get(key)  # an entry already in the list (e.g. the collection check's) is the one marked
+        if target is None:
+            target = r.failure
+            by_key[key] = target
+            result.failures.append(target)
+        result.marks[id(target)] = {"class": classify_not_built(r.failure, ctx), "check": "right-reason"}
+
+    verdict = right_reason_verdict(list(results.values()), all_verified_done=False, ctx=ctx)
+    lines = [f"wrong reason (blocks): {_failure_target(f)}: {f.message}" for f in verdict.blocking]
+    lines += [f"unclear (not blocking): {_failure_target(f)}: {f.message}" for f in verdict.unclear]
+    lines += [f"already passing: {node}" for node in verdict.already_passing]
+    result.checks.append(Check(
+        name,
+        not verdict.blocking,
+        "\n".join(lines),
+        warning=bool(verdict.unclear or verdict.already_passing),
+    ))
+
+
+def _validate(result: GateResult, project_dir: Path, commands: List[str], timeout: int, env: Dict[str, str],
+              report_dir: Path) -> None:
+    """The project's test-track validation commands, run in the gate's checkout (Story 6, 6.1-6.4)."""
+    for command in commands:
+        run = _run_command(command, project_dir, timeout, env, report_dir)
+        check = run.check
+        check.name = f"`{command}` (test_track.validate)"
+        result.checks.append(check)
+        if check.ok:
+            continue
+        if run.returncode is None and run.failures:  # timed out: _run_command already built the timeout entry
+            entries = list(run.failures)
+        else:
+            detail = check.detail.splitlines()[0] if check.detail else "failed"
+            entries = [Failure(node=None, file=None, kind="error", message=detail, truncated=False, command=command,
+                               exc_type=None, phase=None, crash_path=None, crash_line=None, detail=check.detail,
+                               missing_command=None)]
+        existing = {failure_key(f) for f in result.failures}
+        for failure in entries:
+            result.marks[id(failure)] = {"check": "validate"}
+            if failure_key(failure) not in existing:
+                existing.add(failure_key(failure))
+                result.failures.append(failure)
+
+
 def _acceptance(task: SpecTask) -> Check:
     open_items = [text for checked, text in task.acceptance if not checked]
     if not task.acceptance:
@@ -812,6 +942,19 @@ def _run_gate(
     spec_complete = all(n in assumed_done for n in tasks)
     green_only = str(config.get("verify_mode", "auto")).lower() == "auto" and has_test_track and not spec_complete
 
+    # A test-track gate reads the project's validation command first; an invalid value is a Config check and no
+    # test command runs at all (6.5).
+    test_gate = any(t.track == "test" for t in selected)
+    validate_cmds: List[str] = []
+    config_error: Optional[ConfigError] = None
+    if test_gate:
+        try:
+            validate_cmds = test_track_validate(config)
+        except ConfigError as err:
+            config_error = err
+            result.checks.append(Check("Config", False, str(err)))
+    rr_tasks: List[SpecTask] = []  # test tasks whose Verify is not due: checked for the right reason (5.1)
+
     commands.extend(config.get("verify_always", []))
     # A task gate (--task) checks that task: its own Verify and its verifying
     # tests (added below). Re-running every other finished suite on every task
@@ -864,6 +1007,7 @@ def _run_gate(
             if suite_due(task):
                 commands.extend(task.verify)
             elif task.verify:
+                rr_tasks.append(task)
                 result.checks.append(
                     Check(
                         f"Task {task.num} tests may still fail",
@@ -924,7 +1068,9 @@ def _run_gate(
     # An attributed gate runs its own selection and never stamps or reuses a pass.
     task_tree = verified.worktree_tree(project_dir) if task_scoped and to_run and not attribute else None
     reused = verified.lookup_stamp(project_dir, task_tree, [to_run], scope="task") if reuse and task_tree else None
-    if attribute:
+    if config_error is not None:
+        pass  # an invalid test_track.validate: no test command runs (6.5)
+    elif attribute:
         env = xdist.verify_env(os.environ, registry)
         _run_attributed(result, project_dir, config, tasks, collect, timeout, env, report_dir)
     elif reused:
@@ -971,6 +1117,14 @@ def _run_gate(
                 if failure_key(failure) not in failure_keys:
                     failure_keys.add(failure_key(failure))
                     result.failures.append(failure)
+
+    if config_error is None:
+        env = xdist.verify_env(os.environ, registry)
+        if not attribute:  # under --attribute the verdict comes from the attributed failures instead
+            for task in rr_tasks:
+                _right_reason(result, project_dir, spec_dir, config, task, task.verify, timeout, env, report_dir)
+        if test_gate:  # the validator runs on test-track gates only, never on impl-track gates (6.6)
+            _validate(result, project_dir, validate_cmds, timeout, env, report_dir)
 
     result.checks.extend(
         _properties_checks(project_dir, spec_dir, tasks, selected, task_nums is None, assumed_done, config)
