@@ -70,6 +70,10 @@ const INTERACTIVE = A.interactive === true || A.interactive === 'true'
 // a run key no prompt carries a progress flag and nothing else changes. No clock or timer code here.
 const PROGRESS_RUN = typeof A.progressRun === 'string' && A.progressRun ? A.progressRun : null
 const ETA_LINE = typeof A.etaLine === 'string' && A.etaLine ? A.etaLine : null
+// runnerAgent: the lean agent type that runs thin ck calls under Claude Code (`spec:runner`, or `ck-runner` in a
+// vendored project); null or absent means the default agent with a warning. runId defaults to the progress run key.
+const RUNNER_AGENT = typeof A.runnerAgent === 'string' && A.runnerAgent ? A.runnerAgent : null
+const RUN_ID = typeof A.runId === 'string' && A.runId ? A.runId : PROGRESS_RUN
 const BRIEF = !A.brief
   ? `${ROOT}/.claude/workflows/spec-implement-brief.md`
   : String(A.brief).startsWith('/') ? String(A.brief) : `${ROOT}/${String(A.brief).replace(/^\.\//, '')}`
@@ -91,7 +95,12 @@ const SCRIPT_READINESS = !!A.deps && typeof A.deps === 'object' && !Array.isArra
 // orchestrator role sets one; a merge that hits a conflict goes to the resolver.
 const ROLES = A.agents || {}
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
-function roleOpts(name, role, override) {
+// On hosts that provide the ck() global (OpenCode), each base agent call also carries its role
+// (`role` opt), so opencode.roles can map it to a model. Escalated ladder steps drop the tag
+// (see escalated), and Claude Code, which has no ck() global, never sees a role opt.
+const ROLE_TAGS = typeof ck === 'function'
+const ROLE_NAMES = ['implementer', 'test_writer', 'reviewer', 'reviewer_risky', 'fixer', 'orchestrator', 'resolver']
+function roleOpts(name, role, override, tag = name) {
   const model = (override && override.model) || (role && role.model)
   const effort = (override && override.effort) || (role && role.effort)
   const opts = {}
@@ -103,6 +112,7 @@ function roleOpts(name, role, override) {
     if (!EFFORTS.includes(effort)) throw new Error(`spec-implement: unknown effort "${effort}" for ${name} (use ${EFFORTS.join(', ')})`)
     opts.effort = effort
   }
+  if (ROLE_TAGS && ROLE_NAMES.includes(tag)) opts.role = tag
   return opts
 }
 const OVERRIDE = { model: A.model || null, effort: A.effort || null }
@@ -140,7 +150,12 @@ const desc = o => `${o.model || 'inherited'}/${o.effort || 'inherited'}`
 const up = list => (list.length ? ` (escalate ${list.join(' > ')})` : '')
 const baseOpts = n => (TRACKS[n] === 'test' ? TEST : IMPL)
 const baseLadder = n => (TRACKS[n] === 'test' ? TEST_UP : IMPL_UP)
-const escalated = (opts, model) => ({ ...opts, model })
+// An escalated step runs the named model: it drops the role tag so the alias map (or the ck role map) resolves it.
+const escalated = (opts, model) => {
+  const out = { ...opts, model }
+  delete out.role
+  return out
+}
 
 // Risk and complexity routing. Escalation only fires on failures we detect, and
 // the costly bugs (a send path or price tripwire that passes every test) are the
@@ -173,8 +188,9 @@ const ladderOf = n => {
 }
 // The risky reviewer: reviewer.risky_model/risky_effort, never below reviewer.model/effort.
 const RISKY_REVIEW = (() => {
-  const risky = roleOpts('reviewer.risky', { model: REVIEWER.risky_model || REVIEWER.model, effort: REVIEWER.risky_effort || REVIEWER.effort }, null)
+  const risky = roleOpts('reviewer.risky', { model: REVIEWER.risky_model || REVIEWER.model, effort: REVIEWER.risky_effort || REVIEWER.effort }, null, 'reviewer_risky')
   const opts = { ...REVIEW }
+  if (ROLE_TAGS) opts.role = 'reviewer_risky'
   if (risky.model && (!REVIEW.model || rank(risky.model) >= rank(REVIEW.model))) opts.model = risky.model
   if (risky.effort && (!REVIEW.effort || EFFORT_RANK(risky.effort) >= EFFORT_RANK(REVIEW.effort))) opts.effort = risky.effort
   return opts
@@ -191,27 +207,16 @@ const phaseOf = n => (waveOf(n) ? `Wave ${waveOf(n)}` : 'Tasks')
 const label = n => `task ${n}${TRACKS[n] === 'test' ? ' [test]' : ''}`
 const NOW = 'date -u +%Y-%m-%dT%H:%M:%SZ'
 
-const PLAN = {
+// The one output schema of every thin ck call (19.3): the exit code and the command's JSON, as printed.
+// A thin answer that does not match it is a failed call (thinResult).
+const CK_CALL = {
   type: 'object',
   properties: {
-    done: { type: 'array', items: { type: 'string' }, description: '"done" from ck plan' },
-    remaining: { type: 'array', items: { type: 'string' }, description: '"remaining" from ck plan' },
-    deps: { type: 'object', additionalProperties: { type: 'array', items: { type: 'string' } }, description: '"deps" from ck plan: task number -> its dependencies' },
-    ready: { type: 'array', items: { type: 'string' }, description: '"ready" from ck plan: task numbers (the "task" field, e.g. "12", never a path)' },
-    busy: {
-      type: 'array',
-      description: 'leave it empty: tasks are claimed by their own agents now',
-      items: { type: 'object', properties: { task: { type: 'string' }, detail: { type: 'string' } }, required: ['task', 'detail'] },
-    },
-    cycles: { type: 'array', items: { type: 'array', items: { type: 'string' } }, description: '"cycles" from ck plan' },
-    verifyCycles: {
-      type: 'array',
-      items: { type: 'object', properties: { task: { type: 'string' }, message: { type: 'string' } }, required: ['task', 'message'] },
-      description: '"verifyCycles" from ck plan: task and message only',
-    },
-    error: { type: 'string', description: 'only if a command failed to run; leave it out otherwise (no notes or remarks here)' },
+    exitCode: { type: 'integer', description: 'the exit code of the ck command' },
+    json: { type: ['object', 'null'], description: 'the JSON the command printed, copied exactly; null if it printed none' },
+    error: { type: 'string', description: 'only if the command could not run or printed no JSON: what happened' },
   },
-  required: ['done', 'remaining', 'deps', 'ready', 'cycles', 'verifyCycles'],
+  required: ['exitCode', 'json'],
 }
 const RESULT = {
   type: 'object',
@@ -248,48 +253,6 @@ const RESULT = {
   },
   required: ['task', 'status', 'gatePassed', 'summary', 'commits'],
 }
-const PARKED = {
-  type: 'object',
-  properties: {
-    parked: { type: 'boolean' },
-    notification: { type: 'string', description: 'sent, not_configured, failed, deferred or skipped, as printed' },
-    detail: { type: 'string' },
-    error: { type: 'string', description: 'only if the command failed or printed no JSON: what happened' },
-  },
-  required: ['parked'],
-}
-const LAND = {
-  type: 'object',
-  properties: {
-    tasks: {
-      type: 'array',
-      description: '"tasks" from the ck worktree land JSON, every entry, copied as is',
-      items: {
-        type: 'object',
-        properties: {
-          task: { type: 'string' },
-          state: { type: 'string', enum: ['MERGED', 'RED', 'CONFLICT', 'DEFERRED', 'PROTECTED', 'SKIP', 'MISSING', 'BUSY', 'ERROR'] },
-          detail: { type: 'string' },
-          files: { type: 'array', items: { type: 'string' } },
-          checkGreen: { type: ['boolean', 'null'] },
-          checkTail: { type: 'string' },
-          mergedAt: { type: 'string' },
-        },
-        required: ['task', 'state'],
-      },
-    },
-    gates: {
-      type: 'array',
-      items: { type: 'object', properties: { tasks: { type: 'array', items: { type: 'string' } }, green: { type: 'boolean' }, seconds: { type: 'number' } }, required: ['tasks', 'green'] },
-    },
-    bisected: { type: 'boolean' },
-    eta: { type: 'string', description: 'the eta field from the JSON, copied as is' },
-    startedAt: { type: 'string' },
-    finishedAt: { type: 'string' },
-    error: { type: 'string', description: 'only if the command printed no JSON (or was refused): what happened' },
-  },
-  required: ['tasks'],
-}
 const RESOLVED = {
   type: 'object',
   properties: {
@@ -298,16 +261,6 @@ const RESOLVED = {
     error: { type: 'string', description: 'why it is not resolved, including a refused/blocked command' },
   },
   required: ['resolved'],
-}
-const RELINKED = {
-  type: 'object',
-  properties: {
-    fixable: { type: 'boolean', description: 'the relink was possible' },
-    applied: { type: 'boolean', description: 'tasks.md was written' },
-    committed: { type: 'boolean', description: 'tasks.md was committed on the target branch' },
-    reason: { type: 'string', description: 'what ck relink said' },
-  },
-  required: ['fixable', 'applied'],
 }
 
 const REVIEW_SCHEMA = {
@@ -385,18 +338,52 @@ const since = t0 => { const t = t0 === null ? null : nowMs(); return t === null 
 // command's JSON. Claude Code's Workflow runtime has no such global: there the agents run them.
 const DIRECT_CK = A.directCk !== false && typeof ck === 'function' ? ck : null
 const directCk = { plan: 0, land: 0, relink: 0, ms: 0, failures: 0 }
-async function runCk(kind, argv, cwd) {
+// The thin-call mode for this run (thinAgentMode): `direct` runs ck in-script, `lean` and `default` run it in an agent.
+// A lean call that throws on the agent type switches the rest of the run to `default` (and is retried once).
+const thin = { ...thinAgentMode({ runnerAgent: RUNNER_AGENT, unavailable: false, direct: !!DIRECT_CK }), fallback: false }
+const thinAgentOut = () => ({ type: thin.type, fallback: thin.fallback, warning: thin.warning })
+// CkCallResult: {code, json, stderr, via}. Direct calls return the command's own answer; agent calls return the CK_CALL envelope.
+async function runCk(kind, argv, cwd, stdin) {
   const t0 = nowMs()
   let out = null
   try {
-    out = await DIRECT_CK(argv, { cwd })
+    out = await DIRECT_CK(argv, stdin == null ? { cwd } : { cwd, stdin })
   } catch (e) {
     out = { code: -1, stdout: '', stderr: String(e && e.message), json: null }
   }
   directCk[kind] = (directCk[kind] || 0) + 1
   directCk.ms += since(t0)
   if (!out || !out.json || typeof out.json !== 'object') directCk.failures++
-  return out || { code: -1, json: null, stderr: 'no result' }
+  return out ? { code: out.code, json: out.json, stderr: out.stderr || '', via: 'direct' } : { code: -1, json: null, stderr: 'no result', via: 'direct' }
+}
+// A thin answer is usable only if it carries an integer exit code and a JSON object (19.5); anything else is a failed call.
+const thinAnswerOk = a => !!a && typeof a === 'object' && Number.isInteger(a.exitCode) && !!a.json && typeof a.json === 'object'
+const thinResult = a => (thinAnswerOk(a)
+  ? { code: a.exitCode, json: a.json, stderr: a.error || '', via: 'agent' }
+  : { code: -1, json: null, stderr: `thin answer does not match CK_CALL: ${trim(a, 300)}`, via: 'agent' })
+const shellWord = s => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${String(s).replace(/'/g, `'\\''`)}'`)
+// One thin ck call. `argv` is ck's argument list; `what` says what the step is for. The agent prompt holds the ck command
+// on its own line; `stdin` (the park note) is passed as a here-document in the prompt and as stdin when run directly.
+async function thinCk(kind, argv, o = {}) {
+  if (thin.mode === 'direct') return runCk(kind, argv, o.cwd || ROOT, o.stdin)
+  const cmd = `ck ${argv.map(shellWord).join(' ')}`
+  const doc = o.stdin == null ? cmd : `${cmd} <<'CK_PARK'\n${o.stdin}\nCK_PARK`
+  const prompt = `${o.what || 'Mechanical step'}. Do exactly this, nothing else. ${GIT_NOTE}
+Run this command on its own line${o.cwd ? ` (in ${o.cwd})` : ''}, with no other command:
+${doc}
+${o.gate ? `${GATE_NOTE}\n` : ''}A non-zero exit is an answer, not a failure: still return its exit code and JSON.
+Return exitCode (the command's exit code) and json (its JSON output, copied exactly as printed; json must be an object). Put a message in error only if the command could not run or printed no JSON; no notes or remarks anywhere.`
+  const opts = () => (thin.mode === 'lean'
+    ? { label: o.label, phase: o.phase, schema: CK_CALL, agentType: thin.type }
+    : { label: o.label, phase: o.phase, schema: CK_CALL, ...LOW })
+  return call(kind, prompt, opts()).then(thinResult, e => {
+    if (thin.mode !== 'lean') return thinResult({ error: e && e.message })
+    thin.mode = 'default'
+    thin.type = null
+    thin.fallback = true
+    thin.warning = `the lean thin agent type ${RUNNER_AGENT} is unavailable (${trim(e && e.message, 200)}); thin ck calls run on the default agent for the rest of the run`
+    return call(kind, prompt, opts()).then(thinResult, e2 => thinResult({ error: e2 && e2.message }))
+  })
 }
 // A revision that gives up may leave its claim, which would make the next run's task BUSY.
 async function releaseClaim(n) {
@@ -416,12 +403,6 @@ const planArgv = exclude => {
 }
 const landArgv = tasks => ['-C', ROOT, 'worktree', 'land', SPEC, ...tasks, '--into', INTO, '--gate', '--install', '--release', ...(PROGRESS_RUN ? ['--progress-run', PROGRESS_RUN] : []), '--json']
 
-const planFlags = () => (PROGRESS_RUN ? ` --progress-run ${PROGRESS_RUN}${failed.size ? ` --failed ${[...failed.keys()].join(',')}` : ''}` : '')
-
-const planPrompt = exclude => `Mechanical planning step for spec ${SPEC}. Do exactly this, nothing else. ${GIT_NOTE}
-Run:  ck -C ${TARGET} plan ${SPEC} --json${exclude.length ? ` --exclude ${exclude.join(',')}` : ''}${planFlags()}
-Copy into your answer: "done", "remaining", "deps", "ready", "cycles", and for "verifyCycles" only each entry's task and message. "ready", "done" and "remaining" hold task numbers (e.g. "12"), never worktree paths.
-Return the fields. Put a message in error only if the command itself failed to run; no notes or remarks anywhere.`
 
 // A note the agent leaves for whoever picks the task up next (a retry, a revision,
 // or a bigger model after escalation). It sits next to the worktree, not in it, so
@@ -496,11 +477,6 @@ ${GIT_NOTE}
 3. The tasks' gates already passed, so do not re-check what the tests check. Look for what tests miss: behaviour that contradicts design.md or a requirement, a public interface that differs from design.md, missing error handling the design specifies, edits outside the tasks' files, weakened or skipped tests, and security problems.
 ${tasks.map(n => TRACKS[n] === 'test' ? `${CONTRACT_REVIEW(n)}\n` : '').join('')}Return verdict ("approve" or "changes") with per-task findings [{ task, severity, file, issue, fix }] and name every covered task in "tasks". Mark a finding "blocking" only if it should stop the wave; style and taste are "minor". verdict is "changes" only if there is at least one blocking finding.`
 
-const relinkPrompt = n => `Break a verify-order cycle at Task ${n} of spec ${SPEC} in tasks.md on ${INTO}. You run one command; you do not edit any file yourself.
-${GIT_NOTE}
-Run "ck -C ${TARGET} relink ${SPEC} ${n} --apply --commit --json". It rewrites only Task ${n}'s and its linked tasks' Verify / Verified by / Verifies lines the way \`ck lint\` suggests, and commits tasks.md on the checked-out ${INTO}; it refuses when the repair is not mechanical.
-Copy "fixable", "applied", "committed" and "reason" from its JSON exactly. If it printed no JSON, set fixable false and put what it printed in reason.`
-
 const crossTestPrompt = tasks => `Cross-test consistency check for spec ${SPEC}: test-track Tasks ${tasks.join(', ')} have merged into ${INTO}. You review; you do not edit, commit, or run the test suite. ${GIT_NOTE}
 Test tasks written in parallel drift apart: two test files can each look right on their own and still disagree about the same request, response or record (field names, which model a field lives on, status values, error codes, units). Each implementation can then satisfy only one of them.
 1. First pass: run "ck -C ${TARGET} lint ${SPEC} --contracts --json" and read its "unknown" list (names the tests use that design.md never defines; a heuristic, so judge each one).
@@ -518,20 +494,8 @@ ${GUARD_NOTE}
 Return the schema fields with task "${n}".`
 
 // Parking: one `ck worktree park` call. The note carries the quotes; the notification never does.
-const parkPrompt = (n, stop, decision) => `Parking step for Task ${n} of spec ${SPEC}: run ONE command and copy its JSON output. Nothing else: no other commands, no edits. ${GIT_NOTE}
-Command: "ck worktree park ${SPEC} ${n} --json", run in ${ROOT} and with the note on standard input (a here-document, never a pipe), so write it as:
-ck -C ${ROOT} worktree park ${SPEC} ${n} --json <<'CK_PARK'
-${JSON.stringify({ file: stop.file, kind: stop.kind || 'test', test: stop.test || '', requirement: stop.requirement || '', decision })}
-CK_PARK
-Copy "parked", "notification" and "detail" exactly as printed. A non-zero exit is a failure: put what it printed in error.`
-
 // Landing is one ck command: it prechecks with git merge-tree, merges the batch,
 // gates it in-process, and bisects a red batch by itself. The agent only runs it.
-const landPrompt = tasks => `Landing step for spec ${SPEC}: run ONE command and copy its JSON output. Nothing else: no git commands, no fixes, no retries, no edits. ${GIT_NOTE}
-Command:  ck -C ${ROOT} worktree land ${SPEC} ${tasks.join(' ')} --into ${INTO} --gate --install --release${PROGRESS_RUN ? ` --progress-run ${PROGRESS_RUN}` : ''} --json
-It merges the tasks into ${INTO}, gates them, and bisects a red batch itself. ${GATE_NOTE} The same holds for this command, which runs the gate: wait for its EXIT line.
-A non-zero exit is normal (1: a task is RED, 2: a CONFLICT, 3: busy, missing or PROTECTED); still copy the JSON. Copy "tasks" (every entry: task, state, detail, files, checkGreen, checkTail, mergedAt), "gates", "bisected", "startedAt" and "finishedAt" exactly as printed.${PROGRESS_RUN ? ' Copy "eta", the eta field from the JSON, as is (leave it out if the JSON has none).' : ''} Put a message in error only if the command printed no JSON (say what it printed, or that it was refused).`
-
 const resolvePrompt = (n, files, cf = '') => `Merge conflict for Task ${n} of spec ${SPEC}: ${BR(n)} conflicts with ${INTO}${files ? ` (${files})` : ''}. ${INTO} was not touched. ${GIT_NOTE} ${GATE_NOTE}
 1. Resolve it in the TASK WORKTREE, never in ${TARGET}:
      ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover${cf}
@@ -782,6 +746,15 @@ function reviewGroups({ merged, risk } = {}) {
   return { batched, individual }
 }
 
+// How thin ck calls run (19.1, 19.4, 19.6, 2.2, 2.3): `direct` when the host has the `ck` global (OpenCode:
+// ck runs in-script), `lean` when the Claude Code run has a lean runner agent type, otherwise `default`
+// (the session's agent) with a warning that the lean type is unavailable.
+function thinAgentMode({ runnerAgent, unavailable, direct } = {}) {
+  if (direct) return { mode: 'direct', type: null, warning: null }
+  if (typeof runnerAgent === 'string' && runnerAgent && !unavailable) return { mode: 'lean', type: runnerAgent, warning: null }
+  return { mode: 'default', type: null, warning: `the lean thin agent type ${runnerAgent || '(runnerAgent not set)'} is unavailable; thin ck calls run on the default agent` }
+}
+
 // --- end decisions ---
 
 // --- scheduler ---------------------------------------------------------------
@@ -918,7 +891,7 @@ let lastGood = null       // { ready, deps, order } of the last consistent plan:
 let planRun = null          // the plan agent in flight, if any
 let queuedTrigger = null    // a trigger that arrived while one was in flight: one follow-up
 let idleArmed = true
-let recordSeq = 0           // task records seen so far: a landing plan disarms the idle plan only if none arrived while it ran
+let recordSeq = 0           // failed task records seen so far: a landing plan disarms the idle plan only if none arrived while it ran (an ok record waits for its landing, so it changes nothing)
 let deferring = false
 const excluded = () => new Set([...running.keys(), ...failed.keys(), ...parked.keys(), ...mergedInRun])
 function planContext() {
@@ -939,14 +912,10 @@ async function runPlan(trigger) {
   for (let attempt = 0; attempt < 2; attempt++) {
     const label = `plan ${refills}${attempt ? ' retry' : ''}`
     const exclude = [...excluded()]
-    let p = null
-    if (DIRECT_CK) {
-      const out = await runCk('plan', planArgv(exclude), ROOT)
-      p = out.json && typeof out.json === 'object' ? { ...out.json } : { error: ckError(out) }
-      if (p.error === undefined || p.error === null) delete p.error
-    } else {
-      try { p = await call('plan', planPrompt(exclude), { label, phase: 'Plan', schema: PLAN, ...LOW }) } catch (e) { p = { error: e && e.message } }
-    }
+    const out = await thinCk('plan', planArgv(exclude), { label, phase: 'Plan', cwd: ROOT, what: `Mechanical planning step for spec ${SPEC}` })
+    const p = out.json ? { ...out.json } : { error: ckError(out) }
+    if (out.json && out.stderr) p.error = out.stderr  // a note next to a usable plan is a remark, not a failure
+    if (p.error === undefined || p.error === null) delete p.error
     // An "error" next to a usable plan is a remark, not a failure; an empty plan with an error is a failure.
     if (usablePlan(p) && !(p.error && !p.done.length && !p.remaining.length)) {
       const n = normalizePlan(p)
@@ -1047,9 +1016,8 @@ async function relinkTask(n, vc) {
   let r = null
   try {
     r = await withLandingLock(async () => {
-      if (!DIRECT_CK) return call('relink', relinkPrompt(n), { label: `relink ${n}`, phase: phaseOf(n), schema: RELINKED, ...LOW })
-      const out = await runCk('relink', ['-C', TARGET, 'relink', SPEC, n, '--apply', '--commit', '--json'], TARGET)
-      return out.json && typeof out.json === 'object' ? out.json : { fixable: false, applied: false, reason: ckError(out) }
+      const out = await thinCk('relink', ['-C', TARGET, 'relink', SPEC, n, '--apply', '--commit', '--json'], { label: `relink ${n}`, phase: phaseOf(n), cwd: TARGET, what: `Break a verify-order cycle at Task ${n} of spec ${SPEC}` })
+      return out.json ? out.json : { fixable: false, applied: false, reason: ckError(out) }
     })
   } catch (e) {
     r = null
@@ -1110,9 +1078,8 @@ function finishTask(n, rec) {
   releaseSlot(n)
   running.delete(n)
   records[n] = rec
-  recordSeq++
   maybeCrossTest(n)
-  if (!rec.ok) idleArmed = true  // a merged task was already followed by its landing plan; a failed one may change what is ready
+  if (!rec.ok) { idleArmed = true; recordSeq++ }  // only a failure can change what is ready before its landing; a merged task was already followed by its landing plan; a failed one may change what is ready
   if (!rec.ok && rec.needsInput) {
     parked.set(n, rec.needsInput)  // listed apart from failed; never triggers onFailure: halt
     log(`Task ${n}: needs input (${rec.needsInput.action}); independent tasks continue, its dependents wait`)
@@ -1222,12 +1189,8 @@ async function landBatch(batch) {
   const used = batchWindow
   let res = null
   try {
-    if (DIRECT_CK) {
-      const out = await runCk('land', landArgv(tasks), ROOT)
-      res = out.json && typeof out.json === 'object' && Array.isArray(out.json.tasks) ? out.json : { tasks: [], error: ckError(out) }
-    } else {
-      res = await call('land', landPrompt(tasks), { label: `land ${tasks.join(' ')}`, phase: phaseOf(tasks[0]), schema: LAND, ...LOW })
-    }
+    const out = await thinCk('land', landArgv(tasks), { label: `land ${tasks.join(' ')}`, phase: phaseOf(tasks[0]), cwd: ROOT, gate: true, what: `Landing step for spec ${SPEC}: it merges the tasks into ${INTO}, gates them, and bisects a red batch itself` })
+    res = out.json && Array.isArray(out.json.tasks) ? out.json : { tasks: [], error: ckError(out) }
   } catch (e) {
     res = { tasks: [], error: e && e.message }
   }
@@ -1451,7 +1414,9 @@ async function runTask(n) {
       releaseSlot(n)
       if (action === 'park') {
         let p = null
-        try { p = await call('park', parkPrompt(n, stop, entry.decision), { label: `park ${n}`, phase: phaseOf(n), schema: PARKED, ...LOW }) } catch (e) { p = { parked: false, error: e && e.message } }
+        const note = JSON.stringify({ file: stop.file, kind: stop.kind || 'test', test: stop.test || '', requirement: stop.requirement || '', decision: entry.decision })
+        const out = await thinCk('park', ['worktree', 'park', SPEC, n, '--json'], { stdin: note, label: `park ${n}`, phase: phaseOf(n), cwd: ROOT, what: `Parking step for Task ${n} of spec ${SPEC}` })
+        p = out.json ? out.json : { parked: false, error: ckError(out) }
         entry.notification = p && p.notification ? p.notification : 'failed'
         entry.notificationDetail = (p && (p.detail || p.error)) || ''
         if (!p || p.parked === false) {
@@ -1638,7 +1603,7 @@ function buildOverhead() {
   return { share, threshold: OVERHEAD_WARN_THRESHOLD, warned: overheadWarning(share) }
 }
 const startPlan = await requestPlan('start')
-if (!startPlan) return { halted: true, refused: false, reason: PLAN_FAILED, into: INTO, degraded, planFallbacks, overhead: buildOverhead(), directCk: directCkOut() }
+if (!startPlan) return { halted: true, refused: false, reason: PLAN_FAILED, into: INTO, degraded, planFallbacks, overhead: buildOverhead(), directCk: directCkOut(), thinAgent: thinAgentOut() }
 if (startPlan.cycles.length || startPlan.verifyCycles.length) {
   log('Refusing to launch: the plan has a cycle. Fix tasks.md (see `ck lint`; `ck relink <spec> <task> --apply` repairs a verify-order cycle when it can) and run again.')
   return {
@@ -1651,7 +1616,7 @@ if (startPlan.cycles.length || startPlan.verifyCycles.length) {
     degraded,
     planFallbacks,
     overhead: buildOverhead(),
-    directCk: directCkOut(),
+    directCk: directCkOut(), thinAgent: thinAgentOut(),
   }
 }
 const initialPlan = startPlan
@@ -1735,26 +1700,12 @@ const ends = taskReport.map(t => t.mergedAt || t.finishedAt).filter(Boolean).sor
 // 11 merged while git had 19, and bench v2 listed Task 17 as merged and as "merge failed".
 // Agent results only annotate it (reasons). Without a usable git report, the agents' results
 // are used, deduplicated, and reportSource says so.
-const REPORT = {
-  type: 'object',
-  properties: {
-    head: { type: 'string' },
-    merged: { type: 'array', items: { type: 'object', properties: { task: { type: 'string' }, commit: { type: 'string' }, mergedAt: { type: 'string' } }, required: ['task'] } },
-    done: { type: 'array', items: { type: 'object', properties: { task: { type: 'string' } }, required: ['task'] } },
-    failed: { type: 'array', items: { type: 'object', properties: { task: { type: 'string' }, branch: { type: 'string' }, ahead: { type: 'number' }, claim: { type: 'string' } }, required: ['task'] } },
-    blocked: { type: 'array', items: { type: 'object', properties: { task: { type: 'string' }, on: { type: 'array', items: { type: 'string' } } }, required: ['task', 'on'] } },
-    needsInput: { type: 'array', items: { type: 'object', properties: { task: { type: 'string' } }, required: ['task'] } },
-    unstarted: { type: 'array', items: { type: 'object', properties: { task: { type: 'string' } }, required: ['task'] } },
-    error: { type: 'string', description: 'only if the command printed no JSON (or was refused): what happened' },
-  },
-  required: ['merged', 'done', 'failed', 'blocked', 'unstarted'],
-}
-const reportPrompt = () => `Report step for spec ${SPEC}: run ONE command and copy its JSON output. Nothing else: no other commands, no edits. ${GIT_NOTE}
-Command:  ck -C ${ROOT} worktree report ${SPEC} --into ${INTO} --json
-Copy "head", "merged" (task, commit, mergedAt), "done", "failed" (task, branch, ahead, claim), "blocked" (task, on), "needsInput" (task; leave it empty if the output has none) and "unstarted" exactly as printed, every entry. Put a message in error only if the command printed no JSON (say what it printed, or that it was refused).`
 phase('Report')
 let gitReport = null
-try { gitReport = await call('report', reportPrompt(), { label: 'report', phase: 'Report', schema: REPORT, ...LOW }) } catch (e) { gitReport = { error: e && e.message } }
+{
+  const out = await thinCk('report', ['-C', ROOT, 'worktree', 'report', SPEC, '--into', INTO, '--json'], { label: 'report', phase: 'Report', cwd: ROOT, what: `Report step for spec ${SPEC}` })
+  gitReport = out.json ? out.json : { error: ckError(out) }
+}
 const GIT_LISTS = ['merged', 'done', 'failed', 'blocked', 'unstarted']
 const fromGit = !!gitReport && !gitReport.error && GIT_LISTS.every(k => Array.isArray(gitReport[k]))
 const ids = list => (list || []).map(e => taskId(e && typeof e === 'object' ? e.task : e))
@@ -1897,6 +1848,6 @@ return {
   overhead,
   relinks,
   testFixes,
-  directCk: directCkOut(),
+  directCk: directCkOut(), thinAgent: thinAgentOut(),
   stats: { initiallyDone, merged: merged.length, failed: failedList.length, notStarted: notStarted.length, planSteps: refills, planFailures, planFallbacks: planFallbacks.length, fixes: fixCount, landings: landings.length, bisected: landings.filter(l => l.bisected).length },
 }

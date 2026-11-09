@@ -462,7 +462,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Files:**
 - `src/claude_kiro/gate.py` - `_run_command` with plugin injection and failure parsing; `GateResult.failures/attribute/warnings/to_json`; text report unchanged
 - `src/claude_kiro/cli/main.py` - `ck gate --json`
-**Verify:** `uv run pytest -q tests/test_gate_failures.py -k "tc28_ or tc29_ or tc30_ or tc32_ or tc36_gate_json or tc191_"` `uv run pytest -q tests/test_gate_failures_redteam.py` `uv run pytest -q tests/test_gate_attribution_properties.py -k "tc173_p5b"` `uv run pytest -q tests/test_command_deps.py -k "tc115_"` `uv run pytest -q tests/test_gate.py`
+**Verify:** `uv run pytest -q tests/test_gate_failures.py -k "tc28_ or tc29_ or tc30_ or tc32_ or tc36_gate_json"` `uv run pytest -q tests/test_gate_failures_redteam.py -k "not long_message_under_attribute and not (under_every_flag and args1) and not config_error_only"` `uv run pytest -q tests/test_command_deps.py -k "tc115_"` `uv run pytest -q tests/test_gate.py`
 **Verified by:** Task 1 (captures `failure.schema.json` and the text-gate baselines its output is checked against), Task 3 (P-5b through the real CLI), Task 4 (red team of 3.3, 3.5 through `ck gate --json`), Task 5 (TC-28 to TC-30, TC-32, TC-191 and TC-36's `ck gate --json` source), Task 17 (TC-115)
 
 **Acceptance:**
@@ -487,7 +487,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Files:**
 - `src/claude_kiro/gate.py` - attributed command set with node-ID coverage, attribution, one rerun per candidate, `gate_verdict`, `--install`, `to_compact` and the report file
 - `src/claude_kiro/cli/main.py` - `ck gate --attribute`, `--install`, `--compact`
-**Verify:** `uv run pytest -q tests/test_gate_attribution.py -k "not tc11_"` `uv run pytest -q tests/test_gate_attribution_redteam.py` `uv run pytest -q tests/test_attributed_gates_redteam.py -k "tc15_redteam or tc17_redteam"` `uv run pytest -q tests/test_gate_failures.py -k "tc31_ or tc36_gate_attribute or tc183_"` `uv run pytest -q tests/test_spec_graph.py -k "tc14_"` `uv run pytest -q -m serial tests/test_unattended_perf.py -k "tc169_"`
+**Verify:** `uv run pytest -q tests/test_gate_attribution.py -k "not tc11_"` `uv run pytest -q tests/test_gate_attribution_redteam.py` `uv run pytest -q tests/test_attributed_gates_redteam.py -k "tc15_redteam or tc17_redteam"` `uv run pytest -q tests/test_gate_failures.py -k "tc31_ or tc36_gate_attribute or tc183_"` `uv run pytest -q tests/test_spec_graph.py -k "tc14_"` `uv run pytest -q -m serial tests/test_unattended_perf.py -k "tc169_"` `uv run pytest -q tests/test_gate_failures.py -k "tc191_"` `uv run pytest -q tests/test_gate_failures_redteam.py -k "long_message_under_attribute or (under_every_flag and args1)"` `uv run pytest -q tests/test_gate_attribution_properties.py -k "tc173_p5b"`
 **Verified by:** Task 5 (TC-31, TC-183 and TC-36's `--attribute` source), Task 7 (TC-14 through `ck gate --attribute`), Task 9 (TC-169), Task 14 (TC-1 to TC-10, TC-12, TC-13, TC-15 to TC-17, TC-26b, TC-27b, TC-193, TC-195), Task 15 (red team of 1.3 through `ck gate --attribute`), Task 16 (CLI cases for 2.4, 2.5)
 
 **Acceptance:**
@@ -738,7 +738,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Description:** In `gate.run_gate`, a test-track task whose verified tasks are not all Done no longer skips its Verify: run it in the gate's checkout (the task worktree, or the landing target with the task's test files applied), build `ProjectContext` from the graph (project modules from the src layout, owned paths from owns edges, programs from `SpecGraph.programs`, the task's test files and fixtures, and the source text of its test files as `test_sources` for 5.7), classify each failing node with `classify_not_built`, and decide with `right_reason_verdict`. Record a check "Task N tests fail for the right reason": fails when any failure is `bad` (those entries get `class: "bad"`, `check: "right-reason"`), passes with `warning: true` for unclear failures (`class: "unclear"`), adds a warning naming tests that already pass; all verified tasks Done keeps today's "must pass" rule (5.6). Then, on every test-track gate only, read `config.test_track_validate(config)` and run each command in the gate's checkout through `_run_command` with the gate's verify timeout: a non-zero exit is a failing check named `` `<command>` (test_track.validate) `` with its 40-line tail and a failure entry `check: "validate"`, kind `error`; a timeout fails as kind `timeout`; a `ConfigError` becomes a failing "Config" check naming the key and no test command runs. Impl-track gates never run the validator (6.6). Harness Contract owner: item 6's `test_track.validate` at the gate (the reader is Task 28's).
 **Files:**
 - `src/claude_kiro/gate.py` - test-track right-reason check; `test_track.validate` check; Config check on `ConfigError`
-**Verify:** `uv run pytest -q tests/test_right_reason.py tests/test_right_reason_redteam.py tests/test_test_track_validate.py tests/test_test_track_validate_redteam.py`
+**Verify:** `uv run pytest -q tests/test_right_reason.py tests/test_right_reason_redteam.py tests/test_test_track_validate.py tests/test_test_track_validate_redteam.py` `uv run pytest -q tests/test_gate_failures_redteam.py -k "config_error_only"`
 **Verified by:** Task 23 (TC-50 to TC-54, TC-56, TC-57, TC-181), Task 24 (TC-58 to TC-63), Task 25 (red team of 6.5, 6.6), Task 107 (red team of Story 5 through `ck gate`)
 
 **Acceptance:**
@@ -1790,7 +1790,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 78: Route mechanical ck calls through `thinCk` (direct or lean agent)
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 2.2, 2.3, 19.1, 19.3, 19.4, 19.5, 19.6
 **Description:** In `plugin/workflows/spec-implement.js`: add args `runnerAgent` (string or null: `spec:runner` / `ck-runner`) and `runId` (defaults to `progressRun`); add the shared `CK_CALL` schema (`{exitCode, json, error}`) and the `CkCallResult` shape (`{code, json, stderr, via}`); add `thinAgentMode({runnerAgent, unavailable, direct})` in the `// --- decisions` block (`direct` when the `ck()` global exists, `lean` with a runner agent, otherwise `default` with a warning); add `thinCk(label, argv, ...)` that runs ck directly under OpenCode and, under Claude Code, starts one agent with `{ agentType: RUNNER, schema: CK_CALL, label, phase }` and no model or effort, whose prompt holds the ck command on its own line. Route plan, land, relink, park and report through `thinCk`. A thin answer that does not match `CK_CALL` (missing code, `json` null or not an object) is a failed call, handled as each caller's existing error path. If `runnerAgent` is absent or the first lean `agent()` call throws on the agent type, switch to `default` for the rest of the run, retry that call once, and record `thinAgent: {type, fallback, warning}` in the result. Task, review, fix and resolver agents never carry the lean type. Keep the vendored copy untouched (Task 97). Update the existing assertions this supersedes: in `tests/js/spec_implement.test.mjs`, the cases that pin the orchestrator model and effort on the `plan 1` and `land 1` thin calls (around lines 519-533) now expect `agentType` and `schema: CK_CALL` with no model or effort; in `tests/js/landing_speed.test.mjs`, any case that pins the raw shape of a plan or land answer reads it from the envelope. Harness Contract owner: item 8's thin output schema (design: `CK_CALL`), item 7's `thinResult` (design: `thinAgentMode` and the `CK_CALL` check), the lean-type arg (contract `thinAgent`, design `runnerAgent`), opts `agentType` and result `warnings[]`.
@@ -1802,11 +1802,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 2 (the fake runtime, bridge and `CK_CALL` envelopes its thin routing runs under), Task 74 (P-30 at the thin-routing seam)
 
 **Acceptance:**
-- [ ] Under Claude Code every thin ck call uses the lean agent type and no other call does (19.1)
-- [ ] All thin calls share one output schema (19.3)
-- [ ] With the lean type unavailable, thin calls run as before and the result carries a warning (19.4)
-- [ ] A thin output not matching the schema is a failed call (19.5)
-- [ ] Under OpenCode ck runs directly with no thin agent (19.6, 2.2); under Claude Code it goes through the lean agent (2.3)
+- [x] Under Claude Code every thin ck call uses the lean agent type and no other call does (19.1)
+- [x] All thin calls share one output schema (19.3)
+- [x] With the lean type unavailable, thin calls run as before and the result carries a warning (19.4)
+- [x] A thin output not matching the schema is a failed call (19.5)
+- [x] Under OpenCode ck runs directly with no thin agent (19.6, 2.2); under Claude Code it goes through the lean agent (2.3)
 
 **Dependencies:** Task 2 (its tests are the oracle), Task 74 (its tests are the oracle)
 **Complexity:** High
@@ -1815,7 +1815,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 79: Tag base agent calls with their role on ck() hosts
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 14.1, 14.6
 **Description:** In `plugin/workflows/spec-implement.js`, on hosts that provide the `ck()` global, add `role` (`implementer`, `test_writer`, `reviewer`, `reviewer_risky`, `fixer`, `orchestrator`, `resolver`) to the opts of every base (non-escalated) agent call; escalated ladder steps drop it so the alias map resolves them. Under Claude Code no `role` is passed and the agent opts keep today's aliases (`roleOpts` unchanged). Harness Contract owner: item 7's agent opts `role`. Foundation task: its Verify is a smoke check; 14.1 and 14.6 are verified at Task 82 by Task 75, whose suite also needs the run start and audit that Task 82 adds.
@@ -1824,8 +1824,8 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verify:** `uv run pytest -q tests/test_workflow_scripts.py -k "spec_implement"`
 
 **Acceptance:**
-- [ ] Under OpenCode each base agent call carries its role, so `opencode.roles` applies (14.1)
-- [ ] Under Claude Code agent opts carry only Claude aliases (14.6)
+- [x] Under OpenCode each base agent call carries its role, so `opencode.roles` applies (14.1)
+- [x] Under Claude Code agent opts carry only Claude aliases (14.6)
 
 **Dependencies:** Task 78 (both edit spec-implement.js; Task 78 runs first), Task 72 (the OpenCode host consumes the `role` opt)
 **Complexity:** Low
