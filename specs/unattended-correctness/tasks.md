@@ -455,7 +455,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 19: Emit structured failures from `ck gate --json`
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.6, 1.7, 1.11, 3.1, 3.2, 3.3, 3.5, 3.9, 3.10, 12.5
 **Description:** In `src/claude_kiro/gate.py`, replace `_run` with `_run_command(command, project_dir, timeout, env, report_dir) -> CommandRun`. For a direct pytest invocation (detected with `xdist._segment_pytest`), inject in the child environment only `CK_GATE_REPORT=<tmp file>`, `CK_GATE_ROOT=<the gate's checkout>`, `PYTHONPATH=<ck plugin dir>:$PYTHONPATH` and `PYTEST_ADDOPTS="-p ck_pytest_report $PYTEST_ADDOPTS"` (the plugin removes them for nested runs, TC-191); never rewrite the command (wrappers such as tox, make or shell scripts get nothing injected). Parse failures from the plugin report, else pytest's short summary, else failing test file names in the output, else none, and keep the 40-line tail for the text report. A timeout yields a failure of kind `timeout`. `GateResult` gains `failures: List[Failure]`, `attribute: bool`, `warnings: List[str]` and `to_json()` printing `ck-gate/1` (schema, spec, tasks, ok, attribute, checks with today's field names, failures, summary, warnings, durationS); `failures` is always present and never truncated. Without `--attribute`, each failure still carries its TC id and attributed tasks (through `attribution.AttributionIndex`) but no status, and `missingCommand` is `{command, providers}` when `failures.missing_command` matches a command the graph knows (providers from provides edges). Today's command selection and verdict are unchanged (1.11), and so is the text report, byte for byte: failures appear only in the JSON forms (TC-13). In `cli/main.py`, add `--json` to `ck gate` (prints only the JSON object; exit codes as today). Harness Contract owner: item 1's `ck gate --json` (`ck-gate/1`).
@@ -469,7 +469,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 - [x] `ck gate --json` lists one entry per failing node (or per failing file for collection errors and non-pytest runners) with node, TC id, tasks, file, kind and message (3.1, 1.6, 1.7)
 - [x] Every entry's kind is one of the five kinds (3.2); messages over 500 characters are truncated and marked, never dropped (3.5)
 - [x] A passing gate prints `"failures": []`; the field is never omitted (3.3)
-- [ ] Every field `ck gate` and its consumers provide today is still there (3.10), and `ck gate` without `--json` prints exactly today's report (1.11)
+- [x] Every field `ck gate` and its consumers provide today is still there (3.10), and `ck gate` without `--json` prints exactly today's report (1.11)
 - [x] A missing-command failure carries `missingCommand` with its providers (12.5)
 
 **Dependencies:** Task 6 (calls the failure readers and `classify_kind`), Task 18 (fills TC id and tasks through `AttributionIndex`), Task 13 (reads providers from the graph's provides edges), Task 1 (its tests are the oracle), Task 3 (its tests are the oracle), Task 4 (its tests are the oracle), Task 5 (its tests are the oracle), Task 17 (its tests are the oracle)
