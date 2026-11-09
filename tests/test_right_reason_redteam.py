@@ -502,6 +502,8 @@ def gate_project(tmp_path, test_source, extra_files=None, newline="\n"):
     code, _, err = h.ck_text(root, "worktree", "create", "demo", "1", "--base", "integrate/demo")
     assert code == 0, err
     wt = h.task_worktree(root, "1")
+    tasks_md = wt / "specs" / "demo" / "tasks.md"
+    tasks_md.write_text(tasks_md.read_text().replace("- [ ]", "- [x]"))  # unchecked boxes would fail every gate
     files = {
         CALC_TEST_FILE: CLI_HEADER + test_source,
         "tests/fixtures/prices.json": json.dumps(PRICES),
