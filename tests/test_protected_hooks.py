@@ -663,10 +663,10 @@ def test_tc88_a_raw_protected_merge_is_refused_inside_the_real_sandbox(tmp_path)
     assert_ck_hooks_installed(root)
     wt = h.integration_worktree(root)
     before = integ_ref(root)
+    env = sandbox_ck(tmp_path, root)  # one copy of the ck library per repo: copytree refuses an existing target
     proc = h.sandboxed(["git", "-C", str(wt), "merge", "--no-ff", "--no-verify", "--no-edit", "feat/demo-task-1"],
-                       root, root / ".ck" / "worktrees", env=sandbox_ck(tmp_path, root))
+                       root, root / ".ck" / "worktrees", env=env)
     assert_refused(root, proc, PROTECTED_REF, before, "sandboxed git merge --no-verify of Task 1")
-    env = sandbox_ck(tmp_path, root)
     run = lambda a: h.sandboxed(["git", "-C", str(root), *a], root, root / ".ck" / "worktrees", env=env)
     assert_hook_refusal(root, run, PROTECTED_REF, before, "sandboxed raw update-ref of the protected commit")
     ok = run(["update-ref", "refs/heads/feature", tip(root, 3)])  # control: not protected, so the hook lets it pass
