@@ -69,3 +69,53 @@ def test_a_failed_non_command_check_still_shows_in_failed_checks_under_attribute
     compact = result.to_compact(None)
     assert compact["ok"] is False
     assert [c["name"] for c in compact["failedChecks"]] == ["No existing tests deleted or weakened"]
+
+
+# A Verify that runs nothing has nothing to attribute: a warning under --attribute (the plain task gate still fails).
+
+
+def _extra(verify: str) -> str:
+    return (f"### Task 9: Extra\n**Status:** Done\n**Track:** impl\n**Files:**\n- `extra.py` - x\n**Verify:** `{verify}`\n"
+            "**Dependencies:** None\n\n**Acceptance:**\n- [x] works\n\n---\n\n")
+
+
+def _attributed(tmp_path, verify):
+    root = h.attr_project(tmp_path, statuses={"1": "Done", "2": "Done", "3": "Done"}, extra_tasks=_extra(verify),
+                          tests={"tests/test_calc_tc.py::test_tc1_add": "pass", "tests/test_calc_tc.py::test_tc3_sub": "pass"})
+    code, obj, err = h.ck_json(root, "gate", "demo", "--attribute", "--json")
+    assert isinstance(obj, dict), f"gate printed no JSON (exit {code}); stderr: {err[-600:]}"
+    return root, code, obj
+
+
+def _names(obj, verify):
+    return [f for f in obj["failures"] if verify in (f.get("command") or "")]
+
+
+def test_a_verify_selecting_nothing_warns_and_adds_no_failure(tmp_path):
+    verify = 'python -m pytest -q tests/test_calc_tc.py -k "tc999_"'
+    _, code, obj = _attributed(tmp_path, verify)
+    assert _names(obj, verify) == [], obj["failures"]
+    assert any(verify in w and "selects no tests" in w for w in obj["warnings"]), obj["warnings"]
+    assert obj["ok"] is True and code == 0, obj
+
+
+def test_a_verify_naming_an_absent_file_warns_and_adds_no_failure(tmp_path):
+    verify = "python -m pytest -q tests/test_absent.py"
+    _, code, obj = _attributed(tmp_path, verify)
+    assert _names(obj, verify) == [], obj["failures"]
+    assert any(verify in w and "selects no tests" in w for w in obj["warnings"]), obj["warnings"]
+    assert obj["ok"] is True and code == 0, obj
+
+
+def test_a_verify_with_a_bad_option_is_still_a_failure(tmp_path):
+    verify = "python -m pytest -q --no-such-option tests/test_calc_tc.py"
+    _, code, obj = _attributed(tmp_path, verify)
+    assert not any(verify in w and "selects no tests" in w for w in obj["warnings"]), obj["warnings"]
+    assert obj["ok"] is False and code != 0, obj
+
+
+def test_the_plain_task_gate_still_fails_on_a_verify_selecting_nothing(tmp_path):
+    root, _, _ = _attributed(tmp_path, 'python -m pytest -q tests/test_calc_tc.py -k "tc999_"')
+    code, obj, err = h.ck_json(root, "gate", "demo", "--task", "9", "--json")
+    assert isinstance(obj, dict), f"gate printed no JSON (exit {code}); stderr: {err[-600:]}"
+    assert obj["ok"] is False and code != 0, obj

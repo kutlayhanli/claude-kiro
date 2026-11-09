@@ -371,6 +371,14 @@ def _command_failure(run: CommandRun, command: str, known: set) -> List[Failure]
                     missing_command=None)]
 
 
+def _selects_nothing(run: CommandRun) -> bool:
+    """A pytest Verify that selected no tests (exit 5), or named a path that does not exist (exit 4 with pytest's own
+    message). Other usage errors, such as a bad option, stay failures."""
+    if run.returncode == 5:
+        return True
+    return run.returncode == 4 and "file or directory not found" in run.check.detail.lower()
+
+
 def _run_attributed(result: GateResult, project_dir: Path, config: Dict[str, Any], tasks: Dict[str, SpecTask],
                     collect: Optional[str], timeout: int, env: Dict[str, str], report_dir: Path) -> None:
     """Every Verify command the spec has, with node-ID coverage (`--attribute`, 1.1, TC-193).
@@ -422,6 +430,10 @@ def _run_attributed(result: GateResult, project_dir: Path, config: Dict[str, Any
     with ThreadPoolExecutor(max_workers=os.cpu_count() or 1) as pool:
         probes = list(pool.map(probe, pytest_commands))
     for command, found in probes:
+        if _selects_nothing(found):
+            # Nothing ran, so there is nothing to attribute: a warning here, and a plain task gate still fails on it.
+            result.warnings.append(f"`{command}` selects no tests under --attribute: not run (a plain task gate fails on it)")
+            continue
         if not found.check.ok and found.failures:
             # A collection error stops pytest before any test runs, so the Verify would fail the same way: its
             # errors are recorded once (the same keys as the collection check) and it is not run again.
