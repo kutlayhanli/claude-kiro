@@ -1475,7 +1475,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verify:** `uv run pytest -q tests/test_bench_opencode_run.py`
 
 **Acceptance:**
-- [ ] A bench OpenCode arm's integration worktree has the hooks installed and stale claims released (9.1, 16.2)
+- [x] A bench OpenCode arm's integration worktree has the hooks installed and stale claims released (9.1, 16.2)
 - [x] `_integration_target` returns the same value as before
 
 **Dependencies:** Task 50 (calls `ck worktree start`)
