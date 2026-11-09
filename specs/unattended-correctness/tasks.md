@@ -1132,7 +1132,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 - `src/claude_kiro/fixtures.py` - new: lock models, sealed lock store, label reader, `lock_decision`
 - `src/claude_kiro/cli/fixtures.py` - new: `ck fixtures mark`, `ck fixtures status`
 - `src/claude_kiro/cli/main.py` - register `fixtures`
-**Verify:** `uv run pytest -q tests/test_fixture_lock.py -k "tc139_"` `uv run pytest -q tests/test_fixture_config_properties.py -k "tc175_p32"`
+**Verify:** `uv run pytest -q tests/test_fixture_lock.py -k "tc139a_"` `uv run pytest -q tests/test_fixture_config_properties.py -k "tc175_p32"`
 **Verified by:** Task 22 (P-32 at `lock_decision`), Task 43 (TC-139a)
 
 **Acceptance:**
@@ -1144,6 +1144,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Dependencies:** Task 28 (calls `fixture_globs`), Task 44 (uses protect's HMAC key to seal the lock), Task 45 (both edit cli/main.py; Task 45 runs first), Task 22 (its tests are the oracle), Task 43 (its tests are the oracle)
 **Complexity:** Medium
 **Risk:** safety (uses ck's HMAC signing key to seal the fixture lock the run-end audit trusts)
+**Deviation:** Verify said `-k "tc139_"`, which selects no test (the test is `test_tc139a_...`, exit 5); changed to `tc139a_`.
 
 ---
 
