@@ -75,6 +75,12 @@ def reference_transaction(state):
             continue
         if new == protect.ZEROS:
             continue
+        if old == protect.ZEROS:
+            # git reports an all-zero old value for an update that did not pass one (plain `git update-ref REF NEW`);
+            # in the prepared state the ref still holds its current value, so that is the real old value.
+            current = _text(_git(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}"))
+            if re.fullmatch(r"[0-9a-f]{40,64}", current):
+                old = current
         tree, parents = _shape(root, new)
         update = protect.RefUpdate(ref, old, new, tree, parents)
         token_ok = bool(token_id) and protect.check_token(root, token_id, update)
