@@ -1082,7 +1082,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 46: Check protected changes in `ck worktree merge` and record the approved state
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 9.2, 9.6, 9.7, 10.4
 **Description:** In `worktrees.py`: fix `protected_changes` so non-ASCII and space-containing paths are compared unquoted (`git diff --name-only --no-renames -z`); `merge()` runs the same check as `land()` (`protected_changes` against `land_allow_paths(target)`) and returns state `PROTECTED` with the files instead of merging (9.6); `land()` and `merge()` record, with `protect.record_approved_state` after every landing they make, only the protected paths the landed tasks changed (never the whole protected state, so bypass writes are not laundered) (`by: "allow-list"` for covered protected files), and `create_integration` records the baseline state (`by: "baseline"`) on creation and on reuse when none exists (10.4); add the keyword `land(..., approved: Optional[Dict[str, List[str]]] = None)` that lets exactly those task -> protected files through, issues the token for that update and records them as `by: "approval"` (used only by `ck worktree approve`, Task 47). In `cli/worktree.py`, `merge_cmd` treats `PROTECTED` as a bad state (exit 3) and names the files. No existing test pins `ck worktree merge` landing protected files (the merge cases in `tests/test_worktree_cli.py` and `tests/test_worktree_land.py` use no protected paths), so no existing test changes; they stay in this task's Verify as preservation checks. Harness Contract owner: item 5's PROTECTED detail in `ck worktree land/merge --json`. Task 45 already added the unquoted `protected_changes`, the `merge()` PROTECTED check, `merge_cmd`'s exit 3 and the baseline recording (`_record_baseline`, which records only when no state file exists): build on that code and do not add it again.
@@ -1093,9 +1093,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 38 (P-18 on real git and real landings), Task 39 (TC-82), Task 40 (TC-90)
 
 **Acceptance:**
-- [ ] `ck worktree merge` of a branch with protected changes gives PROTECTED, names the files, exits 3 and leaves the ref unchanged (9.6)
-- [ ] `.claude/commands/ä.md` and space-containing paths are refused by land, merge and the hook, naming the unquoted path (9.2)
-- [ ] Allow-listed and approved landings are recorded in the approved state (10.4) and still merge with hooks installed (9.7)
+- [x] `ck worktree merge` of a branch with protected changes gives PROTECTED, names the files, exits 3 and leaves the ref unchanged (9.6)
+- [x] `.claude/commands/ä.md` and space-containing paths are refused by land, merge and the hook, naming the unquoted path (9.2)
+- [x] Allow-listed and approved landings are recorded in the approved state (10.4) and still merge with hooks installed (9.7)
 
 **Dependencies:** Task 45 (calls the token issue path and edits the `land()` / `merge()` code Task 45 changes), Task 38 (its tests are the oracle), Task 39 (its tests are the oracle), Task 40 (its tests are the oracle)
 **Complexity:** Medium
