@@ -149,6 +149,30 @@ if every requirement can say why it exists.
 **Rejected:** Arbiter repairs tests itself - breaks D1 and the guard; waiting for the fixer - the most common stop stays unhandled.
 **Decided by:** user
 
+### D19: What caps a task's arbiter calls that end with no ruling?
+**Choice:** 7.5 gains a limit of 6 arbiter calls per task; a task at 6 calls sends further claims to the user as needs-input entries (7.9, reason `task-call-limit`). Raised by the spec review (V5, R4).
+**Why:** The bounded-cost requirement already promised 6 calls; failed calls shouldn't be free.
+**Rejected:** Only recorded rulings count - failed calls would be unbounded per task.
+**Decided by:** user
+
+### D20: What happens when the arbiter returns a malformed ruling on an audit problem?
+**Choice:** It's a needs-input entry with the arbiter's output (7.2), and the task does not start. 13.8 covers only a call that failed or returned nothing usable. Raised by the consistency check (C1.1).
+**Why:** A malformed ruling is evidence something went wrong, so it shouldn't silently pass.
+**Rejected:** Starting the task and noting a missed audit.
+**Decided by:** user
+
+### D21: Is a review deadlock claim identified per finding or by the whole set?
+**Choice:** Per finding. A finding already covered by a ruling goes to the user with that ruling; only findings never ruled on reach the arbiter. Raised by the consistency check (C2.3).
+**Why:** Follows 7.4: a claim that returns after its ruling is not ruled again, even if other findings changed around it.
+**Rejected:** The whole set as identity - a changed set would earn a new ruling on findings already ruled on.
+**Decided by:** user
+
+### D22: Does a single-task or no-Workflow run audit its selected tests?
+**Choice:** Yes. The implement skill and the no-Workflow guide run the read-only auditor before the first attempt; an audit problem is a needs-input entry (6.12), since those runs never call the arbiter. Raised by the consistency check (C2.10).
+**Why:** Follows 13.1, and those runs benefit from the audit most, since nothing else checks them.
+**Rejected:** Whole-spec runs only.
+**Decided by:** user
+
 ## Delegated to Spec
 
 - The arbiter's prompt, and the structured ruling format (outcome, principle cited, "needs a stronger look").

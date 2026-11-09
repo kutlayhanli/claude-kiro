@@ -1,0 +1,808 @@
+# Design: Principles and Arbiter for Spec Runs
+
+## Overview
+
+Today a task that hits a spec-level mismatch either climbs a model ladder or stops for me. This design adds one judgment role, the **arbiter**, at the places in `/spec:implement` and `/spec:create` where those stops happen, gives it something to uphold (principles), and adds two checks that catch known-bad gates before a run spends attempts.
+
+The feature follows the shape the code already has:
+
+- **Rules are pure and live in one place.** `hooks/_shared/guard_policy.py` is the model: hooks gather facts, a pure function decides. Every arbiter rule sits in a pure function in Python (`arbiter_policy.py`, `principles.py`, `justifications.py`, `lint_scope.py`, `guard_policy.py`), or in the pure decisions block of `plugin/workflows/spec-implement.js` for scheduling rules.
+- **The workflow script has no filesystem or clock.** It reaches durable state through `ck` calls, as it does for `ck plan` and `ck worktree land`. Three new `ck arbiter` calls wrap each ruling: `open` (may we call it, at which tier), `settle` (is the answer valid, where does it go), `record` (write it down).
+- **Spec edits use the merge queue that exists.** An arbiter branch is `arbiter<k>`, in the same worktree and branch naming as `fix<k>`.
+
+PLAN.md decisions that shape it:
+
+| Decision | Effect on the design |
+|---|---|
+| D1, D18 | The arbiter never edits tests. A test-repair ruling goes through one function, `handOffTestRepair`, which creates a needs-input entry until the test-fixer exists. |
+| D2, D11, D15 | The guard gives the arbiter its own lane, which `guard_policy.decide_arbiter_edit` defines. Requirements are never in the lane during a run. |
+| D5 | Two layers, parsed by `principles.py`. The project file is plain text in the repository, so changing defaults does not change `ck`. |
+| D6, D7 | `justifications.py` for lint, a fifth review lens, and skill text at planning. Cuts are only ever proposals. |
+| D8 | `claimTrigger` sends spec claims straight to the arbiter. `confirmConflictPrompt`, `climbGuard` and the revise ladder are removed. |
+| D9 | The `arbiter` role in `agents.py`, with tier chosen by `decide_claim`. |
+| D10 | A per-spec ledger in the git common directory, so limits survive resume. |
+| D12 | `specs/<spec>/decisions.md`, written only by `ck arbiter record`. |
+| D14 | Three arbiter steps in `spec-create.js`. |
+| D16 | `lint_scope.py` simulates each gate; an `auditor` agent reads the tests. |
+| D17 | Built on `integrate/run-principles`. See "Branch dependencies". |
+
+### Branch dependencies (D17)
+
+These exist only on `integrate/unattended-correctness`, and this design relies on them:
+
+- `src/claude_kiro/graph.py` (`build_graph`, `invoked_commands`, `provides` and `invokes` edges) and `src/claude_kiro/cli/graph.py`.
+- `SpecTask.provides` in `hooks/_shared/spec_parser.py`.
+- `ck gate --json` `failures[]` with `missingCommand`, and the three-value `GateFn` in `worktrees.py`.
+- `lint_spec`'s `commandEdges` and related keys.
+- In `spec-implement.js`: `thinCk`, `CK_CALL`, `RUNNER_AGENT`, `agentType` on agent calls, `testConflictsOf`.
+- `plugin/agents/runner.md` and the `None` role in `plugin.AGENT_ROLES`.
+
+The test-fixer (`src/claude_kiro/testfix.py`, `ck testfix`, unattended-correctness Tasks 57 and 86) does not exist on any branch yet.
+
+## Components
+
+### Existing Components to Modify
+
+- `src/claude_kiro/agents.py` - add the `arbiter` role to `DEFAULTS` and `ROLE_KEYS`; allow `inherit` for `arbiter.risky_model` in `_coerce`; in `resolve`, fill each unset `arbiter.*` value from `reviewer.risky_model` or `reviewer.risky_effort` and name that source (5.1, 5.2).
+- `src/claude_kiro/plugin.py` - add `"arbiter": "arbiter"` and `"auditor": "reviewer"` to `AGENT_ROLES`, so `ck-arbiter.md` and `ck-auditor.md` are generated for vendored projects and `spec:arbiter` references are rewritten (D11, 13.4).
+- `src/claude_kiro/analytics/roles.py` - add both agent types to `SPEC_AGENT_TYPES` and its role map, and labels `arbiter task <n>`, `arbiter task <n> risky`, `arbiter <step>` and `audit task <n>`. The integration branch already uses a bare `audit` label, so these carry `task`.
+- `src/claude_kiro/analytics/collect.py` and `src/claude_kiro/analytics/show.py` - read `rulings` from the workflow result and report counts by trigger, outcome and tier (10.8).
+- `src/claude_kiro/hooks/_shared/guard_policy.py` - add `ArbiterEditFacts`, `is_arbiter_caller`, `decide_arbiter_edit`, `decide_arbiter_bash` and `arbiter_block_reason`. `classify_caller`, `Caller` and every existing decision stay unchanged, so existing property P-11 keeps holding (9.5-9.8).
+- `src/claude_kiro/hooks/pre_tool_guard.py` - in `_hook`, check `is_arbiter_caller` first and send that caller only through the lane. An exception on that path denies, where other callers fail open (9.1-9.4, 9.8).
+- `src/claude_kiro/lint.py` - `lint_spec` adds `justifications`, `verifyScope`, `notChecked` and `warnings`, and removes duplicates against existing keys (3.6, 12.10).
+- `src/claude_kiro/cli/worktree.py` - `lint` prints and exits by `lint_verdict`, and gains `--simulate` (with `--task`); `_plan` adds `verifiedBy`; `land_cmd` routes an `arbiter<k>` number to `worktrees.land_spec_edit`.
+- `src/claude_kiro/gate.py` - `suite_due` moves to `lint_scope.suite_due` and `_run_gate` calls it, so the gate and its simulation cannot disagree (12.1).
+- `src/claude_kiro/worktrees.py` - add `land_spec_edit`, the `REFUSED` state, `commit` and `moved` fields on `Landed`, and a `wait_s` option on `land_lock` (8.1, 8.4-8.7, 10.5).
+- `src/claude_kiro/cli/main.py` - register the `arbiter` and `principles` groups.
+- `plugin/workflows/spec-implement.js` - the run integration described under "Data Flow": new args, schemas, prompts, decisions-block functions, removal of `confirmConflictPrompt`, `climbGuard`, `guardLadder` and the revise escalation loop; arbiter landing in the queue; launch handling; audit; `rulings` and `proposedCuts` in the result.
+- `plugin/workflows/spec-create.js` - `**Without it:**` in the requirements template; a `should-exist` lens that the refute loop skips; a `thinCk` helper; the new args; three arbiter steps started with plain `agent`; an `apply-cuts` mode that branches only on the `cut` field of `ck arbiter context --approved-cut`; `review.proposedCuts` and `review.arbiter` in the result; the not-Ready rule (Stories 2, 4, 11).
+- `plugin/skills/plan/SKILL.md` - create the principles file, ask for principles and overrides, ask what breaks without each In-scope item and offer the cut, add `## Principles` and `*Without it:*` to the PLAN.md template, record each override with its reason as `**Reason:** <text>`, and run `ck principles check` before Status `Decided` (1.1-1.5, 2.1, 2.2).
+- `plugin/skills/create/SKILL.md` - run `ck principles init` and tell me when it created the file; run `ck agents --json` and pass `arbiterAgent`, `runnerAgent` and `agents.arbiter`; report proposed cuts and launch the `apply-cuts` mode for the ones I approve; say the frozen message it returns after implementation has started (1.1, 4.2, 4.4, 4.5, 11.9).
+- `plugin/skills/implement/SKILL.md` - after step 5, run `ck -C <targetDir> principles init --commit --json` and tell me when it created the file; pass `arbiterAgent`, `auditorAgent`, `verifiedBy` and `agents.arbiter`; a `verify-scope` finding launches the workflow on a whole-spec run, and refuses a single-task run whose task it names (12.12), as a `verify-file` entry does; report rulings and proposed cuts (1.1, 10.7, 12.5, 12.6).
+- `plugin/skills/review/SKILL.md` - run `ck principles init`, and report proposed cuts as `/spec:create` does; run `ck agents --json` and pass the same args (1.1, 4.2, 11.9).
+- `plugin/resources/spec-implement-brief.md` and `plugin/resources/without-workflow-tool.md` - a guard stop or test conflict now goes to the arbiter. A single-task run and the manual path run the read-only audit before the first attempt (13.1) but have no `ck arbiter` loop, so each claim there, including an audit problem, is a needs-input entry, with no guard ladder and no confirmation agent (6.12); a manual launch with a `verify-scope` finding stops and shows me the findings (12.5).
+
+### New Components
+
+- `plugin/agents/arbiter.md` (new) - the arbiter's role prompt. Tools: Read, Grep, Glob, Edit, Write, Bash.
+- `plugin/agents/auditor.md` (new) - the audit agent's role prompt. Tools: Read, Grep, Glob. With no write or shell tool, it cannot change a file (13.4). Its model and effort follow the `reviewer` role.
+- `src/claude_kiro/principles.py` (new) - starter text, parsing of both layers, effective principles, the Decided check (Story 1).
+- `src/claude_kiro/justifications.py` (new) - story parsing and the justification rule (Story 3).
+- `src/claude_kiro/lint_scope.py` (new) - gate simulation and Verify-scope findings (Story 12).
+- `src/claude_kiro/arbiter_policy.py` (new) - pure rules for claims, rulings, spec edits, records and cuts (Stories 5, 7, 8, 10, 11).
+- `src/claude_kiro/arbiter.py` (new) - the stateful side: ledger, worktree, decisions file, lane tickets.
+- `src/claude_kiro/cli/arbiter.py` (new) - the `ck arbiter` and `ck principles` groups.
+- `specs/PRINCIPLES.md` (new, per project) - the project layer, created by `ck principles init`.
+- `specs/<spec>/decisions.md` (new, per spec) - the record of rulings, created by the first ruling.
+
+## Public Interfaces
+
+### CLI
+
+All `ck arbiter` commands print one JSON object with `--json`. A non-zero exit means no decision was made, and the workflow treats that as "the arbiter cannot be called" (6.10).
+
+```
+ck principles init [--commit]                      # creates specs/PRINCIPLES.md if missing. {"created": bool, "path": str, "commit": str | null}
+                                                   # --commit also commits that file alone on the checkout's branch, when it created it
+ck principles check SPEC --json                    # {"ok": bool, "reason": str}. exit 1 when the plan may not be Decided
+
+ck arbiter open SPEC --task N --into BRANCH --json       # stdin: {"claim": Claim, "task": TaskMeta}. stdout: OpenResult
+ck arbiter settle SPEC KEY --tier normal|risky --json    # stdin: the arbiter's raw output. stdout: SettleResult
+ck arbiter record SPEC --into BRANCH [--lock-wait S] --json   # stdin: RulingRecord. stdout: {"number": int, "commit": str}
+ck arbiter context SPEC [--approved-cut] --json          # /spec:create: {"principles": [...], "planLayer": str, "implementationStarted": bool,
+                                                         #   "missing": str | null, "cut": "apply" | "hold" | "frozen"}
+ck arbiter review SPEC --step refuted|cuts|drift --tier normal|risky --json
+                                                         # /spec:create: stdin: {"subjects": [...], "output": raw, "lostSteps": [step]}. stdout: ReviewResult
+ck arbiter lane open|close SPEC --json                   # opens or closes the /spec:create lane ticket
+
+ck lint SPEC [--json]                                    # new keys below; exit by lint_verdict
+ck lint SPEC --simulate --task N --json                  # {"task": N, "suites": [SuiteSim], "selected": [{"file": str, "tests": [str] | null}]}
+ck plan SPEC --json                                      # adds "verifyScope", "justifications", "verifiedBy": {task: [test tasks]}
+ck worktree land SPEC arbiter<k> --into BRANCH --gate --json   # one entry, state MERGED|CONFLICT|RED|REFUSED|ERROR, with commit and moved
+```
+
+New `ck lint --json` keys (existing keys keep their names and meaning):
+
+| Key | Shape |
+|---|---|
+| `justifications` | `[{"story": "4", "title": "...", "message": "..."}]` |
+| `verifyScope` | `[ScopeFinding]` |
+| `notChecked` | `[{"task": str, "command": str, "reason": str}]` |
+| `warnings` | `[{"kind": "principles", "plan": str, "message": str}]` |
+
+`ck lint` text output prints one line per finding, naming the task, the suite or test, and the provider where one applies (12.8).
+
+### Agent types and the role setting
+
+`arbiter.model`, `arbiter.effort`, `arbiter.risky_model` and `arbiter.risky_effort` are ordinary role settings for `ck agents set` and `ck agents --json`. The two agent types are `spec:arbiter` and `spec:auditor` under the plugin, `ck-arbiter` and `ck-auditor` when vendored.
+
+### Workflow args and result
+
+`spec-implement` gains these args: `arbiterAgent` and `auditorAgent` (agent type names), `verifiedBy` (`{task: [test tasks]}`), and `agents.arbiter`. An absent `arbiterAgent` means the arbiter cannot be called (6.10). `verifiedBy` from the args is used only until the first plan; after that the workflow reads the current plan's `verifiedBy`.
+
+`spec-create` gains these args: `arbiterAgent` and `runnerAgent` (agent type names), and `agents.arbiter` (the resolved `arbiter` role). The create and review skills run `ck agents --json` and pass them. An absent `arbiterAgent` means the arbiter cannot be called, which is 11.12 for each step with subjects: the check did not run and the result is not Ready. A step with no subjects makes no call and is not lost (11.11). Without an agent type the arbiter is not `is_arbiter_caller`, so the lane rules would not apply. `spec-create.js` gains a `thinCk` helper in the shape of the integration branch's (one `CK_CALL` agent per command, with `agentType: runnerAgent` when present, else a low-effort default agent). It runs every `ck arbiter context`, `lane open`, `review` and `lane close` step.
+
+Arbiter steps in `spec-create.js` use plain `agent`, not `pagent`, so their prompts hold no `ck progress` command that `decide_arbiter_bash` would deny. The workflow keeps their time in the ETA with its own `thinCk` calls to `ck progress event ... phase-start` and `step-end`, phase `Arbiter`, around them.
+
+The `spec-implement` result gains `rulings: [RunRuling]` (this run only), `proposedCuts: [{task, file, issue}]` and `missedAudits: [task]`. When launch is refused for Verify scope, it carries `verifyScope` and `proposals`. Needs-input entries keep their existing fields and add `kind` values `arbiter`, `test-repair`, `requirements`, `missing-requirement`, with `ruling` (the number or null).
+
+The `spec-create` result gains `review.proposedCuts: [Cut]` and `review.arbiter: {ran: [step], lost: [step], rulings: [number], missing: string | null}`, where `missing` names an unusable principles file (1.12).
+
+### File formats
+
+`specs/PRINCIPLES.md`, starter text from `ck principles init`:
+
+```markdown
+# Project Principles
+
+Defaults every spec run upholds. A plan's `## Principles` section may add to these or override one with a reason.
+
+- **priority-order:** requirements > design > test plan > task wiring.
+- **test-intent:** a test keeps its intent; only selection and setup may move.
+- **fail-closed:** fail closed on security.
+- **remove-first:** remove before you optimize.
+```
+
+A principle is a top-level `-` bullet, with its continuation lines. Its id is `project:<slug>` when the bullet starts with a `**slug:**` label, else `project:<position>`. Plan bullets get `plan:<slug>` or `plan:<position>` the same way.
+
+`## Principles` of a PLAN.md may hold these forms besides plain bullets:
+
+```markdown
+- **Overrides fail-closed:** a read-only probe may fail open. **Reason:** it touches no data.
+- **Reserves design.md:** interface changes are mine to approve.
+- **Nothing to add:** the project defaults apply.
+```
+
+`Reserves` scopes are `tasks.md`, `design.md`, `test-plan.md`, `code` and `test repairs`. An `Overrides <slug>:` bullet with no `**Reason:**` text is not citable and does not displace the default (1.6).
+
+`specs/<spec>/decisions.md`:
+
+```markdown
+# Rulings: <spec>
+
+## Ruling 3: Task 19 (test-conflict)
+
+- **At:** 2026-11-09T17:02:57Z
+- **Trigger:** test-conflict
+- **Claim:** `19|test:tests/test_x.py::test_a` - the claim text
+- **Tier:** normal
+- **Ruling:** spec_edit - the reasoning
+- **Principle cited:** project:test-intent - the principle's text
+- **Plan layer:** present | absent
+- **What changed:** tasks.md: Task 19 Verify narrowed. Moved out of Verify: tests/test_x.py::test_b (Task 19)
+- **Commit:** abc1234 | none
+- **Landed:** yes | no: <why>
+```
+
+### Decision Seams
+
+Every seam is pure: no I/O, clock or network, and all inputs are arguments.
+
+**`src/claude_kiro/hooks/_shared/guard_policy.py`** (owner: guard)
+
+| Seam | Input -> output | Criteria |
+|---|---|---|
+| `is_arbiter_caller(hook_input)` | `Any -> bool`. True only when `agent_id` is a non-empty string and `agent_type` is exactly `spec:arbiter` or `ck-arbiter`. Environment, tool arguments and prompt text are not inputs. | 9.5, 9.6, 9.7 |
+| `decide_arbiter_edit(facts)` | `ArbiterEditFacts -> GuardDecision`. Lists the only paths allowed; everything else is denied. | 9.1, 9.2, 9.3, 11.5 (guard side), 11.7, 11.10 |
+| `decide_arbiter_bash(command, cwd)` | `str, str -> GuardDecision`. First denies any command holding `$(`, a backtick, `<(` or `>(` outside single quotes (an unterminated quote is denied too), because `_segment_read_only` was written as a pre-filter and treats substitution as read-only. Then allows read-only commands (existing `_segment_read_only`), and `git add` of lane files or `git commit -m` in an arbiter worktree. Any `git -c`, `--amend` or `--no-verify` is denied. A commit message is a plain `-m '...'` in single quotes, and the arbiter's prompt says so: `git commit -m "$(cat <<'EOF' ...)"` is denied, and `-F` would need a file outside the lane. | 9.4 |
+| `arbiter_block_reason(rel)` | `str -> str` | 9.8 |
+
+`decide_arbiter_edit` allows exactly:
+
+- in a worktree named `<spec>-task-arbiter<k>`: `specs/<spec>/tasks.md`, `design.md` and `test-plan.md`;
+- with a lane ticket open for `<spec>`, in a checkout that is not an arbiter worktree: those three, and `specs/<spec>/requirements.md` only while `implementation_started` is false.
+
+**`src/claude_kiro/principles.py`** (owner: principles)
+
+| Seam | Input -> output | Criteria |
+|---|---|---|
+| `parse_principles(text, layer)` | `str, "project"\|"plan" -> List[Principle]` | 1.6 |
+| `plan_section(plan_text)` | `Optional[str] -> Optional[str]` (body of `## Principles`; `None` when absent or empty) | 1.4, 1.10, 1.11 |
+| `effective_principles(project, plan)` | `Sequence[Principle], Optional[Sequence[Principle]] -> EffectivePrinciples` | 1.6, 1.8, 1.10 |
+| `plan_may_be_decided(plan_text)` | `str -> Tuple[bool, str]` | 1.4 |
+
+**`src/claude_kiro/justifications.py`** (owner: lint)
+
+| Seam | Input -> output | Criteria |
+|---|---|---|
+| `justification_findings(text)` | `Optional[str] -> List[JustificationFinding]` | 2.5, 3.1, 3.2, 3.3, 3.4, 3.5 |
+
+**`src/claude_kiro/lint_scope.py`** (owner: lint)
+
+| Seam | Input -> output | Criteria |
+|---|---|---|
+| `suite_due(test_task, tasks, assumed_done)` | `SpecTask, Mapping, Set[str] -> bool` | 12.1 (and the gate itself) |
+| `done_at_gate(tasks, num)` | `Mapping, str -> Set[str]` (Done tasks, the task, its transitive dependencies) | 12.1 |
+| `scope_findings(sim)` | `SimInput -> ScopeResult` | 12.1, 12.2, 12.3, 12.4, 12.9 |
+| `dedupe_scope(result, existing)` | `ScopeResult, Mapping -> Tuple[ScopeResult, List[dict]]` | 12.10 |
+| `lint_verdict(result)` | `Mapping -> LintVerdict` | 1.11, 3.1, 3.7, 12.5, 12.9 |
+
+**`src/claude_kiro/arbiter_policy.py`** (owner: arbiter)
+
+| Seam | Input -> output | Criteria |
+|---|---|---|
+| `claim_key(claim)` | `Claim -> str` | 7.3 |
+| `claim_facts(claim, ledger, principles_read, task)` | `Claim, Mapping, PrinciplesRead, TaskMeta -> ClaimFacts`. Derives `safety` from the task's risk, counts rulings and calls for this task only, finds `prior` by key, whatever the ledger's order. | 1.9, 5.3, 5.4, 5.5, 7.5, 7.6, 7.8 |
+| `decide_claim(facts)` | `ClaimFacts -> ClaimDecision` | 1.9, 5.3, 5.4, 5.5, 7.4, 7.5, 7.6, 7.8, Bounded arbiter cost |
+| `validate_ruling(raw, key, citable, mode)` | `Any, str, Mapping[str, Principle], "run"\|"create" -> RulingCheck` | 7.1, 7.2, 11.9 |
+| `route_ruling(check, tier, effective)` | `RulingCheck, Tier, EffectivePrinciples -> RulingRoute`. A reservation of `code` or `test repairs` is matched by outcome; a file scope is enforced at `decide_spec_edit`, because `reservedBy` is the arbiter's own report. | 1.7, 1.8, 5.6, 5.7, 7.7, 8.1, 8.8, 8.11, 8.13, 8.14 |
+| `decide_spec_edit(facts)` | `SpecEditFacts -> SpecEditDecision` | 1.7 (file scopes), 8.4, 8.5, 8.6, and a second check of 9.1-9.3 |
+| `spec_text_changes(before, after)` | `str, str -> SpecTextChanges` (Status and acceptance-mark changes by task) | 8.6 |
+| `moved_out_of_verify(before, after)` | `Selections, Selections -> List[MovedTest]` | 8.7 |
+| `gate_scope_of_edit(before, after, done)` | `Mapping, Mapping, Set[str] -> List[str]` (Done tasks whose Verify, Verified by or Verifies changed) | 8.4 |
+| `append_entry(existing, entry, number)` | `Optional[str], RulingRecord, int -> str` (output always starts with `existing`) | 10.1, 10.2, 10.3, 10.4, 10.6 |
+| `next_number(existing, ledger_last)` | `Optional[str], int -> int` | 10.4 |
+| `route_create_ruling(check, step, started)` | `RulingCheck, Step, bool -> CreateRoute` | 11.2, 11.4, 11.5, 11.6, 11.7, 11.10 |
+| `decide_cut(approved, started)` | `bool, bool -> "apply"\|"hold"\|"frozen"` | 4.3, 4.4, 4.5 |
+| `rulings_summary(rulings)` | `Sequence[Mapping] -> Mapping` | 10.8 |
+
+**`plugin/workflows/spec-implement.js`, decisions block** (owner: workflow; loaded by `tests/js/load_decisions.mjs`)
+
+| Seam | Input -> output | Criteria |
+|---|---|---|
+| `claimTrigger({ result, guardStop, testConflict, worktreeKind, retryNo, maxRetries, rungsLeft, reviewDeadlock })` | `-> 'test-conflict' \| 'guard-stop' \| 'review-deadlock' \| 'gate-failure' \| null` | 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.11 |
+| `scopeClaims(findings)` | `ScopeFinding[] -> [{ task, rule, subject, tests, provider, messages }]`, one entry per (task, kind, suite or command), the identity `claim_key` uses | 12.6, 12.11 |
+| `settleFindings(review, settled)` | `(Review, string[]) -> Review` | 8.12 |
+| `normalizeReview(review)` | `Review -> Review` (a `noRequirement` finding is minor; a review left with no blocking finding is `approve`) | 4.8 |
+| `nextLandingBatch(queue, window)` | `(Entry[], number) -> Entry[]` (a spec edit lands alone) | 8.1 |
+| `auditDue({ track, verifiedBy, done, audited })` | `-> boolean`. `verifiedBy` is the current plan's entry. | 8.3, 13.1, 13.6, 13.7 |
+| `auditAction(audit)` | `-> { start: boolean, problems: [], missed: boolean }` | 13.2, 13.3, 13.5 |
+
+Existing `flaggedOf` and `parkAction` stay, and receive normalized reviews and arbiter entries.
+
+## Data Models
+
+### Python
+
+```python
+Tier = Literal["normal", "risky"]
+Trigger = Literal["test-conflict", "guard-stop", "review-deadlock", "gate-failure", "audit", "lint"]
+Outcome = Literal["spec_edit", "test_repair", "code", "requirements"]
+Step = Literal["refuted", "cuts", "drift"]
+
+@dataclass(frozen=True)
+class ArbiterEditFacts:            # guard_policy
+    rel: str                       # path relative to its checkout, symlinks and ".." resolved
+    arbiter_worktree_spec: Optional[str]  # the <spec> of a checkout named <spec>-task-arbiter<k>, else None
+    lane_specs: Tuple[str, ...]    # specs with an open lane ticket in this checkout
+    implementation_started: bool   # for the spec named by rel: any task In Progress or Done
+
+@dataclass(frozen=True)
+class Principle:                   # principles
+    id: str                        # "project:test-intent", "plan:2"
+    layer: Literal["project", "plan"]
+    text: str                      # the bullet with its continuation lines, whitespace collapsed
+    overrides: Optional[str]       # slug of the project default it overrides
+    reason: Optional[str]          # the text after **Reason:**
+    reserves: Tuple[str, ...]      # scopes from a Reserves bullet
+
+@dataclass(frozen=True)
+class EffectivePrinciples:         # principles
+    citable: Tuple[Principle, ...] # what a ruling may cite
+    ignored: Tuple[Principle, ...] # overrides with no reason
+    reserved: Tuple[str, ...]      # union of the reserves scopes
+    plan_layer: Literal["present", "absent"]
+
+@dataclass(frozen=True)
+class JustificationFinding:        # justifications
+    story: str
+    title: str
+
+@dataclass(frozen=True)
+class SimTest:                     # lint_scope: one test function as source text sees it
+    name: str
+    cls: str
+    source: str                    # the function's text, for scanning command calls
+
+@dataclass(frozen=True)
+class SimInput:                    # lint_scope; built by load_sim_input from tasks.md and test files
+    tasks: Mapping[str, SpecTask]
+    runs: Mapping[str, Mapping[str, Optional[Selector]]]   # task -> file -> selector (None = whole file)
+    unresolved: Mapping[str, Sequence[Tuple[str, str]]]    # task -> [(command, reason)]
+    tests: Mapping[str, Sequence[SimTest]]                 # file -> tests
+    module_source: Mapping[str, str]                       # file -> code outside test functions
+    programs: Sequence[str]
+
+@dataclass(frozen=True)
+class ScopeFinding:                # lint_scope. Sorted by (int task, kind, suite, test, command)
+    kind: Literal["unfiltered-shared-suite", "later-command"]
+    task: str                      # the task whose gate is simulated
+    suite: Optional[str]           # the test file
+    testTask: Optional[str]        # the test task that makes the suite shared
+    test: Optional[str]            # the selected test that calls the command
+    command: Optional[str]         # command path or flag
+    provider: Optional[str]        # the task that provides it
+    message: str
+
+@dataclass(frozen=True)
+class ScopeResult:
+    findings: Tuple[ScopeFinding, ...]
+    not_checked: Tuple[Tuple[str, str, str], ...]    # (task, command, reason)
+
+@dataclass(frozen=True)
+class LintVerdict:
+    exit_nonzero: bool             # cycles, verify cycles, verify scope, justifications
+    launch_blockers: Tuple[Mapping, ...]  # verify-scope findings only; justifications never block a launch
+
+@dataclass(frozen=True)
+class Claim:                       # arbiter_policy; built from the workflow's JSON
+    task: str
+    trigger: Trigger
+    text: str                      # the claim as reported
+    file: str = ""
+    test: str = ""
+    criterion: str = ""
+    findings: Tuple[Tuple[str, str], ...] = ()   # review-deadlock: (file, issue) of each blocking finding
+    failing: Tuple[str, ...] = ()         # gate-failure: failing test ids, else the failing commands
+    rule: str = ""                        # lint: the ScopeFinding kind
+    subject: str = ""                     # lint: suite, or command
+    tests: Tuple[str, ...] = ()           # lint: every test the grouped findings name; not part of the key
+    models_tried: Tuple[str, ...] = ()
+    evidence: str = ""
+
+@dataclass(frozen=True)
+class PriorClaim:
+    status: Literal["open", "failed", "exhausted", "ruled"]
+    calls: int
+    ruling: Optional[int]          # entry number
+
+PrinciplesRead = Literal["ok", "missing", "directory", "denied", "decode-error"]
+
+@dataclass(frozen=True)
+class TaskMeta:
+    risk: Literal["safety", "normal"]  # ck plan's risk map: a Risk tag or a risk_paths match
+    complexity: str                    # carried, never read (5.5)
+
+@dataclass(frozen=True)
+class ClaimFacts:
+    key: str
+    trigger: Trigger
+    safety: bool
+    principles_readable: bool
+    prior: Optional[PriorClaim]    # same key, from the ledger
+    task_rulings: int
+    task_calls: int
+
+@dataclass(frozen=True)
+class ClaimDecision:
+    action: Literal["rule", "ask"]
+    tier: Optional[Tier]
+    reason: str  # "" | "principles-missing" | "repeat-after-ruling" | "exhausted" | "claim-call-limit"
+                 #    | "task-ruling-limit" | "task-call-limit"
+
+@dataclass(frozen=True)
+class RulingCheck:
+    valid: bool
+    stronger_look: bool
+    outcome: Optional[Outcome]
+    principle: Optional[str]
+    reserved_by: Optional[str]
+    problems: Tuple[str, ...]
+    raw: Any                       # kept for the needs-input entry (7.2)
+
+@dataclass(frozen=True)
+class RulingRoute:
+    route: Literal["spec_edit", "test_repair", "code", "needs_input", "rerun"]
+    reason: str  # "" | "invalid-ruling" | "exhausted" | "reserved" | "requirements" | "missing-requirement"
+    record: bool                   # whether this answer becomes a numbered ruling
+
+@dataclass(frozen=True)
+class SpecEditFacts:
+    spec: str
+    changed: Tuple[str, ...]       # repo-relative paths the branch changes
+    status_changes: Tuple[str, ...]
+    mark_changes: Tuple[str, ...]
+    new_cycles: Tuple[str, ...]
+    new_blocking: Tuple[str, ...]  # new lint findings with exit_nonzero that are not justifications
+    reserved: Tuple[str, ...]      # EffectivePrinciples.reserved from the target's plan layer (1.7)
+
+@dataclass(frozen=True)
+class SpecEditDecision:
+    land: bool
+    reasons: Tuple[str, ...]
+
+@dataclass(frozen=True)
+class CreateRoute:
+    action: Literal["confirm", "keep-refuted", "show-cut", "reject-cut", "apply", "report", "unchecked"]
+    reason: str
+
+@dataclass(frozen=True)
+class RulingRecord:
+    trigger: str
+    claim_key: str
+    claim_text: str
+    task: Optional[str]            # None during /spec:create
+    tier: Tier
+    outcome: Outcome
+    reasoning: str
+    principle_id: str
+    principle_text: str
+    plan_layer: str
+    changed: str                   # what changed, or "nothing"
+    moved: Tuple[Mapping, ...]     # MovedTest as dicts
+    commit: Optional[str]          # None renders as "none"
+    landed: Optional[Tuple[bool, str]]   # None when no landing applies
+
+@dataclass(frozen=True)
+class MovedTest:
+    task: str
+    file: str
+    test: Optional[str]            # None when the selection could not be resolved to names
+    command: str
+```
+
+`Landed` in `worktrees.py` gains `commit: str = ""` and `moved: List[Dict] = field(default_factory=list)`, and its `state` comment gains `REFUSED`.
+
+Claim identity (the design's answer to 7.3), produced by `claim_key`. The key is the task number, `|`, and a subject, whatever the trigger, so an audit problem and a later test conflict on one test are the same claim:
+
+| Claim | Subject |
+|---|---|
+| review deadlock | `review:<sorted identities of the findings never ruled on>` |
+| gate failure | `gate:<sorted failing ids>` |
+| lint finding | `lint:<rule>:<subject>` |
+| names a test | `test:<file>::<test>` |
+| names a file only | `file:<file>:<criterion>` |
+
+A finding identity is `<file>#<issue>`, with the issue lowercased and whitespace collapsed, the match `settleFindings` uses. Identity is per finding (7.4). `ck arbiter open` splits a deadlock: a finding already covered by an applied ruling goes to me as a needs-input entry with that ruling (reason `repeat-after-ruling`), and only the findings never ruled on reach the arbiter, as one claim, whose ruling the ledger records under each of their identities. So a different finding on the same file is a new claim, and an unsettled finding raised again is never ruled again, even when the set of blocking findings around it has changed. Paths drop a leading `./`. A test keeps only what follows the last `::`, drops any `[...]` parameters, collapses whitespace and is lowercased.
+
+Ledger, `<git common dir>/ck/<spec>/arbiter-ledger.json`, the same location pattern as unattended-correctness's test-fix ledger, written under a per-spec file lock:
+
+```json
+{
+  "schema": "ck-arbiter-ledger/1",
+  "nextWorktree": 4,
+  "lastEntry": 3,
+  "claims": {
+    "19|test:tests/test_x.py::test_a": { "task": "19", "status": "ruled", "calls": 2, "ruling": 3, "base": "abc1234" }
+  }
+}
+```
+
+Lane ticket: `<checkout>/.ck/arbiter-lane/<spec>.json`, `{"spec": str, "openedAt": str}`.
+
+### Workflow schemas (JavaScript)
+
+```js
+// OpenResult (ck arbiter open)
+{ action: 'rule' | 'ask', key: string, tier: 'normal' | 'risky' | null, reason: string,
+  principles: [{ id, layer, text }], planLayer: 'present' | 'absent',
+  worktree: string | null, branch: string | null, number: string | null,   // arbiter<k>
+  earlier: [{ ruling, claim, outcome, reasoning }], missing: string | null }
+
+// The arbiter's answer. outcome is an unconstrained string so that a malformed answer
+// reaches validate_ruling and my needs-input entry instead of failing in the agent tool (7.2).
+const RULING = { type: 'object', properties: {
+  claim: { type: 'string', description: 'the claim key you were given, copied' },
+  status: { type: 'string', description: 'ruled | needs_stronger_look' },
+  outcome: { description: 'spec_edit | test_repair | code | requirements' },
+  reasoning: { type: 'string' },
+  principle: { type: 'string', description: 'the id of the principle you upheld' },
+  reservedBy: { type: 'string' },
+  established: { type: 'string', description: 'with needs_stronger_look: what you did establish' },
+  changed: { type: 'string', description: 'spec_edit: what you changed' },
+  commits: { type: 'string' },
+  testRepair: { type: 'object', properties: { file: {type:'string'}, test: {type:'string'}, change: {type:'string'}, why: {type:'string'} } },
+  code: { type: 'string', description: 'code: what the implementer must do' },
+  requirement: { type: 'object', properties: { kind: {type:'string'}, wording: {type:'string'}, reason: {type:'string'} } },
+  settles: { type: 'array', items: { type: 'string' }, description: 'review deadlock: the findings this ruling settles' },
+  verdict: { type: 'string', description: '/spec:create only' },
+}, required: ['status', 'reasoning'] }
+
+// SettleResult (ck arbiter settle)
+{ route: 'spec_edit' | 'test_repair' | 'code' | 'needs_input' | 'rerun', reason: string,
+  record: boolean, principle: { id, text } | null, problems: [string] }
+
+// RunRuling (one per entry in the workflow's rulings)
+{ number: number | null, task: string, trigger: string, outcome: string, tier: 'normal' | 'risky',
+  principle: string, commit: string | null, landed: boolean | null }
+
+// Cut (/spec:create)
+{ id: string, story: string, title: string, weakness: string,
+  saves: { criteria: number, tasks: number, testCases: number },
+  status: 'sound' | 'unchecked', ruling: number | null }
+
+// AUDIT (the auditor's answer)
+{ problems: [{ file: string, test: string, criterion: string, reason: string, needs: string }], summary: string }
+
+// ReviewResult (ck arbiter review)
+{ results: [{ id: string, action: string, reason: string, stronger: boolean, ruling: number | null }], lost: boolean }
+```
+
+`REVIEW_SCHEMA` findings gain `noRequirement` (boolean) and `settledBy` (number). `LAND` gains `REFUSED`, `commit` and `moved`. `PLAN` gains `verifyScope` and `verifiedBy`, and `applyPlanView` keeps both.
+
+## Data Flow
+
+```mermaid
+sequenceDiagram
+    participant W as spec-implement.js
+    participant A as ck arbiter
+    participant J as arbiter agent
+    participant Q as merge queue
+    participant M as me (needs-input)
+    W->>W: claimTrigger(result)
+    W->>A: open(claim)
+    alt action = ask
+        A-->>W: reason, earlier rulings
+        W->>M: needs-input entry
+    else action = rule
+        A-->>W: key, tier, principles, arbiter worktree
+        W->>J: ruling prompt (tier model, agentType)
+        J-->>W: raw ruling
+        W->>A: settle(raw)
+        alt route = rerun
+            W->>J: once more at the risky tier, with first reasoning
+            J-->>W: raw ruling
+            W->>A: settle(raw)
+        end
+        alt spec_edit
+            W->>Q: land arbiter<k> alone
+            Q-->>W: MERGED, commit, moved
+            W->>A: record
+            W->>W: resume the task (attempt not counted)
+        else cannot land
+            Q-->>W: CONFLICT, RED or REFUSED
+            W->>A: record (did not land)
+            W->>M: needs-input with ruling and result
+        else code
+            W->>A: record
+            W->>W: back to the implementer with the ruling
+        else test_repair
+            W->>A: record
+            W->>M: handOffTestRepair (D18)
+        else requirements, or needs_input
+            W->>M: needs-input with recommendation
+        end
+    end
+```
+
+Details the diagram leaves out:
+
+**The task loop.** `runTask` keeps today's retry and escalation loops for plain failures. After them, one loop asks `claimTrigger`. A trigger calls `arbitrate(n, rec, claim)`, which returns `{ exit: rec }` or `{ resumed: true }`. A resumed attempt uses a prompt that merges `INTO` first and carries the ruling, and adds to `arbiterK`, which `retryNo()` subtracts, so it spends no retry or escalation (8.2). The task stays in `running` while a ruling is pending, so dependents wait and independent tasks continue (6.9). The slot is released first, and `'arbiter'` joins `UNBLOCKER_KINDS`.
+
+**Spec claims on integration.** `testConflictsOf` can return several conflicts. Each gets its own claim, in order, and the first `exit` ends the task.
+
+**Review deadlock.** `reviewLoop` keeps its configured revision rounds and drops the model ladder. When blocking findings remain, it calls `arbitrate`. The claim carries each blocking finding's file and issue. On resume, the re-review prompt carries the ruling, and `settleFindings` removes findings that the ruling settled: those whose file and issue text match, and those the reviewer marks `settledBy` (8.12).
+
+**A spec edit in the queue.** `nextLandingBatch` takes an arbiter entry alone. `landBatch` skips review and task-list bookkeeping for it and calls `ck worktree land SPEC arbiter<k>`. `worktrees.land_spec_edit`, under `land_lock`:
+
+1. refuses a conflict found by `git merge-tree`;
+2. takes a lint result and test selections on the target;
+3. merges the branch, and takes them again;
+4. calls `decide_spec_edit` on the difference;
+5. gates only the Done tasks from `gate_scope_of_edit`;
+6. resets the target to its earlier commit on any refusal or red gate.
+
+`decide_spec_edit` refuses a changed path that matches a reserved file scope, whatever the ruling's `reservedBy` says, so a reserved file reaches me by the 8.4 path (1.7). The workflow then requests a plan, which applies new wiring to tasks not yet started (8.3). `land_spec_edit` calls `land_lock` with a bounded wait, 120 seconds.
+
+The arbiter's worktree comes from `ck arbiter open`, which records its starting commit in the ledger entry (`base`). `settle` removes the worktree and branch on `test_repair`, `code` and `needs_input`. It keeps them on `spec_edit`, for the landing. On `rerun` it keeps them and resets the branch to `base` before the risky call, so the re-run starts clean with no partial commit from the first attempt. The re-run makes no second `open`.
+
+**Records.** `ck arbiter record` runs inside the workflow's `withLandingLock`, as relink does, and takes `land_lock` with a bounded wait (120 seconds, or `--lock-wait`), so concurrent records serialize. If the wait runs out it exits non-zero and writes nothing, which is the 10.9 path. `land_lock` gains `wait_s` for this, defaulting to 0, so task landings refuse rather than wait, as today: inside one run `withLandingLock` is what serializes them with arbiter landings. It appends and commits `decisions.md` on `INTO` alone, so a landing's clean-target check still passes. A spec edit records after landing, so the entry can carry the commit and result. Other outcomes record before acting.
+
+**Launch (D16).** If the start plan has `verifyScope` findings, `scopeClaims` groups them by claim identity, and each group goes through `arbitrate` as one `lint` claim that lists every test it covers. Groups go one at a time. After each landed fix the workflow re-plans, drops findings that have gone, and rules only on what remains, so a fix that clears several findings costs one ruling and no needs-input entry (12.6). Any remaining finding refuses the launch with the remaining findings and the arbiter's proposed fixes (12.7). Cycles refuse as today.
+
+**Findings after launch (D16, 12.11).** In a test-first run the test files exist only once test tasks merge, so the `later-command` rule mostly fires after launch. `applyLint` on a non-start plan sends a `verifyScope` finding for a task not yet started to `arbitrate` as a `lint` claim, grouped the same way, and holds that task until the claim settles (6.9). `claim_key` and the ledger rule a finding once, and `lintClaimed` keeps the next plan from reopening a key this run already sent. A finding for a task already started is left to that task's gate.
+
+**Audit (13).** At the start of `runTask`, if `auditDue`, a thin call gets `ck lint --simulate --task N --json`, then one `spec:auditor` agent reads the selected tests against the spec. Each problem is an `audit` claim. A failure of either step notes a missed audit and the task starts. So does an arbiter call on an `audit` claim that failed or returned nothing usable, or `ask` with reason `principles-missing` (13.8). A malformed ruling on an `audit` claim is a needs-input entry with the arbiter's output (7.2), and the task does not start. A `code` ruling goes into the first attempt's prompt. `auditDue` reads the current plan's `verifiedBy`, so a landed spec edit that rewires Verified by also changes the audit decision (8.3).
+
+**`/spec:create`.**
+
+```mermaid
+flowchart TD
+    L[5 lenses] --> R[refuter, 4 lenses]
+    L --> C[should-exist lens: cuts]
+    R --> X[ck arbiter context + lane open]
+    C --> X
+    X --> AR[arbiter: refuted findings]
+    X --> AC[arbiter: cuts]
+    AR --> V1[ck arbiter review --step refuted]
+    AC --> V2[ck arbiter review --step cuts]
+    V1 --> REV[Revise: confirmed findings, review.md, sound cuts listed, never applied]
+    V2 --> REV
+    REV --> D{PLAN.md exists?}
+    D -->|yes| AD[arbiter: compare spec with PLAN.md]
+    AD --> V3[ck arbiter review --step drift]
+    D -->|no| CC
+    V3 --> CC{Revise fixed, or arbiter edited?}
+    CC -->|yes| CHK[Consistency Check]
+    CC -->|no| END[lane close, result]
+    CHK --> END
+```
+
+The arbiter runs once per step and returns one ruling per finding. This shares the cost of reading the spec, which matters when a refuter has rejected many findings. Each entry is validated on its own, so one malformed entry loses only that finding. Entries that ask for a stronger look go to one re-run at the risky tier (11.9). The two calls before Revise run in parallel. A step with no subjects makes no call (11.11). The `should-exist` lens's cuts go to the arbiter without the refuter, so the refute loop skips that lens. When `ck arbiter context` returns `missing`, no arbiter step runs: the steps with subjects are lost, and the report and review.md name the file and `ck principles init` (1.12). The Revise prompt names any lost step, so review.md's Result is `Needs work` (11.12).
+
+`/spec:create` uses the same four outcomes as a run. A ruling that changes nothing (a refutation that stands, a rejected cut) is a `spec_edit` with nothing changed, and its entry records the commit as none (10.2). `verdict` says which way it went. A correction to draft wording is `spec_edit` naming `requirements.md`. Anything that adds, removes or changes what PLAN.md decided is `requirements`, and is reported to me (11.6). `ck arbiter review --step drift` appends the drift rows to `review.md`, since that file is outside the arbiter's lane. It adds each `requirements` item to Needs Your Decision and sets the `**Result:**` line: `Needs work` when this or an earlier step was lost, `Ready after decisions` when Needs Your Decision has a row. A lost drift step still makes this call, with `output` null, so review.md never says Ready when the workflow does not (11.12).
+
+## Error Handling
+
+| Criterion | Behaviour |
+|---|---|
+| 1.9 | `claim_facts` carries the read result and `decide_claim` returns `ask`, reason `principles-missing`. `OpenResult.missing` names `specs/PRINCIPLES.md` and the needs-input entry repeats it. No arbiter call and no worktree. An `audit` claim follows 13.8. |
+| 1.10 | `effective_principles` gives `plan_layer: "absent"`. The ruling proceeds on the project layer, and the entry says the plan layer was absent. An empty section counts as absent. |
+| 1.11 | `warnings` entry naming the plan. `lint_verdict` ignores warnings. |
+| 1.12 | `ck arbiter context` returns `missing`. No arbiter step runs, the steps with subjects are in `review.arbiter.lost`, and review.md and the report name the file and `ck principles init`. |
+| 3.2 | Text after the label, through its paragraph, with `*_\`~#>:-` and whitespace removed. Empty counts as missing. |
+| 3.5 | `justification_findings(None)`, and text with no stories, return `[]`. Lint continues. |
+| 4.7 | The lens returns null from the pipeline and is counted in `lensesLost`, as for other lenses. |
+| 5.4 | A prior claim with status `open` or `failed` starts at the risky tier. |
+| 5.7 | `route_ruling` returns `needs_input`, reason `exhausted`. The ledger status becomes `exhausted`, so later runs also ask. The entry carries `established`. |
+| 6.7 | `claimTrigger` returns null when the worktree outcome is busy or error. |
+| 6.11 | After the retry and escalation loops, `claimTrigger` returns `gate-failure` and `arbitrate` takes the failure as a claim. |
+| 6.12 | A single-task run and the manual path never call `ck arbiter`. Each claim, including an audit problem, is a needs-input entry, with no ladder and no confirmation agent. Both still run the read-only audit before the first attempt (13.1). |
+| 6.10 | No `arbiterAgent`, a thrown or empty agent call, or a failed `ck arbiter` call: needs-input with the claim. Ledger status `failed`. No ladder and no confirmation agent. |
+| 7.2 | `validate_ruling` reports each problem. `route_ruling` returns `needs_input`, `record: false`. The entry includes the raw output. |
+| 7.4 | `ask`, reason `repeat-after-ruling`. The entry has the ruling and the new evidence. |
+| 7.6 | `ask`, reason `task-ruling-limit`. The entry lists the three earlier rulings. |
+| 7.9 | `ask`, reason `task-call-limit`, once the task has 6 arbiter calls, however many produced rulings. |
+| 1.7 | A file scope reserved and changed: `decide_spec_edit` refuses with state `REFUSED`, handled as 8.4. `code` and `test repairs`: `route_ruling` returns `needs_input`, reason `reserved`. |
+| 8.4 | Target reset. Workflow records `landed: false`, and sends needs-input with the ruling and the landing result. No new ruling. |
+| 8.5 | `decide_spec_edit` refuses on a new cycle or blocking finding. State `REFUSED`, handled as 8.4. |
+| 8.6 | `spec_text_changes` feeds `decide_spec_edit`. A removed task that was not Not Started counts as a Status change. State `REFUSED`. |
+| 9.2, 9.3, 9.4 | `decide_arbiter_edit` or `decide_arbiter_bash` denies. An exception on the arbiter path denies. |
+| 9.6 | `is_arbiter_caller` is false, so `classify_caller` applies the existing rules. |
+| 9.8 | `arbiter_block_reason`: `[ck guard] Denied: <file> is outside the arbiter's lane...`. |
+| 10.2 | `commit: None` renders as `none`. |
+| 10.3 | `landed: (False, why)` renders as `no: <why>`. |
+| 10.9 | A failed `record`: logged in the run report, and the claim goes to needs-input, saying whether the edit landed. |
+| 11.12 | The findings or cuts stay as they stood, the step is named in `review.arbiter.lost`, `result` becomes `Needs work`, and review.md's `**Result:**` line says the same. An absent `arbiterAgent` counts. |
+| 12.7 | Launch stays refused, with remaining findings and proposed fixes. |
+| 12.9 | `not_checked` entry. No exit effect. A bare `pytest`, a directory, a glob, a shell variable, an unreadable `-k`, or a selected file not yet on disk is unresolved. |
+| 12.11 | The claim goes through `arbitrate` and holds the task. A failed or `ask` result is a needs-input entry, as 6.10 and Story 7 say. |
+| 13.5 | `auditAction` returns `{ start: true, missed: true }`. `missedAudits` lists the task. |
+| 13.8 | An arbiter call on an `audit` claim that failed or returned nothing usable, or `ask` with reason `principles-missing`: the task starts and `missedAudits` lists it. No needs-input entry. A malformed ruling on an `audit` claim follows 7.2. |
+
+## Security, Performance, Migration
+
+### Security
+
+- **The lane is an allowlist, in two layers.** The guard denies at edit time. `decide_spec_edit` checks the same paths again at landing, so an arbiter that got past the hook still cannot land a change to requirements, tests or code.
+- **Identity comes from the harness.** `agent_type` is set by Claude Code, and the check takes no environment, argument or prompt input (9.5). A main session could still start an agent of type `spec:arbiter`. That gives the agent only the lane, and only in an arbiter worktree or under a ticket.
+- **Fail closed for this caller.** `pre_tool_guard.hook` fails open for others, by design. The arbiter path denies on any exception, and its configured guard modes do not apply: the lane holds even when `guard` is switched off in `specs/ck.json`.
+- **The audit is read-only by its tool list.**
+- **Shell substitution is denied first.** `decide_arbiter_bash` refuses `$(`, backticks and process substitution before any allowlist check, so an inner command cannot run inside a read-only one.
+- **Lint imports no project code.** `lint_scope.py` uses `ast` and text only (NFR).
+
+### Performance
+
+`ck lint` and `ck plan` parse each test file once per run of the command, with results shared across tasks, to stay within 10 seconds on a 108-task spec. A spec edit gates only Done tasks whose verification changed, so most spec edits land without running tests.
+
+### Migration
+
+- Specs written before this feature fail `ck lint` on justifications but still launch (3.7). Adding justifications to them is out of scope.
+- A project gets `specs/PRINCIPLES.md` from whichever of `/spec:plan`, `/spec:create`, `/spec:review` or a whole-spec launch runs first there (1.1). A launch creates and commits it on the target checkout, since the arbiter reads it there. If that fails, each claim becomes a needs-input entry (1.9). This repository also commits the file on `integrate/run-principles` (Task 49).
+- Vendored copies are protected files. After the plugin files change, `.claude/commands/spec/*.md`, `.claude/workflows/*` and `.claude/agents/ck-*.md` must be regenerated with `ck vendor` and landed by hand (Task 92).
+- Tests that assert the replaced behaviour need test-track changes: `tests/js/guard_ladder.test.mjs`, `tests/test_guard_ladder_properties.py`, the issue #8 confirmation cases in `tests/js/spec_implement.test.mjs`, and `tests/js/spec_create.test.mjs` and `tests/js/spec_review_frozen.test.mjs`, whose stubs throw on the new arbiter steps.
+- When unattended-correctness Task 86 lands, its "confirmed conflict" trigger becomes the test-repair ruling. Only `handOffTestRepair` changes (8.9, 8.10).
+
+## Requirements Traceability
+
+| Criterion | Design element |
+|---|---|
+| 1.1 | `ck principles init`, `--commit`; `plugin/skills/plan/SKILL.md`, `create`, `review`, `implement` |
+| 1.2 | `ck principles init` leaves an existing file unchanged |
+| 1.3 | `plugin/skills/plan/SKILL.md` |
+| 1.4 | `plan_may_be_decided`; `ck principles check`; skill |
+| 1.5 | `plugin/skills/plan/SKILL.md` |
+| 1.6 | `parse_principles`, `effective_principles`, `ck arbiter open` |
+| 1.7 | `route_ruling` (`reserved`, by outcome); `decide_spec_edit` (`reserved`, by changed path) |
+| 1.8 | `route_ruling`; `decide_arbiter_edit` (neither takes a grant as input) |
+| 1.9 | `claim_facts`, `decide_claim`, `OpenResult.missing` |
+| 1.10 | `plan_section`, `effective_principles`, `RulingRecord.plan_layer` |
+| 1.11 | `lint_spec` `warnings`, `lint_verdict` |
+| 1.12 | `ck arbiter context` `missing`, `spec-create.js`, `review.arbiter.lost` |
+| 2.1 | `plugin/skills/plan/SKILL.md` |
+| 2.2 | `plugin/skills/plan/SKILL.md` |
+| 2.3 | `spec-create.js` requirements prompt |
+| 2.4 | `spec-create.js` requirements prompt |
+| 2.5 | `justification_findings` (per story only) |
+| 3.1 | `justification_findings`, `lint_verdict` |
+| 3.2 | `justification_findings` |
+| 3.3 | `justification_findings` |
+| 3.4 | `justification_findings` |
+| 3.5 | `justification_findings` |
+| 3.6 | `ck lint --json` `justifications` |
+| 3.7 | `lint_verdict.launch_blockers` |
+| 4.1 | `should-exist` lens in `LENSES` |
+| 4.2 | `Cut`, `review.proposedCuts`, Revise prompt, create and review skills |
+| 4.3 | `decide_cut`; cuts kept out of `toFix` |
+| 4.4 | `decide_cut`; `plugin/skills/create/SKILL.md` |
+| 4.5 | `decide_cut`; `plugin/skills/create/SKILL.md` |
+| 4.6 | Revise prompt |
+| 4.7 | `lensesLost` |
+| 4.8 | `normalizeReview`, `noRequirement`, `proposedCuts` |
+| 5.1 | `agents.py` `DEFAULTS`, `ROLE_KEYS`, `_coerce` |
+| 5.2 | `agents.resolve` |
+| 5.3 | `claim_facts`, `decide_claim` |
+| 5.4 | `claim_facts`, `decide_claim` |
+| 5.5 | `claim_facts`, `decide_claim` (Complexity is not read) |
+| 5.6 | `route_ruling` (`rerun`); workflow |
+| 5.7 | `route_ruling`; ledger `exhausted` |
+| 6.1 | `claimTrigger`; `confirmConflictPrompt` removed |
+| 6.2 | `claimTrigger`; `climbGuard` removed |
+| 6.3 | `claimTrigger`; revise ladder removed |
+| 6.4 | `claimTrigger` |
+| 6.5 | `claimTrigger` (`rungsLeft` 0) |
+| 6.6 | `claimTrigger` |
+| 6.7 | `claimTrigger` |
+| 6.8 | `Claim`, `OpenResult`, ruling prompt, arbiter worktree |
+| 6.9 | `running` map; `arbitrate` |
+| 6.10 | `arbitrate` failure path |
+| 6.11 | `claimTrigger` (`gate-failure`), `arbitrate` |
+| 6.12 | `plugin/skills/implement/SKILL.md`, `plugin/resources/without-workflow-tool.md` |
+| 7.1 | `validate_ruling` |
+| 7.2 | `validate_ruling`, `route_ruling` |
+| 7.3 | `claim_key`, `Claim.findings`, ledger |
+| 7.4 | `decide_claim` |
+| 7.5 | `decide_claim` |
+| 7.6 | `decide_claim` |
+| 7.7 | `route_ruling`; ledger counts one ruling per claim |
+| 7.8 | Ledger in the git common directory |
+| 7.9 | `claim_facts`, `decide_claim` |
+| 8.1 | `ck arbiter open` worktree, `decide_arbiter_bash`, `nextLandingBatch`, `land_spec_edit` |
+| 8.2 | `arbiterK`, resume prompt |
+| 8.3 | `requestPlan('landing')` after landing |
+| 8.4 | `land_spec_edit`, `gate_scope_of_edit`, `arbitrate` |
+| 8.5 | `decide_spec_edit` |
+| 8.6 | `spec_text_changes`, `decide_spec_edit` |
+| 8.7 | `moved_out_of_verify`, `Landed.moved`, `RulingRecord.moved` |
+| 8.8 | `handOffTestRepair` |
+| 8.9 | `handOffTestRepair` |
+| 8.10 | `handOffTestRepair` |
+| 8.11 | `route_ruling`, resume prompt |
+| 8.12 | `settleFindings`, review prompt, `settledBy` |
+| 8.13 | `route_ruling` |
+| 8.14 | `route_ruling`, `requirement` field, needs-input kind `missing-requirement` |
+| 8.15 | `arbitrate` uses `parkAction` and the park path |
+| 9.1 | `decide_arbiter_edit` |
+| 9.2 | `decide_arbiter_edit` |
+| 9.3 | `decide_arbiter_edit`, `decide_spec_edit` |
+| 9.4 | `decide_arbiter_bash` |
+| 9.5 | `is_arbiter_caller` |
+| 9.6 | `is_arbiter_caller`, `classify_caller` (the unclaimed classification) |
+| 9.7 | Existing decisions unchanged |
+| 9.8 | `arbiter_block_reason` |
+| 10.1 | `append_entry`, `ck arbiter record` |
+| 10.2 | `append_entry` |
+| 10.3 | `append_entry` |
+| 10.4 | `append_entry`, `next_number` |
+| 10.5 | `withLandingLock`, `land_lock`, ledger lock |
+| 10.6 | `append_entry` (`existing` None), `ck arbiter record` |
+| 10.7 | `rulings` in the result, skill report |
+| 10.8 | `RunRuling`, `collect.py`, `show.py`, `rulings_summary` |
+| 10.9 | `arbitrate` record failure path |
+| 11.1 | `--step refuted` |
+| 11.2 | `route_create_ruling` |
+| 11.3 | `--step drift` |
+| 11.4 | `--step cuts`, `route_create_ruling` |
+| 11.5 | `decide_arbiter_edit`, `route_create_ruling` |
+| 11.6 | `route_create_ruling`, review.md rows, result |
+| 11.7 | `decide_arbiter_edit`, existing `FROZEN_RULE` |
+| 11.8 | Consistency check condition in `spec-create.js` |
+| 11.9 | `validate_ruling` (`create` mode), re-run, `ck arbiter review`, `arbiterAgent` and `agents.arbiter` args of `spec-create` |
+| 11.10 | `decide_arbiter_edit` (PLAN.md not in the lane) |
+| 11.11 | `spec-create.js` skips empty steps |
+| 11.12 | `review.arbiter.lost`, result rule, `ck arbiter review --step drift` Result line |
+| 12.1 | `done_at_gate`, `suite_due`, `scope_findings` |
+| 12.2 | `scope_findings` |
+| 12.3 | `scope_findings`, `graph.invoked_commands` (integration branch) |
+| 12.4 | `scope_findings` |
+| 12.5 | `lint_verdict`, workflow start |
+| 12.6 | Workflow start, `scopeClaims`, `lint` claim, re-plan after each landing |
+| 12.7 | Workflow start |
+| 12.8 | `ck lint` output; lint never calls the arbiter |
+| 12.9 | `scope_findings` `not_checked` |
+| 12.10 | `dedupe_scope` |
+| 12.11 | `applyLint` on non-start plans, `scopeClaims`, `claim_key` |
+| 12.12 | `plugin/skills/implement/SKILL.md` |
+| 13.1 | `auditDue`, `spec:auditor`; `plugin/skills/implement/SKILL.md` and `plugin/resources/without-workflow-tool.md` for single-task and manual runs |
+| 13.2 | `auditAction` |
+| 13.3 | `auditAction`, `audit` claim |
+| 13.4 | `plugin/agents/auditor.md` tool list |
+| 13.5 | `auditAction`, `missedAudits` |
+| 13.6 | `auditDue` (`audited`) |
+| 13.7 | `auditDue` |
+| 13.8 | `arbitrate` on an `audit` claim, `auditAction`, `missedAudits` |
+| Bounded arbiter cost | `decide_claim` limits |
+| Runtime compatibility | No clock or randomness in new workflow code; timestamps come from `ck` |
+| Lint performance and safety | `lint_scope.py`, shared parsing |
+| Compatibility | Claims, findings and the Story 13 audit steps are the only new paths |
+| Determinism | `ScopeFinding` sort order; `justification_findings` in document order |
