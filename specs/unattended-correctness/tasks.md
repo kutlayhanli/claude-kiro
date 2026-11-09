@@ -498,7 +498,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 - [x] Excused failures list their unfinished tasks, are never rerun and never make the gate red (1.3, 2.5)
 - [x] Unattributed failures make the gate red (1.5); every failure has a status (3.4)
 - [x] Repeated runs give identical `failures` arrays (1.10); without `--attribute` the output equals today's (1.11)
-- [ ] Attribution of 2,000 results with 200 failures over 100 tasks takes under 2 s (NFR attribution cost)
+- [x] Attribution of 2,000 results with 200 failures over 100 tasks takes under 2 s (NFR attribution cost)
 - [x] A task's tests that `verify` deselects still run under `--attribute`, and no node runs twice (1.1, TC-193)
 - [x] `--json --compact` prints the compact object and writes the full, untruncated `ck-gate/1` object to the file it names (2.12, TC-183)
 
