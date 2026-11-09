@@ -761,12 +761,14 @@ def _record_landed(root: Path, spec: str, into: str, landed: Dict[str, List[str]
     try:
         tip = git(root, "rev-parse", ref).stdout.strip()
         at_tip = protect.protected_files_at(root, tip)
-        for by in ("allow-list", "approval"):
-            paths = sorted({f for n, fs in landed.items() for f in fs
-                            if (f in approved.get(n, ())) == (by == "approval")})
-            if paths:
-                protect.record_approved_state(root, spec, ref, tip, {f: at_tip.get(f) for f in paths},
-                                              {"by": by, "tasks": sorted(landed), "files": paths})
+        if protect.read_approved_state(root, spec, ref) is None:
+            return  # never reseal a state that is absent or fails to verify: the audit reports it incomplete
+        for n in sorted(landed):
+            for by in ("allow-list", "approval"):
+                paths = sorted(f for f in landed[n] if (f in approved.get(n, ())) == (by == "approval"))
+                if paths:
+                    protect.record_approved_state(root, spec, ref, tip, {f: at_tip.get(f) for f in paths},
+                                                  {"by": by, "task": n, "files": paths})
     except (OSError, ValueError, subprocess.CalledProcessError, WorktreeError):
         pass
 

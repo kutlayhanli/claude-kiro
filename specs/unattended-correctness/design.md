@@ -710,7 +710,7 @@ class ApprovedState:         # <common>/ck/<spec>/protected.json, sealed with a 
     ref: str
     commit: str
     files: Mapping[str, str]                 # protected path -> approved blob oid; land() re-records only the paths its landed tasks changed, so this is not the whole tree at `commit`
-    approvals: Tuple[Mapping[str, object], ...]  # {at, task, files, by: "allow-list"|"approval"|"baseline", commit}
+    approvals: Tuple[Mapping[str, object], ...]  # {at, task, files, by: "allow-list"|"approval"|"baseline", commit}; one record per task and class
     # The hook finds the approved state of a ref through <common>/ck/refs.json (ref -> spec), written with it.
     # The state outlives a deleted ref, so a re-created ref is checked against it (9.12).
 

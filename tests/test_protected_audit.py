@@ -236,6 +236,20 @@ def test_tc99_allow_list_landing_is_not_drift(tmp_path):
     assert obj["drift"] == []
 
 
+def test_tc99_a_landing_does_not_reseal_a_damaged_state(tmp_path):
+    """10.4, 10.5: an allow-listed landing onto a state that fails its mac leaves it alone; the audit is incomplete."""
+    root, _, _ = audit_repo(tmp_path, allow=[".claude/commands/**"])
+    _task_branch(root, 2, {".claude/commands/x.md": "x\n"})
+    common = h.raw(root, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
+    state = Path(common) / "ck" / "demo" / "protected.json"
+    state.write_text("{}")
+    code, out, err = h.ck_text(root, "worktree", "land", "demo", "2", "--json")
+    assert code == 0, (out, err)
+    assert state.read_text() == "{}", "the damaged state was resealed by a landing"
+    code, obj = audit(root)
+    assert obj["complete"] is False and obj["clean"] is not True, obj
+
+
 def _approve_in_pty(root: Path) -> int:
     """`ck worktree approve demo 1` at a real terminal: read the 6-character code, type it back."""
     pid, fd = pty.fork()
