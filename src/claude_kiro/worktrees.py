@@ -568,6 +568,7 @@ def create_integration(root: Path, spec: str, base: Optional[str] = None) -> Out
     path.parent.mkdir(parents=True, exist_ok=True)
     if branch_exists(root, branch):
         git(root, "worktree", "add", str(path), branch)
+        _record_baseline(root, spec, branch)
     else:
         if unverified:
             raise WorktreeError(
@@ -746,6 +747,30 @@ def release(root: Path, spec: str, num: str) -> Outcome:
     return Outcome(num, "RELEASED", "", rel, branch)
 
 
+def _record_landed(root: Path, spec: str, into: str, landed: Dict[str, List[str]], approved: Dict[str, List[str]]) -> None:
+    """Record in the approved protected state only the protected paths the landed tasks changed (10.4).
+
+    Never the whole protected state: a bypass write elsewhere must not be laundered. `landed` maps task -> its
+    protected paths; those listed in `approved[task]` are recorded `by: "approval"`, the rest `by: "allow-list"`.
+    Best effort: a state that cannot be written is left for the audit to report."""
+    from claude_kiro import protect
+
+    if not into.startswith("integrate/") or not landed:
+        return
+    ref = f"refs/heads/{into}"
+    try:
+        tip = git(root, "rev-parse", ref).stdout.strip()
+        at_tip = protect.protected_files_at(root, tip)
+        for by in ("allow-list", "approval"):
+            paths = sorted({f for n, fs in landed.items() for f in fs
+                            if (f in approved.get(n, ())) == (by == "approval")})
+            if paths:
+                protect.record_approved_state(root, spec, ref, tip, {f: at_tip.get(f) for f in paths},
+                                              {"by": by, "tasks": sorted(landed), "files": paths})
+    except (OSError, ValueError, subprocess.CalledProcessError, WorktreeError):
+        pass
+
+
 def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, keep: bool = False) -> List[Outcome]:
     """Merge task branches into `into` one at a time (--no-ff); stop at the first conflict.
 
@@ -773,6 +798,7 @@ def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, ke
             outcomes.append(Outcome(num, "SKIP", f"no commits ahead of {into}", rel, branch))
             continue
         touched = protected_changes(root, into, branch, allow)
+        landing_paths = protected_changes(root, into, branch)
         if touched:
             outcomes.append(Outcome(num, "PROTECTED", f"changes protected files not covered by land.allow_paths: "
                                     f"{', '.join(touched)}; not merged, a human must review and approve it", rel, branch))
@@ -802,6 +828,7 @@ def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, ke
                 )
             )
             break
+        _record_landed(root, spec, into, {num: landing_paths}, {})
         note = "" if keep else _cleanup_merged(root, target, path, branch)
         outcomes.append(Outcome(num, "MERGED", f"{ahead} commit(s) into {into}{note}", rel, branch))
     return outcomes
@@ -957,6 +984,7 @@ def land(
     keep: bool = False,
     release_claims: bool = False,
     priority: Optional[Dict[str, int]] = None,
+    approved: Optional[Dict[str, List[str]]] = None,
 ) -> Dict:
     """Land a batch of task branches on `into` with one gate, bisecting a red batch.
 
@@ -974,7 +1002,11 @@ def land(
 
     Only the target checkout is ever reset, and only to the commit recorded before this
     batch. Merged tasks' worktrees and branches are removed unless `keep`.
+
+    `approved` (task -> protected files; only `ck worktree approve` passes it) lets exactly those files through
+    for those tasks; they are recorded in the approved state as `by: "approval"`.
     """
+    approved = {k: list(v) for k, v in (approved or {}).items()}
     into = into or current_branch(root)
     target = checkout_of(root, into)
     if target is None:
@@ -1017,6 +1049,7 @@ def land(
         allow = land_allow_paths(target)
         for num in list(candidates):
             touched = protected_changes(root, base, task_branch(spec, num), allow)
+            touched = [f for f in touched if f not in approved.get(num, ())]
             if touched:
                 candidates.remove(num)
                 results[num] = Landed(
@@ -1073,6 +1106,7 @@ def land(
             ).stdout.strip()
             batch.append(num)
 
+        landed_paths = {n: protected_changes(root, base, task_branch(spec, n)) for n in batch}
         gates: List[Dict] = []
 
         def head() -> str:
@@ -1139,6 +1173,10 @@ def land(
 
         if batch:
             land_group(batch)
+
+        _record_landed(
+            root, spec, into,
+            {n: landed_paths[n] for n, o in results.items() if o.state == "MERGED" and n in landed_paths}, approved)
 
         if not keep:
             for num, outcome in results.items():
