@@ -466,3 +466,25 @@ await test('TC-184: a green compact answer records excusedByTask and report; reg
   assertGateError(broken, 'compact answer with regressions not an array')
   assert.ok(!bad.state.events.some(l => /^fix /.test(l)), 'no fixer for a malformed answer')
 })
+
+await test('TC-184: a compact answer with one failure excused by two tasks stays green; summary.excused counts failures, excusedByTask counts tasks (2.8, 2.12)', async () => {
+  // One failure excused by tasks 5 and 6: excusedByTask holds 5:1 and 6:1 (sum 2), summary.excused is 1 (one failure).
+  const deps = { 1: [] }
+  const p = project({ deps, gateAnswers: [compact(true, { excusedByTask: { 5: 1, 6: 1 }, summary: { regressions: 0, excused: 1, flaky: 0, unattributed: 0 } })] })
+  const { result } = await runClaude(p, deps)
+  const g = result.gates.find(x => x.kind === 'final')
+  assert.ok(g, JSON.stringify(result.gates))
+  assert.equal(g.state, 'green', JSON.stringify(g))
+  assert.equal(g.green, true)
+  assert.deepEqual(g.excusedByTask, { 5: 1, 6: 1 })
+  assert.deepEqual(g.regressions, [])
+  assert.ok(!p.state.events.some(l => /^fix /.test(l)), 'no fixer for a green compact answer')
+
+  // Red with only the real regression: the double-excused failure is not listed as a regression.
+  const red2 = project({ deps, gateAnswers: [compact(false, { regressions: [REG_A], excusedByTask: { 5: 1, 6: 1 }, summary: { regressions: 1, excused: 1, flaky: 0, unattributed: 0 } })] })
+  const { result: redResult } = await runClaude(red2, deps)
+  const rg = redResult.gates.find(x => x.kind === 'final')
+  assert.equal(rg.state, 'red', JSON.stringify(rg))
+  assert.deepEqual(rg.regressions.map(f => f.node), [REG_A.node])
+  assert.ok(carries(red2.state.prompts[red2.state.events.find(l => /^fix \d+/.test(l))], REG_A), 'the real regression reaches the fixer')
+})
