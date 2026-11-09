@@ -1834,7 +1834,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 80: Carry structured failures and `testConflicts` through task attempts
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 3.6, 3.7, 3.8, 3.9
 **Description:** In `plugin/workflows/spec-implement.js`: the `RESULT` schema gains `failures: Failure[]` (the D3 entry, copied from ck) and `testConflicts: TestConflict[]` (`{file, test, criterion, reason, fix}`), keeping `testConflict` accepted; add `testConflictsOf(result)` (a single `testConflict` is read as a list of one) and `failuresForPrompt(failures, limit = 50)` (`{shown, more: {file: count}, total}`) in the decisions block; task prompts tell the agent to run the whole Verify with `ck -C <wt> gate <spec> --task <n> --json` without stopping at the first failure and to return ck's `failures` unchanged; retry prompts carry the previous attempt's failures as JSON via `failuresForPrompt` (first 50 in order plus per-file counts of the rest) instead of free text trimmed to 3000 characters; the confirmation step receives every conflict entry; the task report entry gains `failures` and `testConflicts`. Update `plugin/resources/spec-implement-brief.md` and `plugin/resources/without-workflow-tool.md` with the same gate JSON and `testConflicts` instructions (one entry per test). Update the existing assertions this supersedes in `tests/js/spec_implement.test.mjs` (retry prompts that pin the free-text failure trimmed to 3000 characters). Harness Contract owner: item 7's `conflictsOf` and `failureDigest` (design: `testConflictsOf`, `failuresForPrompt`) and result `testConflicts`.
