@@ -68,6 +68,10 @@ def reference_transaction(state):
             continue
         old, new, ref = _norm(parts[0]), _norm(parts[1]), parts[2]
         if not (re.fullmatch(r"[0-9a-f]{40,64}", old) and re.fullmatch(r"[0-9a-f]{40,64}", new)):
+            # fail closed: an update of integrate/* whose values are not plain oids (a symref update) is refused
+            failed = True
+            click.echo(f"refused: cannot verify the update of {ref} ({old} -> {new}); only plain commit updates "
+                       "are allowed.", err=True)
             continue
         if new == protect.ZEROS:
             continue
@@ -80,7 +84,12 @@ def reference_transaction(state):
                 update, protect.protected_files_at(root, new), [], token_ok,
                 dict(approved.files) if approved is not None else None)
         else:
-            changed = _names(_git(root, "diff", "--name-only", "--no-renames", "-z", old, new).stdout)
+            diff = _git(root, "diff", "--name-only", "--no-renames", "-z", old, new)
+            if diff.returncode != 0:
+                failed = True
+                click.echo(f"refused: cannot compare {old} with {new} for {ref}.", err=True)
+                continue
+            changed = _names(diff.stdout)
             decision = protect.ref_update_decision(update, changed, _allow_from(root, old), token_ok, None)
         if not decision.allow:
             failed = True

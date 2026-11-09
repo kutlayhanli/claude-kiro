@@ -548,6 +548,22 @@ def test_tc182_ck_creates_its_own_integration_ref(tmp_path):
     assert h.ref(root, "integrate/other") == h.ref(root, "main")
 
 
+def test_tc182_ck_integration_from_a_protected_base_after_delete_is_refused(tmp_path):
+    """9.12, 10.1: delete the worktree and branch (deletes pass), then `ck worktree integration --base <protected
+    change>` must not recreate the ref nor reseal the approved state from that base."""
+    root = h.hooks_repo(tmp_path)
+    protected = h.ref(root, "feat/demo-task-1")
+    wt = integ(root)
+    assert h.raw(root, "worktree", "remove", "--force", str(wt)).returncode == 0
+    assert h.raw(root, "branch", "-D", INTEG).returncode == 0
+    assert h.ref(root, INTEG) == ""
+    code, out, err = h.ck_text(root, "worktree", "integration", "demo", "--base", protected)
+    assert h.ref(root, INTEG) == "", f"{INTEG} was created: {out} {err}"
+    assert code != 0 or "CREATED" not in out, (out, err)
+    assert ".claude/CLAUDE.md" in out + err, (out, err)
+    assert "ck worktree approve" in out + err, (out, err)
+
+
 # --------------------------------------------------------------------------- TC-190
 
 

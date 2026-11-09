@@ -26,7 +26,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from fnmatch import fnmatchcase
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Dict, Iterator, List, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 from claude_kiro.config import load_config
 from claude_kiro.paths import LEGACY_WORKTREES_DIR, WORKTREES_DIR
@@ -81,7 +81,18 @@ def _commit_shape(root: Path, commit: str) -> Tuple[str, List[str]]:
     return tree.strip(), parents.split()
 
 
-def _token_env(root: Path, into: str, old: str, tree: str, parents: List[str], reason: str) -> Optional[Dict[str, str]]:
+def _tree_protected(root: Path, old: str, tree: str) -> List[str]:
+    """Protected paths (unquoted) that differ between commit `old` and tree `tree`."""
+    from claude_kiro import protect
+
+    out = subprocess.run(["git", "-C", str(root), "diff", "--name-only", "--no-renames", "-z", old, tree],
+                         capture_output=True).stdout
+    names = [n.decode("utf-8", "replace") for n in out.split(b"\0") if n]
+    return [n for n in names if protect.is_protected(n)]
+
+
+def _token_env(root: Path, into: str, old: str, tree: str, parents: List[str], reason: str,
+               files: Sequence[str] = ()) -> Optional[Dict[str, str]]:
     """A process environment carrying a fresh one-shot landing token for this exact update of `integrate/*`
     (the hooks let an update through only with it, 9.7); None for any other branch or when none can be issued."""
     from claude_kiro import protect
@@ -89,7 +100,7 @@ def _token_env(root: Path, into: str, old: str, tree: str, parents: List[str], r
     if not into.startswith("integrate/"):
         return None
     try:
-        rec = protect.issue_token(root, f"refs/heads/{into}", old, tree, parents, reason)
+        rec = protect.issue_token(root, f"refs/heads/{into}", old, tree, parents, reason, files)
     except (OSError, subprocess.CalledProcessError):
         return None
     return {**os.environ, "CK_LANDING_TOKEN": rec.id}
@@ -102,7 +113,9 @@ def _git_merge(root: Path, target: Path, into: str, branch: str, message: str) -
         old = git(target, "rev-parse", "HEAD").stdout.strip()
         ok, tree, _ = merge_tree(root, old, branch)
         if ok and tree:
-            env = _token_env(root, into, old, tree, [old, git(root, "rev-parse", branch).stdout.strip()], "merge")
+            other = git(root, "rev-parse", branch).stdout.strip()
+            env = _token_env(root, into, old, tree, [old, other], f"land {branch} into {into} ({other[:12]})",
+                             _tree_protected(root, old, tree))
     extra = {"env": env} if env else {}
     return git(target, "merge", "--no-ff", "-m", message, branch, check=False, **extra)
 
@@ -112,7 +125,8 @@ def _git_reset(root: Path, target: Path, into: str, commit: str) -> subprocess.C
     if into.startswith("integrate/"):
         old = git(target, "rev-parse", "HEAD").stdout.strip()
         tree, parents = _commit_shape(root, commit)
-        env = _token_env(root, into, old, tree, parents, "reset")
+        env = _token_env(root, into, old, tree, parents, f"reset {into} to {commit[:12]}",
+                         _tree_protected(root, old, tree))
     extra = {"env": env} if env else {}
     return git(target, "reset", "--hard", "-q", commit, check=False, **extra)
 
@@ -542,9 +556,19 @@ def create_integration(root: Path, spec: str, base: Optional[str] = None) -> Out
         git(root, "worktree", "add", str(path), branch)
     else:
         tree, parents = _commit_shape(root, base)
-        env = _token_env(root, branch, protect.ZEROS, tree, parents, "create")
+        ref = f"refs/heads/{branch}"
+        approved = protect.approved_state_for_ref(root, ref)
+        base_files = protect.protected_files_at(root, base)
+        if approved is not None and dict(approved.files) != base_files:
+            # 9.12: the approved state exists and the base differs from it; never reseal it from the base
+            drift = sorted(k for k in {*base_files, *approved.files} if base_files.get(k) != approved.files.get(k))
+            raise WorktreeError(
+                f"refused: creating {ref} from {base} carries protected files that differ from the approved state: "
+                f"{', '.join(drift)}. Review them, then approve in your own terminal with `ck worktree approve SPEC TASK`.")
+        env = _token_env(root, branch, protect.ZEROS, tree, parents, f"create {branch} from {base}",
+                         sorted(base_files))
         git(root, "worktree", "add", "-b", branch, str(path), base, **({"env": env} if env else {}))
-        _record_baseline(root, spec, branch, only_missing=False)
+        _record_baseline(root, spec, branch, only_missing=True)
     return Outcome("integration", "CREATED", f"from {base}" + _hook_detail(notes), rel, branch, hooks=status())
 
 

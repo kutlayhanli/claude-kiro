@@ -443,7 +443,20 @@ HOOK_NAMES = (
     "push-to-checkout", "pre-receive", "update", "proc-receive", "post-receive", "post-update",
 )
 CK_HOOKS = ("reference-transaction", "pre-merge-commit")
+# Hooks whose mere presence changes what git does (push-to-checkout replaces the updateInstead worktree update,
+# proc-receive takes over receive-pack ref updates): installed only when the chain target provides them.
+_PRESENCE_HOOKS = ("push-to-checkout", "proc-receive")
 _CHAIN_FILE = "chain.json"
+
+
+def _hook_names(chain: str) -> Tuple[str, ...]:
+    return tuple(n for n in HOOK_NAMES
+                 if n not in _PRESENCE_HOOKS or os.access(os.path.join(chain, n), os.X_OK))
+
+
+def _chain_of(meta: Optional[Mapping[str, Any]]) -> Optional[str]:
+    value = (meta.get("previous") or meta.get("chain")) if meta else None
+    return str(value) if value else None
 
 
 def hooks_dir(root: Path) -> Path:
@@ -514,12 +527,14 @@ def hook_status(root: Path, worktree: Optional[Path] = None) -> HookStatus:
         d = hooks_dir(root)
         meta = _read_chain(root)
         recorded: Mapping[str, str] = meta["scripts"] if meta else {}
-        installed = bool(meta) and all((d / n).is_file() for n in HOOK_NAMES)
+        names = tuple(recorded) if meta else ()
+        installed = bool(meta) and all(n in recorded for n in HOOK_NAMES if n not in _PRESENCE_HOOKS) \
+            and all((d / n).is_file() for n in names)
         value = _git_out(worktree, "config", "--get", "core.hooksPath")
         active = bool(value) and _same_path(worktree, value, d)
         intact = installed
         if installed:
-            for n in HOOK_NAMES:
+            for n in names:
                 try:
                     ok = _sha((d / n).read_bytes()) == recorded.get(n) and os.access(d / n, os.X_OK)
                 except OSError:
@@ -534,7 +549,7 @@ def hook_status(root: Path, worktree: Optional[Path] = None) -> HookStatus:
             problems.append(f"core.hooksPath is {value!r}, not ck's hooks directory")
         elif not value:
             problems.append("core.hooksPath is not set")
-        chained = str(meta.get("chain")) if meta and meta.get("chain") else None
+        chained = _chain_of(meta)
         return HookStatus(installed, active, intact, chained, tuple(problems))
     except (OSError, subprocess.CalledProcessError, ValueError) as exc:
         return HookStatus(False, False, False, None, (f"cannot read the hook state: {exc}",))
@@ -563,14 +578,15 @@ def install_hooks(root: Path) -> HookStatus:
         meta = _read_chain(root)
         if current and not _same_path(root, current, d):
             chain = current
-        elif meta and meta.get("chain"):
-            chain = str(meta["chain"])
+        elif _chain_of(meta):
+            chain = str(_chain_of(meta))
         else:
             chain = str(common / "hooks")
         python = sys.executable or "python3"
         d.mkdir(parents=True, exist_ok=True)
         shas: Dict[str, str] = {}
-        for name in HOOK_NAMES:
+        names = _hook_names(chain)
+        for name in names:
             text = _script(name, chain, python).encode()
             shas[name] = _sha(text)
             path = d / name
@@ -579,7 +595,7 @@ def install_hooks(root: Path) -> HookStatus:
                 tmp.write_bytes(text)
                 os.chmod(tmp, 0o755)
                 os.replace(tmp, path)
-        _write_json(d / _CHAIN_FILE, {"chain": chain, "python": python, "scripts": shas})
+        _write_json(d / _CHAIN_FILE, {"previous": chain, "python": python, "scripts": shas})
         if not (current and _same_path(root, current, d)):
             subprocess.run(["git", "-C", str(root), "config", "core.hooksPath", str(d)], check=True,
                            capture_output=True, text=True)
@@ -592,10 +608,10 @@ def install_hooks(root: Path) -> HookStatus:
 
 
 def ensure_hooks(root: Path, worktree: Optional[Path] = None) -> HookStatus:
-    """Nothing when the hooks are installed, active and intact; otherwise (re)install them, chaining to a moved
-    `core.hooksPath`."""
+    """Nothing when the hooks are installed and active (an altered script stays `intact: false` for the run-end
+    audit to report, 10.2); otherwise (re)install them, chaining to a moved `core.hooksPath`."""
     status = hook_status(root, worktree)
-    if status.installed and status.active and status.intact:
+    if status.installed and status.active:
         return status
     return install_hooks(root)
 

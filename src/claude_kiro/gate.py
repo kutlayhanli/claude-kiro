@@ -800,7 +800,9 @@ def _run_gate(
             from claude_kiro import protect
 
             if protect.hooks_managed(project_dir):
-                protect.ensure_hooks(project_dir, project_dir)
+                hook_status = protect.ensure_hooks(project_dir, project_dir)
+                if hook_status.problems:
+                    result.checks.append(Check("hooks", True, "; ".join(hook_status.problems), warning=True))
         except Exception:  # noqa: BLE001 - never a gate failure
             pass
 
