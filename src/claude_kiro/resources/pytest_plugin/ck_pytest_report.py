@@ -85,7 +85,9 @@ _RAISED = {}  # (nodeid, phase) -> exception class name, from the call's excinfo
 
 def pytest_runtest_makereport(item, call):
     if call.excinfo is not None:
-        _RAISED[(item.nodeid, call.when)] = call.excinfo.type.__name__
+        cls = call.excinfo.type
+        # A subclass of AssertionError is an assertion failure (3.2); other names keep their own class name.
+        _RAISED[(item.nodeid, call.when)] = "AssertionError" if issubclass(cls, AssertionError) else cls.__name__
 
 
 def _crash(longrepr, exc_hint=None):

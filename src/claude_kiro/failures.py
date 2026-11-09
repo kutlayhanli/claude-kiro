@@ -158,8 +158,8 @@ def missing_command(text: str, programs: Sequence[str] = ()) -> Optional[str]:
     if found is None:
         return None
     prog, words = found
-    if words and words[-1] == name:  # the invocation echoes the unknown name before the marker
-        words = words[:-1]
+    if name in words:  # the invocation echoes the unknown name (click: `mtr thesis new: ... 'thesis'`) before the marker
+        return " ".join([prog, *words])
     return " ".join([prog, *words, name])
 
 
