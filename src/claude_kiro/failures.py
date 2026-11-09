@@ -640,8 +640,10 @@ def classify_not_built(failure: Failure, ctx: ProjectContext) -> str:
     an AssertionError in the test file, bad only when its assert reaches no project code (5.7); otherwise unclear.
     """
     exc = failure.exc_type
-    # anywhere in the chain: a wrapping exception's text still carries the stub's NotImplementedError (rule 1)
-    if exc == "NotImplementedError" or _NOT_IMPLEMENTED.search(_clean(failure.message)) \
+    # anywhere in the chain: a wrapping exception's text still carries the stub's NotImplementedError (rule 1).
+    # An AssertionError's message is the assert's own text, so quoting the name there is not a chain.
+    if exc == "NotImplementedError" \
+            or (exc != "AssertionError" and _NOT_IMPLEMENTED.search(_clean(failure.message))) \
             or _NOT_IMPLEMENTED.search(_clean(failure.detail)):
         return "not-built"
     if exc in IMPORT_FAMILY:
