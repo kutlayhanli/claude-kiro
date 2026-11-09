@@ -373,3 +373,24 @@ def test_a_failed_cleanup_after_the_merge_keeps_the_task_merged(repo, monkeypatc
     assert state == "MERGED"
     assert "Device or resource busy" in detail and "the merge stands" in detail
     assert (repo / "one.txt").exists()
+
+
+def test_land_raises_when_the_reset_after_a_red_gate_is_refused(repo: Path):
+    """A red batch whose rollback git refuses must stop the landing: reporting RED ("it was not landed") while the
+    merge is still on the target would be false, and bisecting would merge on top of it."""
+    from claude_kiro import worktrees
+
+    r = ck(repo, "worktree", "create", "demo", "1", "--base", "main")
+    assert r.exit_code == 0, r.output
+    commit_in(wt(repo, "1"), "one.txt", "1\n", "one")
+    start = git(repo, "rev-parse", "main")
+
+    def red_and_locked(target: Path, group):
+        lock = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-path", "index.lock"], cwd=target,
+                              capture_output=True, text=True, check=True).stdout.strip()
+        Path(lock).write_text("")
+        return False, "red", []
+
+    with pytest.raises(worktrees.WorktreeError, match="index.lock"):
+        worktrees.land(repo, "demo", ["1"], into="main", gate=red_and_locked)
+    assert git(repo, "rev-parse", "main") != start, "setup: the merge must still be on the target"

@@ -548,6 +548,93 @@ def test_tc182_ck_creates_its_own_integration_ref(tmp_path):
     assert h.ref(root, "integrate/other") == h.ref(root, "main")
 
 
+def test_tc182_ck_integration_from_a_protected_base_after_delete_is_refused(tmp_path):
+    """9.12, 10.1: delete the worktree and branch (deletes pass), then `ck worktree integration --base <protected
+    change>` must not recreate the ref nor reseal the approved state from that base."""
+    root = h.hooks_repo(tmp_path)
+    protected = h.ref(root, "feat/demo-task-1")
+    wt = integ(root)
+    assert h.raw(root, "worktree", "remove", "--force", str(wt)).returncode == 0
+    assert h.raw(root, "branch", "-D", INTEG).returncode == 0
+    assert h.ref(root, INTEG) == ""
+    code, out, err = h.ck_text(root, "worktree", "integration", "demo", "--base", protected)
+    assert h.ref(root, INTEG) == "", f"{INTEG} was created: {out} {err}"
+    assert code != 0 or "CREATED" not in out, (out, err)
+    assert ".claude/CLAUDE.md" in out + err, (out, err)
+    assert "ck worktree approve" in out + err, (out, err)
+
+
+def _state_file(root: Path) -> Path:
+    return Path(h.raw(root, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()) / "ck/demo/protected.json"
+
+
+def _delete_integration(root: Path) -> None:
+    assert h.raw(root, "worktree", "remove", "--force", str(integ(root))).returncode == 0
+    assert h.raw(root, "branch", "-D", INTEG).returncode == 0
+
+
+def test_tc182_a_damaged_state_is_not_resealed_when_the_worktree_is_reused(tmp_path):
+    """10.5: `ck worktree integration` on a state that fails its mac leaves it alone and says so."""
+    root = h.hooks_repo(tmp_path)
+    state = _state_file(root)
+    state.write_text("{}")
+    code, out, err = h.ck_text(root, "worktree", "integration", "demo")
+    assert code == 0, (out, err)
+    assert state.read_text() == "{}", "the damaged state was resealed"
+    assert "cannot be verified" in out + err, (out, err)
+
+
+def test_tc182_a_damaged_state_refuses_a_create_from_a_protected_base(tmp_path):
+    """9.12, 10.5: damaging the state does not buy a token for a protected base, and the refusal names the way out."""
+    root = h.hooks_repo(tmp_path)
+    protected = h.ref(root, "feat/demo-task-1")
+    state = _state_file(root)
+    _delete_integration(root)
+    state.write_text("{}")
+    code, out, err = h.ck_text(root, "worktree", "integration", "demo", "--base", protected)
+    assert code != 0, (out, err)
+    assert h.ref(root, INTEG) == "", f"{INTEG} was created: {out} {err}"
+    assert state.read_text() == "{}", "the damaged state was resealed"
+    assert str(state) in out + err, (out, err)
+
+
+def test_tc182_a_ref_lost_from_refs_json_is_still_compared_with_its_state(tmp_path):
+    """9.12: the state file is found by spec, so losing the index entry does not turn a create into a baseline."""
+    root = h.hooks_repo(tmp_path)
+    protected = h.ref(root, "feat/demo-task-1")
+    before = _state_file(root).read_text()
+    _delete_integration(root)
+    (_state_file(root).parent.parent / "refs.json").write_text("{}")
+    code, out, err = h.ck_text(root, "worktree", "integration", "demo", "--base", protected)
+    assert code != 0 and h.ref(root, INTEG) == "", (code, out, err)
+    assert ".claude/CLAUDE.md" in out + err, (out, err)
+    assert _state_file(root).read_text() == before
+
+
+def test_tc182_the_create_refusal_names_a_step_that_works(tmp_path):
+    """Following the refusal's manual step re-creates the ref from the reviewed base."""
+    root = h.hooks_repo(tmp_path)
+    protected = h.ref(root, "feat/demo-task-1")
+    _delete_integration(root)
+    code, out, err = h.ck_text(root, "worktree", "integration", "demo", "--base", protected)
+    assert code != 0, (out, err)
+    assert str(_state_file(root)) in out + err, (out, err)
+    _state_file(root).unlink()
+    code, out, err = h.ck_text(root, "worktree", "integration", "demo", "--base", protected)
+    assert code == 0, (out, err)
+    assert h.ref(root, INTEG) == protected
+
+
+def test_tc182_ck_creates_the_ref_from_an_annotated_tag(tmp_path):
+    """The token is bound to the tagged commit's tree and parents, not to the tag's header."""
+    root = h.hooks_repo(tmp_path)
+    _delete_integration(root)
+    assert h.raw(root, "tag", "-a", "-m", "base", "v1", "main").returncode == 0
+    code, out, err = h.ck_text(root, "worktree", "integration", "demo", "--base", "v1")
+    assert code == 0, (out, err)
+    assert h.ref(root, INTEG) == h.ref(root, "main")
+
+
 # --------------------------------------------------------------------------- TC-190
 
 

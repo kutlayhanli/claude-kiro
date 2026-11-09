@@ -784,3 +784,12 @@ def test_tc194_a_husky_prepare_that_resets_hooks_path_is_repaired_and_chained(tm
     nv = h.raw(wt, "merge", "--no-ff", "--no-verify", "--no-edit", "feat/demo-task-1")
     assert_refused(root, nv, PROTECTED_REF, after_land, "a raw --no-verify protected merge after the husky reset")
     h.raw(wt, "merge", "--abort")
+
+
+def test_tc85_integration_json_names_the_chain_target_chained_to_in_camel_case(tmp_path):
+    """The design's HookStatus JSON key, the one `run start` and `ck-audit/1` consumers read."""
+    root = h.hooks_repo(tmp_path)
+    code, obj, err = h.ck_json(root, "worktree", "integration", "demo", "--json")
+    assert obj is not None, f"no JSON ({code}): {err}"
+    status = hook_status_of(obj)
+    assert "chainedTo" in status and "chained_to" not in status, status

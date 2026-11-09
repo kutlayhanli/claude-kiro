@@ -14,6 +14,7 @@ import os
 import re
 import secrets
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from fnmatch import fnmatchcase
@@ -212,8 +213,9 @@ def audit_decision(approved: Optional[ApprovedState], current: Mapping[str, str]
     complete = isinstance(files, Mapping)
     drift: List[Dict[str, str]] = []
     if not complete:
-        problems.append("the approved protected state is missing or unreadable; run `ck worktree integration` "
-                        "or approve the integration again")
+        problems.append("the approved protected state is missing or unreadable; when it is missing, `ck worktree "
+                        "integration` records it again; when it is damaged, review the protected files and delete "
+                        "it first, since ck never reseals a state it cannot verify")
     else:
         for path in sorted(set(files) | set(current)):
             a, c = files.get(path), current.get(path)
@@ -377,7 +379,10 @@ def _state_payload(spec: str, state: ApprovedState) -> Dict[str, object]:
 def read_approved_state(root: Path, spec: str, ref: Optional[str] = None) -> Optional[ApprovedState]:
     """The sealed state of `spec`, or None when missing, unreadable, unsealed, or of another spec or ref."""
     try:
-        data = json.loads((_spec_dir(root, spec) / "protected.json").read_text())
+        path = _spec_dir(root, spec) / "protected.json"
+        if not path.is_file():  # a directory or a FIFO counts as unreadable, without blocking on it
+            return None
+        data = json.loads(path.read_text())
         state = ApprovedState(ref=str(data["ref"]), commit=str(data["commit"]),
                               files={str(k): str(v) for k, v in dict(data["files"]).items()},
                               approvals=tuple(dict(a) for a in data["approvals"]))
@@ -391,6 +396,15 @@ def read_approved_state(root: Path, spec: str, ref: Optional[str] = None) -> Opt
     if not hmac.compare_digest(_seal(key, _state_payload(spec, state)), mac):
         return None
     return state
+
+
+def approved_state_file(root: Path, spec: str) -> Optional[Path]:
+    """The path of `spec`'s state file when something is there, verified or not; None when nothing is."""
+    try:
+        path = _spec_dir(root, spec) / "protected.json"
+    except ValueError:
+        return None
+    return path if os.path.lexists(path) else None
 
 
 def read_refs_index(root: Path) -> Dict[str, str]:
@@ -430,3 +444,215 @@ def record_approved_state(root: Path, spec: str, ref: str, commit: str, files: M
     index[ref] = spec
     _write_json(ck_dir(root) / "refs.json", index)
     return state
+
+
+# --------------------------------------------------------------------------- git hooks
+
+def hook_status_json(status: HookStatus) -> Dict[str, Any]:
+    """`status` as JSON consumers read it: the one place that names `chainedTo`."""
+    return {"installed": status.installed, "active": status.active, "intact": status.intact,
+            "chainedTo": status.chained_to, "problems": list(status.problems)}
+
+
+# Every client-side hook name git runs; each gets a script in <common>/ck/hooks that chains to the project's own.
+HOOK_NAMES = (
+    "applypatch-msg", "pre-applypatch", "post-applypatch", "pre-commit", "pre-merge-commit", "prepare-commit-msg",
+    "commit-msg", "post-commit", "pre-rebase", "post-checkout", "post-merge", "pre-push", "pre-auto-gc",
+    "post-rewrite", "sendemail-validate", "fsmonitor-watchman", "post-index-change", "reference-transaction",
+    "push-to-checkout", "pre-receive", "update", "proc-receive", "post-receive", "post-update",
+)
+CK_HOOKS = ("reference-transaction", "pre-merge-commit")
+# Known gap: `git symbolic-ref` and the new name of `git branch -m` / `-c` reach no reference-transaction hook
+# (git 2.43; the hook sees only the delete of the old name), so an integrate/* ref re-created that way is not
+# refused here. The run-end audit reports it as drift (design, Security).
+# Hooks whose mere presence changes what git does (push-to-checkout replaces the updateInstead worktree update,
+# proc-receive takes over receive-pack ref updates): installed only when the chain target provides them.
+_PRESENCE_HOOKS = ("push-to-checkout", "proc-receive")
+_CHAIN_FILE = "chain.json"
+
+
+def _hook_names(chain: str) -> Tuple[str, ...]:
+    return tuple(n for n in HOOK_NAMES
+                 if n not in _PRESENCE_HOOKS or os.access(os.path.join(chain, n), os.X_OK))
+
+
+def _chain_of(meta: Optional[Mapping[str, Any]]) -> Optional[str]:
+    value = (meta.get("previous") or meta.get("chain")) if meta else None
+    return str(value) if value else None
+
+
+def hooks_dir(root: Path) -> Path:
+    return ck_dir(root) / "hooks"
+
+
+def _sh(value: str) -> str:
+    import shlex
+
+    return shlex.quote(value)
+
+
+def _script(name: str, chain: str, python: str) -> str:
+    head = ("#!/bin/sh\n# Installed by ck: refuses unapproved protected changes to integrate/* and chains to the "
+            "project's own hooks. Reinstall with `ck worktree integration SPEC`.\n"
+            f"chain={_sh(chain)}\n")
+    if name not in CK_HOOKS:
+        return head + f'if [ -x "$chain/{name}" ]; then exec "$chain/{name}" "$@"; fi\nexit 0\n'
+    runner = (
+        "run_ck() {\n"
+        "  if command -v ck >/dev/null 2>&1; then ck git-hook \"$@\"; return $?; fi\n"
+        f"  if [ -x {_sh(python)} ]; then {_sh(python)} -m claude_kiro.cli git-hook \"$@\"; return $?; fi\n"
+        "  return 127\n}\n"
+        "no_ck() {\n"
+        "  echo \"ck: refused: ck is not available to check this change to an integrate/* branch; "
+        "reinstall the hooks with ck worktree integration SPEC\" >&2\n  exit 1\n}\n")
+    if name == "reference-transaction":
+        return head + runner + (
+            "input=''\n"
+            "while IFS= read -r line || [ -n \"$line\" ]; do input=\"$input$line\n\"; done\n"
+            f"if [ -x \"$chain/{name}\" ]; then printf '%s' \"$input\" | \"$chain/{name}\" \"$@\" || exit $?; fi\n"
+            "[ \"$1\" = prepared ] || exit 0\n"
+            "case \"$input\" in *' refs/heads/integrate/'*) ;; *) exit 0 ;; esac\n"
+            "printf '%s' \"$input\" | run_ck reference-transaction \"$1\"\n"
+            "rc=$?\n[ $rc -eq 127 ] && no_ck\nexit $rc\n")
+    return head + runner + (
+        f"if [ -x \"$chain/{name}\" ]; then \"$chain/{name}\" \"$@\" || exit $?; fi\n"
+        "case \"$(git symbolic-ref -q HEAD)\" in refs/heads/integrate/*) ;; *) exit 0 ;; esac\n"
+        "run_ck pre-merge-commit\nrc=$?\n[ $rc -eq 127 ] && no_ck\nexit $rc\n")
+
+
+def _sha(text: bytes) -> str:
+    return hashlib.sha256(text).hexdigest()
+
+
+def _read_chain(root: Path) -> Optional[Dict[str, Any]]:
+    try:
+        data = json.loads((hooks_dir(root) / _CHAIN_FILE).read_text())
+        return data if isinstance(data, dict) and isinstance(data.get("scripts"), dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _git_out(cwd: Path, *args: str) -> str:
+    proc = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True)
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def _same_path(cwd: Path, value: str, target: Path) -> bool:
+    return os.path.realpath(os.path.join(str(cwd), os.path.expanduser(value))) == os.path.realpath(str(target))
+
+
+def hook_status(root: Path, worktree: Optional[Path] = None) -> HookStatus:
+    """Whether ck's hooks are installed, active for `worktree` and unmodified. Writes nothing."""
+    worktree = worktree or root
+    problems: List[str] = []
+    try:
+        d = hooks_dir(root)
+        meta = _read_chain(root)
+        recorded: Mapping[str, str] = meta["scripts"] if meta else {}
+        names = tuple(recorded) if meta else ()
+        installed = bool(meta) and all(n in recorded for n in HOOK_NAMES if n not in _PRESENCE_HOOKS) \
+            and all((d / n).is_file() for n in names)
+        value = _git_out(worktree, "config", "--get", "core.hooksPath")
+        active = bool(value) and _same_path(worktree, value, d)
+        intact = installed
+        if installed:
+            for n in names:
+                try:
+                    ok = _sha((d / n).read_bytes()) == recorded.get(n) and os.access(d / n, os.X_OK)
+                except OSError:
+                    ok = False
+                if not ok:
+                    intact = False
+                    problems.append(f"hook {n} was modified")
+                    break
+        elif not meta:
+            problems.append("ck's git hooks are not installed")
+        if value and not active:
+            problems.append(f"core.hooksPath is {value!r}, not ck's hooks directory")
+        elif not value:
+            problems.append("core.hooksPath is not set")
+        chained = _chain_of(meta)
+        return HookStatus(installed, active, intact, chained, tuple(problems))
+    except (OSError, subprocess.CalledProcessError, ValueError) as exc:
+        return HookStatus(False, False, False, None, (f"cannot read the hook state: {exc}",))
+
+
+def _writable_target(path: Path) -> Path:
+    while not path.exists() and path != path.parent:
+        path = path.parent
+    return path
+
+
+def install_hooks(root: Path) -> HookStatus:
+    """Install ck's hooks (idempotent); an OS error is returned in `problems`, never raised; never half-installs."""
+    try:
+        common = common_dir(root)
+        d = common / "ck" / "hooks"
+        refuse = [f"{p} is not writable (permission denied)"
+                  for p in (_writable_target(d), common / "config", _writable_target(common / "ck"))
+                  if not os.access(p, os.W_OK)]
+        if refuse:
+            status = hook_status(root)
+            return HookStatus(status.installed, status.active, status.intact, status.chained_to,
+                              tuple(refuse) + status.problems)
+        ensure_key(root)
+        current = _git_out(root, "config", "--get", "core.hooksPath")
+        meta = _read_chain(root)
+        if current and not _same_path(root, current, d):
+            chain = current
+        elif _chain_of(meta):
+            chain = str(_chain_of(meta))
+        else:
+            chain = str(common / "hooks")
+        python = sys.executable or "python3"
+        d.mkdir(parents=True, exist_ok=True)
+        shas: Dict[str, str] = {}
+        names = _hook_names(chain)
+        for name in names:
+            text = _script(name, chain, python).encode()
+            shas[name] = _sha(text)
+            path = d / name
+            if not (path.is_file() and path.read_bytes() == text and os.access(path, os.X_OK)):
+                tmp = d / f".{name}.{secrets.token_hex(4)}.tmp"
+                tmp.write_bytes(text)
+                os.chmod(tmp, 0o755)
+                os.replace(tmp, path)
+        _write_json(d / _CHAIN_FILE, {"previous": chain, "python": python, "scripts": shas})
+        if not (current and _same_path(root, current, d)):
+            subprocess.run(["git", "-C", str(root), "config", "core.hooksPath", str(d)], check=True,
+                           capture_output=True, text=True)
+        return hook_status(root)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        detail = (getattr(exc, "stderr", "") or "").strip() or str(exc)
+        status = hook_status(root)
+        return HookStatus(status.installed, status.active, status.intact, status.chained_to,
+                          (f"cannot install ck's git hooks: {detail}",) + status.problems)
+
+
+def ensure_hooks(root: Path, worktree: Optional[Path] = None) -> HookStatus:
+    """Nothing when the hooks are installed and active (an altered script stays `intact: false` for the run-end
+    audit to report, 10.2); otherwise (re)install them, chaining to a moved `core.hooksPath`."""
+    status = hook_status(root, worktree)
+    if status.installed and status.active:
+        return status
+    return install_hooks(root)
+
+
+def hooks_managed(root: Path) -> bool:
+    """True when ck ever installed its hooks in this repository (its key exists)."""
+    try:
+        return (ck_dir(root) / "key").exists()
+    except (OSError, subprocess.CalledProcessError):
+        return False
+
+
+def protected_files_at(root: Path, commit: str) -> Dict[str, str]:
+    """Protected paths (unquoted) of `commit` -> blob oid."""
+    out = subprocess.run(["git", "-C", str(root), "ls-tree", "-r", "-z", commit], capture_output=True).stdout
+    files: Dict[str, str] = {}
+    for entry in out.split(b"\0"):
+        meta, _, name = entry.partition(b"\t")
+        path = name.decode("utf-8", "replace")
+        if path and is_protected(path):
+            files[path] = meta.split()[2].decode()
+    return files
