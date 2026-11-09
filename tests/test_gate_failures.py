@@ -167,7 +167,8 @@ MIXED = {"test_tc1_a": "pass", "test_tc2_b": "fail", "test_tc3_c": "fail", "test
 
 
 def test_tc31_status_only_with_attribute(tmp_path):
-    root = attr_project(tmp_path, statuses={"1": "Done"}, tests=MIXED)
+    # Tasks 2 and 3 Done too, so Task 1's suite is due and the plain gate (1.11: today's selection) runs it.
+    root = attr_project(tmp_path, statuses={"1": "Done", "2": "Done", "3": "Done"}, tests=MIXED)
     _, with_attr, _ = gate_json(root, "--attribute")
     assert with_attr["failures"]
     for f in with_attr["failures"]:

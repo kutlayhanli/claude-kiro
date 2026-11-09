@@ -319,21 +319,16 @@ def test_tc17_redteam_an_excused_test_that_would_pass_on_rerun_stays_excused(tmp
 
 
 def test_tc17_redteam_all_failures_excused_means_no_test_runs_twice(tmp_path):
-    """No candidate at all: nothing is rerun, not even as a harmless "whole suite" pass. Module imports prove it."""
+    """No candidate at all: nothing is rerun, not even as a harmless "whole suite" pass. Test-body counts prove it
+    (module imports do not: the collection check and `--collect-only` probes import each file, by design)."""
     root = h.attr_project(tmp_path, statuses={"1": "Done"})
     put_file(root, "tests/test_calc_tc.py", '''
-        _count("test_import_calc")
-
-
         @pytest.mark.parametrize("n", range(4))
         def test_tc3_fail_{n}(n):
             _count("test_ex_%d" % n)
             assert False
     '''.replace("{n}", "x"))
     put_file(root, "tests/test_more.py", '''
-        _count("test_import_more")
-
-
         def test_tc5_pass():
             _count("test_pass_more")
     ''')
@@ -342,18 +337,14 @@ def test_tc17_redteam_all_failures_excused_means_no_test_runs_twice(tmp_path):
     assert obj["ok"] is True and code == 0
     for n in range(4):
         assert h.counter_lines(root, f"test_ex_{n}") == 1
-    assert h.counter_lines(root, "test_import_calc") == 1, "the test file was collected again: a suite was rerun"
-    assert h.counter_lines(root, "test_import_more") == 1, "the passing file was collected again: a suite was rerun"
-    assert h.counter_lines(root, "test_pass_more") == 1
+    assert sum(h.counter_lines(root, f"test_ex_{n}") for n in range(4)) == 4, "a test body ran again: a suite was rerun"
+    assert h.counter_lines(root, "test_pass_more") == 1, "the passing file ran again: a suite was rerun"
 
 
 def test_tc17_redteam_rerun_of_a_candidate_does_not_rerun_a_whole_file_or_suite(tmp_path):
-    """Candidate in file A; excused failure and passing tests in file B. B must be collected and run once."""
+    """Candidate in file A; excused failure and passing tests in file B. B's tests must run once."""
     root = h.attr_project(tmp_path, statuses=NOT_THREE)
     put_file(root, "tests/test_calc_tc.py", '''
-        _count("test_import_calc")
-
-
         def test_tc1_cand():
             _count("test_tc1_cand")
             assert False
@@ -364,9 +355,6 @@ def test_tc17_redteam_rerun_of_a_candidate_does_not_rerun_a_whole_file_or_suite(
             assert False
     ''')
     put_file(root, "tests/test_more.py", '''
-        _count("test_import_more")
-
-
         def test_tc5_pass_a():
             _count("test_pass_a")
 
@@ -379,7 +367,7 @@ def test_tc17_redteam_rerun_of_a_candidate_does_not_rerun_a_whole_file_or_suite(
     assert h.counter_lines(root, "test_tc1_cand") == 2
     assert h.counter_lines(root, "test_tc3_excused") == 1
     assert h.counter_lines(root, "test_pass_a") == 1 and h.counter_lines(root, "test_pass_b") == 1
-    assert h.counter_lines(root, "test_import_more") == 1, "an unrelated file was collected by a rerun"
+    assert h.counter_lines(root, "test_pass_a") + h.counter_lines(root, "test_pass_b") == 2, "an unrelated file ran again in a rerun"
 
 
 def test_tc17_redteam_same_test_name_in_two_files_one_excused_one_candidate(tmp_path):
