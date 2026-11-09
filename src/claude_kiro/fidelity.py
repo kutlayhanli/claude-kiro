@@ -307,6 +307,14 @@ def parse_models(design_md: str) -> ModelFacts:
                     if (isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name)
                             and isinstance(stmt.annotation, ast.Name)):
                         annotations.setdefault(stmt.target.id, set()).add(stmt.annotation.id)
+    # A Data Models table row `| Model | Field | Type | ... |` types its field too (its Type names an Enum class).
+    for line in design_md.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        cells = [c.strip().strip("`") for c in stripped.strip("|").split("|")]
+        if len(cells) >= 3 and cells[1].isidentifier() and cells[2].isidentifier():
+            annotations.setdefault(cells[1], set()).add(cells[2])
     allowed: Dict[str, FrozenSet[str]] = {}
     for field_name, types in annotations.items():
         members: Set[str] = set()

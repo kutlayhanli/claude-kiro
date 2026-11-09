@@ -21,6 +21,7 @@ commands to pass once every task they verify is Done.
 Used by `ck gate` and by the done-verify hook when a task is marked Done.
 """
 
+import ast
 import json
 import os
 import re
@@ -38,6 +39,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from claude_kiro import properties as props
 from claude_kiro import verified
 from claude_kiro import xdist
+from claude_kiro import fidelity
 from claude_kiro.attribution import (
     Attribution,
     AttributionIndex,
@@ -47,6 +49,7 @@ from claude_kiro.attribution import (
     gate_verdict,
     rerun_command,
     rerun_plan,
+    tc_of_node,
     _launcher,
 )
 from claude_kiro.config import ConfigError, collect_command, install_command, load_config, test_track_validate
@@ -643,6 +646,57 @@ def _right_reason(result: GateResult, project_dir: Path, spec_dir: Path, config:
     ))
 
 
+def _test_node(trees: Dict[str, ast.AST], test: str, line: int) -> str:
+    """The pytest node id of test function `test` in the task's test files: the one whose body holds `line`."""
+    found = []
+    for rel, tree in trees.items():
+        for n in ast.walk(tree):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == test:
+                found.append((rel, n))
+    for rel, n in found:
+        if n.lineno <= line <= (n.end_lineno or n.lineno):
+            return f"{rel}::{test}"
+    return f"{found[0][0]}::{test}" if found else test
+
+
+def _row_fidelity(result: GateResult, project_dir: Path, spec_dir: Path, config: Dict[str, Any], task: SpecTask) -> None:
+    """Row-fidelity (Story 8) on a test-track gate: each mismatch of the task's tests against its test-plan rows
+    fails the check and adds one failure entry marked `row-fidelity`. Unparsed and unmatched items are left to the
+    reviewer. Reads only: the test plan, design and tests are never written (8.6)."""
+    name = f"Task {task.num} tests match their test-plan rows"
+    try:
+        found = fidelity.check_task(project_dir, spec_dir, task.num)
+    except Exception as exc:  # fail closed: the check cannot run without the spec graph
+        result.checks.append(Check(name, False, f"the row-fidelity check could not run: {exc}"))
+        return
+    trees: Dict[str, ast.AST] = {}
+    for rel in (f for f in task.files if is_test_path(f, config)):
+        try:
+            trees[rel] = ast.parse((project_dir / rel).read_text(encoding="utf-8"))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+    lines = []
+    for m in found.mismatches:
+        test = str(m.get("test", ""))
+        line = int(m.get("line", 0) or 0)
+        node = _test_node(trees, test, line)
+        tc = tc_of_node(test)
+        if "allowed" in m:
+            want = f"one of {', '.join(str(a) for a in m['allowed'])}"
+        else:
+            want = str(m.get("expected"))
+        msg = (f"{node} ({tc or 'no TC id'}, line {line}): value {m.get('value')} does not match the test plan, "
+               f"expected {want}")
+        result.failures.append(Failure(
+            node=node, file=node.split("::")[0] if "::" in node else None, kind="assertion", message=msg[:500],
+            truncated=len(msg) > 500, command="", exc_type=None, phase=None, crash_path=None, crash_line=None,
+            detail=msg, missing_command=None,
+        ))
+        result.marks[id(result.failures[-1])] = {"check": "row-fidelity"}
+        lines.append(msg)
+    result.checks.append(Check(name, not lines, "\n".join(lines)))
+
+
 def _validate(result: GateResult, project_dir: Path, commands: List[str], timeout: int, env: Dict[str, str],
               report_dir: Path) -> None:
     """The project's test-track validation commands, run in the gate's checkout (Story 6, 6.1-6.4)."""
@@ -1125,6 +1179,9 @@ def _run_gate(
                 _right_reason(result, project_dir, spec_dir, config, task, task.verify, timeout, env, report_dir)
         if test_gate:  # the validator runs on test-track gates only, never on impl-track gates (6.6)
             _validate(result, project_dir, validate_cmds, timeout, env, report_dir)
+    for task in selected:  # row-fidelity runs on every test-track gate (8.1, 8.2); it reads only (8.6)
+        if task.track == "test":
+            _row_fidelity(result, project_dir, spec_dir, config, task)
 
     result.checks.extend(
         _properties_checks(project_dir, spec_dir, tasks, selected, task_nums is None, assumed_done, config)
