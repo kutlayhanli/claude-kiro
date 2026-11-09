@@ -96,7 +96,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 - `tests/test_gate_attribution_properties.py` - P-1 to P-6
 **Verify:** `uv run pytest -q tests/test_gate_attribution_properties.py`
 **Properties:** P-1, P-2, P-3, P-4, P-5, P-6
-**Verifies:** Task 6 (P-5a at the truncation and kind seams), Task 18 (P-1 to P-4, P-6 at the attribution seams), Task 19 (P-5b through the real CLI)
+**Verifies:** Task 6 (P-5a at the truncation and kind seams), Task 18 (P-1 to P-4, P-6 at the attribution seams), Task 19 (P-5b through the real CLI), Task 20 (P-5b through `ck gate --attribute`: test_tc173_p5b_real_cli_kinds_and_counts runs in its Verify)
 
 **Acceptance:**
 - [x] Generators cover every surface form and negative listed in the P-1 to P-6 rows (node forms, selector forms, text lengths 0/1/499/500/501/5000, exception classes, phases)
@@ -119,7 +119,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Files:**
 - `tests/test_gate_failures_redteam.py` - adversarial 3.3, 3.5 cases
 **Verify:** `uv run pytest -q tests/test_gate_failures_redteam.py`
-**Verifies:** Task 19 (red team of 3.3, 3.5 through `ck gate --json`)
+**Verifies:** Task 19 (red team of 3.3, 3.5 through `ck gate --json`), Task 20 (the `--attribute` cases: long_message_under_attribute, under_every_flag[args1]), Task 31 (config_error_only: a bad test_track.validate fails a check)
 
 **Acceptance:**
 - [x] Written from the requirements only, never from the implementation
@@ -470,7 +470,6 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 - [x] Every entry's kind is one of the five kinds (3.2); messages over 500 characters are truncated and marked, never dropped (3.5)
 - [x] A passing gate prints `"failures": []`; the field is never omitted (3.3)
 - [ ] Every field `ck gate` and its consumers provide today is still there (3.10), and `ck gate` without `--json` prints exactly today's report (1.11)
-- [ ] A nested pytest run started by a gated test never adds entries to the gate's failures (TC-191)
 - [x] A missing-command failure carries `missingCommand` with its providers (12.5)
 
 **Dependencies:** Task 6 (calls the failure readers and `classify_kind`), Task 18 (fills TC id and tasks through `AttributionIndex`), Task 13 (reads providers from the graph's provides edges), Task 1 (its tests are the oracle), Task 3 (its tests are the oracle), Task 4 (its tests are the oracle), Task 5 (its tests are the oracle), Task 17 (its tests are the oracle)
@@ -488,9 +487,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 - `src/claude_kiro/gate.py` - attributed command set with node-ID coverage, attribution, one rerun per candidate, `gate_verdict`, `--install`, `to_compact` and the report file
 - `src/claude_kiro/cli/main.py` - `ck gate --attribute`, `--install`, `--compact`
 **Verify:** `uv run pytest -q tests/test_gate_attribution.py -k "not tc11_"` `uv run pytest -q tests/test_gate_attribution_redteam.py` `uv run pytest -q tests/test_attributed_gates_redteam.py -k "tc15_redteam or tc17_redteam"` `uv run pytest -q tests/test_gate_failures.py -k "tc31_ or tc36_gate_attribute or tc183_"` `uv run pytest -q tests/test_spec_graph.py -k "tc14_"` `uv run pytest -q -m serial tests/test_unattended_perf.py -k "tc169_"` `uv run pytest -q tests/test_gate_failures.py -k "tc191_"` `uv run pytest -q tests/test_gate_failures_redteam.py -k "long_message_under_attribute or (under_every_flag and args1)"` `uv run pytest -q tests/test_gate_attribution_properties.py -k "tc173_p5b"`
-**Verified by:** Task 5 (TC-31, TC-183 and TC-36's `--attribute` source), Task 7 (TC-14 through `ck gate --attribute`), Task 9 (TC-169), Task 14 (TC-1 to TC-10, TC-12, TC-13, TC-15 to TC-17, TC-26b, TC-27b, TC-193, TC-195), Task 15 (red team of 1.3 through `ck gate --attribute`), Task 16 (CLI cases for 2.4, 2.5)
+**Verified by:** Task 5 (TC-31, TC-183 and TC-36's `--attribute` source), Task 7 (TC-14 through `ck gate --attribute`), Task 9 (TC-169), Task 14 (TC-1 to TC-10, TC-12, TC-13, TC-15 to TC-17, TC-26b, TC-27b, TC-193, TC-195), Task 15 (red team of 1.3 through `ck gate --attribute`), Task 16 (CLI cases for 2.4, 2.5), Task 3 (P-5b through `ck gate --attribute`), Task 4 (its `--attribute` red-team cases)
 
 **Acceptance:**
+- [ ] A nested pytest run started by a gated test never adds entries to the gate's failures (TC-191)
 - [ ] `ck gate SPEC --attribute --json` runs the suites today's gate excuses and attributes every failure (1.1)
 - [ ] A failure whose tasks are all Done (or gated) is a regression after one failed rerun; one that passes on rerun is flaky and does not make the gate red (1.2, 2.4)
 - [ ] Excused failures list their unfinished tasks, are never rerun and never make the gate red (1.3, 2.5)
@@ -739,7 +739,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Files:**
 - `src/claude_kiro/gate.py` - test-track right-reason check; `test_track.validate` check; Config check on `ConfigError`
 **Verify:** `uv run pytest -q tests/test_right_reason.py tests/test_right_reason_redteam.py tests/test_test_track_validate.py tests/test_test_track_validate_redteam.py` `uv run pytest -q tests/test_gate_failures_redteam.py -k "config_error_only"`
-**Verified by:** Task 23 (TC-50 to TC-54, TC-56, TC-57, TC-181), Task 24 (TC-58 to TC-63), Task 25 (red team of 6.5, 6.6), Task 107 (red team of Story 5 through `ck gate`)
+**Verified by:** Task 23 (TC-50 to TC-54, TC-56, TC-57, TC-181), Task 24 (TC-58 to TC-63), Task 25 (red team of 6.5, 6.6), Task 107 (red team of Story 5 through `ck gate`), Task 4 (config_error_only through `ck gate --json`)
 
 **Acceptance:**
 - [ ] A not-due test task's new tests run against the integration branch with its test files, and each failure is classified (5.1, 5.2)
