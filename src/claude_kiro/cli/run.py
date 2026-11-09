@@ -259,6 +259,16 @@ def credential_env_names(environ: Mapping[str, str]) -> List[str]:
     return sorted(n for n in environ if CREDENTIAL_ENV.search(n) and n not in CREDENTIAL_ENV_KEEP)
 
 
+def _ck_denied_paths(project: Path) -> List[str]:
+    try:
+        from .. import protect
+
+        ck = protect.ck_dir(project)
+        return [str(ck / "hooks"), str(ck / "key")]
+    except Exception:  # noqa: BLE001 - not a git repository: nothing of ck's to protect
+        return []
+
+
 def sandbox_settings(project: Path, allowed_domains: List[str], worktree_dir: Optional[Path] = None,
                      environ: Optional[Mapping[str, str]] = None) -> Dict[str, Any]:
     """`--settings` JSON for an unattended run: the Bash sandbox on, no way around it.
@@ -273,6 +283,7 @@ def sandbox_settings(project: Path, allowed_domains: List[str], worktree_dir: Op
     if worktree_dir is not None and not worktree_dir.resolve().is_relative_to(project):
         extra = [str(worktree_dir.resolve())]  # the project itself is writable by default
     env_names = credential_env_names(os.environ if environ is None else environ)
+    deny_write = _ck_denied_paths(project)
     return {
         "sandbox": {
             "enabled": True,
@@ -283,6 +294,9 @@ def sandbox_settings(project: Path, allowed_domains: List[str], worktree_dir: Op
                 "denyRead": ["~/"],
                 "allowRead": [str(project), *extra, *SANDBOX_HOME_READABLE],
                 "allowWrite": [*extra, *SANDBOX_HOME_WRITABLE],
+                # hook code, chain.json, the interpreter record and the key: never editable from inside;
+                # <common>/ck/tokens and <common>/ck/<spec> stay writable (landings need them).
+                "denyWrite": deny_write,
             },
             "network": {
                 "allowedDomains": list(allowed_domains),
@@ -503,6 +517,16 @@ def run(spec: str, extra: tuple, model: str, effort: str, budget: float, max_tur
     trust = trust_warning(cwd)
     if trust:
         warnings.append(trust)
+    if not dry_run:
+        # Unsandboxed, so the repository config and .git/hooks are writable here; inside the sandbox they are not.
+        try:
+            from .. import protect
+
+            hooks = protect.install_hooks(cwd)
+            for problem in hooks.problems:
+                warnings.append(f"ck's git hooks: {problem}")
+        except Exception as exc:  # noqa: BLE001 - reported before launch, never raised (9.10)
+            warnings.append(f"cannot install ck's git hooks: {exc}")
 
     prompt = " ".join([COMMAND_PROMPTS[command].format(spec=name), *(shlex.quote(a) for a in extra)])
     argv = [
