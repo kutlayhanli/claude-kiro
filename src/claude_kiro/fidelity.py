@@ -55,6 +55,7 @@ class RowFacts:
     thresholds: Tuple[Tuple[Decimal, bool], ...]   # (value, percent form) for each number in the Scenario
     is_range: bool                                  # the row states one range: thresholds are its two ends
     dates: Tuple[date, ...]
+    words: FrozenSet[str] = frozenset()             # the Scenario's words, as written (the enum members it states)
 
 
 @dataclass(frozen=True)
@@ -180,6 +181,10 @@ def _walk(node: ast.AST, test: Optional[str], out: List[TestValue]) -> None:
             _compare_values(node, test, out)
         elif isinstance(node, ast.keyword) and node.arg is not None:
             _named_value(node.arg, node.value, test, out)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    _named_value(target.id, node.value, test, out)
         elif isinstance(node, ast.Dict):
             for key, value in zip(node.keys, node.values):
                 if isinstance(key, ast.Constant) and isinstance(key.value, str) and value is not None:
@@ -198,7 +203,13 @@ def extract_test_values(source: str, path: str) -> List[TestValue]:
     tree = ast.parse(source, filename=path)
     out: List[TestValue] = []
     _walk(tree, None, out)
-    return out
+    # A threshold-like local set from a number literal is fed that literal: `assert fee_threshold > 0` only checks the local.
+    assigned = {(fn.name, t.id) for fn in ast.walk(tree)
+                if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) and fn.name.startswith("test")
+                for n in ast.walk(fn) if isinstance(n, ast.Assign) and _number_of(n.value) is not None
+                for t in n.targets if isinstance(t, ast.Name)}
+    return [v for v in out
+            if not (v.role == "asserted" and v.kind == "number" and _is_threshold(v.name) and (v.test, v.name) in assigned)]
 
 
 def _test_names(source: str) -> List[str]:
@@ -248,7 +259,7 @@ def _row_facts(tc_id: str, scenario: str) -> RowFacts:
             thresholds.append((value, m.group(2) is not None))
     is_range = len(thresholds) == 2 and RANGE_RE.search(stripped) is not None
     return RowFacts(tc_id=tc_id, thresholds=tuple(thresholds), is_range=is_range,
-                    dates=tuple(sorted(set(dates))))
+                    dates=tuple(sorted(set(dates))), words=frozenset(re.findall(r"\w+", scenario)))
 
 
 def parse_row(test_plan_md: str, tc_id: str) -> Optional[RowFacts]:
@@ -386,6 +397,14 @@ def _check_numbers(test: str, items: List[TestValue], row: RowFacts, checked: Li
                                "rule": "threshold"})
 
 
+def _enum_matches(v: TestValue, allowed: FrozenSet[str], row: RowFacts) -> bool:
+    """A member the model defines matches as written (8.2). A string in another case equals a value only where the
+    row states that member: P-14's `"buy"` for a row saying BUY matches, TC-69's `"Buy"` for a row with no side does not."""
+    if v.value in allowed:
+        return True
+    return v.kind == "string" and any(m.upper() == v.value.upper() and m in row.words for m in allowed)
+
+
 def _check_test(test: str, items: List[TestValue], row: RowFacts, models: ModelFacts,
                 checked: List[TestValue], mismatches: List[Dict[str, object]],
                 unparsed: List[Dict[str, object]]) -> None:
@@ -414,7 +433,7 @@ def _check_test(test: str, items: List[TestValue], row: RowFacts, models: ModelF
                     unparsed.append(_item(test, v, "no model for field"))
                 continue
             allowed = models.allowed[v.name]
-            if v.value.upper() in {m.upper() for m in allowed}:
+            if _enum_matches(v, allowed, row):
                 checked.append(v)
             else:
                 mismatches.append({"test": test, "value": v.value, "allowed": sorted(allowed),

@@ -766,10 +766,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 - `src/claude_kiro/gate.py` - row-fidelity check on test-track gates
 **Verify:** `uv run pytest -q tests/test_row_fidelity.py tests/test_row_fidelity_redteam.py -k "ongate"`
 **Verified by:** Task 26 (the gate-side TC-69 and TC-74 cases (`ongate`)), Task 27 (gate-side cases (`ongate`))
+**Deviations:** Changes outside the listed file, each needed by this task's Verify. `src/claude_kiro/fidelity.py`: enum membership is exact unless the row states the member (reconciles TC-69 with P-14; design.md's `check_values` rules updated), Data Models table rows type their fields, and literal assignments to named locals are extracted. `src/claude_kiro/cli/worktree.py`: `ck lint --fidelity [--task N] --json` as Task 53 describes it, because the control step of `test_tc71_redteam_ongate_unparsed_items_are_not_gate_failures` calls it. Task 53 still owns the rest of its work, including the `not ongate` cases.
 
 **Acceptance:**
-- [ ] A test-track gate with a mismatched value fails, with D3 entries marked `row-fidelity` (8.1, 8.2)
-- [ ] After the gate the test plan, design and tests are unchanged (8.6)
+- [x] A test-track gate with a mismatched value fails, with D3 entries marked `row-fidelity` (8.1, 8.2)
+- [x] After the gate the test plan, design and tests are unchanged (8.6)
 
 **Dependencies:** Task 31 (extends the test-track check path Task 31 adds to `run_gate`), Task 30 (calls `fidelity.check_task`), Task 26 (its tests are the oracle), Task 27 (its tests are the oracle)
 **Complexity:** Low

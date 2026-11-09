@@ -175,10 +175,11 @@ def _record_failed(spec: str, key: str, ids) -> None:
 @click.argument("spec")
 @click.option("--json", "as_json", is_flag=True)
 @click.option("--contracts", is_flag=True, help="Instead: flag keys and status values the spec's test files use that design.md never names")
-@click.option("--task", "tasks", multiple=True, help="With --contracts: only these test tasks' files (repeatable)")
+@click.option("--fidelity", is_flag=True, help="Instead: check test-track tasks' test values against their test-plan rows and design models")
+@click.option("--task", "tasks", multiple=True, help="With --contracts or --fidelity: only these test tasks (repeatable)")
 @click.option("--base", help="With --contracts: check the test files changed since this git ref instead")
 @click.option("--strict", is_flag=True, help="With --contracts: exit 1 when anything is flagged (default: warn)")
-def lint(spec: str, as_json: bool, contracts: bool, tasks, base, strict: bool):
+def lint(spec: str, as_json: bool, contracts: bool, fidelity: bool, tasks, base, strict: bool):
     """Check SPEC's task plan: dependency cycles, verify-order cycles, reasonless dependencies, untagged risk-path tasks, critical path.
 
     Exits 1 if there is a cycle (the plan can't be executed as written).
@@ -186,6 +187,9 @@ def lint(spec: str, as_json: bool, contracts: bool, tasks, base, strict: bool):
     """
     if contracts:
         _lint_contracts(spec, as_json, tasks, base, strict)
+        return
+    if fidelity:
+        _lint_fidelity(spec, as_json, tasks)
         return
     result = _plan(Path.cwd(), spec, set())
     if as_json:
@@ -231,6 +235,35 @@ def lint(spec: str, as_json: bool, contracts: bool, tasks, base, strict: bool):
             click.echo(f"  ℹ critical path ({len(path)} of {len(result['remaining'])} open tasks): {' -> '.join(path)}")
             click.echo(f"  ℹ ready now: {', '.join(result['ready']) or 'none'}")
     if result["cycles"] or result["verifyCycles"]:
+        sys.exit(1)
+
+
+def _lint_fidelity(spec: str, as_json: bool, tasks) -> None:
+    """`ck lint --fidelity`: the row-fidelity lists of the given test tasks (default: every test-track task). Reads only; exits 1 on mismatches."""
+    from dataclasses import asdict
+
+    from ..fidelity import check_task
+    from ..hooks._shared.spec_parser import parse_tasks
+
+    project_dir = Path.cwd()
+    spec_dir = _spec_dir(project_dir, spec)
+    nums = list(tasks) or [t.num for t in parse_tasks(spec_dir / "tasks.md") if t.track == "test"]
+    found = [check_task(project_dir, spec_dir, num) for num in nums]
+    result = {
+        "checked": [asdict(v) for r in found for v in r.checked],
+        "mismatches": [dict(m) for r in found for m in r.mismatches],
+        "unparsed": [dict(u) for r in found for u in r.unparsed],
+        "unmatched": [u for r in found for u in r.unmatched],
+    }
+    if as_json:
+        click.echo(json.dumps(result, indent=2))
+    else:
+        click.echo(f"Row fidelity for {spec_dir.name}: {len(result['checked'])} checked, {len(result['mismatches'])} mismatched, "
+                   f"{len(result['unparsed'])} unparsed, {len(result['unmatched'])} unmatched")
+        for m in result["mismatches"]:
+            want = m.get("allowed", m.get("expected"))
+            click.echo(f"  ✗ {m['test']} line {m['line']}: {m['value']} (expected {want})")
+    if result["mismatches"]:
         sys.exit(1)
 
 

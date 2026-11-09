@@ -869,7 +869,9 @@ class FidelityResult:
 ```
 
 `check_values` rules: an enum value compared with or fed as field `f` where design models define `f`'s allowed
-set and the value is outside it -> mismatch; a threshold-like number (a comparison operand, or a name containing
+set and the value is outside it -> mismatch (membership is exact; a string in another case counts as the member
+only when the test's row states that member, so `"buy"` matches a row saying BUY and `"Buy"` under a row naming no
+side does not); a threshold-like number (a comparison operand, or a name containing
 `threshold`, `min`, `max`, `limit`, `cutoff`) when the row states exactly one threshold and the test's
 threshold-like numbers do not include it (percent and fraction forms both accepted) -> mismatch; an ISO date fed
 by the test when the row lists dates and the date is not among them -> mismatch. A row with several thresholds, a
