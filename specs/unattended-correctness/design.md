@@ -281,7 +281,9 @@ ck gate SPEC [--task N ...] [--no-reuse] [--json [--compact]] [--attribute] [--i
   task's pytest Verify is collected with `--collect-only -q` under its own launcher prefix (distinct commands
   collected once per gate, up to `os.cpu_count()` at a time). A Verify whose collected nodes all ran in `verify`
   is covered and skipped; otherwise only its nodes that did not run are run, as node-ID arguments after its
-  launcher prefix (`rerun_command`'s form), so no node runs twice. A Verify that fails to collect runs whole.
+  launcher prefix (`rerun_command`'s form), so no node runs twice. A Verify that fails to collect runs whole; one
+  that selects no tests (pytest exit 5) or names a path that does not exist (exit 4, "file or directory not found")
+  has nothing to attribute, so it is not run and is listed in `warnings`. A plain task gate still fails on it.
   Other runners' Verify commands always run. Failures are attributed (1.1-1.8),
   regression candidates are rerun once (2.4), and the gate is red iff `regressions + unattributed > 0` or a
   non-command check fails (acceptance boxes, tamper, properties as today). Excused failures never make it red

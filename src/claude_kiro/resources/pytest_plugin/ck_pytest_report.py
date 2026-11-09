@@ -17,10 +17,11 @@ import re
 ENV_REPORT = "CK_GATE_REPORT"
 ENV_ROOT = "CK_GATE_ROOT"
 ENV_COLLECT = "CK_GATE_COLLECT"
+ENV_ONLY = "CK_GATE_ONLY"  # a file of node IDs, one per line: run exactly these (a path holding "[" cannot be an argument)
 PLUGIN_NAME = "ck_pytest_report"
 DETAIL_LIMIT = 4000
 
-_state = {"report": None, "collect": False, "root": None}
+_state = {"report": None, "collect": False, "root": None, "only": None}
 
 
 def _strip_addopts():
@@ -49,8 +50,16 @@ def pytest_configure(config):
     report = os.environ.pop(ENV_REPORT, None)
     root = os.environ.pop(ENV_ROOT, None)
     collect = os.environ.pop(ENV_COLLECT, None)
+    only = os.environ.pop(ENV_ONLY, None)
     _strip_addopts()
     _state["report"] = None
+    _state["only"] = None
+    if only and root and os.path.realpath(str(config.rootpath)) == os.path.realpath(root):
+        try:
+            with open(only, encoding="utf-8") as fh:
+                _state["only"] = {line.rstrip("\n") for line in fh if line.strip()}
+        except OSError:
+            _state["only"] = None
     if not report:
         return
     if hasattr(config, "workerinput"):  # an xdist worker never writes
@@ -130,6 +139,20 @@ def _crash(longrepr, exc_hint=None):
     if path is not None:
         path = _relative(path)
     return exc, message, path, line, text[:DETAIL_LIMIT]
+
+
+def pytest_collection_modifyitems(config, items):
+    only = _state["only"]
+    if only is None:
+        return
+    def wanted(item):  # a node ID, or a whole file named by its path
+        return item.nodeid in only or item.nodeid.split("::", 1)[0] in only
+
+    kept = [item for item in items if wanted(item)]
+    dropped = [item for item in items if not wanted(item)]
+    if dropped:
+        config.hook.pytest_deselected(items=dropped)
+        items[:] = kept
 
 
 def pytest_collection_finish(session):
