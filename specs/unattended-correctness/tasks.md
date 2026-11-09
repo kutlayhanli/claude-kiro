@@ -1466,7 +1466,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 63: Start bench OpenCode runs with `ck worktree start`
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 9.1, 16.2
 **Description:** In `src/claude_kiro/bench_opencode.py`, make `_integration_target` call `ck worktree start` (hooks, baseline, claim sweep) instead of `ck worktree integration`, parsing `ck-run-start/1` and returning the same value as today. Foundation task: its Verify is a smoke check (the existing bench OpenCode run suite); 9.1 and 16.2 are verified at Task 50 (run start) and by the reruns at Task 104.
@@ -1476,7 +1476,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 
 **Acceptance:**
 - [ ] A bench OpenCode arm's integration worktree has the hooks installed and stale claims released (9.1, 16.2)
-- [ ] `_integration_target` returns the same value as before
+- [x] `_integration_target` returns the same value as before
 
 **Dependencies:** Task 50 (calls `ck worktree start`)
 **Complexity:** Low
