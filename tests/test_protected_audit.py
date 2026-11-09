@@ -147,6 +147,24 @@ def test_tc96_ref_file_bypass_lists_exactly_the_three_changes(tmp_path):
     assert len(obj["drift"]) == 3
 
 
+def test_tc96_a_ref_re_created_by_rename_is_drift(tmp_path):
+    """`git branch -m` reaches no reference-transaction hook for the new name, so only the audit can see this."""
+    root, _, _ = audit_repo(tmp_path)
+    (root / ".claude" / "evil.md").write_text("evil\n")
+    h.git(root, "add", "-A")
+    h.git(root, "-c", "core.hooksPath=/dev/null", "commit", "-qm", "protected change on main")
+    assert h.raw(root, "branch", "feat/protected", "main").returncode == 0
+    assert h.raw(root, "worktree", "remove", "--force", str(h.integration_worktree(root))).returncode == 0
+    assert h.raw(root, "branch", "-D", "integrate/demo").returncode == 0
+    out = h.raw(root, "branch", "-m", "feat/protected", "integrate/demo")
+    assert out.returncode == 0, f"setup: the rename is expected to pass the hook: {out.stderr}"
+    assert h.ref(root, "integrate/demo") == h.ref(root, "main")
+    code, obj = audit(root)
+    assert code == 1, obj
+    assert obj["clean"] is False
+    assert drift_map(obj) == {".claude/evil.md": "added"}
+
+
 # --- TC-97 ----------------------------------------------------------------------
 
 

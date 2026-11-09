@@ -213,8 +213,9 @@ def audit_decision(approved: Optional[ApprovedState], current: Mapping[str, str]
     complete = isinstance(files, Mapping)
     drift: List[Dict[str, str]] = []
     if not complete:
-        problems.append("the approved protected state is missing or unreadable; run `ck worktree integration` "
-                        "or approve the integration again")
+        problems.append("the approved protected state is missing or unreadable; when it is missing, `ck worktree "
+                        "integration` records it again; when it is damaged, review the protected files and delete "
+                        "it first, since ck never reseals a state it cannot verify")
     else:
         for path in sorted(set(files) | set(current)):
             a, c = files.get(path), current.get(path)
@@ -378,7 +379,10 @@ def _state_payload(spec: str, state: ApprovedState) -> Dict[str, object]:
 def read_approved_state(root: Path, spec: str, ref: Optional[str] = None) -> Optional[ApprovedState]:
     """The sealed state of `spec`, or None when missing, unreadable, unsealed, or of another spec or ref."""
     try:
-        data = json.loads((_spec_dir(root, spec) / "protected.json").read_text())
+        path = _spec_dir(root, spec) / "protected.json"
+        if not path.is_file():  # a directory or a FIFO counts as unreadable, without blocking on it
+            return None
+        data = json.loads(path.read_text())
         state = ApprovedState(ref=str(data["ref"]), commit=str(data["commit"]),
                               files={str(k): str(v) for k, v in dict(data["files"]).items()},
                               approvals=tuple(dict(a) for a in data["approvals"]))
@@ -392,6 +396,15 @@ def read_approved_state(root: Path, spec: str, ref: Optional[str] = None) -> Opt
     if not hmac.compare_digest(_seal(key, _state_payload(spec, state)), mac):
         return None
     return state
+
+
+def approved_state_file(root: Path, spec: str) -> Optional[Path]:
+    """The path of `spec`'s state file when something is there, verified or not; None when nothing is."""
+    try:
+        path = _spec_dir(root, spec) / "protected.json"
+    except ValueError:
+        return None
+    return path if os.path.lexists(path) else None
 
 
 def read_refs_index(root: Path) -> Dict[str, str]:
@@ -435,6 +448,12 @@ def record_approved_state(root: Path, spec: str, ref: str, commit: str, files: M
 
 # --------------------------------------------------------------------------- git hooks
 
+def hook_status_json(status: HookStatus) -> Dict[str, Any]:
+    """`status` as JSON consumers read it: the one place that names `chainedTo`."""
+    return {"installed": status.installed, "active": status.active, "intact": status.intact,
+            "chainedTo": status.chained_to, "problems": list(status.problems)}
+
+
 # Every client-side hook name git runs; each gets a script in <common>/ck/hooks that chains to the project's own.
 HOOK_NAMES = (
     "applypatch-msg", "pre-applypatch", "post-applypatch", "pre-commit", "pre-merge-commit", "prepare-commit-msg",
@@ -443,6 +462,9 @@ HOOK_NAMES = (
     "push-to-checkout", "pre-receive", "update", "proc-receive", "post-receive", "post-update",
 )
 CK_HOOKS = ("reference-transaction", "pre-merge-commit")
+# Known gap: `git symbolic-ref` and the new name of `git branch -m` / `-c` reach no reference-transaction hook
+# (git 2.43; the hook sees only the delete of the old name), so an integrate/* ref re-created that way is not
+# refused here. The run-end audit reports it as drift (design, Security).
 # Hooks whose mere presence changes what git does (push-to-checkout replaces the updateInstead worktree update,
 # proc-receive takes over receive-pack ref updates): installed only when the chain target provides them.
 _PRESENCE_HOOKS = ("push-to-checkout", "proc-receive")

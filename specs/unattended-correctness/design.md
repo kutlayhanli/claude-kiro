@@ -1146,11 +1146,20 @@ Entries for the criteria that state an error, refusal or fallback.
 
 ### Security
 
-- **What the hooks stop and what they don't.** The `reference-transaction` hook runs on every ref update, so
-  `git merge --no-verify`, `git update-ref` and `git reset` into `integrate/*` are all checked. An agent with a
+- **What the hooks stop and what they don't.** The `reference-transaction` hook runs on every ref update git makes
+  through a ref transaction, so `git merge --no-verify`, `git update-ref` and `git reset` into `integrate/*` are all
+  checked. Two plain git commands are outside it (seen on git 2.43): `git symbolic-ref`, and the new name of
+  `git branch -m` / `-c`, where the hook sees only the delete of the old name. After a delete, either can re-create
+  an `integrate/*` ref with protected changes and no token, against 9.2 and 9.12. The hook cannot close this; the
+  run-end audit reports the result as drift against the sealed approved state. An agent with a
   shell can still remove the hooks, reset `core.hooksPath`, or read ck's key and forge a token; these are
   deliberate circumventions, not plain git, and the run-end audit reports them (hooks inactive or altered, drift
   against the sealed approved state). PLAN D6 accepts that boundary.
+- **The approved state is only as safe as its directory.** `<common>/ck/<spec>/` stays writable in the sandbox. ck
+  never reseals a `protected.json` that exists and fails to verify (the audit stays incomplete; a create is refused
+  and names the manual step), but it does record a baseline when the file is absent (10.4). So deleting the file
+  and running `ck worktree integration` resets the baseline, and the audit does not see that. It is also the manual
+  recovery the refusal names, for me, from my own terminal. PLAN D6 accepts it as a deliberate circumvention.
 - **Approval needs me.** `approval_decision` requires a TTY on stdin and stdout and the typed code. An agent's
   Bash tool has no TTY; a pseudo-terminal wrapper could fake one, which is again a deliberate circumvention the
   audit sees (an approval record with no matching park note is listed).

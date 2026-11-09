@@ -76,8 +76,8 @@ def git(cwd: Path, *args: str, check: bool = True, env: Optional[Mapping[str, st
 
 
 def _commit_shape(root: Path, commit: str) -> Tuple[str, List[str]]:
-    """(tree, parents) of `commit`."""
-    tree, _, parents = git(root, "show", "-s", "--format=%T%n%P", commit).stdout.strip().partition("\n")
+    """(tree, parents) of `commit`, which may name an annotated tag (`git show` would print the tag header first)."""
+    tree, _, parents = git(root, "log", "-1", "--format=%T%n%P", commit).stdout.strip().partition("\n")
     return tree.strip(), parents.split()
 
 
@@ -120,7 +120,10 @@ def _git_merge(root: Path, target: Path, into: str, branch: str, message: str) -
     return git(target, "merge", "--no-ff", "-m", message, branch, check=False, **extra)
 
 
-def _git_reset(root: Path, target: Path, into: str, commit: str) -> subprocess.CompletedProcess:
+def _git_reset(root: Path, target: Path, into: str, commit: str) -> None:
+    """`git reset --hard` of `target` to `commit`, with a landing token when `into` is an integrate/* branch.
+
+    Raises WorktreeError when git refuses: land() must not carry on over commits it failed to take back."""
     env = None
     if into.startswith("integrate/"):
         old = git(target, "rev-parse", "HEAD").stdout.strip()
@@ -128,13 +131,11 @@ def _git_reset(root: Path, target: Path, into: str, commit: str) -> subprocess.C
         env = _token_env(root, into, old, tree, parents, f"reset {into} to {commit[:12]}",
                          _tree_protected(root, old, tree))
     extra = {"env": env} if env else {}
-    return git(target, "reset", "--hard", "-q", commit, check=False, **extra)
+    git(target, "reset", "--hard", "-q", commit, **extra)
 
 
 def _ensure_hooks(root: Path, worktree: Path, notes: Optional[List[Dict]] = None, managed_only: bool = False) -> None:
     """`protect.ensure_hooks`; a re-install or a problem is appended to `notes` (never raises)."""
-    from dataclasses import asdict as _asdict
-
     from claude_kiro import protect
 
     try:
@@ -145,11 +146,12 @@ def _ensure_hooks(root: Path, worktree: Path, notes: Optional[List[Dict]] = None
             return
         status = protect.ensure_hooks(root, worktree)
         if notes is not None:
-            notes.append({**_asdict(status), "reinstalled": bool(status.installed and status.active and status.intact),
-                          "problems": list(status.problems)})
+            notes.append({**protect.hook_status_json(status),
+                          "reinstalled": bool(status.installed and status.active and status.intact)})
     except Exception as exc:  # noqa: BLE001 - hooks never turn a landing into a crash
         if notes is not None:
-            notes.append({"installed": False, "active": False, "intact": False, "problems": [str(exc)]})
+            notes.append({"installed": False, "active": False, "intact": False, "chainedTo": None,
+                          "problems": [str(exc)]})
 
 
 def _cleanup_merged(root: Path, target: Path, path: Path, branch: str) -> str:
@@ -511,16 +513,19 @@ def _hook_detail(notes: List[Dict]) -> str:
     last = notes[-1]
     if last.get("problems") and not last.get("reinstalled"):
         return f"; git hooks not installed: {'; '.join(last['problems'])}"
-    return "; git hooks reinstalled" + (f" (chained to {last['chained_to']})" if last.get("chained_to") else "")
+    return "; git hooks reinstalled" + (f" (chained to {last['chainedTo']})" if last.get("chainedTo") else "")
 
 
-def _record_baseline(root: Path, spec: str, branch: str, only_missing: bool) -> None:
-    """The approved protected state of a new integration branch: what its tip carries (10.4); best effort."""
+def _record_baseline(root: Path, spec: str, branch: str) -> None:
+    """The approved protected state of an integration branch that has none: what its tip carries (10.4); best effort.
+
+    Only when no state file exists: one that fails to verify is left alone for the audit to report as incomplete
+    (10.5), since resealing it would launder whatever damaged it."""
     from claude_kiro import protect
 
     ref = f"refs/heads/{branch}"
     try:
-        if only_missing and protect.approved_state_for_ref(root, ref) is not None:
+        if protect.approved_state_file(root, spec) is not None:
             return
         tip = git(root, "rev-parse", ref).stdout.strip()
         protect.record_approved_state(root, spec, ref, tip, protect.protected_files_at(root, tip), {"by": "baseline"})
@@ -540,36 +545,50 @@ def create_integration(root: Path, spec: str, base: Optional[str] = None) -> Out
     _ensure_hooks(root, path if path.exists() else root, notes)
     from claude_kiro import protect
 
-    def status() -> Dict:
-        from dataclasses import asdict as _asdict
+    ref = f"refs/heads/{branch}"
+    state_file = protect.approved_state_file(root, spec)  # by spec: a ref lost from refs.json still has its state
+    approved = protect.read_approved_state(root, spec, ref) if state_file is not None else None
+    unverified = state_file is not None and approved is None
+    recover = (f"delete {state_file} in your own terminal and run `ck worktree integration {spec} --base {base}` again")
 
+    def status() -> Dict:
         st = protect.hook_status(root, path if path.exists() else root)
-        out = _asdict(st)
+        out = protect.hook_status_json(st)
         out["problems"] = list(dict.fromkeys([*(notes[-1]["problems"] if notes else []), *st.problems]))
         return out
 
+    def detail(text: str) -> str:
+        note = (f"; the approved protected state {state_file} cannot be verified and was left as it is, so the audit "
+                "will report incomplete" if unverified else "")
+        return text + _hook_detail(notes) + note
+
     if path.exists():
-        _record_baseline(root, spec, branch, only_missing=True)
-        return Outcome("integration", "EXISTS", "reused" + _hook_detail(notes), rel, branch, hooks=status())
+        _record_baseline(root, spec, branch)
+        return Outcome("integration", "EXISTS", detail("reused"), rel, branch, hooks=status())
     path.parent.mkdir(parents=True, exist_ok=True)
     if branch_exists(root, branch):
         git(root, "worktree", "add", str(path), branch)
     else:
+        if unverified:
+            raise WorktreeError(
+                f"refused: creating {ref}: the approved protected state {state_file} cannot be verified, and ck will "
+                f"not reseal it from {base}. To accept {base} as the new approved state, review its protected files, "
+                f"then {recover}.")
         tree, parents = _commit_shape(root, base)
-        ref = f"refs/heads/{branch}"
-        approved = protect.approved_state_for_ref(root, ref)
         base_files = protect.protected_files_at(root, base)
         if approved is not None and dict(approved.files) != base_files:
             # 9.12: the approved state exists and the base differs from it; never reseal it from the base
             drift = sorted(k for k in {*base_files, *approved.files} if base_files.get(k) != approved.files.get(k))
             raise WorktreeError(
                 f"refused: creating {ref} from {base} carries protected files that differ from the approved state: "
-                f"{', '.join(drift)}. Review them, then approve in your own terminal with `ck worktree approve SPEC TASK`.")
+                f"{', '.join(drift)}. `ck worktree approve SPEC TASK` lands a task into an existing integrate branch, "
+                f"so it cannot re-create this one. To accept {base} as the new approved state, review those files, "
+                f"then {recover}.")
         env = _token_env(root, branch, protect.ZEROS, tree, parents, f"create {branch} from {base}",
                          sorted(base_files))
         git(root, "worktree", "add", "-b", branch, str(path), base, **({"env": env} if env else {}))
-        _record_baseline(root, spec, branch, only_missing=True)
-    return Outcome("integration", "CREATED", f"from {base}" + _hook_detail(notes), rel, branch, hooks=status())
+        _record_baseline(root, spec, branch)
+    return Outcome("integration", "CREATED", detail(f"from {base}"), rel, branch, hooks=status())
 
 
 def claim(root: Path, spec: str, num: str, owner: str, takeover: bool = False, run: Optional[str] = None) -> Outcome:
