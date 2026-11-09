@@ -372,7 +372,7 @@ const DIRECT_CK = A.directCk !== false && typeof ck === 'function' ? ck : null
 const directCk = { plan: 0, land: 0, relink: 0, ms: 0, failures: 0 }
 // The thin-call mode for this run (thinAgentMode): `direct` runs ck in-script, `lean` and `default` run it in an agent.
 // A lean call that throws on the agent type switches the rest of the run to `default` (and is retried once).
-const thin = { ...thinAgentMode({ runnerAgent: RUNNER_AGENT, unavailable: false, direct: !!DIRECT_CK }), fallback: false }
+const thin = { ...thinAgentMode({ runnerAgent: RUNNER_AGENT, unavailable: false, direct: !!DIRECT_CK }), fallback: false, proven: false }
 const thinAgentOut = () => ({ type: thin.type, fallback: thin.fallback, warning: thin.warning })
 // CkCallResult: {code, json, stderr, via}. Direct calls return the command's own answer; agent calls return the CK_CALL envelope.
 async function runCk(kind, argv, cwd, stdin) {
@@ -408,8 +408,9 @@ Return exitCode (the command's exit code) and json (its JSON output, copied exac
   const opts = () => (thin.mode === 'lean'
     ? { label: o.label, phase: o.phase, schema: CK_CALL, agentType: thin.type }
     : { label: o.label, phase: o.phase, schema: CK_CALL, ...LOW })
-  return call(kind, prompt, opts()).then(thinResult, e => {
-    if (thin.mode !== 'lean') return thinResult({ error: e && e.message })
+  return call(kind, prompt, opts()).then(a => { thin.proven = true; return thinResult(a) }, e => {
+    // 19.4: only the first thin call can show the agent type is unknown; once one has run, a throw is a failed call.
+    if (thin.mode !== 'lean' || thin.proven) return thinResult({ error: e && e.message })
     thin.mode = 'default'
     thin.type = null
     thin.fallback = true
@@ -447,7 +448,9 @@ const READ_HANDOFF = n => `Before anything else, read ${HANDOFF(n)} if it exists
 // the task on each higher model once; unresolved after the top, the task is parked (or asked about, if interactive).
 // Task 80 (3.6, 3.9): the gate runs whole (every Verify command, no stop at the first failure) and reports JSON, so
 // the failures reach the retry, the test-fix loop and the report in one format.
-const FAILURES_NOTE = n => `Run the gate as "ck -C ${WT(n)} gate ${SPEC} --task ${n} --json" and let the whole Verify run, without stopping at the first failure. Return ck's "failures" array unchanged in failures (every entry, as printed), and one testConflicts entry per test that can never pass.`
+const FAILURES_NOTE = n => `Run the gate as this command, on its own line:
+ck -C ${WT(n)} gate ${SPEC} --task ${n} --json
+and let the whole Verify run, without stopping at the first failure. Return ck's "failures" array unchanged in failures (every entry, as printed), and one testConflicts entry per test that can never pass.`
 // The previous attempt's failures for a retry (3.8): the first 50 in order as JSON, and per-file counts of the rest.
 const failuresBlock = prev => {
   const f = failuresForPrompt(prev && prev.failures)
@@ -815,6 +818,95 @@ function thinAgentMode({ runnerAgent, unavailable, direct } = {}) {
   if (direct) return { mode: 'direct', type: null, warning: null }
   if (typeof runnerAgent === 'string' && runnerAgent && !unavailable) return { mode: 'lean', type: runnerAgent, warning: null }
   return { mode: 'default', type: null, warning: `the lean thin agent type ${runnerAgent || '(runnerAgent not set)'} is unavailable; thin ck calls run on the default agent` }
+}
+
+// The verdict of one `ck gate ... --attribute --json` call (Task 81). A thin answer and a direct answer both arrive as
+// {code, json, stderr}; json is ck-gate/1 (full) or ck-gate-compact/1 (--compact). green: ck said ok, exit code 0, and
+// nothing in the object contradicts it. red: regressions go to the fixer. error: no valid gate object of either shape
+// or a self-contradicting one, so the gate never counts green (2.9, 19.5).
+const isPlainObj = v => !!v && typeof v === 'object' && !Array.isArray(v)
+// One failure entry must match the ck-gate/1 failure schema (design D3): required fields of the right type, a known status,
+// and a node or a file to point at.
+const FAILURE_KINDS = ['assertion', 'import', 'collection', 'timeout', 'error']
+const FAILURE_STATUSES = ['regression', 'excused', 'flaky', 'unattributed']
+const strOrNull = v => v === null || typeof v === 'string'
+function failureProblem(f) {
+  if (!isPlainObj(f)) return 'an entry that is not an object'
+  for (const k of ['node', 'tcId', 'tasks', 'attributedBy', 'file', 'kind', 'message', 'truncated', 'command']) {
+    if (!(k in f)) return `an entry without ${k}`
+  }
+  if (!strOrNull(f.node) || !strOrNull(f.file) || !strOrNull(f.command)) return 'an entry with a node, file or command of the wrong type'
+  if (f.node === null && f.file === null) return 'an entry with neither node nor file'
+  if (f.tcId !== null && !(typeof f.tcId === 'string' && /^TC-[0-9]+$/.test(f.tcId))) return 'an entry with a bad tcId'
+  if (!Array.isArray(f.tasks) || !f.tasks.every(t => typeof t === 'string')) return 'an entry whose tasks are not strings'
+  if (!['tc', 'file', 'command', 'none'].includes(f.attributedBy)) return 'an entry with a bad attributedBy'
+  if (!FAILURE_KINDS.includes(f.kind)) return 'an entry with a bad kind'
+  if (typeof f.message !== 'string' || f.message.length > 500) return 'an entry with a bad message'
+  if (typeof f.truncated !== 'boolean') return 'an entry with a bad truncated flag'
+  if (f.status !== undefined && !FAILURE_STATUSES.includes(f.status)) return 'an entry with an unknown status'
+  if (f.excusedBy !== undefined && !(Array.isArray(f.excusedBy) && f.excusedBy.every(t => typeof t === 'string'))) return 'an entry with a bad excusedBy'
+  return null
+}
+function gateOutcome(out) {
+  const fail = error => ({ state: 'error', green: false, regressions: [], excusedByTask: {}, flaky: [], report: null, error, reason: error })
+  if (!out || typeof out !== 'object') return fail('the gate call returned no result')
+  const j = out.json
+  if (!isPlainObj(j)) return fail(`ck gate printed no JSON object${out.stderr ? `: ${String(out.stderr).slice(0, 300)}` : ''}`)
+  if (typeof j.ok !== 'boolean') return fail('the gate JSON has no ok flag')
+  const report = typeof j.report === 'string' ? j.report : null
+  let regressions
+  let flaky
+  let unattributed
+  let excused
+  const excusedByTask = {}
+  if (j.schema === 'ck-gate/1') {
+    if (!Array.isArray(j.failures)) return fail('ck-gate/1 JSON has no failures array')
+    const entries = j.failures
+    for (const f of entries) {
+      const bad = failureProblem(f)
+      if (bad) return fail(`ck-gate/1 failures hold ${bad}`)
+      if (f.status === undefined) return fail('ck-gate/1 failures hold an entry without a status')
+    }
+    regressions = entries.filter(f => f.status === 'regression')
+    unattributed = entries.filter(f => f.status === 'unattributed')
+    flaky = entries.filter(f => f.status === 'flaky')
+    const ex = entries.filter(f => f.status === 'excused')
+    excused = ex.length
+    for (const f of ex) {
+      for (const t of Array.isArray(f.excusedBy) && f.excusedBy.length ? f.excusedBy : f.tasks) excusedByTask[t] = (excusedByTask[t] || 0) + 1
+    }
+  } else if (j.schema === 'ck-gate-compact/1') {
+    if (!Array.isArray(j.regressions) || !Array.isArray(j.flaky) || !isPlainObj(j.excusedByTask)) {
+      return fail('ck-gate-compact/1 JSON has a regressions, flaky or excusedByTask field of the wrong shape')
+    }
+    if (j.unattributed !== undefined && !Array.isArray(j.unattributed)) return fail('ck-gate-compact/1 unattributed is not an array')
+    regressions = j.regressions
+    flaky = j.flaky
+    unattributed = j.unattributed || []
+    for (const f of [...regressions, ...unattributed, ...flaky]) {
+      const bad = failureProblem(f)
+      if (bad) return fail(`ck-gate-compact/1 lists ${bad}`)
+    }
+    if (!Object.keys(j.excusedByTask).every(k => /^[0-9]+$/.test(k))) return fail('ck-gate-compact/1 excusedByTask has a key that is not a task number')
+    if (!Object.values(j.excusedByTask).every(v => Number.isInteger(v) && v >= 0)) return fail('ck-gate-compact/1 excusedByTask holds a count that is not a non-negative integer')
+    Object.assign(excusedByTask, j.excusedByTask)
+    excused = Object.values(excusedByTask).reduce((n, v) => n + (Number.isInteger(v) ? v : 0), 0)
+    if (Array.isArray(j.failedChecks) && j.ok && j.failedChecks.some(c => isPlainObj(c) && c.ok === false && !c.warning)) {
+      return fail('ck-gate-compact/1 says ok but holds a failed check')
+    }
+  } else {
+    return fail(`the gate JSON has an unknown schema ${JSON.stringify(j.schema)}`)
+  }
+  if (isPlainObj(j.summary)) {
+    const want = { regressions: regressions.length, unattributed: unattributed.length, flaky: flaky.length, excused }
+    for (const k of Object.keys(want)) {
+      if (j.summary[k] !== undefined && j.summary[k] !== want[k]) return fail(`the gate summary says ${k}=${j.summary[k]} but the entries hold ${want[k]}`)
+    }
+  }
+  if (j.ok && (regressions.length || unattributed.length)) return fail('the gate says ok but lists regressions')
+  if (out.code !== (j.ok ? 0 : 1)) return fail(`the gate says ok=${j.ok} but ck exited ${out.code}`)
+  // A red gate hands the fixer both regressions and unattributed failures.
+  return { state: j.ok ? 'green' : 'red', green: j.ok === true, regressions: [...regressions, ...unattributed], excusedByTask, flaky, report, error: null, reason: null }
 }
 
 // --- end decisions ---
@@ -1211,40 +1303,6 @@ function applyLint(p) {
 }
 
 // --- Attributed gates (Task 81) ---------------------------------------------------------------------------------
-// The verdict of one `ck gate ... --attribute --json` call. A thin answer and a direct answer both arrive as
-// {code, json, stderr}; json is ck-gate/1 (full) or ck-gate-compact/1 (--compact). green: ck said ok. red: regressions
-// go to the fixer. error: no valid gate object of either shape, so the gate never counts green (2.9, 19.5).
-const isPlainObj = v => !!v && typeof v === 'object' && !Array.isArray(v)
-function gateOutcome(out) {
-  const fail = error => ({ state: 'error', green: false, regressions: [], excusedByTask: {}, flaky: [], report: null, error })
-  if (!out || typeof out !== 'object') return fail('the gate call returned no result')
-  const j = out.json
-  if (!isPlainObj(j)) return fail(`ck gate printed no JSON object${out.stderr ? `: ${trim(out.stderr, 300)}` : ''}`)
-  if (typeof j.ok !== 'boolean') return fail('the gate JSON has no ok flag')
-  const report = typeof j.report === 'string' ? j.report : null
-  let regressions
-  let flaky
-  const excusedByTask = {}
-  if (j.schema === 'ck-gate/1') {
-    if (!Array.isArray(j.failures)) return fail('ck-gate/1 JSON has no failures array')
-    const entries = j.failures.filter(isPlainObj)
-    regressions = entries.filter(f => f.status === 'regression')
-    flaky = entries.filter(f => f.status === 'flaky')
-    for (const f of entries.filter(f => f.status === 'excused')) {
-      for (const t of Array.isArray(f.tasks) ? f.tasks : []) excusedByTask[t] = (excusedByTask[t] || 0) + 1
-    }
-  } else if (j.schema === 'ck-gate-compact/1') {
-    if (!Array.isArray(j.regressions) || !Array.isArray(j.flaky) || !isPlainObj(j.excusedByTask)) {
-      return fail('ck-gate-compact/1 JSON has a regressions, flaky or excusedByTask field of the wrong shape')
-    }
-    regressions = j.regressions
-    flaky = j.flaky
-    Object.assign(excusedByTask, j.excusedByTask)
-  } else {
-    return fail(`the gate JSON has an unknown schema ${JSON.stringify(j.schema)}`)
-  }
-  return { state: j.ok ? 'green' : 'red', green: j.ok === true, regressions, excusedByTask, flaky, report, error: null }
-}
 // One GateRun record (Task 81): the verdict plus the gate's position and, when a fixer ran, its record.
 const gateRun = (kind, afterMerges, out) => ({ kind, afterMerges, ...gateOutcome(out), fix: null })
 // One attributed gate through thinCk. Claude Code asks for the compact answer (2.12); OpenCode reads the full JSON.
@@ -1252,8 +1310,11 @@ const gateRun = (kind, afterMerges, out) => ({ kind, afterMerges, ...gateOutcome
 async function attributedGate(kind, afterMerges, label, phaseName, what) {
   const argv = [...GATE_ARGV, ...(thin.mode === 'direct' ? [] : ['--compact'])]
   const ask = () => thinCk('gate', argv, { label, phase: phaseName, cwd: TARGET, gate: true, what })
-  let run = gateRun(kind, afterMerges, await ask())
-  if (run.state === 'error') {
+  const first = await ask()
+  let run = gateRun(kind, afterMerges, first)
+  // Only a call-level failure (no JSON object at all) is worth a retry; a JSON object of the wrong shape would be
+  // wrong again.
+  if (run.state === 'error' && !(first && isPlainObj(first.json))) {
     log(`${label}: the gate call failed (${run.error}); retrying once`)
     run = gateRun(kind, afterMerges, await ask())
   }

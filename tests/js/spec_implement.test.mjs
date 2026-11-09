@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { runWorkflow, sleep } from './load_workflow.mjs'
-import { directCk, project } from './fake_project.mjs'
+import { directCk, gateJson, project } from './fake_project.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const SCRIPT = path.join(here, '../../plugin/workflows/spec-implement.js')
@@ -226,7 +226,7 @@ await test('full gate every N merges; red full gate after a failed fix halts', a
   assert.deepEqual(rb.result.fullGates.map(g => g.afterMerges), [4])
 
   const q = project({ deps: { 1: [], 2: [], 3: ['1', '2'] }, fullRed: true })
-  const agent = async (prompt, opts) => (opts.label.startsWith('re-check') ? { green: false } : q.agent(prompt, opts))
+  const agent = async (prompt, opts) => (opts.label.startsWith('re-check') ? { exitCode: 1, json: gateJson(false) } : q.agent(prompt, opts))
   const r2 = await runWorkflow(SCRIPT, { agent, args: { ...baseArgs, fullGateEvery: 2 } })
   assert.equal(r2.result.halted, true)
   assert.equal(r2.result.targetGreen, false)
@@ -526,8 +526,11 @@ await test('orchestrator: plan, landing, gate and re-check steps use the orchest
     assert.equal('effort' in p.state.opts[l], false, l)
     assert.ok(p.state.opts[l].schema && p.state.opts[l].schema.required && p.state.opts[l].schema.required.includes('exitCode'), l)
   }
+  // Attributed gates (Task 81) are thin ck calls too: the lean agent type, no model or effort, the shared CK_CALL schema.
   for (const l of ['full gate @1', 're-check 1']) {
-    assert.deepEqual([p.state.opts[l].model, p.state.opts[l].effort], ['sonnet', 'low'], l)
+    assert.equal(p.state.opts[l].agentType, 'spec:runner', l)
+    assert.equal('model' in p.state.opts[l], false, l)
+    assert.equal('effort' in p.state.opts[l], false, l)
   }
   assert.equal(result.agents.orchestrator, 'sonnet/low')
 })
@@ -1015,9 +1018,31 @@ const SNAPSHOT_KEYS = [
   "escalated",
   "failed",
   "finalGate",
+  "finalGate.afterMerges",
+  "finalGate.error",
+  "finalGate.excusedByTask",
+  "finalGate.fix",
+  "finalGate.flaky",
   "finalGate.green",
+  "finalGate.kind",
+  "finalGate.reason",
+  "finalGate.regressions",
+  "finalGate.report",
+  "finalGate.state",
   "fixerEscalations",
   "fullGates",
+  "gates",
+  "gates[].afterMerges",
+  "gates[].error",
+  "gates[].excusedByTask",
+  "gates[].fix",
+  "gates[].flaky",
+  "gates[].green",
+  "gates[].kind",
+  "gates[].reason",
+  "gates[].regressions",
+  "gates[].report",
+  "gates[].state",
   "halted",
   "head",
   "into",
@@ -1101,6 +1126,7 @@ const SNAPSHOT_KEYS = [
   "tasks[].toMergedMinutes",
   "tasks[].wave",
   "tasks[].wrongTests",
+  "testConflicts",
   "testFixes",
   "thinAgent",
   "thinAgent.fallback",
