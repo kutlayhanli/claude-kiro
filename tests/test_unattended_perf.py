@@ -76,8 +76,9 @@ def test_tc169_attribution_seams_under_two_seconds(tmp_path):
 
     start = time.perf_counter()
     attributions = [attribution.attribute_failure(f, index, done, frozenset()) for f in failures]
-    plan = attribution.rerun_plan(attributions)
-    verdict = attribution.gate_verdict(attributions, {item.key: "failed" for item in plan}, True)
+    pairs = list(zip(failures, attributions))
+    plan = attribution.rerun_plan(pairs)
+    verdict = attribution.gate_verdict(pairs, {item.key: False for item in plan}, True)
     elapsed = time.perf_counter() - start
 
     assert verdict.red is True and len(attributions) == 200

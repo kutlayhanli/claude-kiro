@@ -385,7 +385,7 @@ def test_tc4_redteam_gating_task_with_number_prefix_of_another(tmp_path):
     """`--task 3` must not match task 30 or 13 by prefix or substring: add Task 30 (Not Started, selects tc3_
     as well). Gating Task 3 as Done leaves Task 30 unfinished, so tc3 stays excused by 30 alone."""
     task30 = extra_impl("30", verify='python -m pytest -q tests -k "tc3_"')
-    root = h.attr_project(tmp_path, statuses=done_except("3"), extra_tasks=task30, tests={"test_tc3_sub": "fail"})
+    root = h.attr_project(tmp_path, statuses=done_except(), extra_tasks=task30, tests={"test_tc3_sub": "fail"})
     code, obj = attributed_gate(root, "--task", "3")
     e3 = entry(obj, "test_tc3_sub")
     assert e3["status"] == "excused" and e3["excusedBy"] == ["30"], e3
