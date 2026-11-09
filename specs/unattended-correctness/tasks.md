@@ -1863,7 +1863,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 81: Run attributed periodic, recheck and final gates through ck
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 2.1, 2.2, 2.3, 2.4, 2.6, 2.7, 2.8, 2.9, 2.10, 2.11, 2.12, 3.9, 19.5
 **Description:** In `plugin/workflows/spec-implement.js`, replace the agent-run full and final gates with `thinCk('gate', ['-C', TARGET, 'gate', SPEC, '--attribute', '--install', '--json'])` every `fullGateEvery` merges (default 10) and once after the last merge; on every thin-agent call (the lean runner, and the default subagents of the 19.4 fallback) the command adds `--compact` (2.12) and the agent copies the `ck-gate-compact/1` object. Add `gateOutcome(call)` in the decisions block (`green` / `red` / `error` with regressions, `excusedByTask`, flaky, report and reason; it reads `ck-gate/1` and `ck-gate-compact/1`; `error` whenever there is no valid object of either shape, a crash, a timeout, a thin-agent error or a schema mismatch). Red sends the regressions as `Failure` entries (via `failuresForPrompt`) to the fixer; each recheck is again an attributed `thinCk` gate; the escalation ladder is unchanged, and still red ends with today's `redTarget` / `stopLaunching`. An error call is retried once; a second error is recorded and sends nothing to the fixer; a periodic gate error lets the run continue, a final gate error makes the outcome `halted` with reason "final gate could not run". Record each gate as a `GateRun` (`{kind, afterMerges, state, green, regressions, excusedByTask, flaky, report, error, fix}`, `green === (state === 'green')`) in `gates`. Old readers keep their shapes (`analytics/collect.py`, `issues.py`, `share.py`, `bench.py` read `.green`): `fullGates` holds the periodic entries (`afterMerges`, `green` and the GateRun fields) and `finalGate` stays `{green, fix, ...}` for the final gate. Update the existing assertions this supersedes in `tests/js/spec_implement.test.mjs`: the orchestrator model and effort on `full gate @1` and `re-check 1` (around lines 480-485 and 519-533), the background `ck gate` final-gate prompt with an `EXIT` line (around 560-564), and the `fullGates` positions (around 218-229, kept, now read from GateRun entries); and in `tests/js/landing_speed.test.mjs` any case that pins the `{green}` gate answer shape. Landing gates stay task-scoped (no `--attribute` on land). Harness Contract owner: item 7's `gateVerdict` (design: `gateOutcome`), the `fullGateEvery` arg (item 6), result `gates[]`, and the direct `gate ... --attribute --json` call under the `ck` global.
@@ -1875,11 +1875,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 16 (workflow cases for 2.9), Task 70 (TC-164b: the real runner calls the attributed gate directly), Task 74 (P-7, P-31), Task 76 (TC-18 to TC-20, TC-22 to TC-25, TC-26a, TC-27a, TC-33a, TC-34 to TC-36), Task 77 (TC-21, TC-33b: prompts from the real script run through the real ck)
 
 **Acceptance:**
-- [ ] An attributed gate runs at every Nth merge and after the last merge (2.1, 2.11)
-- [ ] OpenCode runs it directly; Claude Code through the lean agent, using its JSON unchanged (2.2, 2.3)
-- [ ] Regressions go to the fixer as structured entries, and rechecks are attributed gates (2.6, 3.9); a red gate after the ladder stops the run as today (2.7)
-- [ ] A green gate records excused failures with their tasks and flaky tests (2.8); flaky tests never reach the fixer (2.4)
-- [ ] A gate with no parseable JSON is an error, never green (2.9, 19.5); landing gates stay task-scoped (2.10)
+- [x] An attributed gate runs at every Nth merge and after the last merge (2.1, 2.11)
+- [x] OpenCode runs it directly; Claude Code through the lean agent, using its JSON unchanged (2.2, 2.3)
+- [x] Regressions go to the fixer as structured entries, and rechecks are attributed gates (2.6, 3.9); a red gate after the ladder stops the run as today (2.7)
+- [x] A green gate records excused failures with their tasks and flaky tests (2.8); flaky tests never reach the fixer (2.4)
+- [x] A gate with no parseable JSON is an error, never green (2.9, 19.5); landing gates stay task-scoped (2.10)
 
 **Dependencies:** Task 80 (calls `failuresForPrompt` and edits spec-implement.js after it), Task 20 (runs `ck gate --attribute --install --json`), Task 16 (its tests are the oracle), Task 70 (its tests are the oracle), Task 74 (its tests are the oracle), Task 76 (its tests are the oracle), Task 77 (its tests are the oracle)
 **Complexity:** High

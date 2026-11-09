@@ -224,10 +224,14 @@ const FAILURE = {
   description: 'one entry of the "failures" array that ck gate --json prints, copied unchanged',
   properties: {
     node: { type: ['string', 'null'] },
-    file: { type: ['string', 'null'] },
     tcId: { type: ['string', 'null'] },
+    tasks: { type: 'array', items: { type: 'string' } },
+    attributedBy: { type: 'string' },
+    file: { type: ['string', 'null'] },
     kind: { type: 'string', enum: ['assertion', 'import', 'collection', 'timeout', 'error'] },
     message: { type: 'string' },
+    truncated: { type: 'boolean' },
+    command: { type: ['string', 'null'] },
   },
 }
 // One test that can never pass with code that meets the spec: one entry per test.
@@ -368,7 +372,7 @@ const DIRECT_CK = A.directCk !== false && typeof ck === 'function' ? ck : null
 const directCk = { plan: 0, land: 0, relink: 0, ms: 0, failures: 0 }
 // The thin-call mode for this run (thinAgentMode): `direct` runs ck in-script, `lean` and `default` run it in an agent.
 // A lean call that throws on the agent type switches the rest of the run to `default` (and is retried once).
-const thin = { ...thinAgentMode({ runnerAgent: RUNNER_AGENT, unavailable: false, direct: !!DIRECT_CK }), fallback: false }
+const thin = { ...thinAgentMode({ runnerAgent: RUNNER_AGENT, unavailable: false, direct: !!DIRECT_CK }), fallback: false, proven: false }
 const thinAgentOut = () => ({ type: thin.type, fallback: thin.fallback, warning: thin.warning })
 // CkCallResult: {code, json, stderr, via}. Direct calls return the command's own answer; agent calls return the CK_CALL envelope.
 async function runCk(kind, argv, cwd, stdin) {
@@ -404,8 +408,9 @@ Return exitCode (the command's exit code) and json (its JSON output, copied exac
   const opts = () => (thin.mode === 'lean'
     ? { label: o.label, phase: o.phase, schema: CK_CALL, agentType: thin.type }
     : { label: o.label, phase: o.phase, schema: CK_CALL, ...LOW })
-  return call(kind, prompt, opts()).then(thinResult, e => {
-    if (thin.mode !== 'lean') return thinResult({ error: e && e.message })
+  return call(kind, prompt, opts()).then(a => { thin.proven = true; return thinResult(a) }, e => {
+    // 19.4: only the first thin call can show the agent type is unknown; once one has run, a throw is a failed call.
+    if (thin.mode !== 'lean' || thin.proven) return thinResult({ error: e && e.message })
     thin.mode = 'default'
     thin.type = null
     thin.fallback = true
@@ -443,7 +448,9 @@ const READ_HANDOFF = n => `Before anything else, read ${HANDOFF(n)} if it exists
 // the task on each higher model once; unresolved after the top, the task is parked (or asked about, if interactive).
 // Task 80 (3.6, 3.9): the gate runs whole (every Verify command, no stop at the first failure) and reports JSON, so
 // the failures reach the retry, the test-fix loop and the report in one format.
-const FAILURES_NOTE = n => `Run the gate as "ck -C ${WT(n)} gate ${SPEC} --task ${n} --json" and let the whole Verify run, without stopping at the first failure. Return ck's "failures" array unchanged in failures (every entry, as printed), and one testConflicts entry per test that can never pass.`
+const FAILURES_NOTE = n => `Run the gate as this command, on its own line:
+ck -C ${WT(n)} gate ${SPEC} --task ${n} --json
+and let the whole Verify run, without stopping at the first failure. Return ck's "failures" array unchanged in failures (every entry, as printed), and one testConflicts entry per test that can never pass.`
 // The previous attempt's failures for a retry (3.8): the first 50 in order as JSON, and per-file counts of the rest.
 const failuresBlock = prev => {
   const f = failuresForPrompt(prev && prev.failures)
@@ -553,16 +560,7 @@ Fix it without weakening any test and without editing requirements.md or existin
 If the only way to green is to weaken a test or change a requirement, stop and explain precisely instead.
 Return green=true only if the task gate passes in ${WT(n)} after your commit, else failing with the reason.`
 
-const verifyPrompt = what => `Verification (${what}) for spec ${SPEC}. In ${TARGET} (branch ${INTO}):
-1. Refresh dependencies if the project has an install step (e.g. "uv sync -q --directory ${TARGET}").
-2. Run:  ck -C ${TARGET} gate ${SPEC}
-   It checks every Done task: acceptance boxes, the tests that should pass by now, test collection, and that no test was weakened.
-${GATE_NOTE}
-Do not modify anything. Return green=true only if "ck -C ${TARGET} gate ${SPEC}" exited 0; otherwise put the failing checks and the relevant output tail in failing.`
-
-const recheckPrompt = n => `Re-check for spec ${SPEC}. In ${TARGET} (branch ${INTO}): refresh dependencies if needed (e.g. "uv sync -q --directory ${TARGET}"), then run "ck -C ${TARGET} gate ${SPEC}${n ? ` --task ${n}` : ''}". ${GATE_NOTE} Do not modify anything. Return green=true only if it exited 0; otherwise put the failing part in failing.`
-
-const fixPrompt = (k, what, failure) => `${INTO} is red (${what}) for spec ${SPEC}. Failure: ${trim(failure, 4000)}
+const fixPrompt = (k, what, failure) => `${INTO} is red (${what}) for spec ${SPEC}. Failure: ${JSON.stringify(failure || null)}
 Fix it without weakening any test and without editing requirements.md or existing test-plan.md rows. ${GIT_NOTE} ${GATE_NOTE}
 1. Run: ck -C ${ROOT} worktree create ${SPEC} fix${k} --install --base ${INTO}   (worktree ${WT(`fix${k}`)}). Work only there.
 2. Diagnose with the failing check, fix the code (or a clearly broken fixture or harness), and confirm the failing check passes in the fix worktree.
@@ -822,6 +820,102 @@ function thinAgentMode({ runnerAgent, unavailable, direct } = {}) {
   return { mode: 'default', type: null, warning: `the lean thin agent type ${runnerAgent || '(runnerAgent not set)'} is unavailable; thin ck calls run on the default agent` }
 }
 
+// The verdict of one `ck gate ... --attribute --json` call (Task 81). A thin answer and a direct answer both arrive as
+// {code, json, stderr}; json is ck-gate/1 (full) or ck-gate-compact/1 (--compact). green: ck said ok, exit code 0, and
+// nothing in the object contradicts it. red: regressions go to the fixer. error: no valid gate object of either shape
+// or a self-contradicting one, so the gate never counts green (2.9, 19.5).
+const isPlainObj = v => !!v && typeof v === 'object' && !Array.isArray(v)
+// One failure entry must match the ck-gate/1 failure schema (design D3): required fields of the right type, a known status,
+// and a node or a file to point at.
+const FAILURE_KINDS = ['assertion', 'import', 'collection', 'timeout', 'error']
+const FAILURE_STATUSES = ['regression', 'excused', 'flaky', 'unattributed']
+const strOrNull = v => v === null || typeof v === 'string'
+function failureProblem(f) {
+  if (!isPlainObj(f)) return 'an entry that is not an object'
+  for (const k of ['node', 'tcId', 'tasks', 'attributedBy', 'file', 'kind', 'message', 'truncated', 'command']) {
+    if (!(k in f)) return `an entry without ${k}`
+  }
+  if (!strOrNull(f.node) || !strOrNull(f.file) || !strOrNull(f.command)) return 'an entry with a node, file or command of the wrong type'
+  if (f.node === null && f.file === null) return 'an entry with neither node nor file'
+  if (f.tcId !== null && !(typeof f.tcId === 'string' && /^TC-[0-9]+$/.test(f.tcId))) return 'an entry with a bad tcId'
+  if (!Array.isArray(f.tasks) || !f.tasks.every(t => typeof t === 'string')) return 'an entry whose tasks are not strings'
+  if (!['tc', 'file', 'command', 'none'].includes(f.attributedBy)) return 'an entry with a bad attributedBy'
+  if (!FAILURE_KINDS.includes(f.kind)) return 'an entry with a bad kind'
+  if (typeof f.message !== 'string' || f.message.length > 500) return 'an entry with a bad message'
+  if (typeof f.truncated !== 'boolean') return 'an entry with a bad truncated flag'
+  if (f.status !== undefined && !FAILURE_STATUSES.includes(f.status)) return 'an entry with an unknown status'
+  if (f.excusedBy !== undefined && !(Array.isArray(f.excusedBy) && f.excusedBy.every(t => typeof t === 'string'))) return 'an entry with a bad excusedBy'
+  return null
+}
+function gateOutcome(out) {
+  const fail = error => ({ state: 'error', green: false, regressions: [], excusedByTask: {}, flaky: [], report: null, error, reason: error })
+  if (!out || typeof out !== 'object') return fail('the gate call returned no result')
+  const j = out.json
+  if (!isPlainObj(j)) return fail(`ck gate printed no JSON object${out.stderr ? `: ${String(out.stderr).slice(0, 300)}` : ''}`)
+  if (typeof j.ok !== 'boolean') return fail('the gate JSON has no ok flag')
+  const report = typeof j.report === 'string' ? j.report : null
+  let regressions
+  let flaky
+  let unattributed
+  let excused
+  const excusedByTask = {}
+  if (j.schema === 'ck-gate/1') {
+    if (!Array.isArray(j.failures)) return fail('ck-gate/1 JSON has no failures array')
+    const entries = j.failures
+    for (const f of entries) {
+      const bad = failureProblem(f)
+      if (bad) return fail(`ck-gate/1 failures hold ${bad}`)
+      if (f.status === undefined) return fail('ck-gate/1 failures hold an entry without a status')
+    }
+    regressions = entries.filter(f => f.status === 'regression')
+    unattributed = entries.filter(f => f.status === 'unattributed')
+    flaky = entries.filter(f => f.status === 'flaky')
+    const ex = entries.filter(f => f.status === 'excused')
+    excused = ex.length
+    for (const f of ex) {
+      for (const t of Array.isArray(f.excusedBy) && f.excusedBy.length ? f.excusedBy : f.tasks) excusedByTask[t] = (excusedByTask[t] || 0) + 1
+    }
+  } else if (j.schema === 'ck-gate-compact/1') {
+    if (!Array.isArray(j.regressions) || !Array.isArray(j.flaky) || !isPlainObj(j.excusedByTask)) {
+      return fail('ck-gate-compact/1 JSON has a regressions, flaky or excusedByTask field of the wrong shape')
+    }
+    if (j.unattributed !== undefined && !Array.isArray(j.unattributed)) return fail('ck-gate-compact/1 unattributed is not an array')
+    regressions = j.regressions
+    flaky = j.flaky
+    unattributed = j.unattributed || []
+    for (const f of [...regressions, ...unattributed, ...flaky]) {
+      const bad = failureProblem(f)
+      if (bad) return fail(`ck-gate-compact/1 lists ${bad}`)
+    }
+    if (!Object.keys(j.excusedByTask).every(k => /^[0-9]+$/.test(k))) return fail('ck-gate-compact/1 excusedByTask has a key that is not a task number')
+    if (!Object.values(j.excusedByTask).every(v => Number.isInteger(v) && v >= 0)) return fail('ck-gate-compact/1 excusedByTask holds a count that is not a non-negative integer')
+    Object.assign(excusedByTask, j.excusedByTask)
+    excused = Object.values(excusedByTask).reduce((n, v) => n + (Number.isInteger(v) ? v : 0), 0)
+    if (Array.isArray(j.failedChecks) && j.ok && j.failedChecks.some(c => isPlainObj(c) && c.ok === false && !c.warning)) {
+      return fail('ck-gate-compact/1 says ok but holds a failed check')
+    }
+  } else {
+    return fail(`the gate JSON has an unknown schema ${JSON.stringify(j.schema)}`)
+  }
+  if (isPlainObj(j.summary)) {
+    const want = { regressions: regressions.length, unattributed: unattributed.length, flaky: flaky.length, excused }
+    for (const k of Object.keys(want)) {
+      if (j.summary[k] === undefined) continue
+      // The compact form sums one count per excusing task, while summary.excused counts failures: a failure excused by
+      // two tasks gives 2 here and 1 there. So compact only requires the sum to be at least the summary count.
+      if (k === 'excused' && j.schema === 'ck-gate-compact/1') {
+        if (typeof j.summary[k] !== 'number' || want[k] < j.summary[k]) return fail(`the gate summary says ${k}=${j.summary[k]} but the excusedByTask counts hold ${want[k]}`)
+        continue
+      }
+      if (j.summary[k] !== want[k]) return fail(`the gate summary says ${k}=${j.summary[k]} but the entries hold ${want[k]}`)
+    }
+  }
+  if (j.ok && (regressions.length || unattributed.length)) return fail('the gate says ok but lists regressions')
+  if (out.code !== (j.ok ? 0 : 1)) return fail(`the gate says ok=${j.ok} but ck exited ${out.code}`)
+  // A red gate hands the fixer both regressions and unattributed failures.
+  return { state: j.ok ? 'green' : 'red', green: j.ok === true, regressions: [...regressions, ...unattributed], excusedByTask, flaky, report, error: null, reason: null }
+}
+
 // --- end decisions ---
 
 // --- scheduler ---------------------------------------------------------------
@@ -840,7 +934,10 @@ let redTarget = false
 let mergedCount = 0
 let fixCount = 0
 let refills = 0
-const fullGates = []
+const fullGates = []      // the periodic GateRun records (Task 81)
+const gates = []          // every attributed gate run: periodic, recheck and final GateRun records (Task 81)
+let finalGateError = false
+const GATE_ARGV = ['-C', TARGET, 'gate', SPEC, '--attribute', '--install', '--json']
 const fixerEscalations = []
 // Landing queue: finished tasks wait here; one `ck worktree land` runs at a time and
 // takes up to batchWindow of them. Waiting here never holds a slot.
@@ -1212,20 +1309,43 @@ function applyLint(p) {
   }
 }
 
-async function fixAndRecheck(what, failure, n) {
-  const ph = n ? phaseOf(n) : 'Final gate'
+// --- Attributed gates (Task 81) ---------------------------------------------------------------------------------
+// One GateRun record (Task 81): the verdict plus the gate's position and, when a fixer ran, its record.
+const gateRun = (kind, afterMerges, out) => ({ kind, afterMerges, ...gateOutcome(out), fix: null })
+// One attributed gate through thinCk. Claude Code asks for the compact answer (2.12); OpenCode reads the full JSON.
+// An error is retried once; a second error is the run's record and sends nothing to the fixer.
+async function attributedGate(kind, afterMerges, label, phaseName, what) {
+  const argv = [...GATE_ARGV, ...(thin.mode === 'direct' ? [] : ['--compact'])]
+  const ask = () => thinCk('gate', argv, { label, phase: phaseName, cwd: TARGET, gate: true, what })
+  const first = await ask()
+  let run = gateRun(kind, afterMerges, first)
+  // Only a call-level failure (no JSON object at all) is worth a retry; a JSON object of the wrong shape would be
+  // wrong again.
+  if (run.state === 'error' && !(first && isPlainObj(first.json))) {
+    log(`${label}: the gate call failed (${run.error}); retrying once`)
+    run = gateRun(kind, afterMerges, await ask())
+  }
+  return run
+}
+// A red gate (2.6, 2.7): the regressions go to the fixer as Failure entries (3.9), each recheck is again an attributed
+// gate, and the escalation ladder runs as before. Every recheck is recorded in `gates`.
+async function fixAndRecheck(what, first, afterMerges, phaseName) {
+  const ph = phaseName
+  const failuresOf = g => failuresForPrompt(g.regressions)
   fixCount++
-  let fix = await call('fix', fixPrompt(fixCount, what, failure), { label: `fix ${fixCount} (${what})`, phase: ph, schema: VERIFY, ...FIX })
-  let recheck = await call('recheck', recheckPrompt(n), { label: `re-check ${fixCount}`, phase: ph, schema: VERIFY, ...ORCH })
+  let fix = await call('fix', fixPrompt(fixCount, what, failuresOf(first)), { label: `fix ${fixCount} (${what})`, phase: ph, schema: VERIFY, ...FIX })
+  let recheck = await attributedGate('recheck', afterMerges, `re-check ${fixCount}`, ph, `Re-check for spec ${SPEC} in ${TARGET} (branch ${INTO})`)
+  gates.push(recheck)
   for (const model of FIX_UP) {
-    if (recheck && recheck.green) break
+    if (recheck.state !== 'red') break
     fixCount++
     log(`${what}: still red after the fix, escalating the fixer to ${model}`)
-    fix = await call('fix', fixPrompt(fixCount, what, recheck), { label: `fix ${fixCount} (${what}) [${model}]`, phase: ph, schema: VERIFY, ...escalated(FIX, model) })
-    recheck = await call('recheck', recheckPrompt(n), { label: `re-check ${fixCount}`, phase: ph, schema: VERIFY, ...ORCH })
-    fixerEscalations.push({ what, model, green: !!(recheck && recheck.green) })
+    fix = await call('fix', fixPrompt(fixCount, what, failuresOf(recheck)), { label: `fix ${fixCount} (${what}) [${model}]`, phase: ph, schema: VERIFY, ...escalated(FIX, model) })
+    recheck = await attributedGate('recheck', afterMerges, `re-check ${fixCount}`, ph, `Re-check for spec ${SPEC} in ${TARGET} (branch ${INTO})`)
+    gates.push(recheck)
+    fixerEscalations.push({ what, model, green: recheck.green })
   }
-  return { fix, recheck, green: !!(recheck && recheck.green) }
+  return { fix, recheck, green: recheck.green }
 }
 
 function requestLanding(n) {
@@ -1284,17 +1404,20 @@ async function landBatch(batch) {
   if (entry.bisected || entry.red.length) log(`Landing ${tasks.join(' ')}: red, bisected; ${entry.red.length ? `culprit(s) ${entry.red.join(', ')}` : 'no culprit (flaky?)'}; window now ${batchWindow}`)
 
   if (entry.merged.length && FULL_EVERY > 0 && Math.floor(mergedCount / FULL_EVERY) > Math.floor(before / FULL_EVERY)) {
-    let v = await call('gate', verifyPrompt(`full gate after ${mergedCount} merges`), { label: `full gate @${mergedCount}`, phase: phaseOf(tasks[0]), schema: VERIFY, ...ORCH })
-    if (!v || !v.green) {
+    const g = await attributedGate('periodic', mergedCount, `full gate @${mergedCount}`, phaseOf(tasks[0]), `Verification (full gate after ${mergedCount} merges) for spec ${SPEC}`)
+    gates.push(g)
+    fullGates.push(g)
+    if (g.state === 'red') {
       log(`Full gate red after ${mergedCount} merges, one fix attempt`)
-      const f = await fixAndRecheck(`full gate after ${mergedCount} merges`, v)
-      v = { ...(v || {}), fix: f, green: f.green }
-    }
-    fullGates.push({ afterMerges: mergedCount, green: !!v.green })
-    if (!v.green) {
-      redTarget = true
-      stopLaunching = true
-      stopReason = stopReason || `${INTO} is red: full gate after ${mergedCount} merges`
+      g.fix = await fixAndRecheck(`full gate after ${mergedCount} merges`, g, mergedCount, phaseOf(tasks[0]))
+      // A recheck that errors leaves the run going (2.9); only a verdict that is still red stops it.
+      if (g.fix.recheck.state === 'red') {
+        redTarget = true
+        stopLaunching = true
+        stopReason = stopReason || `${INTO} is red: full gate after ${mergedCount} merges`
+      }
+    } else if (g.state === 'error') {
+      log(`Full gate after ${mergedCount} merges could not run (${g.error}); the run goes on`)
     }
   }
   for (const [b, t] of outcomes) {
@@ -1712,13 +1835,21 @@ await Promise.all(crossTestRuns)
 let finalGate = null
 if (mergedCount && !redTarget) {
   phase('Final gate')
-  finalGate = await call('gate', verifyPrompt('final'), { label: 'final gate', phase: 'Final gate', schema: VERIFY, ...ORCH })
-  if (!finalGate || !finalGate.green) {
+  const g = await attributedGate('final', mergedCount, 'final gate', 'Final gate', `Verification (final) for spec ${SPEC}`)
+  gates.push(g)
+  let fix = null
+  if (g.state === 'red') {
     log(`Final gate red, one fix attempt`)
-    const f = await fixAndRecheck('final gate', finalGate)
-    finalGate = { ...(finalGate || {}), fix: f, green: f.green }
+    fix = await fixAndRecheck('final gate', g, mergedCount, 'Final gate')
   }
-  if (!finalGate.green) redTarget = true
+  g.fix = fix
+  const green = g.green || !!(fix && fix.green)
+  finalGate = { ...g, green, fix }
+  if (g.state === 'error') {
+    finalGateError = true
+    log(`Final gate could not run (${g.error})`)
+  }
+  if (!green) redTarget = true
 }
 
 // --- report ------------------------------------------------------------------
@@ -1840,7 +1971,10 @@ for (const e of needsInput) {
 let outcome = 'complete'
 let reason = stopReason
 const planFailed = stopReason === PLAN_FAILED
-if (redTarget) outcome = 'halted'
+if (redTarget) {
+  outcome = 'halted'
+  if (finalGateError) reason = 'final gate could not run'
+}
 else if (stopReason && !planFailed && notStarted.length) outcome = 'halted'
 else if (planFailed && (!fromGit || readyLeft.length)) outcome = 'halted'
 else if (notStarted.length || failedList.length || needsInput.length) {
@@ -1910,6 +2044,8 @@ return {
   tasks: taskReport,
   landings,
   fullGates,
+  gates,
+  testConflicts: taskReport.flatMap(t => t.testConflicts),
   finalGate,
   crossTests,
   degraded,
