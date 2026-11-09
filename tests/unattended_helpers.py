@@ -482,10 +482,14 @@ def restore_ck_state(root: Path, snap: Snapshot) -> None:
 
 @contextlib.contextmanager
 def readonly_git_metadata(root: Path) -> Iterator[None]:
-    """`chmod a-w` on `.git/worktrees/*`, the hooks location and `.git/config`; restored afterwards."""
+    """`chmod a-w` on `.git/worktrees/*`, the hooks location and `.git/config`; restored afterwards.
+
+    The hooks location is both `.git/hooks` and, once ck has installed its hooks, the `core.hooksPath` directory."""
     common = Path(raw(root, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
-    hooks = Path(raw(root, "rev-parse", "--path-format=absolute", "--git-path", "hooks").stdout.strip())
-    targets = [common / "config", hooks]
+    active_hooks = Path(raw(root, "rev-parse", "--path-format=absolute", "--git-path", "hooks").stdout.strip())
+    targets = [common / "config", common / "hooks"]
+    if active_hooks != common / "hooks":
+        targets.append(active_hooks)
     wts = common / "worktrees"
     if wts.is_dir():
         targets += sorted(p for p in wts.iterdir())

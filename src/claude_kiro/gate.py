@@ -1183,14 +1183,19 @@ def _run_gate(
 
     if config_error is None:
         env = xdist.verify_env(os.environ, registry)
-        if not attribute:  # under --attribute the verdict comes from the attributed failures instead
+        # Right-reason judges a test-track task being gated (`--task N`, 5.1). A whole-spec gate only excuses the
+        # suites that are not due, as it always has (1.11). Under --attribute the attributed failures decide instead.
+        if task_nums is not None and not attribute:
             for task in rr_tasks:
                 _right_reason(result, project_dir, spec_dir, config, task, task.verify, timeout, env, report_dir)
         if test_gate:  # the validator runs on test-track gates only, never on impl-track gates (6.6)
             _validate(result, project_dir, validate_cmds, timeout, env, report_dir)
-    for task in selected:  # row-fidelity runs on every test-track gate (8.1, 8.2); it reads only (8.6)
-        if task.track == "test":
-            _row_fidelity(result, project_dir, spec_dir, config, task)
+    # row-fidelity runs when a test-track task is gated (`--task N`, 8.1, 8.2); it reads only (8.6). A whole-spec
+    # gate selects the Done test tasks too, but gates none of them: its report stays as it was (1.11).
+    if task_nums is not None:
+        for task in selected:
+            if task.track == "test":
+                _row_fidelity(result, project_dir, spec_dir, config, task)
 
     result.checks.extend(
         _properties_checks(project_dir, spec_dir, tasks, selected, task_nums is None, assumed_done, config)

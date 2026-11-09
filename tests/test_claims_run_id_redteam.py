@@ -421,7 +421,8 @@ def test_tc145_redteam_odd_ck_now_never_crashes_the_start(tmp_path, now):
 
 def test_tc145_redteam_each_claim_is_decided_on_its_own_run(tmp_path):
     root = make_repo(tmp_path, ("1", "2", "3", "4"))
-    alive, dead = live(root), ended(root)
+    dead = ended(root)  # begun first: `ck progress begin` supersedes every unfinished run, so the live run comes last
+    alive = live(root)
     claim(root, "1", alive, age=5 * 3600)
     claim(root, "2", dead)
     claim(root, "3", alive, owner=f"x run {dead}")
