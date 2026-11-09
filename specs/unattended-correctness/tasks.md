@@ -1104,7 +1104,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 47: Add `ck worktree approve` for my approval of a protected landing
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 9.8, 10.4, 20.3
 **Description:** In `cli/worktree.py`, add `ck worktree approve SPEC TASK [--into BRANCH]`. It computes the task's protected files, prints them and a random 6-character code, reads my typed answer from the terminal, and calls `protect.approval_decision(stdin.isatty(), stdout.isatty(), typed, code)`. Refused (exit 2, no change) unless both are TTYs and the code matches; it never takes `--json` or a code on the command line. On approval it lands the task with `land(..., approved={task: files})`, which issues the token and records the approval, and prints the landing line. It must refuse inside an agent's non-interactive shell, with a pipe as stdin, and when the ck data or git metadata is unreadable. Harness Contract owner: item 4's approval command (`ck worktree approve SPEC TASK`).
@@ -1114,8 +1114,8 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 39 (TC-84a, TC-84b), Task 40 (TC-95)
 
 **Acceptance:**
-- [ ] Without a TTY on stdin and stdout, or with a wrong code, approve refuses and the ref does not move (9.8)
-- [ ] Typing the code at a real terminal lands the task with a token and records it as approved (9.8, 10.4, 20.3)
+- [x] Without a TTY on stdin and stdout, or with a wrong code, approve refuses and the ref does not move (9.8)
+- [x] Typing the code at a real terminal lands the task with a token and records it as approved (9.8, 10.4, 20.3)
 
 **Dependencies:** Task 46 (calls `land(approved=...)`), Task 39 (its tests are the oracle), Task 40 (its tests are the oracle)
 **Complexity:** Low
