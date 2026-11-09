@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
@@ -70,6 +71,9 @@ def _is_handcrafted(label: Optional[Label]) -> bool:
 def lock_decision(lock: Mapping[str, LockEntry], changes: Mapping[str, Optional[str]],
                   labels: Mapping[str, Label], *, tampered: bool = False) -> FixtureReport:
     """`changes` maps each recorded-fixture path to its new sha256 (None: deleted).
+
+    A drift entry's `task` is the lock entry's task (the recorder); the land path overrides it with the
+    landing task (15.2).
 
     No entry -> new lock. A locked file whose content differs (or that was deleted) is drift, unless its
     label is handcrafted with a non-blank reason and a sha256 equal to the new content.
@@ -142,16 +146,22 @@ def read_labels(project: Path, config: Mapping[str, Any]) -> Dict[str, Label]:
 
 
 def write_label(project: Path, config: Mapping[str, Any], path: str, reason: str, sha256: str) -> Path:
+    """Record a handcrafted label. Raises ValueError when the existing label file is malformed (nothing is overwritten)."""
     target = project / labels_path(config)
-    try:
-        data = json.loads(target.read_text())
-        if not isinstance(data, dict):
-            data = {}
-    except (OSError, ValueError):
-        data = {}
+    data: Dict[str, Any] = {}
+    if target.exists():
+        try:
+            loaded = json.loads(target.read_text())
+        except (OSError, ValueError) as e:
+            raise ValueError(f"{target} is not valid JSON ({e}); fix it before labelling") from e
+        if not isinstance(loaded, dict):
+            raise ValueError(f"{target} is not a JSON object; fix it before labelling")
+        data = loaded
     data[path] = {"source": "handcrafted", "reason": reason.strip(), "sha256": sha256}
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+    tmp = target.with_name(target.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+    os.replace(tmp, target)
     return target
 
 
