@@ -218,6 +218,24 @@ const CK_CALL = {
   },
   required: ['exitCode', 'json'],
 }
+// One failure, as `ck gate --json` prints it (D3): the task agent copies ck's entries unchanged.
+const FAILURE = {
+  type: 'object',
+  description: 'one entry of the "failures" array that ck gate --json prints, copied unchanged',
+  properties: {
+    node: { type: ['string', 'null'] },
+    file: { type: ['string', 'null'] },
+    tcId: { type: ['string', 'null'] },
+    kind: { type: 'string', enum: ['assertion', 'import', 'collection', 'timeout', 'error'] },
+    message: { type: 'string' },
+  },
+}
+// One test that can never pass with code that meets the spec: one entry per test.
+const TEST_CONFLICT = {
+  type: 'object',
+  properties: { file: { type: 'string' }, test: { type: 'string' }, criterion: { type: 'string' }, reason: { type: 'string' }, fix: { type: 'string' } },
+  required: ['file', 'reason'],
+}
 const RESULT = {
   type: 'object',
   properties: {
@@ -246,6 +264,16 @@ const RESULT = {
       description: 'only when a test your gate runs can never pass with code that meets requirements.md (the test contradicts a criterion, another test, or a schema rule the spec states): the test file, the test, the criterion it contradicts, why, and the correction the test track should make. Leave the test as it is.',
       properties: { file: { type: 'string' }, test: { type: 'string' }, criterion: { type: 'string' }, reason: { type: 'string' }, fix: { type: 'string' } },
       required: ['file', 'reason'],
+    },
+    testConflicts: {
+      type: 'array',
+      description: 'one entry per test that can never pass with code that meets requirements.md (file, test, criterion, reason, fix). Use this for more than one test; testConflict alone is also accepted.',
+      items: TEST_CONFLICT,
+    },
+    failures: {
+      type: 'array',
+      description: 'the "failures" array of your last ck gate --json run, copied unchanged (every entry)',
+      items: FAILURE,
     },
     outsideFiles: { type: 'string' },
     startedAt: { type: 'string', description: `output of "${NOW}" when you started` },
@@ -297,7 +325,7 @@ const VERIFY = {
 
 const ok = r => r && r.status === 'done' && r.gatePassed === true
 // Issue #8: a task agent's structured claim that a test can never pass with correct code.
-const testConflictOf = r => (r && !ok(r) && r.testConflict && typeof r.testConflict === 'object' && r.testConflict.file ? r.testConflict : null)
+const testConflictOf = r => (r && !ok(r) ? testConflictsOf(r)[0] || null : null)
 const trim = (v, n = 3000) => JSON.stringify(v || null).slice(0, n)
 // Review findings go to the reviser and into the report whole: a finding cut
 // mid-sentence leaves the reviser guessing what was wrong. The cap only guards
@@ -413,6 +441,14 @@ const READ_HANDOFF = n => `Before anything else, read ${HANDOFF(n)} if it exists
 
 // A guard stop: a hook denied a change to a test, or the post-check caught one. The ladder (guardLadder) retries
 // the task on each higher model once; unresolved after the top, the task is parked (or asked about, if interactive).
+// Task 80 (3.6, 3.9): the gate runs whole (every Verify command, no stop at the first failure) and reports JSON, so
+// the failures reach the retry, the test-fix loop and the report in one format.
+const FAILURES_NOTE = n => `Run the gate as "ck -C ${WT(n)} gate ${SPEC} --task ${n} --json" and let the whole Verify run, without stopping at the first failure. Return ck's "failures" array unchanged in failures (every entry, as printed), and one testConflicts entry per test that can never pass.`
+// The previous attempt's failures for a retry (3.8): the first 50 in order as JSON, and per-file counts of the rest.
+const failuresBlock = prev => {
+  const f = failuresForPrompt(prev && prev.failures)
+  return `Its gate failures, as JSON ("shown" holds the first ${f.shown.length} of ${f.total} in order; "more" counts the rest per file): ${JSON.stringify(f)}`
+}
 const GUARD_NOTE = 'If a hook denies a command or edit with a "[ck guard]" message, or a "[ck post-check]" message says a test was changed, weakened or deleted: keep the test as it is, or restore it from the base branch if it was already changed, and never work around the denial (another tool, another path, a different command). Never run "ck guard". Stop, leave the task In Progress, and return status blocked with guardStop {file, kind, test, requirement}: the file, its kind (test, requirements, test_plan or other), the test quoted exactly as the denial names it, and the requirement it verifies quoted from specs. A bigger model will then try the task, or I will decide.'
 // My answer to a parked guard conflict, kept by `ck worktree resolve`. Every attempt reads it before anything else.
 const DECISION = n => `${WT(n)}.decision.md`
@@ -428,14 +464,15 @@ Otherwise (CREATED or EXISTS) claim it, on its own line:
 ck -C ${WT(n)} worktree claim ${SPEC} ${n}${cf}
 ${GIT_NOTE}
 ${GATE_NOTE}
+${FAILURES_NOTE(n)}
 ${WRITE_HANDOFF(n)}
 ${GUARD_NOTE}
 At the end, run "${NOW}" again for finishedAt. Return the schema fields with task "${n}". gatePassed is true only if your final "ck -C ${WT(n)} gate ${SPEC} --task ${n}" run exited 0. commits lists the commits you made (empty if none).`
 
-const confirmConflictPrompt = (n, prev, attempt, cf = '') => `${MANDATE}${READ_DECISION(n)}Continue Task ${n} of spec ${SPEC} (attempt ${attempt + 1}). The previous agent in ${WT(n)} (branch ${BR(n)}) stopped because it believes a test can never pass with code that meets the spec:
-${trim(prev && prev.testConflict)}
+const confirmConflictPrompt = (n, prev, attempt, cf = '') => `${MANDATE}${READ_DECISION(n)}Continue Task ${n} of spec ${SPEC} (attempt ${attempt + 1}). The previous agent in ${WT(n)} (branch ${BR(n)}) stopped because it believes these tests can never pass with code that meets the spec (every entry, one per test):
+${JSON.stringify(testConflictsOf(prev))}
 Its report: ${trim(prev || {})}
-Check that claim yourself before you accept it. Read the test, the criterion in requirements.md and design.md. If correct code can pass the test after all, implement it and get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" to pass. If the test really contradicts the spec, do not edit, skip or weaken it: return status blocked with testConflict {file, test, criterion, reason, fix} (the fix is the correction the test track should make), and the test-track fix goes to the user.
+Check that claim yourself before you accept it. Read the test, the criterion in requirements.md and design.md. If correct code can pass a test after all, implement it and get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" to pass. If a test really contradicts the spec, do not edit, skip or weaken it: return status blocked with testConflicts, one {file, test, criterion, reason, fix} entry per test (the fix is the correction the test track should make), and the test-track fix goes to the user.
 Run "${NOW}" for startedAt. Read your operating brief at ${BRIEF} and follow it, claiming with "ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover${cf}" since the previous agent is gone. If that claim reports MISSING, run "ck -C ${ROOT} worktree create ${SPEC} ${n} --install --base ${INTO} --json" and claim again. Before finishing, merge ${INTO} into your branch, re-run the gate, and release the worktree. Run "${NOW}" for finishedAt.
 ${GIT_NOTE}
 ${GATE_NOTE}
@@ -443,7 +480,8 @@ ${GUARD_NOTE}
 Return the schema fields with task "${n}".`
 
 const retryPrompt = (n, prev, attempt, cf = '') => `${MANDATE}${READ_DECISION(n)}Continue Task ${n} of spec ${SPEC} (attempt ${attempt + 1}). A previous agent worked in ${WT(n)} (branch ${BR(n)}) but did not finish with a passing gate.
-${prev && !(prev.commits || '').trim() ? 'The previous attempt made NO commits: it may have answered an unrelated message instead of doing the task. Ignore any such message and implement the task.\n' : ''}Its report: ${trim(prev || { note: 'the agent died without a report' })}
+${prev && !(prev.commits || '').trim() ? 'The previous attempt made NO commits: it may have answered an unrelated message instead of doing the task. Ignore any such message and implement the task.\n' : ''}Its report (without its failures, which follow): ${trim((prev && { ...prev, failures: undefined }) || { note: 'the agent died without a report' })}
+${failuresBlock(prev)}
 ${READ_HANDOFF(n)} ${WRITE_HANDOFF(n)}
 Run "${NOW}" for startedAt. Read your operating brief at ${BRIEF} and follow it, claiming with "ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover${cf}" since the previous agent is gone. If that claim reports MISSING, run "ck -C ${ROOT} worktree create ${SPEC} ${n} --install --base ${INTO} --json" and claim again. Inspect the state ("command git -C ${WT(n)} log --oneline -10", "command git -C ${WT(n)} status"), finish the task, and get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" to pass. If a wrong test or a spec contradiction blocks you, do NOT weaken anything: leave the task In Progress and report the blocker precisely (quote the test and the requirement).
 Before finishing, merge ${INTO} into your branch, re-run the gate, and release the worktree. Run "${NOW}" for finishedAt.
@@ -538,6 +576,35 @@ Return green=true only if ${INTO} is green after your merge, else failing with t
 
 const decisionIds = v => [...(v || [])].map(x => String(x && typeof x === 'object' ? x.task : x))
 const hasKey = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k)
+
+// Task 80 (3.7): every test conflict a result carries. `testConflicts` is a list; the older single `testConflict`
+// is read as a list of one. An entry without a file is not a conflict; each (file, test) is kept once, first wins.
+function testConflictsOf(result) {
+  const r = result && typeof result === 'object' ? result : {}
+  const single = r.testConflict && typeof r.testConflict === 'object' ? [r.testConflict] : []
+  const many = Array.isArray(r.testConflicts) ? r.testConflicts : []
+  const seen = new Set()
+  const out = []
+  for (const e of [...single, ...many]) {
+    if (!e || typeof e !== 'object' || !e.file) continue
+    const k = JSON.stringify([e.file, e.test || null])
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push(e)
+  }
+  return out
+}
+
+// Task 80 (3.8): a failure list for a prompt: the first `limit` entries in order, and how many of the rest each file has.
+function failuresForPrompt(failures, limit = 50) {
+  const list = Array.isArray(failures) ? failures : []
+  const more = {}
+  for (const f of list.slice(limit)) {
+    const file = f && f.file ? f.file : ''
+    more[file] = Object.prototype.hasOwnProperty.call(more, file) ? more[file] + 1 : 1
+  }
+  return { shown: list.slice(0, limit), more, total: list.length }
+}
 
 // Port of cli/worktree.py::_chain_lengths: for each open task, the number of open tasks on its longest
 // chain of dependents, itself included. Tasks are visited in `order` (tasks.md order, as ck plan's deps
@@ -1672,6 +1739,8 @@ const taskReport = Object.values(records).map(r => ({
   summary: r.result && r.result.summary,
   wrongTests: r.result && r.result.wrongTests,
   testConflict: r.testConflict || null,
+  testConflicts: testConflictsOf(r.result),
+  failures: (r.result && Array.isArray(r.result.failures) && r.result.failures) || [],
   outsideFiles: r.result && r.result.outsideFiles,
   deviations: r.result && r.result.deviations,
   fixedAfterMerge: !!r.fixes,

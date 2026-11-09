@@ -403,22 +403,23 @@ def merge_cmd(spec, tasks, into, keep, as_json):
 
 
 def _gate_fn(spec: str):
-    """Run the task gate in-process in the target checkout: (green, failing part of the report)."""
+    """Run the task gate in-process in the target checkout: (green, failing part of the report, failure entries)."""
     from ..gate import run_gate
 
     def gate(target: Path, nums):
         spec_dir = next((r / spec for r in spec_roots(target) if (r / spec / "tasks.md").exists()), None)
         if spec_dir is None:
-            return False, f"no tasks.md for {spec} in {target}"
+            return False, f"no tasks.md for {spec} in {target}", []
         result = run_gate(target, spec_dir, list(nums))
         if result.ok:
-            return True, ""
+            return True, "", []
         lines = []
         for check in result.checks:
             if not check.ok:
                 lines.append(f"✗ {check.name}")
                 lines.extend(f"    {line}" for line in check.detail.rstrip().splitlines())
-        return False, "\n".join(lines[-80:])
+        # The same ck-gate/1 entries `ck gate --json` prints, never truncated.
+        return False, "\n".join(lines[-80:]), result.to_json()["failures"]
 
     return gate
 

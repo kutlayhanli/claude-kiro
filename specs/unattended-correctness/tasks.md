@@ -869,7 +869,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 37: Carry structured failures through landing
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 2.10, 3.9, 3.10
 **Description:** Change `worktrees.GateFn` to `Callable[[Path, List[str]], Tuple[bool, str, List[dict]]]` and have `land()` keep the gate's failure entries on RED results as `Landed.failures`, printed in `ck worktree land --json` as `tasks[].failures` (always a list; empty when the gate passed or did not run). In `cli/worktree.py`, `_gate_fn` returns `GateResult.failures` as JSON dicts in addition to today's values. The landing gate stays task-scoped (`run_gate(target, spec, nums)` without `attribute`). Every key `ck worktree land --json` prints today stays. Harness Contract owner: item 2's failure entries in `ck worktree land --json`.
@@ -880,9 +880,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 1 (captures `land-json-keys.json`, the land JSON it must keep), Task 5 (TC-36's land source and TC-37)
 
 **Acceptance:**
-- [ ] A RED landing carries the same failure entries `ck gate --json` gives (3.9)
-- [ ] The land JSON keeps every key path it has today, with `failures` added (3.10)
-- [ ] The landing gate is still task-scoped (2.10)
+- [x] A RED landing carries the same failure entries `ck gate --json` gives (3.9)
+- [x] The land JSON keeps every key path it has today, with `failures` added (3.10)
+- [x] The landing gate is still task-scoped (2.10)
 
 **Dependencies:** Task 19 (reads `GateResult.failures`), Task 36 (both edit worktrees.py and cli/worktree.py; Task 36 runs first), Task 1 (its tests are the oracle), Task 5 (its tests are the oracle)
 **Complexity:** Low
@@ -1834,7 +1834,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 80: Carry structured failures and `testConflicts` through task attempts
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 3.6, 3.7, 3.8, 3.9
 **Description:** In `plugin/workflows/spec-implement.js`: the `RESULT` schema gains `failures: Failure[]` (the D3 entry, copied from ck) and `testConflicts: TestConflict[]` (`{file, test, criterion, reason, fix}`), keeping `testConflict` accepted; add `testConflictsOf(result)` (a single `testConflict` is read as a list of one) and `failuresForPrompt(failures, limit = 50)` (`{shown, more: {file: count}, total}`) in the decisions block; task prompts tell the agent to run the whole Verify with `ck -C <wt> gate <spec> --task <n> --json` without stopping at the first failure and to return ck's `failures` unchanged; retry prompts carry the previous attempt's failures as JSON via `failuresForPrompt` (first 50 in order plus per-file counts of the rest) instead of free text trimmed to 3000 characters; the confirmation step receives every conflict entry; the task report entry gains `failures` and `testConflicts`. Update `plugin/resources/spec-implement-brief.md` and `plugin/resources/without-workflow-tool.md` with the same gate JSON and `testConflicts` instructions (one entry per test). Update the existing assertions this supersedes in `tests/js/spec_implement.test.mjs` (retry prompts that pin the free-text failure trimmed to 3000 characters). Harness Contract owner: item 7's `conflictsOf` and `failureDigest` (design: `testConflictsOf`, `failuresForPrompt`) and result `testConflicts`.
@@ -1847,10 +1847,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 56 (P-8, P-9)
 
 **Acceptance:**
-- [ ] Task prompts make the agent run the whole Verify and return ck's failure list (3.6)
-- [ ] A result with `testConflicts` keeps every entry; a single `testConflict` is read as a list of one (3.7)
-- [ ] Retries get the previous failure list, capped at 50 entries plus per-file counts (3.8)
-- [ ] Task results, retries and the confirmation step use the one failure format (3.9)
+- [x] Task prompts make the agent run the whole Verify and return ck's failure list (3.6)
+- [x] A result with `testConflicts` keeps every entry; a single `testConflict` is read as a list of one (3.7)
+- [x] Retries get the previous failure list, capped at 50 entries plus per-file counts (3.8)
+- [x] Task results, retries and the confirmation step use the one failure format (3.9)
 
 **Dependencies:** Task 79 (both edit spec-implement.js; Task 79 runs first), Task 19 (the prompts run `ck gate --json`), Task 56 (its tests are the oracle)
 **Complexity:** Medium
