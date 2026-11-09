@@ -1169,7 +1169,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 50: Add `ck worktree start` for run start
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 9.1, 9.10, 16.2, 16.6
 **Description:** In `cli/worktree.py`, add `ck worktree start SPEC [--base BRANCH] [--run KEY] --json` printing `ck-run-start/1`: `{integration: Outcome, hooks: HookStatus, baseline: {commit, files}, releasedClaims: [{task, run, reason}], keptClaims: [{task, run}], warnings: [str]}`. It creates or reuses the integration worktree with `create_integration` (which calls `ensure_hooks`: inside the sandbox it only reports the state of the hooks `ck run` installed before launch; unsandboxed it installs them; it also records the baseline), then calls `release_for_run_start(root, spec, run, env, now)`. Exit 0 even when hooks could not be installed (reported in `hooks.problems` and `warnings`), exit 3 when the integration worktree cannot be created. Harness Contract owner: item 4's `ck worktree sweep` (design: the claim sweep inside `ck worktree start SPEC --run KEY`).
