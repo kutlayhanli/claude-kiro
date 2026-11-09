@@ -78,6 +78,8 @@ def build(tmp_path, tests: str, statuses=None):
     code, _, err = h.ck_text(root, "worktree", "create", "demo", "1", "--base", "integrate/demo")
     assert code == 0, err
     wt = h.task_worktree(root, 1)
+    tasks_md = wt / "specs" / "demo" / "tasks.md"
+    tasks_md.write_text(tasks_md.read_text().replace("- [ ]", "- [x]"))  # unchecked boxes would fail every gate
     (wt / "tests").mkdir(exist_ok=True)
     (wt / TEST_FILE).write_text(HEADER + textwrap.dedent(tests))
     h.commit_all(wt, "task [1]: tests")

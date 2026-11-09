@@ -138,7 +138,8 @@ await test('TC-18: OpenCode path, 25 linear tasks: attributed gates run as direc
     for (const flag of a.slice(4)) assert.ok(['--attribute', '--json', '--install'].includes(flag), `unexpected gate flag ${flag}`)
   }
   for (const l of requests(trace)) assert.ok(!GATE_LABEL.test(l) && !/gate/.test(l), `no agent runs a gate: ${l}`)
-  for (const [l, prompt] of Object.entries(p.state.prompts)) assert.ok(!/gate demo --attribute/.test(prompt), `${l} prompt holds an attributed gate`)
+  // The fake records a direct `ck gate` call under the label `gate`; the trace check above proves no agent ran it.
+  for (const [l, prompt] of Object.entries(p.state.prompts)) if (l !== 'gate') assert.ok(!/gate demo --attribute/.test(prompt), `${l} prompt holds an attributed gate`)
 })
 
 await test('TC-19: args.fullGateEvery = 3 and 9 tasks: attributed gates after merges 3, 6, 9, plus the final gate (2.1)', async () => {
