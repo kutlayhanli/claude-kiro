@@ -354,9 +354,15 @@ def claim_age(path: Path) -> float:
 
 def stale_claim(root: Path, path: Path) -> Optional[str]:
     """The lock reason when the claim on `path` is stale (no activity for
-    claim_stale_minutes from specs/ck.json), else None."""
+    claim_stale_minutes from specs/ck.json), else None. A claim whose recorded
+    run is still running is never stale, however old it is (16.3)."""
+    from claude_kiro import progress
+
     reason = lock_reason(root, path)
     if not reason:
+        return None
+    run = claim_info(reason).run
+    if run and progress.run_liveness(run, None, progress.clock_now()) == "running":
         return None
     minutes = load_config(root).get("claim_stale_minutes", CLAIM_STALE_MINUTES)
     return reason if claim_age(path) > float(minutes) * 60 else None

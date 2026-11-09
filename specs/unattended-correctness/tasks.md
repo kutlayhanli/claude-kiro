@@ -1179,8 +1179,8 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 35 (TC-143 to TC-147, TC-148a, TC-192), Task 39 (TC-75, TC-86 through run start), Task 106 (red team of Story 16 through `ck worktree start`)
 
 **Acceptance:**
-- [ ] Run start installs or reinstalls the hooks (9.1) and reports when they cannot be installed (9.10)
-- [ ] Claims of finished or dead runs are released with commits kept, and each released task is listed with the run that held it (16.2, 16.6)
+- [x] Run start installs or reinstalls the hooks (9.1) and reports when they cannot be installed (9.10)
+- [x] Claims of finished or dead runs are released with commits kept, and each released task is listed with the run that held it (16.2, 16.6)
 
 **Dependencies:** Task 36 (calls `release_for_run_start`), Task 46 (calls `create_integration` with hooks and baseline), Task 47 (both edit cli/worktree.py; Task 47 runs first), Task 35 (its tests are the oracle), Task 39 (its tests are the oracle), Task 106 (its tests are the oracle)
 **Complexity:** Medium
