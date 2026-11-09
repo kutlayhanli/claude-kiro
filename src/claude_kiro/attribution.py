@@ -9,6 +9,7 @@ Every output is canonical (sorted by command, then failure key; tasks sorted num
 any order give the same output (1.10).
 """
 
+import itertools
 import re
 import shlex
 from dataclasses import dataclass, field
@@ -42,6 +43,10 @@ class AttributionIndex:
     file_owner: Mapping[str, str] = field(default_factory=dict)                  # test file -> test task
     test_task_verifies: Mapping[str, Tuple[str, ...]] = field(default_factory=dict)  # test task -> impl tasks
     command_owner: Mapping[str, Tuple[str, ...]] = field(default_factory=dict)   # Verify command -> tasks
+    task_selectors: Mapping[str, Tuple[str, ...]] = field(default_factory=dict)  # impl task -> its last `-k` per command
+    selected_tc_coverage: Mapping[str, Tuple[str, ...]] = field(default_factory=dict)
+    # ^ each TC attributed through "Verify -k" edges -> its "Verifies" (test-task coverage) tasks, used when no
+    # selecting task can run the failing node. A TC attributed through coverage has no entry, and is never filtered.
 
     @classmethod
     def from_graph(cls, graph: "SpecGraph", tasks: "Mapping[str, SpecTask]",
@@ -84,8 +89,16 @@ class AttributionIndex:
             for command in task.verify:
                 commands.setdefault(command, set()).add(num)
         command_owner = {command: _nums(nums) for command, nums in commands.items()}
+        selected_tc_coverage = {tc: _nums(covering.get(tc, ())) for tc in tc_tasks if selecting.get(tc)}
+        task_selectors: Dict[str, Tuple[str, ...]] = {}
+        for num, task in tasks.items():
+            if task.track != "test":
+                exprs = tuple(e for e in (_last_k(command) for command in task.verify) if e is not None)
+                if exprs:
+                    task_selectors[num] = exprs
         return cls(tc_tasks=tc_tasks, file_owner=file_owner, test_task_verifies=test_task_verifies,
-                   command_owner=command_owner)
+                   command_owner=command_owner, task_selectors=task_selectors,
+                   selected_tc_coverage=selected_tc_coverage)
 
 
 # --------------------------------------------------------------------------- pure seams
@@ -140,6 +153,83 @@ def param_owned_file(node_id: Optional[str], file_owner: Mapping[str, str]) -> O
     return None
 
 
+_K_OPTION = re.compile(r"(?<!\S)-k(?:\s+|=)?(?:\"([^\"]*)\"|'([^']*)'|(\S+))")
+_K_TOKEN = re.compile(r"\(|\)|[^\s()]+")
+_K_WORD = re.compile(r"[\w:+\-.\[\]\\/]+\Z")
+_K_TC_WORD = re.compile(r"tc\d+_", re.IGNORECASE)
+_K_MAX_UNKNOWN = 8
+
+
+def _last_k(command: str) -> Optional[str]:
+    """The `-k` expression pytest would use for this command (the last one), or None without one."""
+    matches = list(_K_OPTION.finditer(command))
+    if not matches:
+        return None
+    return next(g for g in matches[-1].groups() if g is not None)
+
+
+def could_select(expression: str, node_id: str) -> bool:
+    """Whether a pytest `-k` expression can accept this node (the failing test's own id), `and`/`or`/`not`/parens.
+
+    A `tcN_` word is decided by the node id (a case-insensitive substring, or the same TC number). Any other word may be a
+    marker or a name part the id does not show, so it is unknown: the node is accepted if some assignment of the
+    unknown words accepts it. An expression this cannot read accepts the node (nothing is taken away on doubt).
+    """
+    words: List[str] = []
+    out: List[str] = []
+    for token in _K_TOKEN.findall(expression):
+        if token in ("(", ")", "and", "or", "not"):
+            out.append(token)
+        elif _K_WORD.match(token):
+            words.append(token.lower())
+            out.append(f"_w[{len(words) - 1}]")
+        else:
+            return True
+    if not out:
+        return True
+    try:
+        code = compile(" ".join(out), "<-k>", "eval")
+    except SyntaxError:
+        return True
+    hay = node_id.lower()
+    numbers = {int(m.group(1)) for m in TC_TOKEN.finditer(node_id)}  # `TC03_` and `tc003_` are the same TC as `tc3_` (P-3)
+
+    def decided(word: str) -> Optional[bool]:
+        if not _K_TC_WORD.fullmatch(word):
+            return None
+        return word in hay or int(word[2:-1]) in numbers
+
+    known = [decided(w) for w in words]
+    unknown = [i for i, value in enumerate(known) if value is None]
+    if len(unknown) > _K_MAX_UNKNOWN:
+        return True
+    for assignment in itertools.product((True, False), repeat=len(unknown)):
+        values = list(known)
+        for i, value in zip(unknown, assignment):
+            values[i] = value
+        try:
+            if eval(code, {"__builtins__": {}}, {"_w": values}):  # noqa: S307 - compiled from checked tokens only
+                return True
+        except Exception:  # noqa: BLE001 - doubt keeps the selecting task
+            return True
+    return False
+
+
+def _tasks_for_node(tc: str, node: str, index: AttributionIndex) -> Tuple[str, ...]:
+    """The tasks a failing node of this TC is attributed to: only those that can actually run it (1.1, 1.2).
+
+    The graph's TC-level `Verify -k` edge says which TCs a Verify is about; `-k "tc3_ and tc4_"` names TC-3 but never
+    runs a test carrying only tc3_. A selecting task counts only if one of its `-k` expressions can accept this node;
+    when none can, the TC's `Verifies` coverage is used; empty means the caller falls to file attribution.
+    """
+    tasks = index.tc_tasks[tc]
+    if tc not in index.selected_tc_coverage:
+        return tasks
+    kept = [t for t in tasks if t not in index.task_selectors
+            or any(could_select(e, node) for e in index.task_selectors[t])]
+    return _nums(kept) if kept else _nums(index.selected_tc_coverage[tc])
+
+
 def _finish(tc_id: Optional[str], tasks: Tuple[str, ...], by: str, finished: frozenset,
             warnings: List[str]) -> Attribution:
     excused = tuple(t for t in tasks if t not in finished)
@@ -158,8 +248,11 @@ def attribute_failure(failure: Failure, index: AttributionIndex, done: Iterable[
 
     tc = tc_of_node(node)
     if tc is not None and tc in index.tc_tasks:
-        return _finish(tc, _nums(index.tc_tasks[tc]), "tc", finished, warnings)
-    if tc is not None:
+        tasks = _tasks_for_node(tc, node, index)
+        if tasks:
+            return _finish(tc, tasks, "tc", finished, warnings)
+        warnings.append(f"no task's Verify can run {node}")
+    elif tc is not None:
         warnings.append(f"unknown TC id {tc} in {node}")
 
     if node is None and file is None:
