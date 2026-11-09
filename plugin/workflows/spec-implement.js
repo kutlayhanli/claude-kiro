@@ -224,10 +224,14 @@ const FAILURE = {
   description: 'one entry of the "failures" array that ck gate --json prints, copied unchanged',
   properties: {
     node: { type: ['string', 'null'] },
-    file: { type: ['string', 'null'] },
     tcId: { type: ['string', 'null'] },
+    tasks: { type: 'array', items: { type: 'string' } },
+    attributedBy: { type: 'string' },
+    file: { type: ['string', 'null'] },
     kind: { type: 'string', enum: ['assertion', 'import', 'collection', 'timeout', 'error'] },
     message: { type: 'string' },
+    truncated: { type: 'boolean' },
+    command: { type: ['string', 'null'] },
   },
 }
 // One test that can never pass with code that meets the spec: one entry per test.
@@ -553,16 +557,7 @@ Fix it without weakening any test and without editing requirements.md or existin
 If the only way to green is to weaken a test or change a requirement, stop and explain precisely instead.
 Return green=true only if the task gate passes in ${WT(n)} after your commit, else failing with the reason.`
 
-const verifyPrompt = what => `Verification (${what}) for spec ${SPEC}. In ${TARGET} (branch ${INTO}):
-1. Refresh dependencies if the project has an install step (e.g. "uv sync -q --directory ${TARGET}").
-2. Run:  ck -C ${TARGET} gate ${SPEC}
-   It checks every Done task: acceptance boxes, the tests that should pass by now, test collection, and that no test was weakened.
-${GATE_NOTE}
-Do not modify anything. Return green=true only if "ck -C ${TARGET} gate ${SPEC}" exited 0; otherwise put the failing checks and the relevant output tail in failing.`
-
-const recheckPrompt = n => `Re-check for spec ${SPEC}. In ${TARGET} (branch ${INTO}): refresh dependencies if needed (e.g. "uv sync -q --directory ${TARGET}"), then run "ck -C ${TARGET} gate ${SPEC}${n ? ` --task ${n}` : ''}". ${GATE_NOTE} Do not modify anything. Return green=true only if it exited 0; otherwise put the failing part in failing.`
-
-const fixPrompt = (k, what, failure) => `${INTO} is red (${what}) for spec ${SPEC}. Failure: ${trim(failure, 4000)}
+const fixPrompt = (k, what, failure) => `${INTO} is red (${what}) for spec ${SPEC}. Failure: ${JSON.stringify(failure || null)}
 Fix it without weakening any test and without editing requirements.md or existing test-plan.md rows. ${GIT_NOTE} ${GATE_NOTE}
 1. Run: ck -C ${ROOT} worktree create ${SPEC} fix${k} --install --base ${INTO}   (worktree ${WT(`fix${k}`)}). Work only there.
 2. Diagnose with the failing check, fix the code (or a clearly broken fixture or harness), and confirm the failing check passes in the fix worktree.
@@ -840,7 +835,10 @@ let redTarget = false
 let mergedCount = 0
 let fixCount = 0
 let refills = 0
-const fullGates = []
+const fullGates = []      // the periodic GateRun records (Task 81)
+const gates = []          // every attributed gate run: periodic, recheck and final GateRun records (Task 81)
+let finalGateError = false
+const GATE_ARGV = ['-C', TARGET, 'gate', SPEC, '--attribute', '--install', '--json']
 const fixerEscalations = []
 // Landing queue: finished tasks wait here; one `ck worktree land` runs at a time and
 // takes up to batchWindow of them. Waiting here never holds a slot.
@@ -1212,20 +1210,74 @@ function applyLint(p) {
   }
 }
 
-async function fixAndRecheck(what, failure, n) {
-  const ph = n ? phaseOf(n) : 'Final gate'
+// --- Attributed gates (Task 81) ---------------------------------------------------------------------------------
+// The verdict of one `ck gate ... --attribute --json` call. A thin answer and a direct answer both arrive as
+// {code, json, stderr}; json is ck-gate/1 (full) or ck-gate-compact/1 (--compact). green: ck said ok. red: regressions
+// go to the fixer. error: no valid gate object of either shape, so the gate never counts green (2.9, 19.5).
+const isPlainObj = v => !!v && typeof v === 'object' && !Array.isArray(v)
+function gateOutcome(out) {
+  const fail = error => ({ state: 'error', green: false, regressions: [], excusedByTask: {}, flaky: [], report: null, error })
+  if (!out || typeof out !== 'object') return fail('the gate call returned no result')
+  const j = out.json
+  if (!isPlainObj(j)) return fail(`ck gate printed no JSON object${out.stderr ? `: ${trim(out.stderr, 300)}` : ''}`)
+  if (typeof j.ok !== 'boolean') return fail('the gate JSON has no ok flag')
+  const report = typeof j.report === 'string' ? j.report : null
+  let regressions
+  let flaky
+  const excusedByTask = {}
+  if (j.schema === 'ck-gate/1') {
+    if (!Array.isArray(j.failures)) return fail('ck-gate/1 JSON has no failures array')
+    const entries = j.failures.filter(isPlainObj)
+    regressions = entries.filter(f => f.status === 'regression')
+    flaky = entries.filter(f => f.status === 'flaky')
+    for (const f of entries.filter(f => f.status === 'excused')) {
+      for (const t of Array.isArray(f.tasks) ? f.tasks : []) excusedByTask[t] = (excusedByTask[t] || 0) + 1
+    }
+  } else if (j.schema === 'ck-gate-compact/1') {
+    if (!Array.isArray(j.regressions) || !Array.isArray(j.flaky) || !isPlainObj(j.excusedByTask)) {
+      return fail('ck-gate-compact/1 JSON has a regressions, flaky or excusedByTask field of the wrong shape')
+    }
+    regressions = j.regressions
+    flaky = j.flaky
+    Object.assign(excusedByTask, j.excusedByTask)
+  } else {
+    return fail(`the gate JSON has an unknown schema ${JSON.stringify(j.schema)}`)
+  }
+  return { state: j.ok ? 'green' : 'red', green: j.ok === true, regressions, excusedByTask, flaky, report, error: null }
+}
+// One GateRun record (Task 81): the verdict plus the gate's position and, when a fixer ran, its record.
+const gateRun = (kind, afterMerges, out) => ({ kind, afterMerges, ...gateOutcome(out), fix: null })
+// One attributed gate through thinCk. Claude Code asks for the compact answer (2.12); OpenCode reads the full JSON.
+// An error is retried once; a second error is the run's record and sends nothing to the fixer.
+async function attributedGate(kind, afterMerges, label, phaseName, what) {
+  const argv = [...GATE_ARGV, ...(thin.mode === 'direct' ? [] : ['--compact'])]
+  const ask = () => thinCk('gate', argv, { label, phase: phaseName, cwd: TARGET, gate: true, what })
+  let run = gateRun(kind, afterMerges, await ask())
+  if (run.state === 'error') {
+    log(`${label}: the gate call failed (${run.error}); retrying once`)
+    run = gateRun(kind, afterMerges, await ask())
+  }
+  return run
+}
+// A red gate (2.6, 2.7): the regressions go to the fixer as Failure entries (3.9), each recheck is again an attributed
+// gate, and the escalation ladder runs as before. Every recheck is recorded in `gates`.
+async function fixAndRecheck(what, first, afterMerges, phaseName) {
+  const ph = phaseName
+  const failuresOf = g => failuresForPrompt(g.regressions)
   fixCount++
-  let fix = await call('fix', fixPrompt(fixCount, what, failure), { label: `fix ${fixCount} (${what})`, phase: ph, schema: VERIFY, ...FIX })
-  let recheck = await call('recheck', recheckPrompt(n), { label: `re-check ${fixCount}`, phase: ph, schema: VERIFY, ...ORCH })
+  let fix = await call('fix', fixPrompt(fixCount, what, failuresOf(first)), { label: `fix ${fixCount} (${what})`, phase: ph, schema: VERIFY, ...FIX })
+  let recheck = await attributedGate('recheck', afterMerges, `re-check ${fixCount}`, ph, `Re-check for spec ${SPEC} in ${TARGET} (branch ${INTO})`)
+  gates.push(recheck)
   for (const model of FIX_UP) {
-    if (recheck && recheck.green) break
+    if (recheck.state !== 'red') break
     fixCount++
     log(`${what}: still red after the fix, escalating the fixer to ${model}`)
-    fix = await call('fix', fixPrompt(fixCount, what, recheck), { label: `fix ${fixCount} (${what}) [${model}]`, phase: ph, schema: VERIFY, ...escalated(FIX, model) })
-    recheck = await call('recheck', recheckPrompt(n), { label: `re-check ${fixCount}`, phase: ph, schema: VERIFY, ...ORCH })
-    fixerEscalations.push({ what, model, green: !!(recheck && recheck.green) })
+    fix = await call('fix', fixPrompt(fixCount, what, failuresOf(recheck)), { label: `fix ${fixCount} (${what}) [${model}]`, phase: ph, schema: VERIFY, ...escalated(FIX, model) })
+    recheck = await attributedGate('recheck', afterMerges, `re-check ${fixCount}`, ph, `Re-check for spec ${SPEC} in ${TARGET} (branch ${INTO})`)
+    gates.push(recheck)
+    fixerEscalations.push({ what, model, green: recheck.green })
   }
-  return { fix, recheck, green: !!(recheck && recheck.green) }
+  return { fix, recheck, green: recheck.green }
 }
 
 function requestLanding(n) {
@@ -1284,17 +1336,20 @@ async function landBatch(batch) {
   if (entry.bisected || entry.red.length) log(`Landing ${tasks.join(' ')}: red, bisected; ${entry.red.length ? `culprit(s) ${entry.red.join(', ')}` : 'no culprit (flaky?)'}; window now ${batchWindow}`)
 
   if (entry.merged.length && FULL_EVERY > 0 && Math.floor(mergedCount / FULL_EVERY) > Math.floor(before / FULL_EVERY)) {
-    let v = await call('gate', verifyPrompt(`full gate after ${mergedCount} merges`), { label: `full gate @${mergedCount}`, phase: phaseOf(tasks[0]), schema: VERIFY, ...ORCH })
-    if (!v || !v.green) {
+    const g = await attributedGate('periodic', mergedCount, `full gate @${mergedCount}`, phaseOf(tasks[0]), `Verification (full gate after ${mergedCount} merges) for spec ${SPEC}`)
+    gates.push(g)
+    fullGates.push(g)
+    if (g.state === 'red') {
       log(`Full gate red after ${mergedCount} merges, one fix attempt`)
-      const f = await fixAndRecheck(`full gate after ${mergedCount} merges`, v)
-      v = { ...(v || {}), fix: f, green: f.green }
-    }
-    fullGates.push({ afterMerges: mergedCount, green: !!v.green })
-    if (!v.green) {
-      redTarget = true
-      stopLaunching = true
-      stopReason = stopReason || `${INTO} is red: full gate after ${mergedCount} merges`
+      g.fix = await fixAndRecheck(`full gate after ${mergedCount} merges`, g, mergedCount, phaseOf(tasks[0]))
+      // A recheck that errors leaves the run going (2.9); only a verdict that is still red stops it.
+      if (g.fix.recheck.state === 'red') {
+        redTarget = true
+        stopLaunching = true
+        stopReason = stopReason || `${INTO} is red: full gate after ${mergedCount} merges`
+      }
+    } else if (g.state === 'error') {
+      log(`Full gate after ${mergedCount} merges could not run (${g.error}); the run goes on`)
     }
   }
   for (const [b, t] of outcomes) {
@@ -1712,13 +1767,21 @@ await Promise.all(crossTestRuns)
 let finalGate = null
 if (mergedCount && !redTarget) {
   phase('Final gate')
-  finalGate = await call('gate', verifyPrompt('final'), { label: 'final gate', phase: 'Final gate', schema: VERIFY, ...ORCH })
-  if (!finalGate || !finalGate.green) {
+  const g = await attributedGate('final', mergedCount, 'final gate', 'Final gate', `Verification (final) for spec ${SPEC}`)
+  gates.push(g)
+  let fix = null
+  if (g.state === 'red') {
     log(`Final gate red, one fix attempt`)
-    const f = await fixAndRecheck('final gate', finalGate)
-    finalGate = { ...(finalGate || {}), fix: f, green: f.green }
+    fix = await fixAndRecheck('final gate', g, mergedCount, 'Final gate')
   }
-  if (!finalGate.green) redTarget = true
+  g.fix = fix
+  const green = g.green || !!(fix && fix.green)
+  finalGate = { ...g, green, fix }
+  if (g.state === 'error') {
+    finalGateError = true
+    log(`Final gate could not run (${g.error})`)
+  }
+  if (!green) redTarget = true
 }
 
 // --- report ------------------------------------------------------------------
@@ -1840,7 +1903,10 @@ for (const e of needsInput) {
 let outcome = 'complete'
 let reason = stopReason
 const planFailed = stopReason === PLAN_FAILED
-if (redTarget) outcome = 'halted'
+if (redTarget) {
+  outcome = 'halted'
+  if (finalGateError) reason = 'final gate could not run'
+}
 else if (stopReason && !planFailed && notStarted.length) outcome = 'halted'
 else if (planFailed && (!fromGit || readyLeft.length)) outcome = 'halted'
 else if (notStarted.length || failedList.length || needsInput.length) {
@@ -1910,6 +1976,8 @@ return {
   tasks: taskReport,
   landings,
   fullGates,
+  gates,
+  testConflicts: taskReport.flatMap(t => t.testConflicts),
   finalGate,
   crossTests,
   degraded,
