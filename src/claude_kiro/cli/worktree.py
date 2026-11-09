@@ -388,6 +388,73 @@ def integration_cmd(spec, base, as_json):
         click.echo(outcome.line())
 
 
+@worktree.command("start")
+@click.argument("spec")
+@click.option("--base", help="Branch to create the integration branch from (default: the main checkout's branch)")
+@click.option("--run", "run_key", default=None, help="Progress run key of the starting run (its own claims are kept)")
+@click.option("--json", "as_json", is_flag=True)
+def start_cmd(spec, base, run_key, as_json):
+    """Run start: integration worktree, hooks, protected baseline, and the sweep of dead runs' claims.
+
+    Exit 0 even when the hooks could not be installed (see `hooks.problems`); exit 3 when the
+    integration worktree cannot be created.
+    """
+    from .. import protect
+
+    root = _root()
+    name = _spec_name(spec)
+    try:
+        outcome = wt.create_integration(root, name, base=base)
+    except (wt.WorktreeError, OSError) as e:
+        click.echo(f"❌ {e}")
+        sys.exit(3)
+    if outcome.state in ("ERROR", "BUSY", "CONFLICT", "MISSING"):
+        click.echo(outcome.line())
+        sys.exit(3)
+    warnings = []
+    hooks = outcome.hooks or {}
+    for problem in hooks.get("problems", []) or []:
+        warnings.append(f"hooks: {problem}")
+    ref = f"refs/heads/{outcome.branch}"
+    baseline = {"commit": "", "files": {}}
+    try:
+        state = protect.read_approved_state(root, name, ref)
+        if state is not None:
+            baseline = {"commit": state.commit, "files": dict(state.files)}
+        else:
+            tip = wt.git(root, "rev-parse", ref).stdout.strip()
+            baseline = {"commit": tip, "files": protect.protected_files_at(root, tip)}
+    except (OSError, ValueError, wt.WorktreeError) as e:
+        warnings.append(f"baseline unavailable: {e}")
+    try:
+        claims = wt.release_for_run_start(root, name, run_key, dict(os.environ))
+    except (OSError, wt.WorktreeError) as e:
+        warnings.append(f"claim sweep failed: {e}")
+        claims = wt.RunStartClaims()
+    for k in claims.kept:
+        if k.get("error"):
+            warnings.append(f"task {k['task']}: could not release the claim: {k['error']}")
+    doc = {
+        "schema": "ck-run-start/1",
+        "integration": outcome.as_dict(),
+        "hooks": hooks,
+        "baseline": baseline,
+        "releasedClaims": claims.released,
+        "keptClaims": claims.kept,
+        "warnings": warnings,
+    }
+    if as_json:
+        click.echo(json.dumps(doc, indent=2))
+        return
+    click.echo(outcome.line())
+    for r in claims.released:
+        click.echo(f"released claim on task {r['task']} (run {r['run'] or 'none'})")
+    for k in claims.kept:
+        click.echo(f"kept claim on task {k['task']} (run {k['run'] or 'none'})")
+    for w in warnings:
+        click.echo(f"warning: {w}")
+
+
 @worktree.command("claim")
 @click.argument("spec")
 @click.argument("task")
