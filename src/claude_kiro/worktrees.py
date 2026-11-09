@@ -779,6 +779,64 @@ def _record_landed(root: Path, spec: str, into: str, landed: Dict[str, List[str]
         pass
 
 
+def _record_fixtures(root: Path, target: Path, spec: str, base: str, merged: List[str],
+                     results: Dict[str, "Landed"]) -> Optional[str]:
+    """Lock recorded fixtures of the tasks that merged (15.1, 15.2); returns a config error text or None.
+
+    Per merged task, in landing order: new files get a lock entry (task, time); changed or deleted locked files
+    are `fixtureDrift` unless their label is handcrafted with a reason covering the new content, which updates
+    the entry's hash and records the reason. Landing is never refused by drift. No globs: nothing is written."""
+    from claude_kiro import fixtures
+
+    if not merged:
+        return None
+    config = load_config(target)
+    try:
+        globs = fixtures.fixture_globs(dict(config))
+    except fixtures.ConfigError as exc:
+        return str(exc)
+    if not globs:
+        return None
+    entries, tampered = fixtures.read_lock(root, spec)
+    labels = fixtures.read_labels(target, config)
+    changed = False
+    for num in merged:
+        branch = task_branch(spec, num)
+        diff = git(root, "diff", "--name-status", "--no-renames", f"{base}...{branch}", check=False).stdout
+        paths: Dict[str, str] = {}
+        for line in diff.splitlines():
+            status_, _, path = line.partition("\t")
+            if path:
+                paths[path] = status_.strip()
+        recorded = fixtures.recorded_files(config, sorted(paths))
+        changes: Dict[str, Optional[str]] = {}
+        for path in recorded:
+            if paths[path].startswith("D"):
+                changes[path] = None
+                continue
+            proc = subprocess.run(["git", "-C", str(root), "show", f"{branch}:{path}"], capture_output=True)
+            if proc.returncode == 0:
+                changes[path] = fixtures.sha256_text(proc.stdout)
+        if not changes:
+            continue
+        report = fixtures.lock_decision(entries, changes, labels, tampered=tampered)
+        results[num].fixtureDrift = [{"file": d["file"], "task": num, "change": d["change"]} for d in report.drift]
+        if tampered:
+            continue  # never reseal a lock that does not verify: the audit reports it
+        at = _now()
+        for path in report.new_locks:
+            entries[path] = fixtures.LockEntry(sha256=str(changes[path]), task=num, locked_at=at)
+            changed = True
+        for h_ in report.handcrafted:
+            old = entries[h_["file"]]
+            entries[h_["file"]] = fixtures.LockEntry(sha256=str(changes[h_["file"]]), task=old.task,
+                                                     locked_at=old.locked_at, handcrafted=h_["reason"])
+            changed = True
+    if changed:
+        fixtures.write_lock(root, spec, entries)
+    return None
+
+
 def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, keep: bool = False) -> List[Outcome]:
     """Merge task branches into `into` one at a time (--no-ff); stop at the first conflict.
 
@@ -853,6 +911,7 @@ class Landed:
     checkTail: str = ""
     mergedAt: str = ""
     failures: List[Dict] = field(default_factory=list)  # the gate's failure entries (ck-gate/1), RED only
+    fixtureDrift: List[Dict] = field(default_factory=list)  # [{file, task, change}] recorded fixtures changed (15.2)
 
     def line(self) -> str:
         text = f"{self.state} {self.task} ({self.branch})"
@@ -1186,6 +1245,13 @@ def land(
             root, spec, into,
             {n: landed_paths[n] for n, o in results.items() if o.state == "MERGED" and n in landed_paths}, approved)
 
+        fixture_error: Optional[str] = None
+        try:
+            fixture_error = _record_fixtures(
+                root, target, spec, base, [n for n in order if n in results and results[n].state == "MERGED"], results)
+        except (OSError, ValueError, subprocess.CalledProcessError, WorktreeError) as exc:
+            fixture_error = f"fixture lock not recorded: {exc}"
+
         if not keep:
             for num, outcome in results.items():
                 if outcome.state != "MERGED":
@@ -1202,6 +1268,7 @@ def land(
             "gates": gates,
             "bisected": len(gates) > 1,
             **({"hooks": hook_notes[-1]} if hook_notes else {}),
+            **({"fixtureError": fixture_error} if fixture_error else {}),
         }
 
 

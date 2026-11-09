@@ -1149,7 +1149,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 49: Lock recorded fixtures when they land
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 15.1, 15.2, 15.7, 15.8
 **Description:** In `worktrees.land()`, after each task merges, gather the changed files matching `fixtures.recorded`, call `fixtures.lock_decision`, write new lock entries (task and time) for files landing for the first time, and report changes to locked files as `Landed.fixtureDrift` (`[{file, task, change}]`), printed in the land JSON as `tasks[].fixtureDrift` (empty list when none). Accepted handcrafted changes update the entry's hash and record the reason. With no globs nothing is written or reported; a config error is reported in the land result and no lock is kept for that landing. The landing itself is not refused by drift. Harness Contract owner: item 5's `fixtureDrift` in `ck worktree land --json`.
