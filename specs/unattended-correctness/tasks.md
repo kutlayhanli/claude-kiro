@@ -736,7 +736,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 31: Gate test-track tasks on right-reason failures and the project validator
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6
 **Description:** In `gate.run_gate`, a test-track task whose verified tasks are not all Done no longer skips its Verify: run it in the gate's checkout (the task worktree, or the landing target with the task's test files applied), build `ProjectContext` from the graph (project modules from the src layout, owned paths from owns edges, programs from `SpecGraph.programs`, the task's test files and fixtures, and the source text of its test files as `test_sources` for 5.7), classify each failing node with `classify_not_built`, and decide with `right_reason_verdict`. Record a check "Task N tests fail for the right reason": fails when any failure is `bad` (those entries get `class: "bad"`, `check: "right-reason"`), passes with `warning: true` for unclear failures (`class: "unclear"`), adds a warning naming tests that already pass; all verified tasks Done keeps today's "must pass" rule (5.6). Then, on every test-track gate only, read `config.test_track_validate(config)` and run each command in the gate's checkout through `_run_command` with the gate's verify timeout: a non-zero exit is a failing check named `` `<command>` (test_track.validate) `` with its 40-line tail and a failure entry `check: "validate"`, kind `error`; a timeout fails as kind `timeout`; a `ConfigError` becomes a failing "Config" check naming the key and no test command runs. Impl-track gates never run the validator (6.6). Harness Contract owner: item 6's `test_track.validate` at the gate (the reader is Task 28's).
@@ -746,10 +746,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 23 (TC-50 to TC-54, TC-56, TC-57, TC-181), Task 24 (TC-58 to TC-63), Task 25 (red team of 6.5, 6.6), Task 107 (red team of Story 5 through `ck gate`), Task 4 (config_error_only through `ck gate --json`)
 
 **Acceptance:**
-- [ ] A not-due test task's new tests run against the integration branch with its test files, and each failure is classified (5.1, 5.2)
-- [ ] A bad failure fails the gate with the entries marked; unclear failures and already-passing tests only warn (5.3, 5.4, 5.5)
-- [ ] With all verified tasks Done the tests must pass, as today (5.6)
-- [ ] The declared validator runs in the task's worktree on test-track gates only; non-zero fails with command and tail, a timeout fails as timeout, no key means no check, a bad value is a Config error naming the key (6.1-6.6)
+- [x] A not-due test task's new tests run against the integration branch with its test files, and each failure is classified (5.1, 5.2)
+- [x] A bad failure fails the gate with the entries marked; unclear failures and already-passing tests only warn (5.3, 5.4, 5.5)
+- [x] With all verified tasks Done the tests must pass, as today (5.6)
+- [x] The declared validator runs in the task's worktree on test-track gates only; non-zero fails with command and tail, a timeout fails as timeout, no key means no check, a bad value is a Config error naming the key (6.1-6.6)
 
 **Dependencies:** Task 20 (extends the command selection in `run_gate` that Task 20 restructures), Task 29 (calls `classify_not_built` and `right_reason_verdict`), Task 28 (calls `test_track_validate`), Task 13 (reads `SpecGraph.programs`), Task 23 (its tests are the oracle), Task 24 (its tests are the oracle), Task 25 (its tests are the oracle), Task 107 (its tests are the oracle)
 **Complexity:** High
