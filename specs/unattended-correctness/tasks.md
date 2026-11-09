@@ -758,7 +758,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 32: Run the row-fidelity check on test-track gates
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 8.1, 8.2, 8.6
 **Description:** In `gate.run_gate`, on every test-track gate, call `fidelity.check_task` for the gated test task. Mismatches make a failing check "Task N tests match their test-plan rows" and add one failure entry per mismatch (`check: "row-fidelity"`, kind `assertion`, message naming the value and the expected value or allowed set, node and TC id of the test). Unparsed and unmatched items do not fail the gate; they are left for the reviewer (Task 87). The gate must not write to the test plan, design or tests.
