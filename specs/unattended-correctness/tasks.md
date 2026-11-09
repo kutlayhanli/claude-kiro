@@ -1124,7 +1124,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 48: Add the recorded-fixture lock and `ck fixtures`
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 15.1, 15.3, 15.4, 15.5, 15.6, 15.7, 15.8
 **Description:** Create `src/claude_kiro/fixtures.py` with `LockEntry`, `Label` and `FixtureReport`, the sealed lock `<git-common-dir>/ck/<spec>/fixture-lock.json` (`{"entries": {...}, "mac": ...}`, mac with protect's HMAC key), the label file reader (`fixtures.labels`, default `specs/fixture-labels.json`), and the pure seam `lock_decision(lock, changes, labels) -> FixtureReport`: a file matching `fixtures.recorded` with no entry -> `new_locks`; a changed or deleted locked file -> drift with file and task, unless its label is `handcrafted` with a non-blank reason and a sha256 equal to the new content -> `handcrafted`; a blank reason or wrong hash is drift; `lock_tampered` when the mac fails or an entry for an existing file was changed or removed; `unlabeled` lists recorded fixtures with no capture metadata and no handcrafted label. Globs come from `config.fixture_globs`; with none, nothing is locked or reported; a `ConfigError` is returned as `configError`. Create `src/claude_kiro/cli/fixtures.py` with `ck fixtures mark PATH --handcrafted REASON` (writes the label with the current content's sha256 and the reason; rejects a blank reason) and `ck fixtures status SPEC [--task N] --json` (`{locked, drift, unlabeled, configError}`), and register `fixtures` in `cli/main.py`. Harness Contract owner: item 3's `fixtures.drift` (design: `lock_decision`) and item 4's `ck fixtures status` and `ck fixtures handcraft` (design: `ck fixtures mark PATH --handcrafted REASON`).
@@ -1132,18 +1132,19 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 - `src/claude_kiro/fixtures.py` - new: lock models, sealed lock store, label reader, `lock_decision`
 - `src/claude_kiro/cli/fixtures.py` - new: `ck fixtures mark`, `ck fixtures status`
 - `src/claude_kiro/cli/main.py` - register `fixtures`
-**Verify:** `uv run pytest -q tests/test_fixture_lock.py -k "tc139_"` `uv run pytest -q tests/test_fixture_config_properties.py -k "tc175_p32"`
+**Verify:** `uv run pytest -q tests/test_fixture_lock.py -k "tc139a_"` `uv run pytest -q tests/test_fixture_config_properties.py -k "tc175_p32"`
 **Verified by:** Task 22 (P-32 at `lock_decision`), Task 43 (TC-139a)
 
 **Acceptance:**
-- [ ] A handcrafted label with a reason accepts the change and records the reason (15.3); a blank reason is drift (15.4)
-- [ ] A changed or removed lock entry for an existing file is reported as tampering (15.5)
-- [ ] `ck fixtures status` lists recorded fixtures without capture metadata that are not handcrafted (15.6)
-- [ ] No globs means no lock and no report (15.7); a bad glob value is a config error naming `fixtures.recorded` (15.8)
+- [x] A handcrafted label with a reason accepts the change and records the reason (15.3); a blank reason is drift (15.4)
+- [x] A changed or removed lock entry for an existing file is reported as tampering (15.5)
+- [x] `ck fixtures status` lists recorded fixtures without capture metadata that are not handcrafted (15.6)
+- [x] No globs means no lock and no report (15.7); a bad glob value is a config error naming `fixtures.recorded` (15.8)
 
 **Dependencies:** Task 28 (calls `fixture_globs`), Task 44 (uses protect's HMAC key to seal the lock), Task 45 (both edit cli/main.py; Task 45 runs first), Task 22 (its tests are the oracle), Task 43 (its tests are the oracle)
 **Complexity:** Medium
 **Risk:** safety (uses ck's HMAC signing key to seal the fixture lock the run-end audit trusts)
+**Deviation:** Verify said `-k "tc139_"`, which selects no test (the test is `test_tc139a_...`, exit 5); changed to `tc139a_`.
 
 ---
 

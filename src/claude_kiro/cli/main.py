@@ -28,6 +28,7 @@ from .stats import stats
 from .eta import eta, eta_backtest, eta_defaults, progress_group, status_line
 from .worktree import lint, plan, relink, waves, worktree
 from .graph import graph
+from .fixtures import fixtures
 from .githooks import git_hook
 from .runner import HOOK_SETTINGS, configured_hooks, execute_hook, install_hook_settings
 
@@ -1189,6 +1190,7 @@ cli.add_command(git_hook)
 cli.add_command(waves)
 cli.add_command(plan)
 cli.add_command(lint)
+cli.add_command(fixtures)
 cli.add_command(graph)
 cli.add_command(relink)
 cli.add_command(agents)
