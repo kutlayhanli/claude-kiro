@@ -2476,7 +2476,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 108: Install the hooks from `ck run` before launch and deny sandboxed writes to them
-**Status:** Done
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 9.1, 9.10, 9.11, NFR sandbox
 **Description:** In `src/claude_kiro/cli/run.py`: before launching the harness, the unsandboxed `ck run` calls `protect.install_hooks(project)` (the repository config and `.git/hooks` are read-only inside Claude Code's sandbox, so in-sandbox steps can only check); an install problem is printed before launch and is what run start later reports (9.10). `sandbox_settings` adds `"denyWrite": [<git-common-dir>/ck/hooks, <git-common-dir>/ck/key]` to `filesystem`, leaving `<git-common-dir>/ck/tokens` and `<git-common-dir>/ck/<spec>` writable, so sandboxed processes can run the hooks and land with tokens but never edit hook code, `chain.json`, the interpreter record or the key (design Security). Bench arms launch `ck run`, so they get the same install. Update the existing `tests/test_run.py` cases that pin the exact `sandbox_settings` filesystem keys, in this task.
