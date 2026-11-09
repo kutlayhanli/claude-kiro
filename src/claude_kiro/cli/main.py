@@ -1145,11 +1145,10 @@ def gate(spec: str, tasks: tuple, no_reuse: bool, as_json: bool, attribute: bool
         if compact and report is not None:
             payload = result.to_compact(str(report))
         else:
-            if compact:
-                result.warnings.append("gate report not written: printing the full ck-gate/1 object instead")
+            # A failed write already warned (write_report); with --compact the full object is printed instead.
             payload = result.to_json()
-            if report is not None:
-                payload["report"] = str(report)
+            if attribute:
+                payload["report"] = str(report) if report is not None else None
         click.echo(json.dumps(payload, ensure_ascii=False))
         sys.exit(0 if result.ok else 1)
     if not result.tasks and not result.checks:

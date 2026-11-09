@@ -104,6 +104,10 @@ class GateResult:
             return None
         return {"command": command, "providers": list(self.command_providers[command])}
 
+    def _failed_checks(self) -> List[Check]:
+        """The failed checks; under --attribute a Verify command's run is not one (its failures carry the verdict)."""
+        return [c for c in self.checks if not c.ok and not (self.verdict is not None and c.command)]
+
     def to_json(self) -> Dict[str, Any]:
         """The `ck-gate/1` object (`ck gate --json`). Failure entries are never truncated or dropped."""
         entries = []
@@ -126,7 +130,7 @@ class GateResult:
             entries.append(entry)
         summary: Dict[str, Any] = {
             "checks": len(self.checks),
-            "failedChecks": sum(1 for c in self.checks if not c.ok),
+            "failedChecks": len(self._failed_checks()),
             "failures": len(entries),
         }
         if self.verdict is not None:
@@ -165,7 +169,8 @@ class GateResult:
             "tasks": full["tasks"],
             "ok": full["ok"],
             "attribute": full["attribute"],
-            "failedChecks": [c for c in full["checks"] if not c["ok"]],
+            "failedChecks": [{"name": c.name, "ok": c.ok, "detail": c.detail, "warning": c.warning}
+                             for c in self._failed_checks()],
             "regressions": with_status("regression"),
             "unattributed": with_status("unattributed"),
             "flaky": with_status("flaky"),
@@ -410,7 +415,8 @@ def _run_attributed(result: GateResult, project_dir: Path, config: Dict[str, Any
             record(_run_command(command, project_dir, timeout, env, report_dir), command)
 
     def probe(command: str) -> Tuple[str, CommandRun]:
-        return command, _run_command(f"{_launcher(command)} --collect-only -q", project_dir, timeout, env,
+        # The Verify as written (its paths, -k, -m, --ignore) plus --collect-only: only the nodes it selects.
+        return command, _run_command(f"{command} --collect-only -q", project_dir, timeout, env,
                                      report_dir, collect=True)
 
     with ThreadPoolExecutor(max_workers=os.cpu_count() or 1) as pool:
