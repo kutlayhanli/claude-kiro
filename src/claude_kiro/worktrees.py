@@ -656,6 +656,7 @@ class Landed:
     checkGreen: Optional[bool] = None
     checkTail: str = ""
     mergedAt: str = ""
+    failures: List[Dict] = field(default_factory=list)  # the gate's failure entries (ck-gate/1), RED only
 
     def line(self) -> str:
         text = f"{self.state} {self.task} ({self.branch})"
@@ -668,8 +669,8 @@ class Landed:
         return text
 
 
-# gate(target checkout, task numbers) -> (green, failing output)
-GateFn = Callable[[Path, List[str]], Tuple[bool, str]]
+# gate(target checkout, task numbers) -> (green, failing output, failure entries)
+GateFn = Callable[[Path, List[str]], Tuple[bool, str, List[Dict]]]
 
 
 def _now() -> str:
@@ -927,26 +928,27 @@ def land(
                 merged.append(num)
             return merged
 
-        def check(group: List[str]) -> Tuple[bool, str]:
+        def check(group: List[str]) -> Tuple[bool, str, List[Dict]]:
             t0 = datetime.datetime.now()
-            ok, tail = True, ""
+            ok, tail, failures = True, "", []
             if install:
                 proc = subprocess.run(install, shell=True, cwd=target, capture_output=True, text=True)
                 if proc.returncode != 0:
                     out = "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-20:])
                     ok, tail = False, f"install step failed: `{install}`\n{out}"
             if ok:
-                ok, tail = gate(target, group)
+                ok, tail, failures = gate(target, group)
             gates.append({"tasks": list(group), "green": ok, "seconds": int((datetime.datetime.now() - t0).total_seconds())})
-            return ok, tail
+            return ok, tail, failures
 
         def mark_merged(group: List[str], green: Optional[bool]) -> None:
             at = _now()
             for num in group:
                 results[num] = Landed(num, "MERGED", f"into {into}", task_branch(spec, num), [], green, "", at)
 
-        def land_group(group: List[str], known_red: bool = False, red_tail: str = "") -> bool:
+        def land_group(group: List[str], known_red: bool = False, red_tail: str = "", red_failures: Optional[List[Dict]] = None) -> bool:
             """Land `group` on the current target head; True if all of it landed green."""
+            red_failures = red_failures or []
             if not known_red:
                 start = head()
                 merged = merge_all(group)
@@ -955,20 +957,20 @@ def land(
                 if gate is None:
                     mark_merged(merged, None)
                     return len(merged) == len(group)
-                ok, tail = check(merged)
+                ok, tail, failures = check(merged)
                 if ok:
                     mark_merged(merged, True)
                     return len(merged) == len(group)
                 git(target, "reset", "--hard", "-q", start)
-                group, red_tail = merged, tail
+                group, red_tail, red_failures = merged, tail, failures
             if len(group) == 1:
                 num = group[0]
-                results[num] = Landed(num, "RED", f"the gate on {into} fails with this task; it was not landed", task_branch(spec, num), [], False, red_tail)
+                results[num] = Landed(num, "RED", f"the gate on {into} fails with this task; it was not landed", task_branch(spec, num), [], False, red_tail, failures=red_failures)
                 return False
             half = len(group) // 2
             left_green = land_group(group[:half])
             # A green left half on the same base proves the right half red: skip re-gating it whole.
-            land_group(group[half:], known_red=left_green, red_tail=red_tail)
+            land_group(group[half:], known_red=left_green, red_tail=red_tail, red_failures=red_failures)
             return False
 
         if batch:

@@ -869,7 +869,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 37: Carry structured failures through landing
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 2.10, 3.9, 3.10
 **Description:** Change `worktrees.GateFn` to `Callable[[Path, List[str]], Tuple[bool, str, List[dict]]]` and have `land()` keep the gate's failure entries on RED results as `Landed.failures`, printed in `ck worktree land --json` as `tasks[].failures` (always a list; empty when the gate passed or did not run). In `cli/worktree.py`, `_gate_fn` returns `GateResult.failures` as JSON dicts in addition to today's values. The landing gate stays task-scoped (`run_gate(target, spec, nums)` without `attribute`). Every key `ck worktree land --json` prints today stays. Harness Contract owner: item 2's failure entries in `ck worktree land --json`.
