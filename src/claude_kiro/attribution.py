@@ -96,8 +96,12 @@ def _nums(tasks: Iterable[str]) -> Tuple[str, ...]:
 
 
 def _function_name(node_id: str) -> str:
-    last = node_id.split("::")[-1]
-    return last.split("[", 1)[0]
+    # The parameter ID is cut first: it may itself hold "::" (`test_x[a::1]`). The file part (before the first
+    # "::") may hold "[" (`odd dir [1]/test_odd.py`), so the cut is made after it.
+    head, sep, rest = node_id.partition("::")
+    if not sep:
+        return head.split("[", 1)[0]
+    return rest.split("[", 1)[0].split("::")[-1]
 
 
 def tc_of_node(node_id: Optional[str]) -> Optional[str]:

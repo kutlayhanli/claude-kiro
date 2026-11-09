@@ -23,6 +23,7 @@ Used by `ck gate` and by the done-verify hook when a task is marked Done.
 
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -32,7 +33,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from claude_kiro import properties as props
 from claude_kiro import verified
@@ -74,6 +75,7 @@ class CommandRun:
     check: Check
     failures: List[Failure] = field(default_factory=list)
     collected: List[str] = field(default_factory=list)  # node IDs the plugin recorded under CK_GATE_COLLECT
+    returncode: Optional[int] = None  # the process exit code (None: timed out)
 
 
 @dataclass
@@ -205,7 +207,7 @@ def _known_files(project_dir: Path) -> List[str]:
 
 
 def _run_command(command: str, project_dir: Path, timeout: int, env: Optional[Dict[str, str]],
-                 report_dir: Path, collect: bool = False) -> CommandRun:
+                 report_dir: Path, collect: bool = False, only: Optional[Sequence[str]] = None) -> CommandRun:
     """Run one verify command and parse its failures. The command text is never rewritten.
 
     For a direct pytest invocation the child environment (only) gets the plugin: CK_GATE_REPORT names a fresh
@@ -224,6 +226,10 @@ def _run_command(command: str, project_dir: Path, timeout: int, env: Optional[Di
         run_env["PYTEST_ADDOPTS"] = " ".join(p for p in (f"-p {PLUGIN_NAME}", run_env.get("PYTEST_ADDOPTS", "")) if p)
         if collect:
             run_env["CK_GATE_COLLECT"] = "1"
+        if only:
+            selection = report_dir / f"only-{os.getpid()}-{time.monotonic_ns()}.txt"
+            selection.write_text("".join(f"{node}\n" for node in only), encoding="utf-8")
+            run_env["CK_GATE_ONLY"] = str(selection)
     try:
         proc = subprocess.run(
             command,
@@ -244,7 +250,7 @@ def _run_command(command: str, project_dir: Path, timeout: int, env: Optional[Di
         return CommandRun(Check(name, False, f"timed out after {timeout}s", command=True), [timeout_failure])
     collected = read_collected(report) if report is not None and collect else []
     if proc.returncode == 0:
-        return CommandRun(Check(name, True, command=True), [], collected)
+        return CommandRun(Check(name, True, command=True), [], collected, 0)
     output = proc.stdout + proc.stderr
     tail = "\n".join(output.strip().splitlines()[-OUTPUT_TAIL:])
     found: List[Failure] = read_report(report, command) if report is not None else []
@@ -252,7 +258,53 @@ def _run_command(command: str, project_dir: Path, timeout: int, env: Optional[Di
         found = parse_short_summary(output, command)
     if not found:
         found = failing_files(output, _known_files(project_dir), command)
-    return CommandRun(Check(name, False, f"exit {proc.returncode}\n{tail}", command=True), found, collected)
+    return CommandRun(Check(name, False, f"exit {proc.returncode}\n{tail}", command=True), found, collected,
+                      proc.returncode)
+
+
+_DURATION = re.compile(r"^(.*\b(?:passed|failed|errors?|skipped|deselected|xfailed|xpassed|warnings?|no tests ran))"
+                       r" in \d+(?:\.\d+)?s(?: \(\d+:\d\d:\d\d\))?(\s*=*)$")
+
+
+def _untimed(detail: str) -> str:
+    """The pytest summary line's wall time (`2 failed in 0.12s`) dropped, so two runs report the same text."""
+    return "\n".join(_DURATION.sub(r"\1\2", line) for line in detail.split("\n"))
+
+
+def _node_arg(node: str) -> Optional[str]:
+    """`node` itself when pytest accepts it as an argument, else None.
+
+    pytest cuts an argument at its first "[" and refuses one whose path part holds it
+    (`odd dir [1]/test_x.py::test_y`), so such a node is selected through the plugin's CK_GATE_ONLY instead.
+    """
+    base, bracket, _rest = node.partition("[")
+    return node if not bracket or "::" in base else None
+
+
+def _safe_dir(node: str) -> str:
+    path = node.split("::", 1)[0]
+    parts = path.split("/")[:-1]
+    while parts and "[" in "/".join(parts):
+        parts.pop()
+    return "/".join(parts) or "."
+
+
+def _rerun_chunks(prefix: str, nodes: Sequence[str]) -> List[Tuple[str, Optional[List[str]]]]:
+    """`rerun_command` lines for `nodes`, each with the node set the plugin must keep (None: the arguments suffice).
+
+    A node pytest cannot take as an argument is reached through its nearest directory without "[", and the
+    chunk then runs with CK_GATE_ONLY naming exactly its nodes, so nothing else in that directory runs.
+    """
+    args: Dict[str, List[str]] = {}
+    for node in nodes:
+        args.setdefault(_node_arg(node) or _safe_dir(node), []).append(node)
+    out: List[Tuple[str, Optional[List[str]]]] = []
+    base_len = len(shlex.split(rerun_command(prefix, ["x"])[0])) - 1
+    for chunk in rerun_command(prefix, list(args)):
+        chosen = [n for arg in shlex.split(chunk)[base_len:] for n in args.get(arg, [])]
+        odd = any(_node_arg(n) is None for n in chosen)
+        out.append((chunk, chosen if odd else None))
+    return out
 
 
 def _attribute(result: GateResult, project_dir: Path, spec_dir: Path, tasks: Dict[str, SpecTask]) -> None:
@@ -327,6 +379,7 @@ def _run_attributed(result: GateResult, project_dir: Path, config: Dict[str, Any
     known = set(_known_files(project_dir))
 
     def record(run: CommandRun, command: str) -> None:
+        run.check.detail = _untimed(run.check.detail)  # repeated runs give the same report (1.10)
         result.checks.append(run.check)
         # Sorted by key: parallel workers report in arrival order, and the output must not depend on it (1.10).
         for failure in sorted(_command_failure(run, command, known), key=failure_key):
@@ -378,8 +431,8 @@ def _run_attributed(result: GateResult, project_dir: Path, config: Dict[str, Any
         if not nodes:
             continue  # every node this Verify names already ran under another suite or command
         prefix = _launcher(command)
-        for chunk in rerun_command(prefix, nodes):
-            run = _run_command(chunk, project_dir, timeout, env, report_dir, collect=True)
+        for chunk, only in _rerun_chunks(prefix, nodes):
+            run = _run_command(chunk, project_dir, timeout, env, report_dir, collect=True, only=only)
             run.check.name = f"`{command}`: the nodes no other run covered"
             run.failures = [replace(f, command=command) for f in run.failures]  # a failure names its Verify
             covered.update(run.collected)
@@ -406,11 +459,11 @@ def _decide(result: GateResult, project_dir: Path, timeout: int, env: Dict[str, 
         targets = list(dict.fromkeys(_failure_target(by_key[k]) for k in group))
         failing: set = set()
         unavailable = False
-        for chunk in rerun_command(prefix, targets):
-            run = _run_command(chunk, project_dir, timeout, env, report_dir)
+        for chunk, only in _rerun_chunks(prefix, targets):
+            run = _run_command(chunk, project_dir, timeout, env, report_dir, only=only)
             if run.check.ok:
                 continue
-            if run.failures:
+            if run.returncode == 1 and run.failures:  # 2-5: interrupted, internal, usage error, nothing ran
                 failing.update(failure_key(f) for f in run.failures)
             else:
                 unavailable = True
@@ -781,7 +834,13 @@ def _run_gate(
     for task in selected:
         result.checks.append(_acceptance(task))
         if task.track == "test":
-            result.checks.append(_test_files_present(task, project_dir, config))
+            present = _test_files_present(task, project_dir, config)
+            if attribute and not present.ok:
+                # Under --attribute the red/green comes from the attributed failures plus the
+                # non-command checks design names (acceptance boxes, tamper, properties); a listed
+                # test file that is absent is reported, not a red check.
+                present = Check(present.name, True, present.detail, warning=True)
+            result.checks.append(present)
             if suite_due(task):
                 commands.extend(task.verify)
             elif task.verify:
