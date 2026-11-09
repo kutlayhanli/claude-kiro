@@ -455,7 +455,9 @@ def _decide(result: GateResult, project_dir: Path, timeout: int, env: Dict[str, 
     whole: Dict[str, List[str]] = {}
     for key in keys:
         failure = by_key[key]
-        if _direct_pytest(failure.command) and _failure_target(failure):
+        # Only a node is rerun by its ID; a file- or command-level failure reruns its Verify as written, so the
+        # Verify's own -k/-m/paths decide what runs (a launcher-only rerun would run the whole file and pass).
+        if _direct_pytest(failure.command) and failure.node:
             direct.setdefault(_launcher(failure.command), []).append(key)
         else:
             whole.setdefault(failure.command, []).append(key)
