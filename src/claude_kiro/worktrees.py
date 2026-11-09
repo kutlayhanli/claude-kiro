@@ -47,6 +47,7 @@ class Outcome:
     path: str = ""
     branch: str = ""
     run: Optional[str] = None  # progress run recorded by the claim (status only)
+    hooks: Optional[Dict] = None  # HookStatus of the integration worktree's hooks (create_integration only)
 
     def line(self) -> str:
         parts = [self.state, self.task]
@@ -62,14 +63,79 @@ class Outcome:
         out = asdict(self)
         if out.get("run") is None:
             out.pop("run", None)
+        if out.get("hooks") is None:
+            out.pop("hooks", None)
         return out
 
 
-def git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
-    proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+def git(cwd: Path, *args: str, check: bool = True, env: Optional[Mapping[str, str]] = None) -> subprocess.CompletedProcess:
+    proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, env=dict(env) if env else None)
     if check and proc.returncode != 0:
         raise WorktreeError(f"git {' '.join(args)}: {(proc.stderr or proc.stdout).strip()}")
     return proc
+
+
+def _commit_shape(root: Path, commit: str) -> Tuple[str, List[str]]:
+    """(tree, parents) of `commit`."""
+    tree, _, parents = git(root, "show", "-s", "--format=%T%n%P", commit).stdout.strip().partition("\n")
+    return tree.strip(), parents.split()
+
+
+def _token_env(root: Path, into: str, old: str, tree: str, parents: List[str], reason: str) -> Optional[Dict[str, str]]:
+    """A process environment carrying a fresh one-shot landing token for this exact update of `integrate/*`
+    (the hooks let an update through only with it, 9.7); None for any other branch or when none can be issued."""
+    from claude_kiro import protect
+
+    if not into.startswith("integrate/"):
+        return None
+    try:
+        rec = protect.issue_token(root, f"refs/heads/{into}", old, tree, parents, reason)
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return {**os.environ, "CK_LANDING_TOKEN": rec.id}
+
+
+def _git_merge(root: Path, target: Path, into: str, branch: str, message: str) -> subprocess.CompletedProcess:
+    """`git merge --no-ff` of `branch` in `target`, with a landing token when `into` is an integrate/* branch."""
+    env = None
+    if into.startswith("integrate/"):
+        old = git(target, "rev-parse", "HEAD").stdout.strip()
+        ok, tree, _ = merge_tree(root, old, branch)
+        if ok and tree:
+            env = _token_env(root, into, old, tree, [old, git(root, "rev-parse", branch).stdout.strip()], "merge")
+    extra = {"env": env} if env else {}
+    return git(target, "merge", "--no-ff", "-m", message, branch, check=False, **extra)
+
+
+def _git_reset(root: Path, target: Path, into: str, commit: str) -> subprocess.CompletedProcess:
+    env = None
+    if into.startswith("integrate/"):
+        old = git(target, "rev-parse", "HEAD").stdout.strip()
+        tree, parents = _commit_shape(root, commit)
+        env = _token_env(root, into, old, tree, parents, "reset")
+    extra = {"env": env} if env else {}
+    return git(target, "reset", "--hard", "-q", commit, check=False, **extra)
+
+
+def _ensure_hooks(root: Path, worktree: Path, notes: Optional[List[Dict]] = None, managed_only: bool = False) -> None:
+    """`protect.ensure_hooks`; a re-install or a problem is appended to `notes` (never raises)."""
+    from dataclasses import asdict as _asdict
+
+    from claude_kiro import protect
+
+    try:
+        if managed_only and not protect.hooks_managed(root):
+            return
+        before = protect.hook_status(root, worktree)
+        if before.installed and before.active and before.intact:
+            return
+        status = protect.ensure_hooks(root, worktree)
+        if notes is not None:
+            notes.append({**_asdict(status), "reinstalled": bool(status.installed and status.active and status.intact),
+                          "problems": list(status.problems)})
+    except Exception as exc:  # noqa: BLE001 - hooks never turn a landing into a crash
+        if notes is not None:
+            notes.append({"installed": False, "active": False, "intact": False, "problems": [str(exc)]})
 
 
 def _cleanup_merged(root: Path, target: Path, path: Path, branch: str) -> str:
@@ -417,23 +483,69 @@ def create(
             if proc.returncode != 0:
                 tail = "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-10:])
                 outcome = Outcome(num, "ERROR", f"install failed: `{install}`\n{tail}", rel, branch)
+            notes: List[Dict] = []
+            _ensure_hooks(root, path, notes, managed_only=True)
+            if notes and outcome.state in ("CREATED", "EXISTS"):
+                outcome.detail += _hook_detail(notes)
         outcomes.append(outcome)
     return outcomes
 
 
+def _hook_detail(notes: List[Dict]) -> str:
+    if not notes:
+        return ""
+    last = notes[-1]
+    if last.get("problems") and not last.get("reinstalled"):
+        return f"; git hooks not installed: {'; '.join(last['problems'])}"
+    return "; git hooks reinstalled" + (f" (chained to {last['chained_to']})" if last.get("chained_to") else "")
+
+
+def _record_baseline(root: Path, spec: str, branch: str, only_missing: bool) -> None:
+    """The approved protected state of a new integration branch: what its tip carries (10.4); best effort."""
+    from claude_kiro import protect
+
+    ref = f"refs/heads/{branch}"
+    try:
+        if only_missing and protect.approved_state_for_ref(root, ref) is not None:
+            return
+        tip = git(root, "rev-parse", ref).stdout.strip()
+        protect.record_approved_state(root, spec, ref, tip, protect.protected_files_at(root, tip), {"by": "baseline"})
+    except (OSError, ValueError, subprocess.CalledProcessError, WorktreeError):
+        pass
+
+
 def create_integration(root: Path, spec: str, base: Optional[str] = None) -> Outcome:
-    """Worktree on integrate/<spec> that task merges go into instead of the base branch."""
+    """Worktree on integrate/<spec> that task merges go into instead of the base branch.
+
+    The git hooks are installed (or repaired) first, so the creation of the ref already needs its token (9.1).
+    """
     base = base or current_branch(root)
     path, branch = integration_path(root, spec), integration_branch(spec)
     rel = rel_path(root, path)
+    notes: List[Dict] = []
+    _ensure_hooks(root, path if path.exists() else root, notes)
+    from claude_kiro import protect
+
+    def status() -> Dict:
+        from dataclasses import asdict as _asdict
+
+        st = protect.hook_status(root, path if path.exists() else root)
+        out = _asdict(st)
+        out["problems"] = list(dict.fromkeys([*(notes[-1]["problems"] if notes else []), *st.problems]))
+        return out
+
     if path.exists():
-        return Outcome("integration", "EXISTS", "reused", rel, branch)
+        _record_baseline(root, spec, branch, only_missing=True)
+        return Outcome("integration", "EXISTS", "reused" + _hook_detail(notes), rel, branch, hooks=status())
     path.parent.mkdir(parents=True, exist_ok=True)
     if branch_exists(root, branch):
         git(root, "worktree", "add", str(path), branch)
     else:
-        git(root, "worktree", "add", "-b", branch, str(path), base)
-    return Outcome("integration", "CREATED", f"from {base}", rel, branch)
+        tree, parents = _commit_shape(root, base)
+        env = _token_env(root, branch, protect.ZEROS, tree, parents, "create")
+        git(root, "worktree", "add", "-b", branch, str(path), base, **({"env": env} if env else {}))
+        _record_baseline(root, spec, branch, only_missing=False)
+    return Outcome("integration", "CREATED", f"from {base}" + _hook_detail(notes), rel, branch, hooks=status())
 
 
 def claim(root: Path, spec: str, num: str, owner: str, takeover: bool = False, run: Optional[str] = None) -> Outcome:
@@ -606,6 +718,7 @@ def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, ke
         raise WorktreeError(f"{target} has uncommitted changes to tracked files; refusing to merge into {into}")
 
     outcomes = []
+    allow = land_allow_paths(target)
     for num in nums:
         path, branch = task_path(root, spec, num), task_branch(spec, num)
         rel = rel_path(root, path)
@@ -616,6 +729,11 @@ def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, ke
         if ahead == 0:
             outcomes.append(Outcome(num, "SKIP", f"no commits ahead of {into}", rel, branch))
             continue
+        touched = protected_changes(root, into, branch, allow)
+        if touched:
+            outcomes.append(Outcome(num, "PROTECTED", f"changes protected files not covered by land.allow_paths: "
+                                    f"{', '.join(touched)}; not merged, a human must review and approve it", rel, branch))
+            break
         if path.exists():
             reason = lock_reason(root, path)
             if reason and stale_claim(root, path):
@@ -626,7 +744,7 @@ def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, ke
             if dirty_files(path):
                 outcomes.append(Outcome(num, "ERROR", "task worktree has uncommitted changes", rel, branch))
                 continue
-        proc = git(target, "merge", "--no-ff", "-m", f"Merge {branch} (task {num})", branch, check=False)
+        proc = _git_merge(root, target, into, branch, f"Merge {branch} (task {num})")
         if proc.returncode != 0:
             conflicted = git(target, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split()
             git(target, "merge", "--abort", check=False)
@@ -744,9 +862,9 @@ def _glob(path: str, pattern: str) -> bool:
 
 def protected_changes(root: Path, base: str, branch: str, allow: Optional[List[str]] = None) -> List[str]:
     """Files the branch changes since it forked from `base` that match PROTECTED_PATHS and no `allow` glob."""
-    out = git(root, "diff", "--name-only", "--no-renames", f"{base}...{branch}", check=False).stdout.split("\n")
+    out = git(root, "diff", "--name-only", "--no-renames", "-z", f"{base}...{branch}", check=False).stdout.split("\0")
     allow = [a for a in (allow or []) if isinstance(a, str) and a]
-    return [f for f in (line.strip() for line in out) if f
+    return [f for f in out if f
             and any(_glob(f, p) for p in PROTECTED_PATHS) and not any(_glob(f, a) for a in allow)]
 
 
@@ -826,6 +944,8 @@ def land(
 
     with land_lock(root, into):
         started = _now()
+        hook_notes: List[Dict] = []
+        _ensure_hooks(root, target, hook_notes)
         base = git(target, "rev-parse", "HEAD").stdout.strip()
         results: Dict[str, Landed] = {}
         candidates: List[str] = []
@@ -919,7 +1039,7 @@ def land(
             merged = []
             for num in group:
                 branch = task_branch(spec, num)
-                proc = git(target, "merge", "--no-ff", "-m", f"Merge {branch} (task {num})", branch, check=False)
+                proc = _git_merge(root, target, into, branch, f"Merge {branch} (task {num})")
                 if proc.returncode != 0:
                     files = git(target, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split()
                     git(target, "merge", "--abort", check=False)
@@ -936,6 +1056,7 @@ def land(
                 if proc.returncode != 0:
                     out = "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-20:])
                     ok, tail = False, f"install step failed: `{install}`\n{out}"
+                _ensure_hooks(root, target, hook_notes)  # an install step may move core.hooksPath (husky prepare)
             if ok:
                 ok, tail, failures = gate(target, group)
             gates.append({"tasks": list(group), "green": ok, "seconds": int((datetime.datetime.now() - t0).total_seconds())})
@@ -961,7 +1082,7 @@ def land(
                 if ok:
                     mark_merged(merged, True)
                     return len(merged) == len(group)
-                git(target, "reset", "--hard", "-q", start)
+                _git_reset(root, target, into, start)
                 group, red_tail, red_failures = merged, tail, failures
             if len(group) == 1:
                 num = group[0]
@@ -991,6 +1112,7 @@ def land(
             "tasks": [asdict(results[n]) for n in order if n in results],
             "gates": gates,
             "bisected": len(gates) > 1,
+            **({"hooks": hook_notes[-1]} if hook_notes else {}),
         }
 
 

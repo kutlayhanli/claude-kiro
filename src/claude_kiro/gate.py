@@ -796,6 +796,13 @@ def _run_gate(
                                        "" if proc.returncode == 0 else f"`{install}` exit {proc.returncode}\n{tail}"))
         except subprocess.TimeoutExpired:
             result.checks.append(Check("install", False, f"`{install}` timed out after {timeout}s"))
+        try:  # an install step may move core.hooksPath (husky): put ck's hooks back
+            from claude_kiro import protect
+
+            if protect.hooks_managed(project_dir):
+                protect.ensure_hooks(project_dir, project_dir)
+        except Exception:  # noqa: BLE001 - never a gate failure
+            pass
 
     commands: List[str] = []
     impl_selected = [t for t in selected if t.track != "test"]

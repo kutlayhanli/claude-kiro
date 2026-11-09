@@ -336,15 +336,23 @@ def create_cmd(spec, tasks, base, do_install, reuse_dirty, as_json):
 @worktree.command("integration")
 @click.argument("spec")
 @click.option("--base", help="Branch to create from (default: the main checkout's branch)")
-def integration_cmd(spec, base):
-    """Create the integrate/<SPEC> worktree that task merges can go into instead of main."""
+@click.option("--json", "as_json", is_flag=True)
+def integration_cmd(spec, base, as_json):
+    """Create the integrate/<SPEC> worktree that task merges can go into instead of main.
+
+    Also installs (or repairs) ck's git hooks, which refuse unapproved protected changes to integrate/*;
+    the outcome reports them as `hooks` and names why when they could not be installed.
+    """
     root = _root()
     try:
         outcome = wt.create_integration(root, _spec_name(spec), base=base)
     except wt.WorktreeError as e:
         click.echo(f"❌ {e}")
         sys.exit(3)
-    click.echo(outcome.line())
+    if as_json:
+        click.echo(json.dumps(outcome.as_dict(), indent=2))
+    else:
+        click.echo(outcome.line())
 
 
 @worktree.command("claim")
@@ -399,7 +407,7 @@ def merge_cmd(spec, tasks, into, keep, as_json):
     except wt.WorktreeError as e:
         click.echo(f"❌ {e}")
         sys.exit(3)
-    _emit(outcomes, as_json, bad_states=("CONFLICT", "ERROR", "BUSY"))
+    _emit(outcomes, as_json, bad_states=("CONFLICT", "ERROR", "BUSY", "PROTECTED"))
 
 
 def _gate_fn(spec: str):
