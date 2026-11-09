@@ -869,7 +869,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 37: Carry structured failures through landing
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 2.10, 3.9, 3.10
 **Description:** Change `worktrees.GateFn` to `Callable[[Path, List[str]], Tuple[bool, str, List[dict]]]` and have `land()` keep the gate's failure entries on RED results as `Landed.failures`, printed in `ck worktree land --json` as `tasks[].failures` (always a list; empty when the gate passed or did not run). In `cli/worktree.py`, `_gate_fn` returns `GateResult.failures` as JSON dicts in addition to today's values. The landing gate stays task-scoped (`run_gate(target, spec, nums)` without `attribute`). Every key `ck worktree land --json` prints today stays. Harness Contract owner: item 2's failure entries in `ck worktree land --json`.
@@ -880,9 +880,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 1 (captures `land-json-keys.json`, the land JSON it must keep), Task 5 (TC-36's land source and TC-37)
 
 **Acceptance:**
-- [ ] A RED landing carries the same failure entries `ck gate --json` gives (3.9)
-- [ ] The land JSON keeps every key path it has today, with `failures` added (3.10)
-- [ ] The landing gate is still task-scoped (2.10)
+- [x] A RED landing carries the same failure entries `ck gate --json` gives (3.9)
+- [x] The land JSON keeps every key path it has today, with `failures` added (3.10)
+- [x] The landing gate is still task-scoped (2.10)
 
 **Dependencies:** Task 19 (reads `GateResult.failures`), Task 36 (both edit worktrees.py and cli/worktree.py; Task 36 runs first), Task 1 (its tests are the oracle), Task 5 (its tests are the oracle)
 **Complexity:** Low
