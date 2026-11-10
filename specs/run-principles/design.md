@@ -52,9 +52,9 @@ The test-fixer (`src/claude_kiro/testfix.py`, `ck testfix`, unattended-correctne
 - `src/claude_kiro/hooks/_shared/guard_policy.py` - add `ArbiterEditFacts`, `is_arbiter_caller`, `decide_arbiter_edit`, `decide_arbiter_bash` and `arbiter_block_reason`. `classify_caller`, `Caller` and every existing decision stay unchanged, so existing property P-11 keeps holding (9.5-9.8).
 - `src/claude_kiro/hooks/pre_tool_guard.py` - in `_hook`, check `is_arbiter_caller` first and send that caller only through the lane. An exception on that path denies, where other callers fail open (9.1-9.4, 9.8).
 - `src/claude_kiro/lint.py` - `lint_spec` adds `justifications`, `verifyScope`, `notChecked` and `warnings`, and removes duplicates against existing keys (3.6, 12.10).
-- `src/claude_kiro/cli/worktree.py` - `lint` prints and exits by `lint_verdict`, and gains `--simulate` (with `--task`); `_plan` adds `verifiedBy`; `land_cmd` routes an `arbiter<k>` number to `worktrees.land_spec_edit`; `merge` prints a restored checkout's discarded paths (14.2).
-- `src/claude_kiro/gate.py` - `suite_due` moves to `lint_scope.suite_due` and `_run_gate` calls it, so the gate and its simulation cannot disagree (12.1).
-- `src/claude_kiro/worktrees.py` - add `land_spec_edit`, the `REFUSED` state, `commit` and `moved` fields on `Landed`, and a `wait_s` option on `land_lock` (8.1, 8.4-8.7, 10.5). Add `RecoveryFacts`, `decide_recovery` and `recover_target`, called by `land` and `merge` in place of their dirty-target refusal (Story 14). In `land`, `land_group` gates every half and the result gains `unreproduced` (Story 15).
+- `src/claude_kiro/cli/worktree.py` - `lint` prints and exits by `lint_verdict`, and gains `--simulate` (with `--task`); `_plan` adds `verifiedBy`; `land_cmd` routes an `arbiter<k>` number to `worktrees.land_spec_edit`; `merge` prints a restored checkout's discarded paths (14.2); `_gate_fn` takes `whole` and passes it to `run_gate` as `escalate_complete` (15.1, 15.2).
+- `src/claude_kiro/gate.py` - `suite_due` moves to `lint_scope.suite_due` and `_run_gate` calls it, so the gate and its simulation cannot disagree (12.1). `run_gate` gains `escalate_complete: bool = True`; when it is false, `spec_complete` is taken as false, so the gate stays task-scoped (green-only) however complete the spec is (15.1, 15.2). Every existing caller keeps the default.
+- `src/claude_kiro/worktrees.py` - add `land_spec_edit`, the `REFUSED` state, `commit` and `moved` fields on `Landed`, and a `wait_s` option on `land_lock` (8.1, 8.4-8.7, 10.5). Add `RecoveryFacts`, `decide_recovery` and `recover_target`, called by `land` and `merge` in place of their dirty-target refusal, and at the start of `land_spec_edit` under its `land_lock` (Story 14). `GateFn` gains a keyword `whole: bool = True`. In `land`, `land_group` gates every half with `whole=False`, only the batch gate with `whole=True`, and the result gains `unreproduced` (Story 15).
 - `src/claude_kiro/protect.py` - add `Refusal`, `record_refusal`, `refusal_for` and `clear_refusal`, kept in `<git common dir>/ck/refusals.json` (14.1, 14.5).
 - `src/claude_kiro/cli/githooks.py` - `reference-transaction` and `pre-merge-commit` call `protect.record_refusal` for each `integrate/*` update they refuse (14.1).
 - `src/claude_kiro/cli/main.py` - register the `arbiter` and `principles` groups.
@@ -75,7 +75,7 @@ The test-fixer (`src/claude_kiro/testfix.py`, `ck testfix`, unattended-correctne
 - `src/claude_kiro/lint_scope.py` (new) - gate simulation and Verify-scope findings (Story 12).
 - `src/claude_kiro/arbiter_policy.py` (new) - pure rules for claims, rulings, spec edits, records and cuts (Stories 5, 7, 8, 10, 11).
 - `src/claude_kiro/arbiter.py` (new) - the stateful side: ledger, worktree, decisions file, lane tickets.
-- `src/claude_kiro/cli/arbiter.py` (new) - the `ck arbiter` and `ck principles` groups.
+- `src/claude_kiro/cli/arbiter.py` (new) - the `ck arbiter` and `ck principles` groups. `ck arbiter record` calls `worktrees.recover_target` on the `INTO` checkout under `land_lock`, before it commits `decisions.md`, when `INTO` is an `integrate/*` branch; a `/spec:create` record never calls it (14.1, 10.2).
 - `specs/PRINCIPLES.md` (new, per project) - the project layer, created by `ck principles init`.
 - `specs/<spec>/decisions.md` (new, per spec) - the record of rulings, created by the first ruling.
 
@@ -92,7 +92,7 @@ ck principles check SPEC --json                    # {"ok": bool, "reason": str}
 
 ck arbiter open SPEC --task N --into BRANCH --json       # stdin: {"claim": Claim, "task": TaskMeta}. stdout: OpenResult
 ck arbiter settle SPEC KEY --tier normal|risky --json    # stdin: the arbiter's raw output. stdout: SettleResult
-ck arbiter record SPEC --into BRANCH [--lock-wait S] --json   # stdin: RulingRecord. stdout: {"number": int, "commit": str}
+ck arbiter record SPEC --into BRANCH [--lock-wait S] --json   # stdin: RulingRecord. stdout: {"number": int, "commit": str}, plus "recovered" when it restored INTO (14.2)
 ck arbiter context SPEC [--approved-cut] --json          # /spec:create: {"principles": [...], "planLayer": str, "implementationStarted": bool,
                                                          #   "missing": str | null, "cut": "apply" | "hold" | "frozen"}
 ck arbiter review SPEC --step refuted|cuts|drift --tier normal|risky --json
@@ -102,9 +102,9 @@ ck arbiter lane open|close SPEC --json                   # opens or closes the /
 ck lint SPEC [--json]                                    # new keys below; exit by lint_verdict
 ck lint SPEC --simulate --task N --json                  # {"task": N, "suites": [SuiteSim], "selected": [{"file": str, "tests": [str] | null}]}
 ck plan SPEC --json                                      # adds "verifyScope", "justifications", "verifiedBy": {task: [test tasks]}
-ck worktree land SPEC arbiter<k> --into BRANCH --gate --json   # one entry, state MERGED|CONFLICT|RED|REFUSED|ERROR, with commit and moved
+ck worktree land SPEC arbiter<k> --into BRANCH --gate --json   # one entry, state MERGED|CONFLICT|RED|REFUSED|ERROR, with commit and moved, and "recovered" when it restored (14.2)
 ck worktree land SPEC N... --json                        # adds "recovered" (14.2) and "unreproduced" (15.3), each only when it applies
-ck worktree merge SPEC N...                              # prints "restored <checkout> to <head>: discarded <paths>" first when it restored (14.2)
+ck worktree merge SPEC N...                              # prints "restored <checkout> to <head>: discarded <paths>" first when it restored, ending "; a merge was in progress" when one was (14.2)
 ```
 
 New `ck lint --json` keys (existing keys keep their names and meaning):
@@ -595,7 +595,7 @@ sequenceDiagram
             W->>A: record
             W->>W: resume the task (attempt not counted)
         else cannot land
-            Q-->>W: CONFLICT, RED or REFUSED
+            Q-->>W: CONFLICT, RED, REFUSED or ERROR
             W->>A: record (did not land)
             W->>M: needs-input with ruling and result
         else code
@@ -671,21 +671,25 @@ The arbiter runs once per step and returns one ruling per finding. This shares t
 
 **Recording a refusal.** When `ck git-hook reference-transaction` refuses an update of `refs/heads/integrate/*` (a protected change without a token, or an update it cannot verify), it calls `protect.record_refusal` with the ref, the update's old value and the hook's working directory before it exits non-zero. `pre-merge-commit` does the same with `HEAD`. A failure to write the record is ignored: the refusal still stands, and a later landing then refuses as today (14.5), which is the safe direction. `git merge --no-verify` skips `pre-merge-commit` but not `reference-transaction`, so both the fast-forward and the merge-commit forms are recorded.
 
-**Restoring before a landing.** `land` and `merge` call `recover_target` where they now refuse a dirty target: `land` inside `land_lock`, and `merge` inside a `land_lock` taken for that step, so a recovery never races a landing. The reset is `_git_reset(root, target, into, head)`: the old and new values are the same commit, so the reference-transaction hook allows it with the minted token and the ref does not move (14.4). `git reset --hard` clears the index, the tracked files, MERGE_HEAD, MERGE_MSG and AUTO_MERGE, and leaves untracked files alone (14.3). A merge into the main checkout or any branch outside `integrate/*` is never managed, so it refuses as today (14.3). The result's `recovered` is printed by `ck worktree merge` and carried by `ck worktree land --json` (14.2).
+**Restoring before a landing.** `land` and `merge` call `recover_target` where they now refuse a dirty target: `land` inside `land_lock`, and `merge` inside a `land_lock` taken for that step, so a recovery never races a landing. The reset is `_git_reset(root, target, into, head)`: the old and new values are the same commit, so the reference-transaction hook allows it with the minted token and the ref does not move (14.4). `git reset --hard` clears the index, the tracked files, MERGE_HEAD, MERGE_MSG and AUTO_MERGE, and leaves untracked files alone (14.3). A merge into the main checkout or any branch outside `integrate/*` is never managed, so it refuses as today (14.3). The result's `recovered` is printed by `ck worktree merge` and carried by `ck worktree land --json` (14.2). Every other path that writes to an integration checkout restores it the same way first, so "the next landing or merge into it" (14.1) has no exception: `land_spec_edit` (an arbiter spec edit, `ck worktree land SPEC arbiter<k>`) calls `recover_target` at its start under its `land_lock` and its entry carries `recovered`, and `ck arbiter record` calls it on `INTO` under the `land_lock` it already takes, before it commits `decisions.md`, when `INTO` is an `integrate/*` branch, and its output carries `recovered` when it restored (14.2). A record on any other branch, such as a `/spec:create` ruling recorded through `ck arbiter review` (10.2) while the draft spec files are uncommitted, does not call it and records as before, committing `decisions.md` alone (14.3). A `refuse` there is the same `WorktreeError` (14.5): the spec edit is `ERROR`, which cannot land and is handled as 8.4 (target unchanged, needs-input with the ruling and the landing result), and the record leaves the checkout unchanged and commits `decisions.md` alone, as before (10.1, 14.5, D26). The record takes the 10.9 path only when git cannot make that commit, for example while a merge is in progress.
 
 **Bisection.** `land_group` loses its `known_red` shortcut:
 
 ```
-land_group(group):
+land_group(group, whole):
     start = head(); merged = merge_all(group)
-    ok, tail, failures = check(merged)            # a gate on exactly `merged`, on the current head
+    ok, tail, failures = check(merged, whole and len(merged) > 1)   # a gate on exactly `merged`, on the current head
     if ok: mark MERGED; return
     reset to start
     if len(merged) == 1: RED with this gate's tail and failures   # 15.2
-    else: land_group(left half); land_group(right half)           # each half gated itself (15.1)
+    else: land_group(left half, False); land_group(right half, False)   # each half gated itself (15.1)
+
+land_group(batch, True)
 ```
 
-Each node of the bisection tree runs one gate, so a batch of n runs at most 2n-1 (NFR). The right half is gated on top of whatever the left half landed, so a failure that needs both shows in the right half's gates and is blamed on the first task whose own gate fails with it. After `land_group(batch)`, when the batch gate was red and no task ended RED, the result carries `unreproduced` with the batch gate's tail and failures (15.3). The tasks whose own gates passed are MERGED, so the target now holds the failure the batch gate saw.
+**Gate scope below the batch.** `gate.py` widens a gate to the full suite (`verify`) when the tasks Done in the target's `tasks.md` plus the gated tasks cover the whole spec (`spec_complete`). Task branches commit their own `**Status:** Done`, so once a left half is MERGED its tasks are Done on the target, and a gate on the last remaining half or single task would see the spec complete, run the full suite, fail on an earlier task's regression, and blame the last task by its own red gate: the TC-176 misblame by another path. So only the batch gate (`whole=True`) may widen. Every gate below it is called with `whole=False`, which `_gate_fn` passes to `run_gate(..., escalate_complete=False)`, and runs task-scoped and green-only, as for a task in a spec that is not yet complete, whatever is Done on the target (15.1, 15.2). A failure that only the full suite sees can then never end in a RED task; it ends as `unreproduced` and goes to the attributed full gate, which finds the task it belongs to (15.3). `land` calls the batch gate as `gate(target, group)` and every gate below it as `gate(target, group, whole=False)`, so an existing two-argument gate function still works for a batch that is not bisected. A batch in which only one task merges is gated with `whole=False` too (D25): a single task is never gated with the full suite at landing, so it can never be RED on a failure only the full suite sees. The run's final full gate, which follows the last task, runs the full suite and its attributed fixer.
+
+Each node of the bisection tree runs one gate, so a batch of n runs at most 2n-1 (NFR). The right half is gated on top of whatever the left half landed, so a failure that needs both shows in the right half's gates and is blamed on the first task whose own task-scoped gate fails with it. After `land_group(batch, True)`, when the batch gate was red and no task ended RED, the result carries `unreproduced` with the batch gate's tail and failures (15.3). The tasks whose own gates passed are MERGED (15.3), so the target now holds the failure the batch gate saw.
 
 **The run's side.** In `spec-implement.js` the landing step logs `recovered` and keeps it on the landing entry. When the result has `unreproduced`, it sets `unreproduced: true` on the landing entry, logs `Landing <tasks>: red as a batch, no task reproduces it alone; running the full gate`, and calls the periodic path's code, factored into `fullGateAndFix(kind, label)`, with kind `unreproduced` and label `full gate @<merges> (unreproduced landing)`: `attributedGate`, then `fixAndRecheck` when it is red, then `redTarget` and `stopLaunching` when the recheck is still red. A periodic gate due on the same landing step is not run again. No task goes to the landing fixer, since none is RED. A flaky batch gate gives a green full gate and no fix.
 
@@ -756,7 +760,7 @@ Gating every bisection half adds at most one gate per level against today's shor
 - Tests that assert the replaced behaviour need test-track changes: `tests/js/guard_ladder.test.mjs`, `tests/test_guard_ladder_properties.py`, the issue #8 confirmation cases in `tests/js/spec_implement.test.mjs`, and `tests/js/spec_create.test.mjs` and `tests/js/spec_review_frozen.test.mjs`, whose stubs throw on the new arbiter steps.
 - When unattended-correctness Task 86 lands, its "confirmed conflict" trigger becomes the test-repair ruling. Only `handOffTestRepair` changes (8.9, 8.10).
 - `tests/test_worktree_land.py::test_red_batch_bisects_to_the_culprit` asserts fewer than 5 gates because the right half is not re-gated. It moves to the 2n-1 bound and asserts the right half's own gate (Task 96).
-- TC-178's scripted agent in `tests/test_unattended_smoke.py` stops resetting after its refused merge, so the run exercises the recovery (Task 100).
+- TC-178's scripted agent in `tests/test_unattended_smoke.py` keeps its cleanup on the shared `tc176_run` fixture, so the existing TC-176 and TC-178 tests stay green throughout. TC-169 runs on its own `tc169_run` fixture, the same scenario with the raw merge and no cleanup, so the run exercises the recovery (Task 100).
 
 ## Requirements Traceability
 
@@ -890,13 +894,13 @@ Gating every bisection half adds at most one gate per level against today's shor
 | Runtime compatibility | No clock or randomness in new workflow code; timestamps come from `ck` |
 | Lint performance and safety | `lint_scope.py`, shared parsing |
 | Compatibility | Claims, findings and the Story 13 audit steps are the only new paths |
-| 14.1 | `record_refusal` in `githooks.py`, `recover_target` in `land` and `merge` |
-| 14.2 | `recover_target` result, `ck worktree land --json` `recovered`, `ck worktree merge` output |
+| 14.1 | `record_refusal` in `githooks.py`, `recover_target` in `land_spec_edit` and `ck arbiter record`; `recover_target` in `land` and `merge` |
+| 14.2 | `recover_target` result, `ck worktree land --json` `recovered` (task and `arbiter<k>` landings), `ck arbiter record` output `recovered`, `ck worktree merge` output |
 | 14.3 | `decide_recovery` (`managed`), `git reset --hard` leaves untracked files |
 | 14.4 | `_git_reset` to the current head; post-reset check that HEAD is unchanged |
 | 14.5 | `decide_recovery` (`refusal` must match ref, head and checkout) |
-| 15.1 | `land_group` gates every half |
-| 15.2 | `land_group`: RED only from a gate on exactly that task, with that gate's tail and failures |
-| 15.3 | `unreproduced` in the landing result; `fullGateAndFix('unreproduced')` in `spec-implement.js` |
+| 15.1 | `land_group` gates every half with `whole=False`; `_gate_fn` and `run_gate(escalate_complete=False)` |
+| 15.2 | `land_group`: RED only from a task-scoped gate (`whole=False`) on exactly that task, with that gate's tail and failures; a batch of one merged task is gated with `whole=False` (D25) |
+| 15.3 | `unreproduced` in the landing result, the green tasks MERGED; `fullGateAndFix('unreproduced')` in `spec-implement.js` |
 | Determinism | `ScopeFinding` sort order; `justification_findings` in document order |
 | Bounded landing cost | One gate per bisection node, at most 2n-1 |

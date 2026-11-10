@@ -2137,18 +2137,19 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Status:** Not Started
 **Track:** test
 **Requirements:** 14.1, 14.2, 14.3, 14.4, 14.5
-**Description:** Create `tests/test_land_recovery.py` with TC-162 to TC-168 and P-47 (test-plan.md). Build each case on a real repository with ck's git hooks installed and a real integration worktree, using the integration branch's helpers (`tests/unattended_helpers.py` or its equivalent there: `integration_worktree`, `protected_branch`), and make the refused merge with a real `git merge --no-verify`, so the residue is exactly what git leaves. Read the refusal record only through `protect.refusal_for`, and the landing result only through `ck worktree land --json`. P-47 drives the pure `worktrees.decide_recovery` with Hypothesis (`derandomize=True, max_examples=200, database=None, deadline=None`) and carries a `PROPERTIES` map. Import project modules inside test bodies.
+**Description:** Create `tests/test_land_recovery.py` with TC-162 to TC-168, TC-196, TC-197 and P-47 (test-plan.md). Keep TC-168 to the hook side (no `tc168_` test depends on the recovery: none runs `ck worktree merge` or `ck worktree land` after a refused merge; its tokened landing is a `ck worktree land` of a clean task into a clean checkout), since it is Task 94's whole Verify; the merge restore and the cleared record are TC-196. TC-197 makes its spec edit with `ck arbiter open` and lands it with `ck worktree land demo arbiter<k>`, and records with `ck arbiter record`. Build each case on a real repository with ck's git hooks installed and a real integration worktree, using the integration branch's helpers (`tests/unattended_helpers.py` or its equivalent there: `integration_worktree`, `protected_branch`), and make the refused merge with a real `git merge --no-verify`, so the residue is exactly what git leaves. Read the refusal record only through `protect.refusal_for`, and the landing result only through `ck worktree land --json`. P-47 drives the pure `worktrees.decide_recovery` with Hypothesis (`derandomize=True, max_examples=200, database=None, deadline=None`) and carries a `PROPERTIES` map. Import project modules inside test bodies.
 **Files:**
-- `tests/test_land_recovery.py` - TC-162 to TC-168, P-47
+- `tests/test_land_recovery.py` - TC-162 to TC-168, TC-196, TC-197, P-47
 **Verify:** `uv run pytest tests/test_land_recovery.py -q`
-**Verifies:** Task 94 (TC-168's refusal record), Task 95 (the recovery in `land` and `merge`)
+**Verifies:** Task 94 (TC-168's refusal record), Task 95 (the recovery in `land`, `merge`, `land_spec_edit` and `ck arbiter record`: TC-162 to TC-167, TC-196, TC-197, P-47)
 
 **Acceptance:**
 - [ ] Each refused merge is a real `git merge --no-verify` refused by the real installed hook
 - [ ] TC-166 covers no record, a record at an older head, and a record from another checkout
+- [ ] No `tc168_` test depends on the recovery itself (Task 95)
 - [ ] P-47 generates every combination its row lists
 - [ ] Tests exercise the real boundary named in the test plan (real git, real hooks, the `ck` CLI)
-- [ ] Tests fail before the implementation exists for the right reason (the landing refuses the dirty checkout; no refusal record exists)
+- [ ] Tests fail before the implementation exists for the right reason (the landing refuses the dirty checkout; no refusal record exists; for TC-197, the arbiter landing or record does not restore the checkout, or `ck arbiter` does not exist yet)
 - [ ] No mocks of the project's own code in integration tests
 
 **Dependencies:** None
@@ -2183,19 +2184,21 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Status:** Not Started
 **Track:** impl
 **Requirements:** 14.1, 14.2, 14.3, 14.4, 14.5
-**Description:** In `src/claude_kiro/worktrees.py`, add `RecoveryFacts`, the pure `decide_recovery` and `recover_target` (design.md, "Landing recovery and bisection"). Replace the dirty-target refusals in `land` (inside `land_lock`) and `merge` (inside a `land_lock` taken for that step) with `recover_target`. It restores only with `_git_reset(root, target, into, head)` to the checkout's current head, then checks that HEAD is unchanged, MERGE_HEAD is gone and no tracked file is dirty, and clears the refusal. `land`'s result gains `recovered` when it restored. In `src/claude_kiro/cli/worktree.py`, `merge` prints `restored <checkout> to <head>: discarded <paths>` first when it restored.
+**Description:** In `src/claude_kiro/worktrees.py`, add `RecoveryFacts`, the pure `decide_recovery` and `recover_target` (design.md, "Landing recovery and bisection"). Replace the dirty-target refusals in `land` (inside `land_lock`) and `merge` (inside a `land_lock` taken for that step) with `recover_target`. It restores only with `_git_reset(root, target, into, head)` to the checkout's current head, then checks that HEAD is unchanged, MERGE_HEAD is gone and no tracked file is dirty, and clears the refusal. `land`'s result gains `recovered` when it restored. In `src/claude_kiro/cli/worktree.py`, `merge` prints `restored <checkout> to <head>: discarded <paths>` first when it restored, ending `; a merge was in progress` when one was (14.2). Call `recover_target` too at the start of `land_spec_edit` under its `land_lock` (its entry carries `recovered`), and in `ck arbiter record` on the `INTO` checkout under the `land_lock` it takes, before it commits `decisions.md`, when `INTO` is an `integrate/*` branch (its output carries `recovered` when it restored, 14.2), so no write into the integration checkout skips the restore (14.1). A record on any other branch, such as a `/spec:create` ruling through `ck arbiter review`, never calls it and still commits `decisions.md` alone (10.2, 14.3). When `recover_target` refuses (a dirty integration checkout with no matching refusal, 14.5), the record leaves the checkout unchanged and still commits `decisions.md` alone; it takes the 10.9 path only when git cannot make that commit, such as while a merge is in progress (10.1, D26).
 **Files:**
-- `src/claude_kiro/worktrees.py` - `RecoveryFacts`, `decide_recovery`, `recover_target`, used by `land` and `merge`
+- `src/claude_kiro/worktrees.py` - `RecoveryFacts`, `decide_recovery`, `recover_target`, used by `land`, `merge` and `land_spec_edit`
 - `src/claude_kiro/cli/worktree.py` - `merge` prints the restore
+- `src/claude_kiro/cli/arbiter.py` - `ck arbiter record` restores `INTO` before it commits
 **Verify:** `uv run pytest tests/test_land_recovery.py -q` `uv run pytest tests/test_land_recovery_redteam.py -q`
-**Verified by:** Task 93 (TC-162 to TC-168, P-47), Task 101 (red team of 14.3, 14.4, 14.5), Task 100 (TC-169, in a full run)
+**Verified by:** Task 93 (TC-162 to TC-167, TC-196, TC-197, P-47), Task 101 (red team of 14.3, 14.4, 14.5), Task 100 (TC-169, in a full run)
 
 **Acceptance:**
 - [ ] A managed integration checkout with a matching refusal is restored and the landing goes on; any other dirty checkout is refused as today
 - [ ] The ref never moves, and untracked files are untouched
 - [ ] A failed reset refuses the landing and keeps the refusal record
+- [ ] An arbiter spec-edit landing and `ck arbiter record` restore the checkout the same way
 
-**Dependencies:** Task 93 (its tests are the oracle), Task 100 (its tests are the oracle), Task 101 (its tests are the oracle), Task 94 (the refusal record), Task 44 (edits the same `worktrees.py` and `cli/worktree.py`)
+**Dependencies:** Task 93 (its tests are the oracle), Task 100 (its tests are the oracle), Task 101 (its tests are the oracle), Task 94 (the refusal record), Task 44 (edits the same `worktrees.py` and `cli/worktree.py`; adds `land_spec_edit`), Task 42 (adds `ck arbiter record` in `cli/arbiter.py`), Task 43 (edits the same `cli/arbiter.py`)
 **Complexity:** Medium
 **Risk:** safety (resets a checkout that protected-file hooks guard)
 
@@ -2205,7 +2208,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Status:** Not Started
 **Track:** test
 **Requirements:** 15.1, 15.2, 15.3
-**Description:** Create `tests/test_land_bisect.py` with TC-170, TC-171, TC-172, TC-175 and P-48 (test-plan.md). TC-170 to TC-172 and TC-175 run the real `ck worktree land --gate --json` on a real repository with a spec whose task branches each commit their own files; TC-171's `specs/ck.json` `verify` runs a test file no task's Verify selects. P-48 calls `worktrees.land` with an in-process gate function over real task branches, at `max_examples=30`, and carries a `PROPERTIES` map. Migrate `tests/test_worktree_land.py::test_red_batch_bisects_to_the_culprit`: its `len(data["gates"]) < 5` and the comment "a green left half proves the right half red without re-gating it" encode the behaviour 15.1 replaces; assert the 2n-1 bound and the right half's own gate instead, keeping its other assertions.
+**Description:** Create `tests/test_land_bisect.py` with TC-170, TC-171, TC-172, TC-175, TC-198 and P-48 (test-plan.md). TC-170 to TC-172 and TC-175 run the real `ck worktree land --gate --json` on a real repository with a spec whose task branches each commit their own files and their own `**Status:** Done` in `tasks.md`, as real implementers do, so a gate after an earlier half has MERGED sees those tasks Done on the target; TC-171's `specs/ck.json` `verify` runs a test file no task's Verify selects, and it asserts that the gate on the last single task, which sees the spec complete, ran task-scoped. P-48 calls `worktrees.land` with an in-process gate function over real task branches, at `max_examples=30`, and carries a `PROPERTIES` map; its gate function models `gate.py`'s scope rule (full suite when called with `whole` true and the tasks Done on the target plus its group cover the spec), so it fails on a design that lets a sub-batch gate widen. Migrate `tests/test_worktree_land.py::test_red_batch_bisects_to_the_culprit`: its `len(data["gates"]) < 5` and the comment "a green left half proves the right half red without re-gating it" encode the behaviour 15.1 replaces; assert the 2n-1 bound and the right half's own gate instead, keeping its other assertions.
 **Files:**
 - `tests/test_land_bisect.py` - TC-170, TC-171, TC-172, TC-175, P-48
 - `tests/test_worktree_land.py` - the bisection gate count moves to the 2n-1 bound
@@ -2213,7 +2216,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 97 (bisection without inference and `unreproduced`)
 
 **Acceptance:**
-- [ ] TC-171 reproduces the observed case: a spec-completing batch red only under the full suite
+- [ ] TC-171 reproduces the observed case: a spec-completing batch red only under the full suite, with task branches that mark themselves Done, and the last task is not RED
 - [ ] The migrated test keeps every assertion not about the gate count
 - [ ] P-48 generates every combination its row lists
 - [ ] Tests exercise the real boundary named in the test plan (real git, real `ck gate`, the `ck` CLI)
@@ -2230,20 +2233,23 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Status:** Not Started
 **Track:** impl
 **Requirements:** 15.1, 15.2, 15.3
-**Description:** In `src/claude_kiro/worktrees.py`, rewrite `land_group` inside `land` as design.md's "Bisection" shows: drop `known_red`, gate every group it merges, report RED only for a single task whose own gate failed, with that gate's tail and failures, and recurse into both halves otherwise. After `land_group(batch)`, when the batch gate was red and no task is RED, add `unreproduced: {tasks, tail, failures}` from the batch gate to the result.
+**Description:** In `src/claude_kiro/worktrees.py`, rewrite `land_group` inside `land` as design.md's "Bisection" shows: drop `known_red`, gate every group it merges, report RED only for a single task whose own gate failed, with that gate's tail and failures, and recurse into both halves otherwise. Only the batch gate may widen to the full suite: `GateFn` gains a keyword `whole: bool = True`, `land` calls every gate below the batch gate with `whole=False`, `_gate_fn` in `src/claude_kiro/cli/worktree.py` passes it to `run_gate` as `escalate_complete`, and `run_gate` in `src/claude_kiro/gate.py` gains `escalate_complete: bool = True`, which when false takes `spec_complete` as false (design.md, "Gate scope below the batch"; 15.1, 15.2). After `land_group(batch)`, when the batch gate was red and no task is RED, add `unreproduced: {tasks, tail, failures}` from the batch gate to the result; the tasks whose own gates passed stay MERGED (15.3). A batch in which only one task merges is gated with `whole=False` too, so a lone task is never gated with the full suite at landing (D25, TC-198).
 **Files:**
-- `src/claude_kiro/worktrees.py` - `land_group` and the `unreproduced` key
+- `src/claude_kiro/worktrees.py` - `land_group`, `GateFn`'s `whole`, and the `unreproduced` key
+- `src/claude_kiro/gate.py` - `run_gate(..., escalate_complete=True)`
+- `src/claude_kiro/cli/worktree.py` - `_gate_fn` passes `whole` as `escalate_complete`
 **Verify:** `uv run pytest tests/test_land_bisect.py -q` `uv run pytest tests/test_worktree_land.py -q`
 **Verified by:** Task 96 (TC-170 to TC-172, TC-175, P-48), Task 100 (TC-174, in a full run)
 
 **Acceptance:**
 - [ ] No RED task without a red gate on exactly that task
+- [ ] No gate below the batch gate runs the full suite, however complete the spec is on the target
 - [ ] A batch-only failure gives `unreproduced` and no RED task
 - [ ] At most 2n-1 gates for a batch of n
 
 **Dependencies:** Task 96 (its tests are the oracle), Task 100 (its tests are the oracle), Task 95 (edits the same `worktrees.py`)
 **Complexity:** Medium
-**Risk:** normal
+**Risk:** safety (resets the protected integration branch with landing tokens and lands tasks from a batch whose gate was red)
 
 ---
 
@@ -2296,14 +2302,14 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Status:** Not Started
 **Track:** test
 **Requirements:** 14.1, 14.2, 15.2, 15.3
-**Description:** In `tests/test_unattended_smoke.py`, stop TC-178's scripted agent resetting after its refused merge (the `cleanup` step from commit a64c0aa); keep recording the merge's exit code and heads. Add TC-169 on the `tc176_run` fixture: a later landing entry carries `recovered` naming `.claude/CLAUDE.md`, and the run-end audit is clean. Add a `tc174_run` fixture running the TC-176 scenario without `landOrder`, and TC-174's tests on it (test-plan.md). The existing TC-176 and TC-178 tests keep their assertions.
+**Description:** In `tests/test_unattended_smoke.py`, leave the shared `tc176_run` fixture and its cleanup unchanged, so the existing TC-176 and TC-178 tests stay green throughout. Add a `tc169_run` fixture running the same scenario with TC-178's raw merge and no cleanup step (from commit a64c0aa), keeping the merge's exit code and heads, and TC-169 on it: a later landing entry carries `recovered` naming `.claude/CLAUDE.md`, and the run-end audit is clean. Add a `tc174_run` fixture running the TC-176 scenario without `landOrder`, and TC-174's tests on it (test-plan.md). The existing TC-176 and TC-178 tests keep their assertions.
 **Files:**
-- `tests/test_unattended_smoke.py` - TC-178's agent stops cleaning up; TC-169 and TC-174
+- `tests/test_unattended_smoke.py` - `tc169_run` (raw merge, no cleanup) with TC-169, and `tc174_run` with TC-174
 **Verify:** `uv run pytest tests/test_unattended_smoke.py -q -k "tc169_ or tc174_"`
 **Verifies:** Task 95 (TC-169), Task 97 (TC-174's landing), Task 99 (TC-174's route)
 
 **Acceptance:**
-- [ ] TC-178's assertions are unchanged, and its agent no longer cleans up
+- [ ] `tc176_run`, its cleanup, and the TC-176 and TC-178 tests are unchanged; only `tc169_run`'s agent skips the cleanup
 - [ ] TC-174 runs the observed scenario with no `landOrder`
 - [ ] Tests exercise the real boundary named in the test plan (the real workflow under the fake runtime, real `ck`, real hooks)
 - [ ] Tests fail before the implementation exists for the right reason (the landing after the refused merge refuses the dirty checkout; Task 7 is blamed)
@@ -2694,6 +2700,8 @@ graph TD
     T101 --> T95
     T94 --> T95
     T44 --> T95
+    T42 --> T95
+    T43 --> T95
     T96 --> T97
     T100 --> T97
     T95 --> T97
@@ -2710,6 +2718,6 @@ graph TD
 
 There are no waves: each task starts as soon as its own Dependencies are merged, so the plan is the dependency graph above.
 
-- **Ready at start:** Tasks 89, 1, 3, 17, 88, 9, 75, 93, 96, 100, 101
+- **Ready at start:** Tasks 89, 1, 3, 17, 88, 93, 100, 101, 96, 9, 75
 - **Critical path:** Task 89 -> Task 2 -> Task 55 -> Task 56 -> Task 57 -> Task 58 -> Task 59 -> Task 60 -> Task 61 -> Task 62 -> Task 63 -> Task 65 -> Task 66 -> Task 67 -> Task 68 -> Task 69 -> Task 70 -> Task 74 -> Task 99 -> Task 92 (20 of 101 tasks; the floor on wall-clock time however many agents run)
 - **Hand steps:** Task 91 (paid hook capture) and Task 92 (`uv run ck vendor`, committed by hand on the integration branch). Until Task 92 is done, the final whole-suite gate is expected to fail only on `test_dogfood_copies_in_this_repo_match_the_plugin_source` and `test_claude_vendored_workflow_matches_plugin_source`.

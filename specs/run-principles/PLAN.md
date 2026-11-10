@@ -185,7 +185,19 @@ if every requirement can say why it exists.
 **Choice:** Each half of a bisected batch is gated itself; nothing is inferred from the other half. A task is RED only when a gate on exactly that task, on the current target head, fails, and its result carries that gate's failures. A batch red as a whole that no half and no task reproduces is reported `unreproduced` with the batch gate's failures: the tasks whose own gates passed land, and the run sends the target to the full gate and its fixer, as after a red periodic gate.
 **Why:** A batch that completes the spec is gated with the full suite (`gate.py` `spec_complete`), while its halves get task-scoped gates that cannot see that failure. `land_group`'s "a green left half on the same base proves the right half red" then blamed the last task by elimination (TC-176 smoke scenario: an earlier task's regression in `tests/test_other.py` was blamed on Task 7). The attributed full gate already finds the task a full-suite failure belongs to.
 **Rejected:** Gating each half with the whole batch's scope - a half lacks the other half's code, so the batch's checks can fail on it with no culprit there. Keeping an unreproduced batch off the target - a regression already on the target would hold every later batch.
-**Decided by:** user (drafted in the unattended-correctness session; the choice between the two forms of 15.1, and landing the green halves, are this spec's)
+**Decided by:** user (drafted in the unattended-correctness session; the review's rewrite of 15.1-15.3 to this choice was approved on 2026-11-10)
+
+### D25: Is a landing batch of one task ever gated with the full suite?
+**Choice:** No. A batch in which only one task merges is gated task-scoped, like every bisection half; only a batch of two or more may widen to the full suite when it completes the spec. A full-suite failure then surfaces at the run's final full gate, which follows the last task, and its attributed fixer. Raised by the review's consistency check (C1.1).
+**Why:** Follows 15.2: a task is never RED on a failure only the full suite sees. In a run the last task often lands alone, so widening its gate would repeat the TC-176 misblame.
+**Rejected:** Re-gating a red lone task task-scoped - a second gate for the same answer the final full gate gives. Keeping it RED on its full-suite gate - needs 15.2 changed and can blame the last task.
+**Decided by:** user
+
+### D26: Does `ck arbiter record` still record when the integration checkout is dirty with no matching refusal?
+**Choice:** Yes. It leaves the checkout unchanged (14.5) and commits `decisions.md` alone, as before; it takes the 10.9 path only when git cannot make that commit, such as while a merge is in progress. Raised by the review's consistency check (C2.1).
+**Why:** Follows 10.1: every ruling is recorded. 14.5's refusal is about landings; a hand edit should not also block the record of rulings.
+**Rejected:** Refusing like a landing - a hand edit would block rulings as well as landings.
+**Decided by:** user
 
 ## Delegated to Spec
 

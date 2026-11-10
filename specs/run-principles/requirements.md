@@ -467,12 +467,14 @@ unattended-correctness TC-176 smoke scenario: an earlier task's regression in `t
 
 **Acceptance Criteria:**
 
-- 15.1 WHEN a landing batch is bisected, THE SYSTEM SHALL gate each half with the same check scope as the whole batch, or SHALL
-  gate the right half itself rather than infer that it is red.
+- 15.1 WHEN a landing batch is bisected, THE SYSTEM SHALL run a gate on each half it merges, task-scoped as for a task in a
+  spec that is not yet complete, and SHALL NOT infer a half's result from the other half's gate.
 - 15.2 WHEN a single task is reported RED, THE SYSTEM SHALL have run a gate with that task on the base that fails, and SHALL
-  report that gate's failing checks.
-- 15.3 WHEN no single task, nor any half, reproduces the batch's failure, THE SYSTEM SHALL report the batch red with no culprit
-  and route it to the full-gate fixer path instead of blaming a task.
+  report that gate's failing checks. The failing gate SHALL be scoped to that task, never the full suite that only spec
+  completion turns on.
+- 15.3 WHEN a landing batch's gate is red and no task ends RED, THE SYSTEM SHALL land every task whose own gates passed, SHALL
+  report the batch unreproduced with the batch gate's failing checks, and SHALL run the attributed full gate and its fixer on
+  the target, as after a red periodic gate.
 
 ## Specification Heritage
 
@@ -554,6 +556,6 @@ answer no agent was allowed to act on.
 - The audit agent's model and effort follow an existing role, chosen in design. D9 adds settings only for the arbiter.
 - A failed audit lets the task start, because the audit only saves attempts and the task's own gate still guards it.
 - Stories 14 and 15 came from the unattended-correctness run as drafts I asked for; 14.5 is this spec's reading of "a refused
-  ref update" in 14.1, and D24 chooses the second form of 15.1.
+  ref update" in 14.1.
 - "The landing result" in 14.2 is `ck worktree land --json` (and the output of `ck worktree merge`), not the workflow result,
   which carries it along.
