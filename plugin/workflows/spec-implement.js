@@ -1901,7 +1901,7 @@ async function testFixFor(n, conflicts, { held = [] } = {}) {
     const rec = await runTestFix({ k, blocked: n, held, source: src, conflicts: g.conflicts })
     out.records.push(rec)
     if (rec.outcome === 'landed') out.fixed.push(...rec.tests)
-    else if (rec.outcome === 'test-correct') out.findings.push({ ...rec.finding, kind: 'assertion', message: rec.reason, tasks: [String(n)], command: null, node: rec.tests[0], file: rec.finding.file || g.file })
+    else if (rec.outcome === 'test-correct') out.findings.push({ ...rec.finding, kind: 'assertion', message: rec.reason, tasks: n != null ? [String(n)] : held.map(String), command: null, node: rec.tests[0], file: rec.finding.file || g.file })
     else out.toMe.push(`${g.file}: ${rec.reason}`)
   }
   testFixRecords.push(...out.records)
@@ -1945,16 +1945,28 @@ async function routeCrossFindings(w, findings, replan) {
     reason: String(f.issue || f.reason || ''),
     fix: String(f.fix || ''),
   })).filter(c => c.file)
-  const held = [...heldByCrossTest({ findings, testVerifies: current && current.testVerifies })].filter(t => !view.done.has(t) && !mergedInRun.has(t))
+  // The proof and the record name every verified task (ck refuses a proof with neither --blocked nor --held). A file
+  // no impl task verifies falls back to the wave's test tasks, so the list is never empty.
+  const verified = [...heldByCrossTest({ findings, testVerifies: current && current.testVerifies })]
+  const proofHeld = verified.length ? verified : testTasksOf(w).map(String)
+  // The scheduler holds only the verified tasks not yet done or merged.
+  const held = verified.filter(t => !view.done.has(t) && !mergedInRun.has(t))
   for (const t of held) crossHeld.add(t)
   if (held.length) log(`cross-test (wave ${w}): holding Task ${held.join(', ')} until the test fix lands`)
   if (!conflicts.length) {
     log(`cross-test (wave ${w}): no finding names a test file; nothing to fix`)
     for (const t of held) crossHeld.delete(t)
+    // no automatic fix exists for these findings: list them as needing my input, so none goes unseen
+    const texts = findings.map(f => trim(String(f.issue || f.summary || f.reason || JSON.stringify(f)), 300))
+    crossNeedsInput.push({
+      task: held[0] != null ? held[0] : `cross-test wave ${w}`, file: '', files: [], kind: 'test-fix', test: '', requirement: '',
+      decision: `A cross-test check found blocking findings that name no test file, so no automatic test fix can be made: ${texts.join(' | ')}. Fix the tests yourself on ${INTO} (a test-track change: you decide), then resume the run${RUN_ID ? ` with the same runId ${RUN_ID}` : ''}.`,
+      findings: texts, fixes: [], runId: RUN_ID || null, action: 'ask', notification: null, escalatedTo: [], held,
+    })
     if (held.length) replan()
     return
   }
-  const fixed = await testFixFor(null, conflicts, { held })
+  const fixed = await testFixFor(null, conflicts, { held: proofHeld })
   if (fixed.toMe.length) {
     // the fix did not land: the held tasks stay held and the conflict goes to me
     const reasons = fixed.toMe
