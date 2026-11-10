@@ -4,6 +4,8 @@
 Recorded surface: `dsh --version`, and `dsh --profile sdk`, which speaks newline-delimited JSON-RPC on stdio.
 Client to server: initialize, session/prompt, session/wait, shutdown. Nothing else is implemented, and there is
 no process-execution request (the record says the protocol has none).
+Parameter and result field names (sessionId, prompt, finalResponse, {ok: true}) are PLACEHOLDERS: the record
+names only the methods and the Python SDK RunResult.final_response, not the wire shapes.
 Env: FAKE_DSH_VERSION (version printed, default 0.2.2-rc.1), FAKE_DSH_LOG (a file each request's method is appended to).
 """
 import json

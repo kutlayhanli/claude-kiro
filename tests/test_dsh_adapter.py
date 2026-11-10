@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 from bench_helpers import CK, bench_setup
+from claude_kiro.bench import check_arm_result
 
 from test_dsh_harness import load_record
 
@@ -73,6 +74,9 @@ def test_tc155_fake_dsh_implements_only_the_recorded_surface(tmp_path):
 
 
 def test_tc155_bench_arm_runs_on_dsh(tmp_path):
+    """agent() is observed at the fake (initialize, session/prompt). ck() is not observable there: the record
+    says the protocol has no process-execution request, so the runner's own ck() runs ck directly (design
+    line 258) and never reaches dsh; a successful arm run whose result passes the 17.5 check is its evidence."""
     _require_allowed()
     env = _env(tmp_path)
     cfg = bench_setup(tmp_path)
@@ -84,18 +88,17 @@ def test_tc155_bench_arm_runs_on_dsh(tmp_path):
     assert "initialize" in methods and "session/prompt" in methods, methods  # agent() reached dsh
     results = list((tmp_path / "results").rglob("*.json"))
     assert results, "bench wrote no result"
-    from claude_kiro.harnesses import check_arm_result
-
-    for path in results:
-        data = json.loads(path.read_text())
-        if isinstance(data, dict) and "harness" in data:
-            assert check_arm_result(data) == [], path  # the 17.5 key set
+    arms = [d for d in (json.loads(p.read_text()) for p in results) if isinstance(d, dict) and "harness" in d]
+    assert arms, "no arm result carries a harness key"
+    for data in arms:
+        assert data["harness"] == "dsh", data
+        assert check_arm_result(data) == [], data  # the 17.5 key set
 
 
 def test_tc157_dsh_missing_from_path(tmp_path):
     _require_allowed()
     if shutil.which("dsh", path=_env(tmp_path, on_path=False)["PATH"]):
-        pytest.skip("a real dsh is on PATH and could not be removed")
+        pytest.fail("a real dsh is on PATH and could not be removed; the record allows dsh so this test must run")
     env = _env(tmp_path, on_path=False)
     doctor = _ck(tmp_path, env, "doctor", "--harness", "dsh")
     assert doctor.returncode != 0 and "dsh" in (doctor.stdout + doctor.stderr)
