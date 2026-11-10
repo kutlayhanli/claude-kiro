@@ -1234,7 +1234,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 53: Wire the graph into `ck plan`, `ck lint`, `ck relink` and `ck lint --fidelity`
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 7.4, 8.1, 8.3, 8.6, 11.6, 12.1, 12.2, 12.3, 12.5, 12.7, 13.1, 13.4, 13.6
 **Description:** In `src/claude_kiro/cli/worktree.py`: `_plan` adds `overlaps` (from `graph.write_set_overlaps`), `testVerifies` (test file -> impl tasks it verifies), `provides` (command -> providing tasks) and `graphProblems`; a new `--compact` flag prints only the scheduler keys (`done`, `remaining`, `deps`, `ready`, `cycles`, `verifyCycles`, `overlaps`, `testVerifies`, `provides`); `ck plan` never writes tasks.md. `lint` prints the new `lint_spec` keys (`commandEdges`, `unknownCommands`, `untaggedTests`, `noWriteSet`, `graphProblems`) in `--json` and as warnings in text mode, keeping the exit code rule (1 only for cycles); `lint --fidelity [--task N] --json` prints `{checked, mismatches, unparsed, unmatched}` from `fidelity.check_task` and exits 1 on mismatches. `relink` gains `--commands` (TASK becomes optional with it) that runs `plan_command_relink` / `apply_command_relink` with today's `--apply`, `--commit` and `--json` behaviour, reporting refused cyclic edges. All of these build the same graph (11.6) and make no network calls. Harness Contract owner: item 4's `ck fidelity` (design: `ck lint --fidelity`) and item 5's `ck plan --json` `overlaps`/`provides`, the `ck lint --json` keys and `ck relink --commands`. In `src/claude_kiro/fidelity.py`, so that Task 27's `ck lint --fidelity` cases pass: a comparison's literal is checked whatever it is compared with (`score() >= 4.50` against the row's threshold, no `no name` item for it); a comparison with no literal reports an operand computed from a number, enum or date (`score() == base * 1.1`) as unparsed and one computed from nothing concrete (`score()`, `obj.get("x")`) as nothing; test files are read as UTF-8 with an optional BOM; `parse_row` keeps an escaped `\|` inside its cell.
@@ -1245,12 +1245,12 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 10 (11.6 single-mapping cases across graph, lint, plan and gate (`tc14_redteam`)), Task 14 (TC-11 through `ck lint`), Task 17 (TC-110 to TC-112, TC-122b, TC-124b, TC-125), Task 26 (TC-69 to TC-74 through `ck lint --fidelity`), Task 27 (8.3, 8.6 through `ck lint --fidelity`), Task 52 (TC-168 for gate, graph, lint, relink, plan, land, hooks, audit, start and fixtures)
 
 **Acceptance:**
-- [ ] `ck lint --fidelity` checks `score() >= 4.50` against its row, reports `base * 1.1` compared with no literal as unparsed, and reads a BOM-prefixed test file (8.1, 8.3)
-- [ ] `ck plan --json` reports `overlaps`, `testVerifies`, `provides` and `graphProblems`; `--compact` prints only the scheduler keys (7.4, 12.5, 13.1)
-- [ ] `ck plan` leaves tasks.md byte-identical (13.6)
-- [ ] `ck lint --json` shows missing command edges, unknown commands, untagged tests and tasks without a write-set as warnings (12.1, 12.3, 13.4)
-- [ ] `ck relink SPEC --commands --apply` adds the missing edges, a second lint is clean, and a cyclic edge is refused (12.2, 12.7)
-- [ ] `ck lint --fidelity --task N --json` reports the fidelity lists and leaves files unchanged (8.1, 8.6)
+- [x] `ck lint --fidelity` checks `score() >= 4.50` against its row, reports `base * 1.1` compared with no literal as unparsed, and reads a BOM-prefixed test file (8.1, 8.3)
+- [x] `ck plan --json` reports `overlaps`, `testVerifies`, `provides` and `graphProblems`; `--compact` prints only the scheduler keys (7.4, 12.5, 13.1)
+- [x] `ck plan` leaves tasks.md byte-identical (13.6)
+- [x] `ck lint --json` shows missing command edges, unknown commands, untagged tests and tasks without a write-set as warnings (12.1, 12.3, 13.4)
+- [x] `ck relink SPEC --commands --apply` adds the missing edges, a second lint is clean, and a cyclic edge is refused (12.2, 12.7)
+- [x] `ck lint --fidelity --task N --json` reports the fidelity lists and leaves files unchanged (8.1, 8.6)
 
 **Dependencies:** Task 33 (calls the new `lint_spec` keys and `plan_command_relink`), Task 30 (calls `fidelity.check_task`), Task 57 (both edit cli/worktree.py; Task 57 runs first), Task 10 (its tests are the oracle), Task 14 (its tests are the oracle), Task 17 (its tests are the oracle), Task 26 (its tests are the oracle), Task 27 (its tests are the oracle), Task 52 (its tests are the oracle)
 **Complexity:** Medium
