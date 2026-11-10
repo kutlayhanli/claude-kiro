@@ -2127,9 +2127,214 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Acceptance:**
 - [ ] `tests/test_plugin.py` passes in full, including the dogfood and vendored-copy tests
 
-**Dependencies:** Task 6 (plugin source this copies), Task 48 (plugin source this copies), Task 65 (plugin source this copies), Task 66 (plugin source this copies), Task 67 (plugin source this copies), Task 68 (plugin source this copies), Task 69 (plugin source this copies), Task 70 (plugin source this copies), Task 74 (plugin source this copies), Task 76 (plugin source this copies), Task 83 (plugin source this copies), Task 84 (plugin source this copies), Task 85 (plugin source this copies), Task 86 (plugin source this copies)
+**Dependencies:** Task 6 (plugin source this copies), Task 48 (plugin source this copies), Task 65 (plugin source this copies), Task 66 (plugin source this copies), Task 67 (plugin source this copies), Task 68 (plugin source this copies), Task 69 (plugin source this copies), Task 70 (plugin source this copies), Task 74 (plugin source this copies), Task 76 (plugin source this copies), Task 83 (plugin source this copies), Task 84 (plugin source this copies), Task 85 (plugin source this copies), Task 86 (plugin source this copies), Task 99 (plugin source this copies)
 **Complexity:** Low
 **Risk:** normal
+
+---
+
+### Task 93: Test the integration checkout recovery
+**Status:** Not Started
+**Track:** test
+**Requirements:** 14.1, 14.2, 14.3, 14.4, 14.5
+**Description:** Create `tests/test_land_recovery.py` with TC-162 to TC-168 and P-47 (test-plan.md). Build each case on a real repository with ck's git hooks installed and a real integration worktree, using the integration branch's helpers (`tests/unattended_helpers.py` or its equivalent there: `integration_worktree`, `protected_branch`), and make the refused merge with a real `git merge --no-verify`, so the residue is exactly what git leaves. Read the refusal record only through `protect.refusal_for`, and the landing result only through `ck worktree land --json`. P-47 drives the pure `worktrees.decide_recovery` with Hypothesis (`derandomize=True, max_examples=200, database=None, deadline=None`) and carries a `PROPERTIES` map. Import project modules inside test bodies.
+**Files:**
+- `tests/test_land_recovery.py` - TC-162 to TC-168, P-47
+**Verify:** `uv run pytest tests/test_land_recovery.py -q`
+**Verifies:** Task 94 (TC-168's refusal record), Task 95 (the recovery in `land` and `merge`)
+
+**Acceptance:**
+- [ ] Each refused merge is a real `git merge --no-verify` refused by the real installed hook
+- [ ] TC-166 covers no record, a record at an older head, and a record from another checkout
+- [ ] P-47 generates every combination its row lists
+- [ ] Tests exercise the real boundary named in the test plan (real git, real hooks, the `ck` CLI)
+- [ ] Tests fail before the implementation exists for the right reason (the landing refuses the dirty checkout; no refusal record exists)
+- [ ] No mocks of the project's own code in integration tests
+
+**Dependencies:** None
+**Complexity:** Medium
+**Risk:** safety (the tests that keep the recovery from becoming a bypass of the protected-file hooks)
+
+---
+
+### Task 94: Record refused integration updates in ck's git hooks
+**Status:** Not Started
+**Track:** impl
+**Requirements:** 14.1, 14.5
+**Description:** In `src/claude_kiro/protect.py`, add the `Refusal` dataclass and `record_refusal`, `refusal_for` and `clear_refusal` (design.md, "Landing recovery and bisection" under Data Models), keeping the latest refusal per ref in `<git common dir>/ck/refusals.json` under a file lock. `record_refusal` never raises. In `src/claude_kiro/cli/githooks.py`, `reference_transaction` records each `refs/heads/integrate/*` update it refuses (protected change without a token, or an update it cannot verify) with the update's old value and the realpath of the working directory, and `pre_merge_commit` does the same with `HEAD` when it refuses. A failed write leaves the refusal itself unchanged.
+**Files:**
+- `src/claude_kiro/protect.py` - `Refusal`, `record_refusal`, `refusal_for`, `clear_refusal`
+- `src/claude_kiro/cli/githooks.py` - record each refusal
+**Verify:** `uv run pytest tests/test_land_recovery.py -q -k "tc168_"`
+**Verified by:** Task 93 (TC-168)
+
+**Acceptance:**
+- [ ] A refused raw merge, fast-forward or not, leaves a record naming the ref, its head and the checkout
+- [ ] An allowed or tokened update leaves no record
+- [ ] A record that cannot be written changes nothing about the refusal
+
+**Dependencies:** Task 93 (its tests are the oracle)
+**Complexity:** Low
+**Risk:** safety (edits the hooks that refuse protected changes)
+
+---
+
+### Task 95: Restore a refused integration checkout before landing
+**Status:** Not Started
+**Track:** impl
+**Requirements:** 14.1, 14.2, 14.3, 14.4, 14.5
+**Description:** In `src/claude_kiro/worktrees.py`, add `RecoveryFacts`, the pure `decide_recovery` and `recover_target` (design.md, "Landing recovery and bisection"). Replace the dirty-target refusals in `land` (inside `land_lock`) and `merge` (inside a `land_lock` taken for that step) with `recover_target`. It restores only with `_git_reset(root, target, into, head)` to the checkout's current head, then checks that HEAD is unchanged, MERGE_HEAD is gone and no tracked file is dirty, and clears the refusal. `land`'s result gains `recovered` when it restored. In `src/claude_kiro/cli/worktree.py`, `merge` prints `restored <checkout> to <head>: discarded <paths>` first when it restored.
+**Files:**
+- `src/claude_kiro/worktrees.py` - `RecoveryFacts`, `decide_recovery`, `recover_target`, used by `land` and `merge`
+- `src/claude_kiro/cli/worktree.py` - `merge` prints the restore
+**Verify:** `uv run pytest tests/test_land_recovery.py -q` `uv run pytest tests/test_land_recovery_redteam.py -q`
+**Verified by:** Task 93 (TC-162 to TC-168, P-47), Task 101 (red team of 14.3, 14.4, 14.5), Task 100 (TC-169, in a full run)
+
+**Acceptance:**
+- [ ] A managed integration checkout with a matching refusal is restored and the landing goes on; any other dirty checkout is refused as today
+- [ ] The ref never moves, and untracked files are untouched
+- [ ] A failed reset refuses the landing and keeps the refusal record
+
+**Dependencies:** Task 93 (its tests are the oracle), Task 100 (its tests are the oracle), Task 101 (its tests are the oracle), Task 94 (the refusal record), Task 44 (edits the same `worktrees.py` and `cli/worktree.py`)
+**Complexity:** Medium
+**Risk:** safety (resets a checkout that protected-file hooks guard)
+
+---
+
+### Task 96: Test that bisection blames only a task whose own gate fails
+**Status:** Not Started
+**Track:** test
+**Requirements:** 15.1, 15.2, 15.3
+**Description:** Create `tests/test_land_bisect.py` with TC-170, TC-171, TC-172, TC-175 and P-48 (test-plan.md). TC-170 to TC-172 and TC-175 run the real `ck worktree land --gate --json` on a real repository with a spec whose task branches each commit their own files; TC-171's `specs/ck.json` `verify` runs a test file no task's Verify selects. P-48 calls `worktrees.land` with an in-process gate function over real task branches, at `max_examples=30`, and carries a `PROPERTIES` map. Migrate `tests/test_worktree_land.py::test_red_batch_bisects_to_the_culprit`: its `len(data["gates"]) < 5` and the comment "a green left half proves the right half red without re-gating it" encode the behaviour 15.1 replaces; assert the 2n-1 bound and the right half's own gate instead, keeping its other assertions.
+**Files:**
+- `tests/test_land_bisect.py` - TC-170, TC-171, TC-172, TC-175, P-48
+- `tests/test_worktree_land.py` - the bisection gate count moves to the 2n-1 bound
+**Verify:** `uv run pytest tests/test_land_bisect.py -q` `uv run pytest tests/test_worktree_land.py -q`
+**Verifies:** Task 97 (bisection without inference and `unreproduced`)
+
+**Acceptance:**
+- [ ] TC-171 reproduces the observed case: a spec-completing batch red only under the full suite
+- [ ] The migrated test keeps every assertion not about the gate count
+- [ ] P-48 generates every combination its row lists
+- [ ] Tests exercise the real boundary named in the test plan (real git, real `ck gate`, the `ck` CLI)
+- [ ] Tests fail before the implementation exists for the right reason (the right half is inferred red and a task is blamed by elimination)
+- [ ] No mocks of the project's own code in integration tests
+
+**Dependencies:** None
+**Complexity:** Medium
+**Risk:** normal
+
+---
+
+### Task 97: Gate every bisection half and report an unreproduced batch
+**Status:** Not Started
+**Track:** impl
+**Requirements:** 15.1, 15.2, 15.3
+**Description:** In `src/claude_kiro/worktrees.py`, rewrite `land_group` inside `land` as design.md's "Bisection" shows: drop `known_red`, gate every group it merges, report RED only for a single task whose own gate failed, with that gate's tail and failures, and recurse into both halves otherwise. After `land_group(batch)`, when the batch gate was red and no task is RED, add `unreproduced: {tasks, tail, failures}` from the batch gate to the result.
+**Files:**
+- `src/claude_kiro/worktrees.py` - `land_group` and the `unreproduced` key
+**Verify:** `uv run pytest tests/test_land_bisect.py -q` `uv run pytest tests/test_worktree_land.py -q`
+**Verified by:** Task 96 (TC-170 to TC-172, TC-175, P-48), Task 100 (TC-174, in a full run)
+
+**Acceptance:**
+- [ ] No RED task without a red gate on exactly that task
+- [ ] A batch-only failure gives `unreproduced` and no RED task
+- [ ] At most 2n-1 gates for a batch of n
+
+**Dependencies:** Task 96 (its tests are the oracle), Task 100 (its tests are the oracle), Task 95 (edits the same `worktrees.py`)
+**Complexity:** Medium
+**Risk:** normal
+
+---
+
+### Task 98: Test the run's route for an unreproduced landing
+**Status:** Not Started
+**Track:** test
+**Requirements:** 14.2, 15.3
+**Description:** Add the fake-project landing option `unreproduced: {batch: [n...]}` to `tests/js/fake_project.mjs` (additive, absent by default), which answers that landing with every task MERGED and an `unreproduced` key, and emit the label `full gate @<n> (unreproduced landing)` from `tests/js/emit_labels.mjs`. Create `tests/test_land_unreproduced_workflow.py` with TC-173: the real `spec-implement.js` under the fake runtime through the bridge, with the attributed gate run by the real `ck gate --attribute` (`exec_ck`), red in one case and green in the other. It also checks that a landing answer carrying `recovered` keeps it on the landing entry.
+**Files:**
+- `tests/js/fake_project.mjs` - the `unreproduced` landing option
+- `tests/js/emit_labels.mjs` - the new full gate label
+- `tests/test_land_unreproduced_workflow.py` - TC-173
+**Verify:** `uv run pytest tests/test_land_unreproduced_workflow.py -q`
+**Verifies:** Task 99 (the run's route)
+
+**Acceptance:**
+- [ ] Existing `tests/js/*.test.mjs` suites still pass with the option absent
+- [ ] TC-173 covers a red and a green attributed gate
+- [ ] Tests exercise the real boundary named in the test plan (the real workflow under the fake runtime, real `ck`)
+- [ ] Tests fail before the implementation exists for the right reason (the run logs "no culprit (flaky?)" and runs no full gate)
+- [ ] No mocks of the project's own code in integration tests
+
+**Dependencies:** Task 2 (edits the same fake runtime files)
+**Complexity:** Medium
+**Risk:** normal
+
+---
+
+### Task 99: Send an unreproduced landing to the full gate and its fixer
+**Status:** Not Started
+**Track:** impl
+**Requirements:** 14.2, 15.3
+**Description:** In `plugin/workflows/spec-implement.js`, factor the periodic gate's code into `fullGateAndFix(kind, label)` (attributed gate, `fixAndRecheck` when red, `redTarget` and `stopLaunching` when the recheck is still red). In the landing step, keep `recovered` on the landing entry and log it; when the result has `unreproduced`, set `unreproduced: true` on the landing entry, log it, and call `fullGateAndFix('unreproduced', ...)` with label `full gate @<merges> (unreproduced landing)`, skipping a periodic gate due on the same step. No new clock or randomness.
+**Files:**
+- `plugin/workflows/spec-implement.js` - `fullGateAndFix`, the `unreproduced` route, `recovered` on the landing entry
+**Verify:** `uv run pytest tests/test_land_unreproduced_workflow.py -q`
+**Verified by:** Task 98 (TC-173), Task 100 (TC-174, in a full run)
+
+**Acceptance:**
+- [ ] An unreproduced landing runs the attributed full gate, and its fixer when red
+- [ ] The periodic gate behaves as before
+
+**Dependencies:** Task 98 (its tests are the oracle), Task 100 (its tests are the oracle), Task 97 (the `unreproduced` key), Task 74 (edits the same workflow)
+**Complexity:** Medium
+**Risk:** normal
+
+---
+
+### Task 100: Migrate the unattended smoke scenarios to the recovery and the unreproduced route
+**Status:** Not Started
+**Track:** test
+**Requirements:** 14.1, 14.2, 15.2, 15.3
+**Description:** In `tests/test_unattended_smoke.py`, stop TC-178's scripted agent resetting after its refused merge (the `cleanup` step from commit a64c0aa); keep recording the merge's exit code and heads. Add TC-169 on the `tc176_run` fixture: a later landing entry carries `recovered` naming `.claude/CLAUDE.md`, and the run-end audit is clean. Add a `tc174_run` fixture running the TC-176 scenario without `landOrder`, and TC-174's tests on it (test-plan.md). The existing TC-176 and TC-178 tests keep their assertions.
+**Files:**
+- `tests/test_unattended_smoke.py` - TC-178's agent stops cleaning up; TC-169 and TC-174
+**Verify:** `uv run pytest tests/test_unattended_smoke.py -q -k "tc169_ or tc174_"`
+**Verifies:** Task 95 (TC-169), Task 97 (TC-174's landing), Task 99 (TC-174's route)
+
+**Acceptance:**
+- [ ] TC-178's assertions are unchanged, and its agent no longer cleans up
+- [ ] TC-174 runs the observed scenario with no `landOrder`
+- [ ] Tests exercise the real boundary named in the test plan (the real workflow under the fake runtime, real `ck`, real hooks)
+- [ ] Tests fail before the implementation exists for the right reason (the landing after the refused merge refuses the dirty checkout; Task 7 is blamed)
+- [ ] No mocks of the project's own code in integration tests
+
+**Dependencies:** None
+**Complexity:** Medium
+**Risk:** normal
+
+---
+
+### Task 101: Red-team the prohibitions of Story 14
+**Status:** Not Started
+**Track:** test
+**Requirements:** 14.3, 14.4, 14.5
+**Description:** Try to break each SHALL NOT clause of Story 14 and its refusal rule with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Target a refusal record for a branch whose name is a prefix of the target's, a checkout path reached through a symlink, a main checkout that has an `integrate/*` branch checked out, a record written by hand pointing at a protected commit, untracked files with names git would stage, a dirty submodule, and a landing that runs while the hook is writing a record. Written from the requirements only, never from the implementation.
+**Files:**
+- `tests/test_land_recovery_redteam.py` - adversarial cases for 14.3, 14.4, 14.5
+**Verify:** `uv run pytest tests/test_land_recovery_redteam.py -q`
+**Verifies:** Task 95 (red team of 14.3, 14.4, 14.5)
+
+**Acceptance:**
+- [ ] Each SHALL NOT clause has at least one adversarial test per listed input class that applies to it
+- [ ] No case moves `integrate/demo` or lands a protected file
+- [ ] Tests exercise the real boundary named in the test plan (real git, real hooks, the `ck` CLI)
+- [ ] Tests fail before the implementation exists for the right reason (the landing refuses every dirty checkout)
+- [ ] No mocks of the project's own code in integration tests
+
+**Dependencies:** None
+**Complexity:** Medium
+**Risk:** safety (the recovery must not become a bypass of the protected-file hooks)
 
 
 ## Dependency Graph
@@ -2228,6 +2433,15 @@ graph TD
     T90["90: Migrate the /spec:create workflow suites to the ar"]:::test
     T91["91: Capture the arbiter's real hook input (lands by ha"]
     T92["92: Regenerate the vendored copies (lands by hand)"]
+    T93["93: Test the integration checkout recovery"]:::test
+    T94["94: Record refused integration updates in ck's git hooks"]
+    T95["95: Restore a refused integration checkout before landing"]
+    T96["96: Test that bisection blames only a task whose own gate fails"]:::test
+    T97["97: Gate every bisection half and report an unreproduced batch"]
+    T98["98: Test the run's route for an unreproduced landing"]:::test
+    T99["99: Send an unreproduced landing to the full gate and its fixer"]
+    T100["100: Migrate the unattended smoke scenarios to the recovery and the unreproduced route"]:::test
+    T101["101: Red-team the prohibitions of Story 14"]:::test
     T89 --> T2
     T3 --> T4
     T3 --> T5
@@ -2474,6 +2688,21 @@ graph TD
     T84 --> T92
     T85 --> T92
     T86 --> T92
+    T93 --> T94
+    T93 --> T95
+    T100 --> T95
+    T101 --> T95
+    T94 --> T95
+    T44 --> T95
+    T96 --> T97
+    T100 --> T97
+    T95 --> T97
+    T2 --> T98
+    T98 --> T99
+    T100 --> T99
+    T97 --> T99
+    T74 --> T99
+    T99 --> T92
     classDef test fill:#e8f0fe,stroke:#4a6fa5,stroke-dasharray: 4 2
 ```
 
@@ -2481,6 +2710,6 @@ graph TD
 
 There are no waves: each task starts as soon as its own Dependencies are merged, so the plan is the dependency graph above.
 
-- **Ready at start:** Tasks 89, 1, 3, 17, 88, 9, 75
-- **Critical path:** Task 89 -> Task 2 -> Task 55 -> Task 56 -> Task 57 -> Task 58 -> Task 59 -> Task 60 -> Task 61 -> Task 62 -> Task 63 -> Task 65 -> Task 66 -> Task 67 -> Task 68 -> Task 69 -> Task 70 -> Task 74 -> Task 92 (19 of 92 tasks; the floor on wall-clock time however many agents run)
+- **Ready at start:** Tasks 89, 1, 3, 17, 88, 9, 75, 93, 96, 100, 101
+- **Critical path:** Task 89 -> Task 2 -> Task 55 -> Task 56 -> Task 57 -> Task 58 -> Task 59 -> Task 60 -> Task 61 -> Task 62 -> Task 63 -> Task 65 -> Task 66 -> Task 67 -> Task 68 -> Task 69 -> Task 70 -> Task 74 -> Task 99 -> Task 92 (20 of 101 tasks; the floor on wall-clock time however many agents run)
 - **Hand steps:** Task 91 (paid hook capture) and Task 92 (`uv run ck vendor`, committed by hand on the integration branch). Until Task 92 is done, the final whole-suite gate is expected to fail only on `test_dogfood_copies_in_this_repo_match_the_plugin_source` and `test_claude_vendored_workflow_matches_plugin_source`.

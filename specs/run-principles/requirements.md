@@ -8,7 +8,7 @@ needed real judgment. The rest had a clear right answer that no agent was allowe
 shows up earlier: requirements nobody justified get specified, tested and built.
 
 This feature makes runs stop only for decisions that are really mine, and makes every requirement say why it
-exists. See [PLAN.md](PLAN.md) (Status: Decided, D1-D18), the source of truth for scope and decisions.
+exists. See [PLAN.md](PLAN.md) (Status: Decided, D1-D24), the source of truth for scope and decisions.
 
 1. **Principles (D5).** A project-wide file holds defaults; each plan adds tie-breakers or overrides.
 2. **Justifications (D6, D7).** Every user story carries a `**Without it:**` line. Planning asks for it, lint
@@ -20,6 +20,8 @@ exists. See [PLAN.md](PLAN.md) (Status: Decided, D1-D18), the source of truth fo
 4. **The same arbiter in `/spec:create` (D14, D15).**
 5. **Prevention (D16).** A static lint and a reading audit catch Verify-scope problems before a run spends
    attempts.
+6. **Landing repairs (D23, D24).** Two landing gaps found while running unattended-correctness: an integration
+   checkout left dirty by a refused raw merge, and bisection that blames a task by elimination.
 
 Terms used below:
 
@@ -35,6 +37,10 @@ Terms used below:
 - **Normal tier / risky tier**: the arbiter's two model-and-effort settings.
 - **Project layer / plan layer**: the project-wide principles file / a plan's `## Principles` section.
 - **Implementation started**: at least one task in the spec is not Not Started.
+- **Managed integration checkout**: a checkout of an `integrate/*` branch under ck's worktree directory, which is where
+  `ck worktree land` merges.
+- **Recorded refusal**: ck's git hook's record that it refused an update of an `integrate/*` branch, naming the branch, its
+  head at the time, and the checkout the refused command ran in.
 - **I, me**: the user running the spec.
 
 ## User Stories
@@ -424,6 +430,50 @@ static check cannot prove are caught before an attempt is spent.
 - 13.8 WHEN the arbiter cannot be called or returns nothing usable for an audit problem, THE SYSTEM SHALL start the task and note the
   missed audit, as in 13.5. A malformed ruling on an audit problem follows 7.2.
 
+### Story 14: An integration checkout survives a refused raw merge (D23)
+
+**As a** user **I want** ck to recover an integration checkout that a refused raw merge left dirty **So that** one agent's
+refused bypass doesn't stop every later landing.
+
+**Without it:** an agent's refused raw `git merge` into the integration checkout (the reference-transaction hook refuses the ref
+update) still leaves staged files, or a merge in progress (MERGE_HEAD, AUTO_MERGE, MERGE_MSG). Every later `ck worktree land`
+then refuses with "has uncommitted changes to tracked files", and the run ends blocked waiting for me. unattended-correctness
+PLAN D6 records an agent doing such a merge in the equity E2E.
+
+**Acceptance Criteria:**
+
+- 14.1 WHEN a refused ref update leaves a managed integration checkout with a merge in progress or uncommitted changes to
+  tracked files, THE SYSTEM SHALL restore that checkout to its branch head before the next landing or merge into it.
+- 14.2 WHEN it restores a checkout, THE SYSTEM SHALL report the discarded paths, and whether a merge was in progress, in the
+  landing result.
+- 14.3 THE SYSTEM SHALL NOT restore any other checkout (a dirty main checkout is still refused, as today) and SHALL NOT touch
+  untracked files.
+- 14.4 THE SYSTEM SHALL restore only to the ref's current head, never moving the ref, so the recovery can't become a bypass of
+  the protected-file hooks.
+- 14.5 WHEN a managed integration checkout has a merge in progress or uncommitted changes to tracked files and no recorded
+  refusal names its branch, its current head and that checkout, THE SYSTEM SHALL refuse the landing as today and leave the
+  checkout unchanged, so a merge I am making there by hand is never discarded.
+
+### Story 15: Bisection blames the task that broke the gate (D24)
+
+**As a** user **I want** a red landing batch blamed only on a task whose gate fails with it **So that** the fixer gets the real
+culprit and a correct task isn't held back.
+
+**Without it:** when a landing batch completes the spec, ck gates the whole batch with the full suite (`spec_complete` turns off
+the green-only, task-scoped mode). The bisection halves are smaller, so they run task-scoped gates that can't see the failure.
+`land_group` then treats "a green left half on the same base proves the right half red" and blames the last task by
+elimination. That task goes to a fixer with nothing to fix, and the run ends blocked. It was observed in the
+unattended-correctness TC-176 smoke scenario: an earlier task's regression in `tests/test_other.py` was blamed on Task 7.
+
+**Acceptance Criteria:**
+
+- 15.1 WHEN a landing batch is bisected, THE SYSTEM SHALL gate each half with the same check scope as the whole batch, or SHALL
+  gate the right half itself rather than infer that it is red.
+- 15.2 WHEN a single task is reported RED, THE SYSTEM SHALL have run a gate with that task on the base that fails, and SHALL
+  report that gate's failing checks.
+- 15.3 WHEN no single task, nor any half, reproduces the batch's failure, THE SYSTEM SHALL report the batch red with no culprit
+  and route it to the full-gate fixer path instead of blaming a task.
+
 ## Specification Heritage
 
 **Evolves From:** none directly. It builds next to specs/unattended-correctness and on the needs-input path of
@@ -434,7 +484,8 @@ rules for every caller other than the arbiter; the frozen-spec rule for the revi
 test-fixer's proof step and review (unattended-correctness Story 4).
 
 **Supersedes:** the second-agent confirmation of a test conflict; the guard ladder for guard stops; the model-ladder escalation of
-a review deadlock. unattended-correctness 4.1 starts the test-fixer on a conflict "confirmed by a second agent"; here the arbiter's
+a review deadlock; bisection's inference that a green left half proves the right half red; the refusal to land into an
+integration checkout that only a refused ref update made dirty. unattended-correctness 4.1 starts the test-fixer on a conflict "confirmed by a second agent"; here the arbiter's
 ruling takes that role (D8, 8.10).
 
 **Evolution Reason:** a stronger implementer cannot fix a wrong test or a bad Verify line, and most spec-level stops had a clear
@@ -451,6 +502,8 @@ answer no agent was allowed to act on.
 - **Compatibility.** A spec with no rulings and no findings under Stories 3 and 12 SHALL launch and run as it does today, apart from
   the stops Story 6 reroutes and the audit steps Story 13 adds.
 - **Determinism.** Lint findings SHALL come out in a stable order, so two runs on the same tree produce identical output.
+- **Bounded landing cost.** A bisected batch of n tasks SHALL run at most 2n-1 gates. Checked by a landing test over batches
+  with one culprit, several, and none.
 
 ## Constraints
 
@@ -479,6 +532,10 @@ answer no agent was allowed to act on.
 - Principles built into `ck`, in place of the project file.
 - A justification per acceptance criterion.
 - Retroactively adding justifications to specs written before this feature.
+- Restoring a checkout left mid-rebase, mid-cherry-pick or mid-revert, or a task worktree.
+- Telling a refused merge's residue apart from edits made in the same checkout after the refusal, at the same head.
+- Naming more than one culprit for a failure that appears only when several tasks land together. The first task whose own
+  gate fails with it is the one blamed.
 
 ## Assumptions
 
@@ -496,3 +553,7 @@ answer no agent was allowed to act on.
 - A reviewer's "serves no requirement" finding does not block landing, because D7 makes cuts proposals.
 - The audit agent's model and effort follow an existing role, chosen in design. D9 adds settings only for the arbiter.
 - A failed audit lets the task start, because the audit only saves attempts and the task's own gate still guards it.
+- Stories 14 and 15 came from the unattended-correctness run as drafts I asked for; 14.5 is this spec's reading of "a refused
+  ref update" in 14.1, and D24 chooses the second form of 15.1.
+- "The landing result" in 14.2 is `ck worktree land --json` (and the output of `ck worktree merge`), not the workflow result,
+  which carries it along.

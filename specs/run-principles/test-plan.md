@@ -63,6 +63,9 @@ These encode behaviour the requirements' **Supersedes** list replaces. A grep fo
 - `tests/test_guard_park.py`, `tests/test_guard_agent_mode_docs.py`, `tests/test_stats_interruptions.py`, `tests/test_stats_submit.py` (hits to triage; they may only use the ladder's labels).
 - `tests/js/spec_create.test.mjs` and `tests/js/spec_review_frozen.test.mjs` (their stub throws on unknown labels, and their default run has a refuted finding, so the new arbiter steps need default answers in `fake_create.mjs`).
 - `tests/test_plugin.py` (`AGENTS` gains `arbiter` and `auditor`; this also makes the guide assertion require `spec:arbiter`).
+- `tests/test_worktree_land.py::test_red_batch_bisects_to_the_culprit` (`len(gates) < 5`, "a green left half proves the right half red without re-gating it"): moves to the 2n-1 bound and asserts the right half's own gate (Story 15).
+- `tests/test_unattended_smoke.py`: TC-178's scripted agent resets after its refused merge (commit a64c0aa). It stops, so TC-169 exercises the recovery (Story 14). TC-176's `landOrder` stays; TC-174 runs the same scenario without it.
+- `tests/js/fake_project.mjs`: its simulated landing gains an `unreproduced` answer for TC-173. Its simulated bisection is a stand-in and need not change.
 
 `bridge.ladder` and `agents.guard_ladder` stay valid as seams even once the workflow stops climbing.
 
@@ -232,6 +235,20 @@ Files are abbreviated by name; all are under `tests/`. Level: **I** integration,
 | TC-158 | 11.6, 11.12 | W | A drift ruling with a `requirements` item lands in Needs Your Decision and review.md's Result is `Ready after decisions`; a lost drift step sets it to `Needs work`, matching the workflow's `result` | Workflow, real files | test_arbiter_create.py |
 | TC-159 | 1.1, 11.9 | C | The create and review skills run `ck agents --json` and pass `arbiterAgent`, `runnerAgent` and `agents.arbiter` | Shipped skills | test_arbiter_skill_contracts.py |
 | TC-160 | 9.5, 9.6 | I | The captured real hook input of a Workflow agent started with `agentType` `spec:arbiter`, and of the vendored `ck-arbiter`, has no `_derivedFrom` key, and `is_arbiter_caller` is true on it | Recorded real hook input | test_arbiter_capture.py |
+| TC-162 | 14.1, 14.2, 14.4 | I | Given a managed integration checkout with ck's hooks installed and a branch whose only change adds `.claude/CLAUDE.md` on top of `integrate/demo`, a raw `git merge --no-verify` of it fast-forwards, is refused, and leaves `A .claude/CLAUDE.md` staged; when `ck worktree land demo <n> --json` runs for a clean task, then the task is MERGED, `recovered.paths` lists `.claude/CLAUDE.md`, `recovered.mergeInProgress` is false, `recovered.head` equals `integrate/demo` before the landing, and `.claude/CLAUDE.md` is not in `integrate/demo` | Real git, real hooks, CLI | test_land_recovery.py |
+| TC-163 | 14.1, 14.2 | I | As TC-162 with a non-fast-forward merge: the refused merge leaves MERGE_HEAD; the landing merges, `recovered.mergeInProgress` is true, and MERGE_HEAD, MERGE_MSG and AUTO_MERGE are gone | Real git, real hooks, CLI | test_land_recovery.py |
+| TC-164 | 14.3 | I | An untracked file and an ignored file in the integration checkout before the refused merge are byte-identical after the recovering landing | Real git, real files | test_land_recovery.py |
+| TC-165 | 14.3 | I | With a dirty tracked file in the main checkout, `ck worktree merge demo <n>` into the main branch exits non-zero with today's "has uncommitted changes to tracked files" message, and the file is unchanged | Real git, CLI | test_land_recovery.py |
+| TC-166 | 14.5 | I | Given an integration checkout with a hand edit to a tracked file and a merge in progress made with the hooks' token (no refusal recorded), `ck worktree land` exits non-zero naming "no refused ref update is recorded at this head", and the edit and MERGE_HEAD are untouched; the same with a refusal recorded at an older head (the branch moved since), and with one recorded from another checkout | Real git, real hooks, CLI | test_land_recovery.py |
+| TC-167 | 14.1, 14.4 | I | After a refused merge, with the checkout's `index.lock` held, `ck worktree land` exits non-zero naming the target and the git error, `integrate/demo` is unchanged, and `protect.refusal_for` still returns the record; once the lock is removed the next landing recovers | Real git, real lock file, CLI | test_land_recovery.py |
+| TC-168 | 14.1, 14.2 | I | A refused raw merge leaves a record `protect.refusal_for(root, "refs/heads/integrate/demo")` returns with that head and the checkout's realpath; a tokened landing leaves none; `ck worktree merge demo <n> --into integrate/demo` after a refused merge succeeds and prints the restored paths; the record is cleared after the recovery | Real git, real hooks, CLI | test_land_recovery.py |
+| TC-169 | 14.1, 14.2 | E | The TC-176 run with TC-178's scripted agent no longer resetting after its refused merge: the run goes on, a later landing entry carries `recovered` naming `.claude/CLAUDE.md`, and the run-end `ck worktree audit` is clean | Real workflow under the fake runtime, real `ck`, real hooks | test_unattended_smoke.py |
+| TC-170 | 15.1, 15.2 | I | A batch of three tasks where only the third fails its own Verify: the third is RED, `gates` holds a gate whose `tasks` is the right half, and the RED task's `checkTail` and `failures` equal those of the gate whose `tasks` is exactly that task, which is red | Real git, real `ck gate`, CLI | test_land_bisect.py |
+| TC-171 | 15.1, 15.3 | I | A batch whose two tasks complete the spec, where the first breaks `tests/test_other.py`, which only the full suite in `verify` runs: the batch gate is red, no task is RED, both are MERGED, and `unreproduced` carries the batch gate's failure naming `tests/test_other.py` | Real git, real `ck gate`, CLI | test_land_bisect.py |
+| TC-172 | 15.3 | I | A batch gate that fails once (a test that fails on its first run, keyed by a file it writes) and then passes: no task is RED and `unreproduced` is set | Real git, real `ck gate`, CLI | test_land_bisect.py |
+| TC-173 | 15.3 | W | A landing answers with `unreproduced`: the run calls an attributed gate with `kind` `unreproduced` and label `full gate @<n> (unreproduced landing)`; red, a fixer gets the attributed entry and a recheck runs; no `fix <k> (Task <n> red on landing)` label runs; the landing entry has `unreproduced: true`; a green attributed gate runs no fixer | Workflow, real `ck` for the attributed gate | test_land_unreproduced_workflow.py |
+| TC-174 | 15.2, 15.3 | E | The TC-176 scenario without `landOrder`: Task 2 lands in the batch that completes the spec; the landing reports `unreproduced` and no RED task; the attributed gate names `test_tc1_add` on Task 2; the fixer prompt carries it; the final gate is green | Real workflow under the fake runtime, real `ck` | test_unattended_smoke.py |
+| TC-175 | Bounded landing cost | I | Batches of 4 with one culprit, two culprits, and none but a batch-only failure each run at most 7 gates | Real git, real `ck gate`, CLI | test_land_bisect.py |
 | TC-161 | 7.2, 13.3, 13.8 | W | An audit problem whose arbiter returns a malformed ruling (no principle, or an unknown outcome): no ruling is applied or recorded, the task does not start, a needs-input entry carries the arbiter's output, and the task is not in `missedAudits` | Workflow, real `ck` | test_arbiter_audit.py |
 
 ## Properties
@@ -286,6 +303,8 @@ Library: **Hypothesis** for all of them. JS decisions are reached through the br
 | P-44 | 8.12 | A settled finding never blocks again | `settleFindings` (bridge) over findings settled by file and issue, with case and whitespace variants, and reworded ones the reviewer marks `settledBy`; negatives: a different issue on the same file | A matching or `settledBy` finding is removed; a different issue stays |
 | P-45 | 11.5, 11.7, 11.10 | `requirements.md` is in the lane exactly under a ticket before implementation starts | `decide_arbiter_edit` over lane ticket present or absent × `implementation_started` × the ticket's spec or another × arbiter worktree or not × `requirements.md`, `PLAN.md` | `requirements.md` allowed exactly with a ticket for its own spec, not started, not in an arbiter worktree; `PLAN.md` never |
 | P-46 | 11.11 | With no refuted findings and no cuts, those steps call no arbiter | Reviews with no refuted findings and no cuts, alone and mixed with confirmed findings, in create and review modes (W) | No `arbiter refuted` or `arbiter cuts` label; neither step in `review.arbiter.ran` or `lost` |
+| P-47 | 14.1, 14.3, 14.4, 14.5 | Recovery happens only for a managed checkout with a matching refusal | `decide_recovery` over managed or not × dirty or clean × merge in progress or not × refusal absent, for another ref, at another head, from another checkout, or matching | `recover` exactly when managed, dirty or merging, and the refusal matches ref, head and checkout; `clean` when neither dirty nor merging; otherwise `refuse` |
+| P-48 | 15.1, 15.2, 15.3, Bounded landing cost | A task is RED only on its own red gate | `land` with an in-process gate function over real task branches (G): batch size 1 to 6, any set of bad tasks, and a batch-only failure on or off; the gate is red when its group holds a bad task, or when the flag is on and the group is the whole batch | Every RED task is bad and has a red gate on exactly itself; with no bad task and the flag on, `unreproduced` is set and no task is RED; with no bad task and the flag off, all MERGED; at most 2n-1 gates |
 
 ## Harness Contract
 
@@ -328,6 +347,8 @@ def arbiter_may_edit(rel: str, spec: str, phase: Literal["run", "create"], imple
 
 `classify_caller` keeps its signature and its existing results for every caller that is not the arbiter.
 
+`claude_kiro.worktrees`: `decide_recovery(RecoveryFacts) -> ("clean" | "recover" | "refuse", reason)` (pure), and `land(..., gate=GateFn)` taking an in-process gate. `claude_kiro.protect`: `refusal_for(root, ref) -> Refusal | None`.
+
 `claude_kiro.lint`: `justification_findings(requirements_text: str) -> list[dict]` (`{story: str, title: str, message: str}`); `verify_scope(tasks: dict, project_dir: Path, config: dict) -> dict` (`{"findings": [{task, suite, test, provider, kind, message}], "checked": [...], "notChecked": [...]}`).
 
 ### CLI (exit 0 unless stated; `--json` prints exactly one JSON object)
@@ -343,6 +364,8 @@ def arbiter_may_edit(rel: str, spec: str, phase: Literal["run", "create"], imple
 | `ck lint <spec> --json` | existing keys unchanged, plus `justifications`, `planPrinciples`, `verifyScope` | exit 1 when justification or Story 12 findings exist |
 | `ck plan <spec> --json` | existing keys unchanged, plus `verifyScope` (Story 12 findings only) | |
 | `ck stats show <run> --json` | | adds `rulings: {byTrigger, byOutcome, byTier}` |
+| `ck worktree land <spec> <n>... --json` | | adds `recovered: {paths, mergeInProgress, head}` and `unreproduced: {tasks, tail, failures}`, each only when it applies |
+| `ck worktree merge <spec> <n>...` | | first line `restored <checkout> to <head>: discarded <paths>` when it restored |
 
 Decisions block of `spec-implement.js`, via `loadDecisions({extra: [...]})`: `handOffTestRepair(ruling, {fixerAvailable}) -> {kind: 'needs_input', entry} or {kind: 'fixer', ruling}`.
 
@@ -355,6 +378,7 @@ Decisions block of `spec-implement.js`, via `loadDecisions({extra: [...]})`: `ha
 - Result keys: `rulings` (this run's, each `{number, task, trigger, outcome, tier, principle, commit}`), `proposedCuts`, and the existing `needsInput`. A ruling's needs-input entry keeps the fields of today's entry and adds `ruling`, and `evidence` when new evidence exists.
 - Create result keys: `arbiterChecks: {refuted, drift, cuts}` each `"ran"` or `"not_run"`, and `proposedCuts`.
 - `ck-arbiter` agent source: `plugin/agents/arbiter.md`, in `plugin.AGENT_ROLES`.
+- Landing entries: `landings[].recovered` and `landings[].unreproduced`; a gate record with `kind: 'unreproduced'`; fake-project landing option `unreproduced: {batch: [n...]}`.
 - Test names: `test_tc<N>_...` and `test_p<N>_...`.
 
 ## Critical Paths
@@ -367,6 +391,8 @@ Decisions block of `spec-implement.js`, via `loadDecisions({extra: [...]})`: `ha
 6. **A spec gets written with the arbiter.** Lenses run, including should-this-exist (TC-26) → refuted findings get rulings (TC-97, TC-98) → cuts are checked and listed, never applied (TC-100, TC-27, TC-28) → drift is ruled on after Revise (TC-99) → the consistency check runs over changes (TC-104) → an arbiter failure means not Ready (TC-108).
 7. **Bad wiring never launches.** `ck lint` finds a Story 12 problem (TC-110, TC-111, TC-113) → launch is refused (TC-114) → the arbiter fixes it (TC-115) → lint re-runs before launch (TC-116).
 8. **A test needing a later task is caught early.** After the test tasks merge, the audit reads the selected tests (TC-120) → a problem goes to the arbiter before any attempt (TC-122).
+9. **A refused raw merge does not stop the run.** The hook refuses and records it (TC-168) → the next landing restores the checkout to its head (TC-162, TC-163) → untracked files and other checkouts are untouched (TC-164, TC-165) → a hand merge is never discarded (TC-166) → in a full run (TC-169).
+10. **The fixer gets the real culprit.** Every half is gated (TC-170) → a batch-only failure blames no task (TC-171, TC-172) → the run sends it to the attributed full gate and fixer (TC-173) → in the TC-176 scenario (TC-174).
 
 ## Commands
 
@@ -393,6 +419,11 @@ Everything runs from the project root on `integrate/run-principles`.
 | Verify-scope lint (TC-109-119, 136, 143-145; P-31 to P-34) | `uv run pytest tests/test_verify_scope_lint.py -q` |
 | Audit (TC-120-126, 142, 151; P-35) | `uv run pytest tests/test_arbiter_audit.py -q -n auto` |
 | NFRs (TC-127-129, 131, 132) | `uv run pytest tests/test_arbiter_nfr.py -q -m "not serial"` |
+| Landing recovery (TC-162-168; P-47) | `uv run pytest tests/test_land_recovery.py -q` |
+| Recovery red team (Story 14) | `uv run pytest tests/test_land_recovery_redteam.py -q` |
+| Bisection (TC-170-172, 175; P-48) | `uv run pytest tests/test_land_bisect.py -q` |
+| Unreproduced landing in a run (TC-173) | `uv run pytest tests/test_land_unreproduced_workflow.py -q` |
+| Smoke runs (TC-169, 174) | `uv run pytest tests/test_unattended_smoke.py -q -k "tc169_ or tc174_"` |
 | One case | `uv run pytest tests/<file> -q -k tc42_` |
 | One property | `uv run pytest tests/<file> -q -k p12_` |
 | Existing workflow control-flow suite | `uv run pytest tests/test_workflow_scripts.py -q` |

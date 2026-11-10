@@ -1,7 +1,7 @@
 # Plan: Principles and Arbiter for Spec Runs
 
 **Status:** Decided
-**Updated:** 2026-11-09
+**Updated:** 2026-11-10
 **Evolves:** none directly; builds next to specs/unattended-correctness (its D4 test-fixer)
 
 ## Problem
@@ -25,6 +25,8 @@ if every requirement can say why it exists.
 - An arbiter role on a high-capability model in `/spec:implement`, at the points where tasks stop now. *Without it:* about 11 of 12 spec-level stops still reach the user, a run each.
 - The same arbiter in `/spec:create`, when its adversarial review disagrees with the plan. *Without it:* mismatches surface later, when they cost a run.
 - A `ck lint` check and a reading audit that catch Verify-scope problems before a run spends attempts. *Without it:* known-bad gates spend attempts.
+- An integration checkout that a refused raw merge left dirty is restored before the next landing (D23). *Without it:* one agent's refused bypass stops every later landing and the run ends blocked.
+- Bisection blames a task only when a gate with that task fails (D24). *Without it:* a task with nothing to fix goes to the fixer and the run ends blocked.
 
 **Out:**
 - The arbiter changing requirements on its own. It may find missing requirements and suggest them.
@@ -173,6 +175,18 @@ if every requirement can say why it exists.
 **Rejected:** Whole-spec runs only.
 **Decided by:** user
 
+### D23: How does ck recover an integration checkout that a refused raw merge left dirty?
+**Choice:** Before it lands or merges into a managed integration checkout (an `integrate/*` branch checked out under the worktree directory), ck restores that checkout to its own head with the tokened reset (`git reset --hard` to the current head, so the ref never moves) and reports the discarded paths and whether a merge was in progress. It does this only when ck's git hook recorded a refused update of that branch, from that checkout, at that same head. A dirty checkout with no such record is refused as today (14.5). Raised by the unattended-correctness run: TC-178's scripted agent had to clean up after its refused merge (commit a64c0aa), and unattended-correctness PLAN D6 records an agent doing such a merge in the equity E2E.
+**Why:** A refused merge leaves staged files (fast-forward) or a merge in progress (non-fast-forward), and every later landing refuses. `git reset --hard HEAD` clears both and passes the hook because the old and new values are equal; a reset to a protected commit is still refused (Fable max ruling, checked in a temporary repository). The refusal record keeps the recovery from discarding a merge I am doing by hand in the same checkout.
+**Rejected:** `git merge --abort` - misses the fast-forward case. Restoring any dirty integration checkout - would discard a hand merge in progress. Leaving it to me - one refused agent ends the run.
+**Decided by:** user (drafted in the unattended-correctness session; the refusal record and 14.5 are this spec's reading of "a refused ref update" in 14.1)
+
+### D24: How does bisection decide which task broke a red landing batch?
+**Choice:** Each half of a bisected batch is gated itself; nothing is inferred from the other half. A task is RED only when a gate on exactly that task, on the current target head, fails, and its result carries that gate's failures. A batch red as a whole that no half and no task reproduces is reported `unreproduced` with the batch gate's failures: the tasks whose own gates passed land, and the run sends the target to the full gate and its fixer, as after a red periodic gate.
+**Why:** A batch that completes the spec is gated with the full suite (`gate.py` `spec_complete`), while its halves get task-scoped gates that cannot see that failure. `land_group`'s "a green left half on the same base proves the right half red" then blamed the last task by elimination (TC-176 smoke scenario: an earlier task's regression in `tests/test_other.py` was blamed on Task 7). The attributed full gate already finds the task a full-suite failure belongs to.
+**Rejected:** Gating each half with the whole batch's scope - a half lacks the other half's code, so the batch's checks can fail on it with no culprit there. Keeping an unreproduced batch off the target - a regression already on the target would hold every later batch.
+**Decided by:** user (drafted in the unattended-correctness session; the choice between the two forms of 15.1, and landing the green halves, are this spec's)
+
 ## Delegated to Spec
 
 - The arbiter's prompt, and the structured ruling format (outcome, principle cited, "needs a stronger look").
@@ -189,6 +203,8 @@ if every requirement can say why it exists.
 - Editing the guard to allow a new caller widens what an agent can change -> the `ck-arbiter` lane is limited to tasks.md, design.md and test-plan.md (D11).
 - Principles written carelessly give confident wrong rulings -> /spec:plan asks for them directly; every ruling cites the principle it used.
 - This work depends on an unfinished spec -> it can't land until unattended-correctness does (D17).
+- Recovery discards files in an integration checkout -> only tracked files, only at the head a recorded refusal names, never moving the ref (D23).
+- Gating every bisection half costs more gates -> at most 2n-1 gates for a batch of n, and a red batch halves the landing window, as today (D24).
 
 ## Open Questions
 
@@ -205,6 +221,12 @@ None.
 - `src/claude_kiro/agents.py` - roles and their settings (planning, reviewer, fixer...)
 - `src/claude_kiro/lint.py` - verify-order checks, already extended for issue #15
 - `src/claude_kiro/gate.py` - `suite_due`: a test task's suite runs only once every task it verifies is Done
+
+### Evidence for D23 and D24 (from the unattended-correctness run)
+- `src/claude_kiro/worktrees.py` on `integrate/unattended-correctness`: `_git_reset` (~123) is the tokened reset; `merge` (~871) and `land` (~1102) refuse a target with uncommitted changes to tracked files; `land_group` (~1235-1260) skips gating the right half after a green left half.
+- `src/claude_kiro/gate.py` (~1005-1006): `spec_complete` turns off the green-only, task-scoped mode, so the batch that completes a spec runs the full suite.
+- `src/claude_kiro/cli/githooks.py`: `reference-transaction` and `pre-merge-commit` are where an `integrate/*` update is refused; `git merge --no-verify` skips only the second.
+- `tests/test_unattended_smoke.py`: TC-178's scripted agent resets after its refused merge (a64c0aa); TC-176 pins `landOrder` because the spec-completing batch was bisected onto the wrong task.
 
 ### Evidence from unattended-correctness
 - Verify scope selected tests needing a later task: Tasks 71, 12, 44, 78, 19 (twice), plus Task 2's suite
