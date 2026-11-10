@@ -2008,7 +2008,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 87: Make cross-test findings blocking and send test-track failures back to the writer
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 4.11, 5.3, 6.2, 7.1, 7.2, 7.3, 7.4, 7.5, 8.2, 8.3, 8.4, 8.5, 15.6
 **Description:** In `plugin/workflows/spec-implement.js`: `CROSS_TEST = REVIEWER.cross_test !== false` (on unless set false); `REVIEW_SCHEMA` findings get an optional `test`; a cross-test finding is blocking, becomes `TestConflict` entries on the tests it names and goes into the test-fix loop (Task 86) with no blocked task: its proof runs `ck testfix prove ... --held <tasks>` against the integration branch, its `TestFixRecord` has `blocked: null` and `held`, and the held tasks are released once the fix lands (4.11); `crossTests[]` entries gain `blocking` and `routed`; add `heldByCrossTest({findings, testVerifies})` in the decisions block, using `ck plan`'s `testVerifies`, and keep `crossHeld` tasks out of ready until the fix lands; no findings proceeds as today. A test-track task whose gate failures are marked `class: "bad"`, `check: "validate"` or `check: "row-fidelity"` goes back to the test writer (test-writer role opts) with the D3 list, the failing entries marked. The test-task review prompt runs `ck lint SPEC --fidelity --task N --json` and passes only its `unparsed` and `unmatched` items for the row-fidelity check (no section when both are empty), and runs `ck fixtures status SPEC --task N --json` and treats every `unlabeled` fixture as a blocking finding. In `plugin/resources/spec-implement-brief.md` and `plugin/resources/without-workflow-tool.md`, tell test writers to label fixtures with `ck fixtures mark`. In `plugin/agents/reviewer.md`, add one line: findings name `file` and `test`. Harness Contract owner: item 7's `cross-test` label, the `agents.reviewer.cross_test` arg and the direct `fixtures status` call.
@@ -2021,12 +2021,13 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 83 (TC-39, TC-65, TC-186 in `test_fix_cross.test.mjs`), Task 74 (P-34 at `heldByCrossTest`), Task 84 (TC-55, TC-59b, TC-64b, TC-66b to TC-68, TC-71b, TC-73b, TC-139b), Task 85 (red team of 7.4)
 
 **Acceptance:**
-- [ ] With no config the cross-test check runs (7.1); set false it is skipped (7.3); no findings proceeds as today (7.5)
-- [ ] A finding blocks and goes to the test-fixer as a conflict on the tests it names (7.2); impl tasks those tests verify do not start while it is open (7.4)
-- [ ] Bad, validation and row-fidelity failures send the test-track task back to the test writer with the marked list (5.3, 6.2, 8.2)
-- [ ] The reviewer gets only unparsed and unmatched fidelity items, and nothing when there are none (8.3, 8.4, 8.5)
-- [ ] Unlabeled recorded fixtures block the test task's review (15.6)
+- [x] With no config the cross-test check runs (7.1); set false it is skipped (7.3); no findings proceeds as today (7.5)
+- [x] A finding blocks and goes to the test-fixer as a conflict on the tests it names (7.2); impl tasks those tests verify do not start while it is open (7.4)
+- [x] Bad, validation and row-fidelity failures send the test-track task back to the test writer with the marked list (5.3, 6.2, 8.2)
+- [x] The reviewer gets only unparsed and unmatched fidelity items, and nothing when there are none (8.3, 8.4, 8.5)
+- [x] Unlabeled recorded fixtures block the test task's review (15.6)
 
+**Implementation notes:** `crossPendingHeld` also keeps impl tasks that depend on a test task of a wave waiting while that wave's test tasks are still running or landing (the finding that would hold them is not known yet); a wave that cannot finish is not waited for. A cross-test fix runs beside the scheduler (`crossOpen` keeps the loop alive) and a fix that lands re-plans. A cross-test fix that goes to me is listed in `needsInput` (kind `test-fix`) against its first held task. The fidelity and fixture inputs are read through the direct `ck` global only. Also updated the superseded `cross-test consistency: off by default` case in `tests/js/spec_implement.test.mjs` to the new default.
 **Dependencies:** Task 86 (routes findings into the test-fix loop and edits spec-implement.js after it), Task 53 (reads `ck plan`'s `testVerifies` and runs `ck lint --fidelity`), Task 48 (runs `ck fixtures status` and `ck fixtures mark`), Task 83 (its tests are the oracle), Task 84 (its tests are the oracle), Task 85 (its tests are the oracle), Task 74 (its tests are the oracle)
 **Complexity:** High
 **Risk:** normal

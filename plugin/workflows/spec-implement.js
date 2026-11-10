@@ -126,8 +126,9 @@ const EFFORT_RANK = e => EFFORTS.indexOf(e)
 const REVIEW_ROUNDS = Number.isInteger(REVIEWER.rounds) ? REVIEWER.rounds : 1
 // reviewer.cross_test: once every test-track task of a wave has finished, one read-only
 // agent (the risky reviewer's settings) compares the merged test files with each other
-// and with design.md. Report only: its findings go in the run's report.
-const CROSS_TEST = !!A.agents && REVIEWER.cross_test === true
+// and with design.md. On unless reviewer.cross_test is false. A finding blocks: it becomes a test conflict
+// for the test-fixer, and the impl tasks its tests verify wait until the fix lands (7.1-7.5).
+const CROSS_TEST = !!A.agents && REVIEWER.cross_test !== false
 const ORCH = roleOpts('orchestrator', ROLES.orchestrator, null)
 const LOW = { effort: 'low', ...ORCH }
 const RESOLVE = roleOpts('resolver', ROLES.resolver, null)
@@ -307,6 +308,7 @@ const REVIEW_SCHEMA = {
           task: { type: 'string', description: 'the task number this finding is about (required in a batched review-wave)' },
           severity: { type: 'string', enum: ['blocking', 'minor'] },
           file: { type: 'string' },
+          test: { type: 'string', description: 'the test the finding is about (a test finding names its file and test)' },
           issue: { type: 'string', description: 'what is wrong, and the spec text it contradicts' },
           fix: { type: 'string', description: 'what the implementer should change' },
         },
@@ -513,25 +515,53 @@ Return the schema fields with task "${n}".`
 // disagreed about command / intent_id / state, and review passed both).
 const CONTRACT_REVIEW = n => `4. This is a test-track task, so also check its contract with the design. First run "ck -C ${WT(n)} lint ${SPEC} --contracts --task ${n}": a heuristic first pass that lists string-literal keys and compared values the tests use but design.md never names. Then list every request field, response field and status value the new tests use (dict keys, subscripts, attribute names, compared strings, endpoint paths, error codes), and check each against design.md's Data Models and API tables: that the name exists, belongs to the model or endpoint the test reads it from, and has the type and allowed values the design gives. A name the design doesn't define, a field read from the wrong model, or a status value outside the design's set is a blocking finding: quote the test line and the design text. Put the list you checked, with each item's verdict, in summary.`
 
-const reviewPrompt = (n, r) => `Review Task ${n} of spec ${SPEC}${TITLES[n] ? ` ("${TITLES[n]}")` : ''} before it merges. You review; you do not edit, commit, or run the test suite.
+const reviewPrompt = (n, r, extra = '') => `Review Task ${n} of spec ${SPEC}${TITLES[n] ? ` ("${TITLES[n]}")` : ''} before it merges. You review; you do not edit, commit, or run the test suite.
 Worktree: ${WT(n)} (branch ${BR(n)}), to merge into ${INTO}. ${GIT_NOTE}
 1. Read the change: command git -C ${WT(n)} diff ${INTO}...${BR(n)}  (and its file list with --stat).
 2. Read Task ${n}'s block in ${WT(n)}/specs/${SPEC}/tasks.md, the requirements it covers in requirements.md, and the parts of design.md it implements (interfaces, file paths, error handling).
 3. The task's gate already passed, so do not re-check what the tests check. Look for what tests miss: behaviour that contradicts design.md or a requirement, a public interface that differs from design.md, missing error handling the design specifies, edits outside the task's files, weakened or skipped tests, and security problems.
-${TRACKS[n] === 'test' ? `${CONTRACT_REVIEW(n)}\n` : ''}The implementer reported: ${trim(r && { summary: r.summary, deviations: r.deviations, outsideFiles: r.outsideFiles }, 2000)}
+${TRACKS[n] === 'test' ? `${CONTRACT_REVIEW(n)}\n${extra}` : ''}The implementer reported: ${trim(r && { summary: r.summary, deviations: r.deviations, outsideFiles: r.outsideFiles }, 2000)}
 Mark a finding "blocking" only if it should stop the merge; style and taste are "minor". verdict is "changes" only if there is at least one blocking finding.`
+
+// Task 87 (8.3-8.5, 15.6): what ck found out about a test task's files, for its review. Row fidelity: only the
+// unparsed and unmatched items (a checked one needs no judgment); no section when both are empty. Fixtures: every
+// unlabeled recorded fixture is a blocking finding. Read through the direct ck global; without one nothing is added.
+const asList = v => (Array.isArray(v) ? v : [])
+const WANT_EXTRA = n => TRACKS[n] === 'test' && !!DIRECT_CK
+async function testReviewExtra(n) {
+  if (TRACKS[n] === 'test' && !DIRECT_CK) {
+    const w = `Task ${n}: no direct ck, so the row-fidelity and fixture checks were not added to its review`
+    if (!runWarnings.includes(w)) runWarnings.push(w)
+  }
+  if (!WANT_EXTRA(n)) return ''
+  let text = ''
+  try {
+    const fid = await runCk('lint', ['-C', WT(n), 'lint', SPEC, '--fidelity', '--task', String(n), '--json'], WT(n))
+    const unparsed = fid.json ? asList(fid.json.unparsed) : []
+    const unmatched = fid.json ? asList(fid.json.unmatched) : []
+    if (unparsed.length || unmatched.length) {
+      text += `Row fidelity: ck could not check these items against their test-plan rows, so judge each one: is the value or name the test uses what its row says? A mismatch is a blocking finding.\n${unparsed.length ? `Unparsed (a value the row states in a form ck cannot read): ${JSON.stringify(unparsed)}\n` : ''}${unmatched.length ? `Unmatched (a test no row names): ${JSON.stringify(unmatched)}\n` : ''}`
+    }
+  } catch (e) { /* no fidelity section without an answer */ }
+  try {
+    const fx = await runCk('fixtures', ['-C', WT(n), 'fixtures', 'status', SPEC, '--task', String(n), '--json'], WT(n))
+    const unlabeled = fx.json ? asList(fx.json.unlabeled) : []
+    if (unlabeled.length) text += `Unlabeled fixtures: these recorded fixtures have no capture metadata and are not marked handcrafted. Each one is a blocking finding (file: the fixture, fix: label it with "ck fixtures mark"): ${JSON.stringify(unlabeled)}\n`
+  } catch (e) { /* no fixture section without an answer */ }
+  return text
+}
 
 // Wave-batched review (4.1): one agent over the combined diff of the wave's
 // non-risky tasks. Names the wave, its tasks, the per-task diffs (and the
 // combined `git diff <merge-base>...<INTO>` range over their files), each
 // task's block/requirements, and design.md. The verdict echoes its coverage
 // in `tasks` and flags individual tasks via per-task findings.
-const waveReviewPrompt = (wave, tasks) => `Review Wave ${wave} of spec ${SPEC} before it merges: non-risky Tasks ${tasks.join(', ')} are about to land together into ${INTO}. You review; you do not edit, commit, or run the test suite.
+const waveReviewPrompt = (wave, tasks, extras = {}) => `Review Wave ${wave} of spec ${SPEC} before it merges: non-risky Tasks ${tasks.join(', ')} are about to land together into ${INTO}. You review; you do not edit, commit, or run the test suite.
 ${GIT_NOTE}
 1. Read the combined change: ${tasks.map(n => `command git -C ${WT(n)} diff ${INTO}...${BR(n)}`).join('; ')} (and each file list with --stat), or the combined range \`git diff <merge-base>...${INTO}\` over their files.
 2. Read each task's block in specs/${SPEC}/tasks.md, the requirements it covers in requirements.md, and design.md (interfaces, file paths, error handling).
 3. The tasks' gates already passed, so do not re-check what the tests check. Look for what tests miss: behaviour that contradicts design.md or a requirement, a public interface that differs from design.md, missing error handling the design specifies, edits outside the tasks' files, weakened or skipped tests, and security problems.
-${tasks.map(n => TRACKS[n] === 'test' ? `${CONTRACT_REVIEW(n)}\n` : '').join('')}Return verdict ("approve" or "changes") with per-task findings [{ task, severity, file, issue, fix }] and name every covered task in "tasks". Mark a finding "blocking" only if it should stop the wave; style and taste are "minor". verdict is "changes" only if there is at least one blocking finding.`
+${tasks.map(n => TRACKS[n] === 'test' ? `${CONTRACT_REVIEW(n)}\n${extras[n] || ''}` : '').join('')}Return verdict ("approve" or "changes") with per-task findings [{ task, severity, file, issue, fix }] and name every covered task in "tasks". Mark a finding "blocking" only if it should stop the wave; style and taste are "minor". verdict is "changes" only if there is at least one blocking finding.`
 
 const crossTestPrompt = tasks => `Cross-test consistency check for spec ${SPEC}: test-track Tasks ${tasks.join(', ')} have merged into ${INTO}. You review; you do not edit, commit, or run the test suite. ${GIT_NOTE}
 Test tasks written in parallel drift apart: two test files can each look right on their own and still disagree about the same request, response or record (field names, which model a field lives on, status values, error codes, units). Each implementation can then satisfy only one of them.
@@ -671,6 +701,29 @@ function chainLengths(order, deps, done) {
   const out = {}
   for (const n of keys) if (!doneSet.has(n)) out[n] = length(n, new Set([n]))
   return out
+}
+
+// Task 87 (7.4): the impl tasks held while a cross-test finding is open: those verified by the test file each
+// finding names. A finding names its file in `file`, or as the node-id part of `test` ("file::name"); a bare
+// test name places nothing. Paths compare in one surface form (slashes, ./, case): holding too much is safe.
+function heldByCrossTest({ findings, testVerifies } = {}) {
+  const norm = p => String(p == null ? '' : p).trim().replace(/\\/g, '/').split('/').filter(x => x !== '' && x !== '.').join('/').toLowerCase()
+  const tv = testVerifies && typeof testVerifies === 'object' && !Array.isArray(testVerifies) ? testVerifies : {}
+  const byFile = new Map()
+  for (const [k, v] of Object.entries(tv)) {
+    const f = norm(k)
+    if (!f || !Array.isArray(v)) continue
+    byFile.set(f, [...(byFile.get(f) || []), ...v.map(String)])
+  }
+  const held = new Set()
+  for (const x of Array.isArray(findings) ? findings : []) {
+    if (!x || typeof x !== 'object') continue
+    const test = x.test == null ? '' : String(x.test)
+    const f = norm(x.file) || (test.includes('::') ? norm(test.split('::')[0]) : '')
+    if (!f) continue
+    for (const t of byFile.get(f) || []) held.add(t)
+  }
+  return held
 }
 
 // Which tasks may start, in ck plan's order: longest open chain first, then numeric id, stable over `order`.
@@ -1047,10 +1100,41 @@ const MAX_RESOLVES = 3
 // started when its last test task finishes (or at the end, for a wave that never
 // finished). It runs beside the scheduler and never holds a slot or the landing.
 const crossTests = []
+const findings0 = r => ((r && r.findings) || []).filter(f => f && typeof f === 'object')
 const crossTestRuns = []
+const crossHeld = new Set()   // impl tasks the tests of an open cross-test finding verify: not started until the fix lands (7.4)
+let crossOpen = 0             // cross-test fixes in flight: they keep the scheduler loop alive without holding a slot
+const crossNeedsInput = []    // a cross-test fix that went to me (no blocked task to park)
 const crossTestDone = new Set()
+const crossInFlight = new Set()   // waves whose check is running or whose findings are still being routed: their impl dependents wait (7.4)
 let doneAtStart = new Set()
 const testTasksOf = w => Object.keys(TRACKS).filter(m => TRACKS[m] === 'test' && waveOf(m) === w && !doneAtStart.has(m))
+// While a wave's test tasks are still running or landing, the impl tasks that depend on one of them wait: the
+// cross-test check, which comes right after the last one merges, may name tests such a task verifies (7.4). A wave
+// whose test tasks cannot all merge (one failed, was parked, or waits on a failed task) is not waited for: its
+// check runs at the end.
+function crossWaveDoomed(m, seen = new Set()) {
+  if (failed.has(m) || parked.has(m)) return true
+  if (seen.has(m)) return false
+  seen.add(m)
+  if (view.done.has(m) || mergedInRun.has(m) || running.has(m)) return false
+  return ((view.deps && view.deps[m]) || []).some(d => !view.done.has(String(d)) && !mergedInRun.has(String(d)) && crossWaveDoomed(String(d), seen))
+}
+function crossPendingHeld() {
+  const out = new Set()
+  if (!CROSS_TEST || !Object.keys(TRACKS).length) return out
+  if (Object.values(TRACKS).filter(t => t === 'test').length < 2) return out
+  const waves = new Set(Object.keys(TRACKS).filter(m => TRACKS[m] === 'test' && !doneAtStart.has(m)).map(m => waveOf(m)))
+  for (const w of waves) {
+    if (crossTestDone.has(w) && !crossInFlight.has(w)) continue
+    const wave = testTasksOf(w)
+    if (!wave.length || (!crossInFlight.has(w) && wave.every(m => (records[m] && !running.has(m)) || mergedInRun.has(m) || view.done.has(m))) || (!crossInFlight.has(w) && wave.some(m => crossWaveDoomed(m)))) continue
+    for (const x of Object.keys((view && view.deps) || {})) {
+      if (TRACKS[x] !== 'test' && view.deps[x].some(d => wave.includes(String(d)))) out.add(x)
+    }
+  }
+  return out
+}
 function maybeCrossTest(n, atEnd = false) {
   if (!CROSS_TEST || TRACKS[n] !== 'test') return
   const w = waveOf(n)
@@ -1060,16 +1144,34 @@ function maybeCrossTest(n, atEnd = false) {
   const merged = wave.filter(m => records[m] && records[m].ok)
   if (!merged.length) return
   crossTestDone.add(w)
+  crossInFlight.add(w)
+  crossOpen++
   crossTestRuns.push((async () => {
     let r = null
+    const replan = () => { if (!SCRIPT_READINESS) { idleArmed = true; requestPlan('landing') } }
+    try {
     try {
       r = await call('cross-test', crossTestPrompt(merged), { label: `cross-test wave ${w}`, phase: phaseOf(merged[0]), schema: REVIEW_SCHEMA, ...RISKY_REVIEW })
     } catch (e) {
       r = null
     }
-    const blocking = ((r && r.findings) || []).filter(f => f.severity === 'blocking')
-    crossTests.push({ wave: w, tasks: merged, verdict: r ? r.verdict : 'unchecked', findings: (r && r.findings) || [], summary: r && r.summary })
-    log(`cross-test consistency (wave ${w}): ${r ? `${blocking.length} blocking finding(s)${blocking.length ? `: ${trim(blocking.map(f => f.issue), 600)}` : ''}` : 'the check returned nothing'}`)
+    // 7.2: every finding of the cross-test check blocks; none proceeds as today (7.5).
+    const findings = ((r && r.findings) || []).filter(f => f && typeof f === 'object')
+    const entry = { wave: w, tasks: merged, verdict: r ? r.verdict : 'unchecked', findings: (r && r.findings) || [], summary: r && r.summary, blocking: findings.length, routed: false }
+    crossTests.push(entry)
+    log(`cross-test consistency (wave ${w}): ${r ? `${findings.length} blocking finding(s)${findings.length ? `: ${trim(findings.map(f => f.issue), 600)}` : ''}` : 'the check returned nothing'}`)
+    // without args.deps the plan agent's ready list is used once: a task it was filtered out of needs a new plan
+    if (findings.length) {
+      entry.routed = true
+      try { await routeCrossFindings(w, findings, replan, entry) } catch (e) { log(`cross-test fix for wave ${w} failed: ${trim(e && e.message, 300)}`) }
+    }
+    } finally {
+      // the hold on the wave's dependents ends only now: crossHeld is set (or there was nothing to hold)
+      crossInFlight.delete(w)
+      crossOpen--
+      replan()  // without args.deps the plan agent's list is read once: the released tasks need a new plan
+      poke()
+    }
   })())
 }
 
@@ -1143,7 +1245,7 @@ let queuedTrigger = null    // a trigger that arrived while one was in flight: o
 let idleArmed = true
 let recordSeq = 0           // failed task records seen so far: a landing plan disarms the idle plan only if none arrived while it ran (an ok record waits for its landing, so it changes nothing)
 let deferring = false
-const excluded = () => new Set([...running.keys(), ...failed.keys(), ...parked.keys(), ...mergedInRun])
+const excluded = () => new Set([...running.keys(), ...failed.keys(), ...parked.keys(), ...mergedInRun, ...crossHeld, ...crossPendingHeld()])
 function planContext() {
   const exclude = excluded()
   const ready = SCRIPT_READINESS ? readyTasks({ order: view.order, deps: view.deps, done: view.done, exclude, blocked: blockedOf(view) }) : []
@@ -1547,7 +1649,7 @@ async function reviewBatch(batch) {
   const waveNo = ++reviewWaveCount
   let review = null
   try {
-    review = await call('review-wave', waveReviewPrompt(waveNo, ids), { label: `review-wave ${waveNo} tasks ${ids.join(' ')}`, phase: phaseOf(ids[0]), schema: REVIEW_SCHEMA, ...REVIEW })
+    review = await call('review-wave', waveReviewPrompt(waveNo, ids, Object.fromEntries(await Promise.all(ids.map(async n => [n, WANT_EXTRA(n) ? await testReviewExtra(n) : ''])))), { label: `review-wave ${waveNo} tasks ${ids.join(' ')}`, phase: phaseOf(ids[0]), schema: REVIEW_SCHEMA, ...REVIEW })
   } catch (e) {
     review = null
   }
@@ -1788,13 +1890,14 @@ async function runTestFix({ k, blocked, held = [], source = 'conflict', conflict
 
 // A blocked task's confirmed conflicts: plan, run one test-fixer per file, record each outcome.
 // Returns {records, fixed: [node], findings: [Failure], toMe: [reason]}.
-async function testFixFor(n, conflicts) {
+async function testFixFor(n, conflicts, { held = [] } = {}) {
+  const src = n == null ? 'cross-test' : 'conflict'
   const nodes = [...new Set(conflicts.map(conflictNode))]
-  const led = await thinCk('testfix ledger', ['-C', ROOT, 'testfix', 'check', SPEC, ...nodes.flatMap(x => ['--test', x]), '--json'], { label: `testfix ledger ${++ledgerSeq}`, phase: phaseOf(n), cwd: ROOT, what: `Ledger check for the test fixes of spec ${SPEC}` })
+  const led = await thinCk('testfix ledger', ['-C', ROOT, 'testfix', 'check', SPEC, ...nodes.flatMap(x => ['--test', x]), '--json'], { label: `testfix ledger ${++ledgerSeq}`, phase: n != null ? phaseOf(n) : 'Test fix', cwd: ROOT, what: `Ledger check for the test fixes of spec ${SPEC}` })
   if (!led.json || !Array.isArray(led.json.alreadyFixed) || led.json.error || led.code !== 0) {
     // 4.8: a ledger that cannot be read never grants a fix (a damaged ledger exits 3 and still lists every node)
     const reason = `the test-fix ledger could not be read: ${led.json && led.json.error ? trim(String(led.json.error), 300) : ckError(led)}`
-    const rec = { fix: null, blocked: n, held: [], source: 'conflict', tests: nodes, outcome: 'to-me', proof: null, scope: null, review: null, reason }
+    const rec = { fix: null, blocked: n, held: [...held], source: src, tests: nodes, outcome: 'to-me', proof: null, scope: null, review: null, reason }
     testFixRecords.push(rec)
     return { records: [rec], fixed: [], findings: [], toMe: [reason] }
   }
@@ -1803,17 +1906,17 @@ async function testFixFor(n, conflicts) {
   const out = { records: [], fixed: [], findings: [], toMe: [] }
   for (const c of plan.toMe) {
     const reason = `${conflictNode(c)} was already fixed once (testfix ledger); a second fix goes to you`
-    const rec = { fix: null, blocked: n, held: [], source: 'conflict', tests: [conflictNode(c)], outcome: 'to-me', proof: null, scope: null, review: null, reason }
+    const rec = { fix: null, blocked: n, held: [...held], source: src, tests: [conflictNode(c)], outcome: 'to-me', proof: null, scope: null, review: null, reason }
     out.records.push(rec)
     out.toMe.push(reason)
   }
   for (const g of plan.groups) {
     const k = ++testFixSeq
-    log(`Task ${n}: test-fixer ${k} for ${g.file} (${g.conflicts.length} test(s))`)
-    const rec = await runTestFix({ k, blocked: n, conflicts: g.conflicts })
+    log(`${n != null ? `Task ${n}` : 'Cross-test'}: test-fixer ${k} for ${g.file} (${g.conflicts.length} test(s))`)
+    const rec = await runTestFix({ k, blocked: n, held, source: src, conflicts: g.conflicts })
     out.records.push(rec)
     if (rec.outcome === 'landed') out.fixed.push(...rec.tests)
-    else if (rec.outcome === 'test-correct') out.findings.push({ ...rec.finding, kind: 'assertion', message: rec.reason, tasks: [String(n)], command: null, node: rec.tests[0], file: rec.finding.file || g.file })
+    else if (rec.outcome === 'test-correct') out.findings.push({ ...rec.finding, kind: 'assertion', message: rec.reason, tasks: n != null ? [String(n)] : held.map(String), command: null, node: rec.tests[0], file: rec.finding.file || g.file })
     else out.toMe.push(`${g.file}: ${rec.reason}`)
   }
   testFixRecords.push(...out.records)
@@ -1845,6 +1948,72 @@ async function parkTestFix(n, rec, reasons, records) {
   rec.needsInput = entry
   rec.reason = `needs input: test fix (${trim(reasons.join(' | '), 300)})`
   return rec
+}
+
+// Task 87 (7.2, 7.4): the findings of a cross-test check are test conflicts with no blocked task. The impl tasks
+// their tests verify wait (crossHeld) until the fix lands; a fix that does not land keeps them waiting and goes to me.
+async function routeCrossFindings(w, findings, replan, entry0 = null) {
+  const conflicts = findings.map(f => ({
+    file: String(f.file || (f.test && String(f.test).includes('::') ? String(f.test).split('::')[0] : '') || ''),
+    test: String(f.test || ''),
+    criterion: String(f.criterion || ''),
+    reason: String(f.issue || f.reason || ''),
+    fix: String(f.fix || ''),
+  })).filter(c => c.file)
+  // The proof and the record name every verified task (ck refuses a proof with neither --blocked nor --held). A file
+  // no impl task verifies falls back to the wave's test tasks, so the list is never empty.
+  const verified = [...heldByCrossTest({ findings, testVerifies: current && current.testVerifies })]
+  const proofHeld = verified.length ? verified : testTasksOf(w).map(String)
+  // The scheduler holds only the verified tasks not yet done or merged.
+  const held = verified.filter(t => !view.done.has(t) && !mergedInRun.has(t))
+  for (const t of held) crossHeld.add(t)
+  // crossHeld now says exactly what waits: the wave's other dependents no longer need the blanket hold of the check window
+  crossInFlight.delete(w)
+  poke()
+  if (held.length) log(`cross-test (wave ${w}): holding Task ${held.join(', ')} until the test fix lands`)
+  if (!conflicts.length) {
+    log(`cross-test (wave ${w}): no finding names a test file; nothing to fix`)
+    for (const t of held) crossHeld.delete(t)
+    // no automatic fix exists for these findings: list them as needing my input, so none goes unseen
+    const texts = findings.map(f => trim(String(f.issue || f.summary || f.reason || JSON.stringify(f)), 300))
+    crossNeedsInput.push({
+      task: held[0] != null ? held[0] : `cross-test wave ${w}`, file: '', files: [], kind: 'test-fix', test: '', requirement: '',
+      decision: `A cross-test check found blocking findings that name no test file, so no automatic test fix can be made: ${texts.join(' | ')}. Fix the tests yourself on ${INTO} (a test-track change: you decide), then resume the run${RUN_ID ? ` with the same runId ${RUN_ID}` : ''}.`,
+      findings: texts, fixes: [], runId: RUN_ID || null, action: 'ask', notification: null, escalatedTo: [], held,
+    })
+    if (held.length) replan()
+    return
+  }
+  const fixed = await testFixFor(null, conflicts, { held: proofHeld })
+  if (fixed.toMe.length) {
+    // the fix did not land: the held tasks stay held and the conflict goes to me
+    const reasons = fixed.toMe
+    const tests = [...new Set(fixed.records.flatMap(x => x.tests))]
+    const files = [...new Set(tests.map(t => t.split('::')[0]))]
+    const action = parkAction({ interactive: INTERACTIVE })
+    const decision = `A cross-test check found tests that disagree, and the automatic test fix did not land: ${reasons.join(' | ')}. ${held.length ? `Task ${held.join(', ')} stay held. ` : ''}Fix the tests yourself on ${INTO} (a test-track change: you decide), then resume the run${RUN_ID ? ` with the same runId ${RUN_ID}` : ''}.`
+    const entry = { task: held[0] != null ? held[0] : `cross-test wave ${w}`, file: files.join(', '), files, kind: 'test-fix', test: tests.join(', '), requirement: '', decision, findings: reasons, fixes: fixed.records.map(x => x.fix).filter(Boolean), runId: RUN_ID || null, action: held.length ? action : 'ask', notification: null, escalatedTo: [], held }
+    if (entry.action === 'park') {
+      const note = JSON.stringify({ file: entry.file, kind: 'test-fix', test: entry.test, requirement: '', decision })
+      const out = await thinCk('park', ['worktree', 'park', SPEC, entry.task, '--json'], { stdin: note, label: `park ${entry.task}`, phase: 'Test fix', cwd: ROOT, what: `Parking step for the held Task ${entry.task} of spec ${SPEC}` })
+      const pk = out.json ? out.json : { parked: false, error: ckError(out) }
+      entry.notification = pk && pk.notification ? pk.notification : 'failed'
+      entry.notificationDetail = (pk && (pk.detail || pk.error)) || ''
+      if (!pk || pk.parked === false) { entry.notification = 'failed'; entry.notificationDetail = 'park failed: ' + ((pk && (pk.error || pk.detail)) || 'the park step returned nothing') }
+    }
+    crossNeedsInput.push(entry)
+    return
+  }
+  for (const t of held) crossHeld.delete(t)
+  if (held.length) replan()  // re-read the plan: it lists the released tasks again
+  if (fixed.findings.length) {
+    // the test-fixer judged the tests correct: that is not a landed fix, and its reason reaches the report
+    const why = fixed.findings.map(f => trim(String(f.message || f.issue || ''), 300))
+    if (entry0) entry0.testCorrect = why
+    log(`cross-test (wave ${w}): the tests are correct, no fix was needed (${why.join(' | ')})${fixed.fixed.length ? '; test fix landed for the rest' : ''}; ${held.length ? `Task ${held.join(', ')} released` : 'no task was held'}`)
+    return
+  }
+  log(`cross-test (wave ${w}): test fix landed; ${held.length ? `Task ${held.join(', ')} released` : 'no task was held'}`)
 }
 
 async function runTask(n) {
@@ -2031,7 +2200,7 @@ async function runTask(n) {
         log(`Task ${n}: reviewer asked for changes, revision ${round}/${REVIEW_ROUNDS}`)
         await revised(revisePrompt(n, review, round, claimFlags('revision', codeOpts(n), round + 1)), `${label(n)} revise ${round}`, codeOpts(n), codeOpts(n).model)
         if (stop) return { exit: await needInput() }
-        if (ok(r)) review = await call('review', reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts })
+        if (ok(r)) review = await call('review', reviewPrompt(n, r, WANT_EXTRA(n) ? await testReviewExtra(n) : ''), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts })
       }
       for (const model of ladderOf(n)) {
         if (!(review && review.verdict === 'changes' && ok(r))) break
@@ -2040,7 +2209,7 @@ async function runTask(n) {
         await revised(revisePrompt(n, review, round, claimFlags('escalation', escalated(codeOpts(n), model), round + 1)), `${label(n)} revise ${round} (${model})`, escalated(codeOpts(n), model), model)
         if (stop) return { exit: await needInput() }
         rec.escalations.push({ stage: 'revise', model })
-        if (ok(r)) review = await call('review', reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts })
+        if (ok(r)) review = await call('review', reviewPrompt(n, r, WANT_EXTRA(n) ? await testReviewExtra(n) : ''), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts })
       }
       // model/effort: who judged the task, so an audit can count escapes (approved bugs) per reviewer tier.
       const by = { model: opts.model || 'inherited', effort: opts.effort || 'inherited', riskTag: rec.riskTag }
@@ -2057,7 +2226,7 @@ async function runTask(n) {
     }
     const individualReview = REVIEW_ON && reviewGroups({ merged: [n], risk: RISK }).individual.length > 0
     if (ok(r) && individualReview) {
-      const first = await call('review', reviewPrompt(n, r), { label: `review ${n}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
+      const first = await call('review', reviewPrompt(n, r, WANT_EXTRA(n) ? await testReviewExtra(n) : ''), { label: `review ${n}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
       const out = await reviewLoop(first, reviewOpts(n))
       if (out) return out.exit
     }
@@ -2186,15 +2355,26 @@ poked = false
 // microtask hops, so the continuation of the call that settled makes its own follow-up request (a review
 // after an implementer, a land after an approval) before free slots are counted (3.9).
 // A held start with agents still in flight stays alive too: any of them settling re-runs the start decision (NFR-6).
-while (running.size || planRun || (deferring && inFlight.length)) {
-  await signal()
-  poked = false
-  for (let i = 0; i < 10; i++) await null
+const resumedWaves = new Set()
+for (;;) {
+  while (running.size || planRun || crossOpen > 0 || (deferring && inFlight.length)) {
+    await signal()
+    poked = false
+    for (let i = 0; i < 10; i++) await null
+    schedule()
+  }
+  await landingIdle
+  for (const n of Object.keys(records)) maybeCrossTest(n, true)  // waves whose other test tasks never finished
+  await Promise.all(crossTestRuns)
+  // A cross-test fix that landed after the loop went idle releases held tasks: start them (7.4).
+  const resumed = crossTests.filter(c => c.routed && !resumedWaves.has(c.wave))
+  if (!resumed.length) break
+  for (const c of resumed) resumedWaves.add(c.wave)
+  if (planRun) await planRun
   schedule()
+  poked = false
+  if (!(running.size || planRun)) break
 }
-await landingIdle
-for (const n of Object.keys(records)) maybeCrossTest(n, true)  // waves whose other test tasks never finished
-await Promise.all(crossTestRuns)
 
 // Final full gate on the target, unless it is already known to be red.
 let finalGate = null
@@ -2281,6 +2461,7 @@ const startDone = new Set((initialPlan.done || []).map(taskId))
 const needsInputIds = new Set([...parked.keys(), ...(fromGit ? ids(gitReport.needsInput) : [])].map(taskId))
 const needsInput = [...parked.values()].map(e => ({ ...e, task: taskId(e.task) }))
 for (const t of needsInputIds) if (!needsInput.some(e => e.task === t)) needsInput.push({ task: t, file: '', kind: '', test: '', requirement: '', decision: 'see the park note (ck worktree report)', action: 'park', notification: null })
+for (const e of crossNeedsInput) needsInput.push({ ...e, task: taskId(e.task) })
 needsInput.sort((a, b) => byNum(a.task, b.task))
 const agentFailed = new Map([...failed.entries()].map(([t, r]) => [taskId(t), r]))
 let merged, failedList, notStarted, blocked = [], readyLeft = null

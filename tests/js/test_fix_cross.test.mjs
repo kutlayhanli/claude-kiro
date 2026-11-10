@@ -116,3 +116,22 @@ await test('tc186_ with proof fail: nothing lands, Task 2 stays held, the confli
   const rec = (result.testFixes || []).find(r => r.source === 'cross-test')
   assert.ok(rec && rec.outcome === 'to-me' && rec.blocked === null, JSON.stringify(result.testFixes))
 })
+
+// Task 87 review: a finding naming a file that no open impl task verifies still gets its fix, and the proof and the
+// record hold the wave's test tasks instead, so the proof never runs with an empty --held list.
+await test('tc186b_ a cross-test finding on a file no open task verifies: the proof names the wave test tasks with --held, the fix still runs', async () => {
+  const FILE2 = 'tests/test_nobody.py'
+  const f = { severity: 'blocking', file: FILE2, test: 'test_nobody_one', issue: 'test_nobody_one disagrees with design.md', fix: 'align the assertion' }
+  const { p, trace, result } = await run([f], { [FILE]: {}, [FILE2]: {} })
+  assert.equal(fixers(trace).length, 1, 'the fixer runs for the named file')
+  const prove = p.state.prompts['testfix prove 1']
+  assert.ok(prove, 'testfix prove 1 ran')
+  assert.match(prove, /--held[ =]1\b/, 'the wave test task 1 is named')
+  assert.match(prove, /--held[ =]3\b/, 'the wave test task 3 is named')
+  assert.doesNotMatch(prove, /--blocked/)
+  const rec = (result.testFixes || []).find(r => r.source === 'cross-test')
+  assert.ok(rec, JSON.stringify(result.testFixes))
+  assert.deepEqual([...rec.held].sort(), ['1', '3'], 'the record names the same held set the proof got')
+  assert.equal(rec.outcome, 'landed')
+  assert.ok(result.merged.includes('2'), 'Task 2 proceeds once the fix landed')
+})

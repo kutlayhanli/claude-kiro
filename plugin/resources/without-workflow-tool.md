@@ -81,6 +81,10 @@ Run the progress commands yourself, with the same events and fields the Workflow
 
 Before a whole-spec run, run `ck lint <spec> --json`. A `verify-file` entry (a task's **Verify:** command names a test file that no task lists in its **Files:**) means its gate could never pass: refuse to start the run, show me each entry's message and tell me to fix tasks.md, as the command's step 3 says. A single-task run (`/spec:implement <spec> X`) refuses to start the same way when a `verify-file` entry has `task == X`: quote that entry's message and do not launch the task.
 
+## Test writers and fixtures
+
+When a test-track task writes a fixture by hand rather than capturing it from a real system, its agent labels it with `ck fixtures mark <path> --handcrafted "<why>"`. Tell every test writer this in its prompt: a recorded fixture with no capture metadata and no label is a blocking finding in the task's review (`ck fixtures status <spec> --task <N> --json` lists the unlabeled ones; put each in the review prompt as a blocking finding).
+
 ## Translating a script
 
 | In the script | With the Agent tool |
