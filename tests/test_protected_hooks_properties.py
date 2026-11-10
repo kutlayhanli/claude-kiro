@@ -487,8 +487,8 @@ def landed(root: Path, n: str) -> Tuple[int, dict, str]:
 def extract_code(text: str) -> Optional[str]:
     """The 6-character code the approval command prints (the line that mentions the code)."""
     all_lines = text.replace("\r", "").splitlines()
-    # Design only says a 6-character code is printed: prefer the line that mentions it, else any line with one.
-    lines = [ln for ln in all_lines if re.search("code", ln, re.I)] or all_lines
+    # Only the line that mentions the code: output can arrive in pieces, and an earlier line may hold a 6-letter word.
+    lines = [ln for ln in all_lines if re.search("code", ln, re.I)]
     for line in reversed(lines):
         tokens = re.findall(r"(?<![A-Za-z0-9])[A-Za-z0-9]{6}(?![A-Za-z0-9])", line)
         mixed = [t for t in tokens if not t.isalpha() or not t.islower()]
