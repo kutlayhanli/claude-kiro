@@ -91,7 +91,7 @@ def lock_decision(lock: Mapping[str, LockEntry], changes: Mapping[str, Optional[
         if sha == entry.sha256:
             continue
         label = labels.get(path)
-        if sha is not None and _is_handcrafted(label) and label.sha256 == sha:
+        if _is_handcrafted(label) and label.sha256 == sha:
             handcrafted.append({"file": path, "task": entry.task, "reason": str(label.reason).strip()})
         else:
             drift.append({"file": path, "task": entry.task, "change": "deleted" if sha is None else "changed"})

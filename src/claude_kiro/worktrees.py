@@ -837,18 +837,18 @@ def _record_fixtures(root: Path, target: Path, spec: str, base: str, merged: Lis
         if not changes:
             continue
         report = fixtures.lock_decision(entries, changes, labels, tampered=tampered)
-        results[num].fixtureDrift = [{"file": d["file"], "task": num, "change": d["change"]} for d in report.drift]
+        # A deletion has no content to seal, so one that lock_decision accepts as handcrafted is still reported.
+        accepted = [h_ for h_ in report.handcrafted if changes[h_["file"]] is not None]
+        deleted = [{"file": h_["file"], "change": "deleted"} for h_ in report.handcrafted if changes[h_["file"]] is None]
+        results[num].fixtureDrift = [{"file": d["file"], "task": num, "change": d["change"]}
+                                     for d in sorted([*report.drift, *deleted], key=lambda d: d["file"])]
         if tampered:
             continue  # never reseal a lock that does not verify: the audit reports it
         at = _now()
         for path in report.new_locks:
-            if changes[path] is None:
-                continue
             entries[path] = fixtures.LockEntry(sha256=str(changes[path]), task=num, locked_at=at)
             changed = True
-        for h_ in report.handcrafted:
-            if changes[h_["file"]] is None:
-                continue
+        for h_ in accepted:
             old = entries[h_["file"]]
             entries[h_["file"]] = fixtures.LockEntry(sha256=str(changes[h_["file"]]), task=old.task,
                                                      locked_at=old.locked_at, handcrafted=h_["reason"])
