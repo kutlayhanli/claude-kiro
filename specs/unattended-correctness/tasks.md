@@ -1329,7 +1329,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 57: Add the test-fix ledger, scope check and proof (`ck testfix`)
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 4.2, 4.4, 4.5, 4.8, 4.10, 4.11
 **Description:** Create `src/claude_kiro/testfix.py` with `Change`, `ScopeDecision`, `ProofOutcome`, `ProofVerdict` and the ledger `<git-common-dir>/ck/<spec>/testfix-ledger.json` (node -> `{fix, at, outcome}`, kept across runs). Pure seams: `scope_decision(changed, plan_before, plan_after, config)` (in scope only if every changed path is a test file or test fixture of the spec, and neither the spec's requirements.md nor its test-plan.md changed at all, new rows included (4.5, P-10); a changed test that no longer carries a TC ID it carried before the fix is out of scope too); `fix_allowed(nodes, ledger)` (nodes already in the ledger are refused with their earlier fix); `proof_decision(outcomes)` (proved iff every node passed or failed only as `not-built`; skipped, xfailed, deselected or missing nodes never count as passed); `gate_scope(graph, changed, nodes)` (the test tasks owning a changed file, plus those covering the fixed nodes' TC IDs). `prove(root, spec, fix_id, blocked, held, nodes, into)` checks scope first and, only when in scope, builds a temporary checkout of the blocked task's branch with the fix merged, or, with `held` and no blocked task (a cross-test fix, 4.11), of the integration branch with the fix merged, runs the fixed test nodes through `gate._run_command`, classifies failures with `failures.classify_not_built`, and returns the verdict. Create `src/claude_kiro/cli/testfix.py` with `ck testfix check SPEC --test NODE ... --json` (`{allowed, alreadyFixed}`), `ck testfix prove SPEC FIXID (--blocked TASK | --held TASK ...) --test NODE ... [--into BRANCH] --json` (`{scope, proof, changedTests, against}`; neither option is a usage error) and `ck testfix record SPEC FIXID --test NODE ... --outcome landed|to-me --json`, and register `testfix` in `cli/main.py`. In `cli/worktree.py`, `_gate_fn` maps a `testfix<k>` landing to `testfix.gate_scope` and gates those test tasks (`run_gate(target, spec, scope)`, task-scoped, 2.10); an empty scope is RED with "test fix testfix<k> changes no file a test task owns"; the land JSON entry names `gateTasks` (4.4). No network. Harness Contract owner: item 3's `testfix.scope_violations` (design: `scope_decision`) and item 4's `ck testfix check|prove|claim` (design: `check`, `prove`, `record`).
@@ -1342,9 +1342,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 52 (TC-168 for `ck testfix check`), Task 54 (TC-41, TC-44a, TC-47a, TC-185, TC-187), Task 55 (CLI cases for 4.2, 4.5, 4.8), Task 56 (P-10 at `scope_decision`, P-33a at `proof_decision`)
 
 **Acceptance:**
-- [ ] A fix that changes source files, requirements.md or test-plan.md in any way (a new row included) is out of scope before any proof runs (4.5)
-- [ ] The proof passes when each fixed test passes on the blocked branch plus the fix, or fails only for a reason the blocked task still has to address; otherwise it fails (4.2)
-- [ ] A node fixed once is refused by `check` in a later process and a later run (4.8); `record` writes the ledger entry (4.10)
+- [x] A fix that changes source files, requirements.md or test-plan.md in any way (a new row included) is out of scope before any proof runs (4.5)
+- [x] The proof passes when each fixed test passes on the blocked branch plus the fix, or fails only for a reason the blocked task still has to address; otherwise it fails (4.2)
+- [x] A node fixed once is refused by `check` in a later process and a later run (4.8); `record` writes the ledger entry (4.10)
 
 **Dependencies:** Task 29 (calls `classify_not_built`), Task 19 (calls `gate._run_command`), Task 48 (both edit cli/main.py; Task 48 runs first), Task 51 (both edit cli/worktree.py; Task 51 runs first), Task 12 (`gate_scope` reads the graph's owns edges), Task 52 (its tests are the oracle), Task 54 (its tests are the oracle), Task 55 (its tests are the oracle), Task 56 (its tests are the oracle)
 **Complexity:** High
