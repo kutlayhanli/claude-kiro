@@ -1149,7 +1149,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 49: Lock recorded fixtures when they land
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 15.1, 15.2, 15.7, 15.8
 **Description:** In `worktrees.land()`, after each task merges, gather the changed files matching `fixtures.recorded`, call `fixtures.lock_decision`, write new lock entries (task and time) for files landing for the first time, and report changes to locked files as `Landed.fixtureDrift` (`[{file, task, change}]`), printed in the land JSON as `tasks[].fixtureDrift` (empty list when none). Accepted handcrafted changes update the entry's hash and record the reason. With no globs nothing is written or reported; a config error is reported in the land result and no lock is kept for that landing. The landing itself is not refused by drift. Harness Contract owner: item 5's `fixtureDrift` in `ck worktree land --json`.
@@ -1159,9 +1159,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 43 (TC-134, TC-141)
 
 **Acceptance:**
-- [ ] The first landing of a recorded fixture creates its lock entry (15.1)
-- [ ] A later landing that changes it reports drift naming the file and task (15.2)
-- [ ] No globs: no lock file and no fixture items (15.7); a bad glob value is reported as a config error (15.8)
+- [x] The first landing of a recorded fixture creates its lock entry (15.1)
+- [x] A later landing that changes it reports drift naming the file and task (15.2)
+- [x] No globs: no lock file and no fixture items (15.7); a bad glob value is reported as a config error (15.8)
 
 **Dependencies:** Task 48 (calls `lock_decision` and the lock store), Task 46 (both edit `land()` in worktrees.py; Task 46 runs first), Task 43 (its tests are the oracle)
 **Complexity:** Medium
