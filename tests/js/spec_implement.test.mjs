@@ -98,20 +98,25 @@ await test('issue #6: a refused relink skips the task as before, and relink: fal
 
 const CONFLICT = { file: 'tests/unit/test_decay_golden.py', test: 'test_decay_printed', criterion: '14.6', reason: 'rel_tol 1e-12 on a rounded input', fix: 'rel_tol 1e-5 for the printed input' }
 
-await test('issue #8: a confirmed test conflict blocks only that task (blocked: test) and lists the test-track fix', async () => {
+await test('issue #8: a confirmed test conflict goes to the test-fixer; one that persists after the fix parks only that task (needs-input, kind test-fix)', async () => {
   const p = project({ deps: { 1: [], 2: [], 3: ['2'], 4: [] }, testConflicts: { 2: { conflict: CONFLICT } } })
   const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, onFailure: 'halt' } })
   const t2 = p.state.events.filter(e => /^task 2( |$)/.test(e) && !e.endsWith(' end'))
-  assert.deepEqual(t2, ['task 2', 'task 2 retry 1'], 'one report plus one confirmation, no further retries')
+  assert.deepEqual(t2, ['task 2', 'task 2 retry 1', 'task 2 retry 2'], 'one report, one confirmation, then one fresh attempt after the landed fix')
   assert.match(p.state.prompts['task 2 retry 1'], /Check that claim yourself/)
+  assert.ok(p.state.events.includes('testfix 1 (Task 2)'), 'a test-fixer ran for Task 2')
   assert.equal(result.halted, false, 'a test conflict never halts the run, even with onFailure halt')
   assert.deepEqual(result.merged.sort(), ['1', '4'])
   assert.ok(!p.state.events.includes('task 3'), 'its dependent waits')
-  const f = result.failed.find(x => x.task === '2')
-  assert.ok(f && f.reason.startsWith('blocked: test (tests/unit/test_decay_golden.py test_decay_printed)'), f && f.reason)
-  assert.deepEqual(result.testFixes, [{ task: '2', file: CONFLICT.file, test: CONFLICT.test, criterion: '14.6', reason: CONFLICT.reason, fix: CONFLICT.fix }])
-  assert.ok(logs.some(l => l.startsWith('Test-track fixes (1)')))
-  assert.ok(logs.some(l => l.includes('Task 2: tests/unit/test_decay_golden.py test_decay_printed vs 14.6')))
+  const e = (result.needsInput || []).filter(x => x.task === '2')
+  assert.equal(e.length, 1, JSON.stringify(result.needsInput))
+  assert.equal(e[0].kind, 'test-fix')
+  assert.match(JSON.stringify(e[0]), /still reports a test that can never pass/)
+  assert.ok(!result.failed.some(x => x.task === '2'), 'a task that needs input is not failed')
+  assert.equal(result.testFixes.length, 1)
+  const rec = result.testFixes[0]
+  assert.deepEqual([rec.fix, rec.blocked, rec.source, rec.outcome, rec.tests], ['testfix1', '2', 'conflict', 'landed', [`${CONFLICT.file}::${CONFLICT.test}`]])
+  assert.ok(logs.some(l => l.startsWith('Test fixes (1)')))
 })
 
 await test('issue #8: the confirmation runs on the strongest rung, and an agent that passes the gate wins', async () => {
@@ -577,12 +582,12 @@ await test('the final gate starts ck gate in the background and waits for its EX
   assert.ok(prompt.includes('${TMPDIR:-/tmp}/ck-gate-') && prompt.includes('^EXIT='))
 })
 
-await test('a PROTECTED landing fails the task as needing a human: no resolver, no fixer, no retry', async () => {
+await test('a PROTECTED landing parks the task as needing a human (needs-input, not failed): no resolver, no fixer, no retry', async () => {
   const p = project({ deps: { 1: [], 2: [], 3: ['2'] }, protectedTasks: ['2'] })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })
   assert.deepEqual(result.merged, ['1'])
-  const f = result.failed.find(x => x.task === '2')
-  assert.ok(f && /needs a human/.test(f.reason) && /\.claude\/settings\.json/.test(f.reason), JSON.stringify(result.failed))
+  const f = (result.needsInput || []).find(x => x.task === '2')
+  assert.ok(f && f.kind === 'protected' && /\.claude\/settings\.json/.test(f.file), JSON.stringify(result.needsInput))
   assert.ok(!p.state.events.some(e => /^(resolve|fix) /.test(e)))
   assert.equal(p.state.landings.filter(l => l.includes('2')).length, 1)
   assert.ok(!p.state.events.includes('task 3'), 'its dependents never start')
@@ -1010,6 +1015,26 @@ const SNAPSHOT_KEYS = [
   "agents.reviewer",
   "agents.reviewer_risky",
   "agents.test_writer",
+  "audit",
+  "audit.clean",
+  "audit.complete",
+  "audit.drift",
+  "audit.fixtures",
+  "audit.fixtures.drift",
+  "audit.fixtures.handcrafted",
+  "audit.fixtures.lockTampered",
+  "audit.fixtures.newLocks",
+  "audit.head",
+  "audit.hooks",
+  "audit.hooks.active",
+  "audit.hooks.chainedTo",
+  "audit.hooks.installed",
+  "audit.hooks.intact",
+  "audit.hooks.problems",
+  "audit.into",
+  "audit.problems",
+  "audit.schema",
+  "audit.spec",
   "blocked",
   "blockedOn",
   "crossTests",
@@ -1075,6 +1100,23 @@ const SNAPSHOT_KEYS = [
   "reason",
   "relinks",
   "reportSource",
+  "runStart",
+  "runStart.baseline",
+  "runStart.baseline.commit",
+  "runStart.baseline.files",
+  "runStart.hooks",
+  "runStart.hooks.active",
+  "runStart.hooks.chainedTo",
+  "runStart.hooks.installed",
+  "runStart.hooks.intact",
+  "runStart.hooks.problems",
+  "runStart.integration",
+  "runStart.integration.branch",
+  "runStart.integration.state",
+  "runStart.keptClaims",
+  "runStart.releasedClaims",
+  "runStart.warnings",
+  "runWarnings",
   "stats",
   "stats.bisected",
   "stats.failed",
@@ -1086,6 +1128,9 @@ const SNAPSHOT_KEYS = [
   "stats.planFailures",
   "stats.planFallbacks",
   "stats.planSteps",
+  "sweep",
+  "sweep.keptClaims",
+  "sweep.releasedClaims",
   "targetGreen",
   "taskAgents",
   "taskAgents.effort",
@@ -1141,7 +1186,7 @@ const SNAPSHOT_KEYS = [
   "timing.phases[].minutes",
   "timing.phases[].start",
   "timing.phases[].tasks",
-  "timing.start"
+  "timing.start",
 ]
 const keyPaths = (v, prefix = '') => {
   if (Array.isArray(v)) return v.flatMap(x => keyPaths(x, prefix + '[]'))

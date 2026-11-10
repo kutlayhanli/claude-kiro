@@ -318,6 +318,17 @@ const REVIEW_SCHEMA = {
   },
   required: ['verdict', 'findings', 'summary'],
 }
+const TESTFIX = {
+  type: 'object',
+  properties: {
+    verdict: { type: 'string', enum: ['fixed', 'test-correct', 'cannot-fix'], description: 'fixed: you changed the tests and committed; test-correct: the tests are right and the code is wrong; cannot-fix: you cannot repair them within the rules' },
+    changedTests: { type: 'array', items: { type: 'object', properties: { file: { type: 'string' }, test: { type: 'string' } }, required: ['file'] } },
+    commits: { type: 'string', description: 'hashes of commits you made; empty if none' },
+    finding: { type: ['object', 'null'], description: 'test-correct only: what the blocked task\'s code gets wrong', properties: { file: { type: 'string' }, test: { type: 'string' }, issue: { type: 'string' } } },
+    summary: { type: 'string' },
+  },
+  required: ['verdict', 'summary'],
+}
 const VERIFY = {
   type: 'object',
   properties: {
@@ -567,6 +578,34 @@ Fix it without weakening any test and without editing requirements.md or existin
 3. Commit with a message starting "fix:", then run: ck -C ${ROOT} worktree merge ${SPEC} fix${k} --into ${INTO}
 If the only way to green is to weaken a test or change a requirement, stop and explain precisely instead.
 Return green=true only if ${INTO} is green after your merge, else failing with the reason.`
+
+
+// Task 86 (4.1): the test-fixer's brief. It is the test writer, started on a testfix<k> branch from INTO.
+const testFixPrompt = (k, n, entries) => `${MANDATE}You are a test-fixer for spec ${SPEC}. ${n != null ? `Task ${n} is blocked because` : 'A cross-test check found that'} these tests can never pass with code that meets the spec (every entry, one per test; the "fix" is the correction a first agent proposed):
+${JSON.stringify(entries)}
+Work on branch ${BR(`testfix${k}`)} in worktree ${WT(`testfix${k}`)}. Create it from the integration branch, on its own line:
+ck -C ${ROOT} worktree create ${SPEC} testfix${k} --install --base ${INTO} --json
+${GIT_NOTE}
+Read each test, the criterion in requirements.md and design.md. Then decide, for all of the tests together:
+- the tests are wrong: change only those tests (and fixtures they need) the smallest way that makes them demand exactly what the criterion demands. Do not loosen a test beyond its criterion, do not weaken or delete one, do not edit source code, requirements.md or existing test-plan.md rows. Commit on the branch with a message starting "test-fix:". Do not merge or land it. Return verdict "fixed", changedTests [{file, test}] and commits.
+- the tests are right and the code a task would write is what is wrong: change nothing. Return verdict "test-correct" and finding {file, test, issue} saying exactly what the code gets wrong.
+- you cannot repair them within these rules (for example a guard denies it): return verdict "cannot-fix" and say why in summary.
+Return the schema fields.`
+
+// Task 86 (4.3): the risky-tier review of a proved fix against the test-plan rows and the guard checklist.
+const testFixReviewPrompt = (k, entries, changed, scope) => {
+  const ids = [...new Set([...entries, ...changed].map(x => `${x.file || ''} ${x.test || ''}`).join(' ').match(/tc[-_]?\d+[a-z]?/gi) || [])].map(t => `TC-${t.replace(/^tc[-_]?/i, '')}`)
+  return `Review the test fix testfix${k} for spec ${SPEC} before it lands on ${INTO}. You review; you do not edit, commit, or run the test suite. ${GIT_NOTE}
+1. Read the diff: command git -C ${ROOT} diff ${INTO}...${BR(`testfix${k}`)}  (and its file list with --stat). It must change only the tests named below and what they need.
+2. The fix repairs these tests, which could never pass (every entry): ${JSON.stringify(entries)}
+3. Read the rows of ${WT(`testfix${k}`)}/specs/${SPEC}/test-plan.md for ${ids.length ? ids.join(', ') : 'each changed test (find its TC ID by name)'} and the criteria they verify in requirements.md. Check the changed tests still demand everything their rows say and the criterion says.
+4. Guard checklist, each a blocking finding if it fails: no test is weakened (a looser tolerance than the criterion allows, a removed or softened assertion, a skip or xfail, a deleted test); requirements.md is not edited; no existing test-plan.md row is reworded or deleted; no source file changes.
+The scope check found: ${trim(scope || {}, 800)}
+Mark a finding "blocking" only if the fix must not land. verdict is "changes" only if there is at least one blocking finding; name file and test in each finding.`
+}
+
+// Task 86: the retry prompt of a blocked task after its tests were fixed or found correct.
+const afterFixNote = (fixedTests, findings) => `${fixedTests.length ? `The tests ${fixedTests.join(', ')} were fixed and landed on ${INTO}: merge ${INTO} into your branch first, then finish the task.\n` : ''}${findings.length ? `A test-fixer found the tests correct and the code wrong: ${JSON.stringify(findings)}\n` : ''}`
 
 // --- decisions (pure; loaded by tests) ---
 // Every scheduling rule that allows, refuses or holds something. No script globals, no agent/log/args,
@@ -916,6 +955,53 @@ function gateOutcome(out) {
   return { state: j.ok ? 'green' : 'red', green: j.ok === true, regressions: [...regressions, ...unattributed], excusedByTask, flaky, report, error: null, reason: null }
 }
 
+// Task 86 (4.8, 4.9): which conflicts a test-fixer may take. Each distinct (file, test) is kept once, first wins; one whose
+// node is in `alreadyFixed` (ledger entries {node, at, fix}) goes to me; the rest are grouped by file, one group per file.
+// Nodes and files are compared by their canonical form (design: Node canonicalisation), as ck's ledger keys them.
+function testFixPlan({ conflicts, alreadyFixed } = {}) {
+  const nodeOf = c => canonicalNode(c.test ? `${c.file}::${c.test}` : String(c.file))
+  const fixed = new Set((Array.isArray(alreadyFixed) ? alreadyFixed : []).map(e => canonicalNode(String(e && typeof e === 'object' ? e.node : e))))
+  const seen = new Set()
+  const groups = []
+  const toMe = []
+  for (const c of Array.isArray(conflicts) ? conflicts : []) {
+    if (!c || typeof c !== 'object' || !c.file) continue
+    const k = nodeOf(c)
+    if (seen.has(k)) continue
+    seen.add(k)
+    if (fixed.has(k)) { toMe.push(c); continue }
+    const fk = canonicalNode(String(c.file))
+    let g = groups.find(x => x.key === fk)
+    if (!g) { g = { file: c.file, conflicts: [] }; Object.defineProperty(g, 'key', { value: fk, enumerable: false }); groups.push(g) }
+    g.conflicts.push(c)
+  }
+  return { groups, toMe }
+}
+
+// The JS mirror of ck's canonical_node (testfix.py): `\\` becomes `/`, repeated slashes and `./` / `..` segments are
+// normalised, a trailing `[param]` id is dropped, and the result is lower-cased.
+function canonicalNode(node) {
+  const text = String(node ?? '').trim().replace(/\\/g, '/')
+  const i = text.indexOf('::')
+  let path = i < 0 ? text : text.slice(0, i)
+  const sep = i < 0 ? '' : '::'
+  let rest = i < 0 ? '' : text.slice(i + 2)
+  path = path.replace(/\/{2,}/g, '/')
+  if (path) {
+    const abs = path.startsWith('/')
+    const out = []
+    for (const seg of path.split('/')) {
+      if (seg === '' || seg === '.') continue
+      if (seg === '..' && out.length && out[out.length - 1] !== '..') out.pop()
+      else if (seg === '..' && abs) continue
+      else out.push(seg)
+    }
+    path = (abs ? '/' : '') + out.join('/') || (abs ? '/' : '.')
+  }
+  rest = rest.replace(/\[.*\]\s*$/, '').trim()
+  return (path + sep + rest).toLowerCase()
+}
+
 // --- end decisions ---
 
 // --- scheduler ---------------------------------------------------------------
@@ -1165,13 +1251,18 @@ async function runPlan(trigger) {
 
 // Run fn while no landing step runs (and keep new landings queued until it returns): a relink
 // commits tasks.md on INTO, so it must never interleave with a merge into it.
+// While it holds the lock it publishes a promise that settles on release, so a second caller waiting in the loop
+// below really waits (an already-settled landingIdle would spin on microtasks and starve the holder's I/O).
 async function withLandingLock(fn) {
   while (landingBusy) await landingIdle
+  let release
+  landingIdle = new Promise(r => { release = r })
   landingBusy = true
   try {
     return await fn()
   } finally {
     landingBusy = false
+    release()
     if (landQueue.length) pumpLandings()
   }
 }
@@ -1226,11 +1317,23 @@ function requestPlan(trigger) {
   return planRun
 }
 
-// A task's implementing agent finished; its slot is free.
+// A task's implementing agent finished; its slot is free. A task waiting to take a slot back (acquireSlot) gets it
+// first, before the scheduler can start a new task in it.
 function releaseSlot(n) {
   if (!working.delete(n)) return
+  const w = slotWaiters.shift()
+  if (w) { working.add(w.n); w.resolve() }
   requestPlan('freed')
   poke()
+}
+
+// A task that gave its slot up (a test fix) takes one again before its next agent runs, so the run never holds more
+// than its configured slots.
+const slotWaiters = []   // { n, resolve }
+function acquireSlot(n) {
+  if (working.has(n)) return Promise.resolve()
+  if (!(working.size >= MAX_CONCURRENT)) { working.add(n); return Promise.resolve() }
+  return new Promise(resolve => slotWaiters.push({ n, resolve }))
 }
 
 function startTask(n) {
@@ -1579,6 +1682,171 @@ async function parkProtected(n, rec, protectedInfo) {
   return rec
 }
 
+
+// --- the test-fix loop (Task 86, Story 4) ---
+// A confirmed conflict goes to a test-fixer (the test writer on a testfix<k> branch from INTO). A fix lands only when
+// ck's scope check and proof pass and a risky-tier reviewer approves it; anything else goes to me with the findings.
+const testFixRecords = []     // TestFixRecord[]: the result's testFixes
+const testFixLedger = new Set()   // nodes a fix was tried for this run (the ck ledger holds the ones from earlier runs)
+let testFixSeq = 0
+let ledgerSeq = 0
+const conflictNode = c => (c.test ? `${c.file}::${c.test}` : String(c.file))
+const conflictKey = c => canonicalNode(conflictNode(c))   // the run ledger's key, as ck's ledger keys it (4.8)
+const conflictEntry = c => ({ file: String(c.file ?? ''), test: String(c.test ?? ''), criterion: String(c.criterion ?? ''), reason: String(c.reason ?? ''), fix: String(c.fix ?? '') })
+// 4.5: the workflow does not trust in_scope alone.
+const scopeRefusal = sc => {
+  if (!sc || typeof sc !== 'object') return 'ck returned no scope decision'
+  const out = (sc.outside || []).map(String)
+  const docs = (sc.spec_docs_edited || []).map(String)
+  if (sc.in_scope !== true || out.length || docs.length || sc.requirements_edited) {
+    return `out of scope: ${out.length ? `changes ${out.join(', ')}` : ''}${docs.length ? ` edits ${docs.join(', ')}` : ''}${sc.requirements_edited ? ' edits requirements.md' : ''}${sc.reason ? ` (${sc.reason})` : ''}`.replace(/\s+/g, ' ')
+  }
+  return null
+}
+const proofRefusal = pf => {
+  if (!pf || typeof pf !== 'object') return 'ck returned no proof'
+  const bad = (Array.isArray(pf.outcomes) ? pf.outcomes : []).filter(o => o && !(o.passed === true || o.cls === 'not-built'))
+  if (pf.proved !== true || bad.length) return `the proof failed: ${pf.reason || ''}${bad.length ? ` ${JSON.stringify(bad)}` : ''}`.trim()
+  return null
+}
+const reviewApproved = rv => !!rv && rv.verdict === 'approve' && !(rv.findings || []).some(f => f && f.severity === 'blocking')
+
+// One test-fixer for one file group. `blocked` is the task the tests block (null for a cross-test fix, which holds `held`).
+async function runTestFix({ k, blocked, held = [], source = 'conflict', conflicts }) {
+  const fix = `testfix${k}`
+  const entries = conflicts.map(conflictEntry)
+  const nodes = conflicts.map(conflictNode)
+  const phase = blocked != null ? phaseOf(blocked) : 'Test fix'
+  const rec = { fix, blocked: blocked ?? null, held: [...held], source, tests: nodes, changedTests: [], outcome: 'to-me', proof: null, scope: null, review: null, reason: '', finding: null }
+  const toMe = reason => { rec.outcome = 'to-me'; rec.reason = reason; return rec }
+  const record = async outcome => {
+    const out = await thinCk('testfix record', ['-C', ROOT, 'testfix', 'record', SPEC, fix, ...nodes.flatMap(x => ['--test', x]), '--outcome', outcome, '--json'], { label: `testfix record ${k}`, phase, cwd: ROOT, what: `Recording step for test fix ${fix} of spec ${SPEC}` }).catch(() => null)
+    if (!out || out.code !== 0) {
+      rec.recordError = `ck testfix record did not confirm (${out ? trim(out.stderr || out.code, 200) : 'no answer'}); the cross-run ledger may lack ${fix}`
+      log(`Test fix ${fix}: ${rec.recordError}`)
+      runWarnings.push(`Test fix ${fix}: ${rec.recordError}`)
+    }
+  }
+  for (const c of conflicts) testFixLedger.add(conflictKey(c))
+  let fx = null
+  try {
+    fx = await call('testfix', testFixPrompt(k, blocked, entries), { label: blocked != null ? `testfix ${k} (Task ${blocked})` : `testfix ${k} (cross-test)`, phase, schema: TESTFIX, ...TEST })
+  } catch (e) {
+    return toMe(`the test-fixer agent failed: ${trim(e && e.message, 300)}`)
+  }
+  if (!fx || typeof fx !== 'object') return toMe('the test-fixer returned nothing')
+  if (fx.verdict === 'test-correct') {
+    rec.outcome = 'test-correct'
+    rec.finding = fx.finding && typeof fx.finding === 'object' ? fx.finding : { file: conflicts[0].file, test: conflicts[0].test || '', issue: fx.summary || 'the test is correct' }
+    rec.reason = trim(rec.finding.issue || fx.summary, 400)
+    return rec
+  }
+  if (Array.isArray(fx.changedTests)) rec.changedTests = fx.changedTests.map(String)
+  if (fx.verdict !== 'fixed') return toMe(`the test-fixer cannot fix it: ${trim(fx.summary, 400)}`)
+  if (fx.finding && typeof fx.finding === 'object') return toMe(`the test-fixer's report contradicts itself (verdict fixed with a finding about the code): ${trim(fx.finding, 300)}`)
+  const proveArgv = ['-C', ROOT, 'testfix', 'prove', SPEC, fix, ...(blocked != null ? ['--blocked', String(blocked)] : held.flatMap(h => ['--held', String(h)])), ...nodes.flatMap(x => ['--test', x]), '--into', INTO, '--json']
+  const pv = await thinCk('testfix prove', proveArgv, { label: `testfix prove ${k}`, phase, cwd: ROOT, what: `Proof step for test fix ${fix} of spec ${SPEC}: it checks the fix's scope, then that the tests pass with it` })
+  if (!pv.json) { await record('to-me'); return toMe(`ck testfix prove gave no result: ${ckError(pv)}`) }
+  rec.scope = pv.json.scope ?? null
+  rec.proof = pv.json.proof ?? null
+  // 4.10: the record names the tests the fix changed; ck's proof is the authority when it lists them
+  const proved = pv.json.changedTests ?? (rec.proof && rec.proof.changedTests) ?? (rec.scope && rec.scope.changedTests)
+  if (Array.isArray(proved)) rec.changedTests = proved.map(String)
+  const refusedScope = scopeRefusal(rec.scope)
+  if (refusedScope) { await record('to-me'); return toMe(refusedScope) }
+  const refusedProof = proofRefusal(rec.proof)
+  if (refusedProof) { await record('to-me'); return toMe(refusedProof) }
+  let rv = null
+  try {
+    rv = await call('review', testFixReviewPrompt(k, entries, Array.isArray(fx.changedTests) ? fx.changedTests : [], rec.scope), { label: `testfix review ${k}`, phase, schema: REVIEW_SCHEMA, ...RISKY_REVIEW })
+  } catch (e) {
+    rv = null
+  }
+  rec.review = rv ? { verdict: rv.verdict, findings: rv.findings || [], summary: rv.summary } : null
+  if (!reviewApproved(rv)) {
+    await record('to-me')
+    return toMe(rv ? `the reviewer rejected the fix: ${trim((rv.findings || []).filter(f => f && f.severity === 'blocking').map(f => f.issue), 800) || rv.summary || rv.verdict}` : 'the reviewer returned nothing')
+  }
+  let res = null
+  try {
+    // the landing lock keeps this landing from running beside a batch landing (ck worktree land holds a non-blocking flock)
+    const out = await withLandingLock(() => thinCk('land', landArgv([fix]), { label: `land ${fix}`, phase, cwd: ROOT, gate: true, what: `Landing step for test fix ${fix} of spec ${SPEC}: it merges the fix into ${INTO} and gates the tests it changes` }))
+    res = out.json && Array.isArray(out.json.tasks) ? out.json : { tasks: [], error: ckError(out) }
+  } catch (e) {
+    res = { tasks: [], error: e && e.message }
+  }
+  const t = (res.tasks || []).find(x => String(x.task) === fix) || { state: 'ERROR', detail: res.error || 'the landing step returned no result for the fix' }
+  if (t.state !== 'MERGED') {
+    await record('to-me')
+    return toMe(`the fix did not land (${t.state}${t.detail ? `: ${trim(t.detail, 300)}` : ''}${t.files && t.files.length ? ` ${t.files.join(', ')}` : ''})`)
+  }
+  await record('landed')
+  rec.outcome = 'landed'
+  rec.reason = 'the fix landed'
+  return rec
+}
+
+// A blocked task's confirmed conflicts: plan, run one test-fixer per file, record each outcome.
+// Returns {records, fixed: [node], findings: [Failure], toMe: [reason]}.
+async function testFixFor(n, conflicts) {
+  const nodes = [...new Set(conflicts.map(conflictNode))]
+  const led = await thinCk('testfix ledger', ['-C', ROOT, 'testfix', 'check', SPEC, ...nodes.flatMap(x => ['--test', x]), '--json'], { label: `testfix ledger ${++ledgerSeq}`, phase: phaseOf(n), cwd: ROOT, what: `Ledger check for the test fixes of spec ${SPEC}` })
+  if (!led.json || !Array.isArray(led.json.alreadyFixed) || led.json.error || led.code !== 0) {
+    // 4.8: a ledger that cannot be read never grants a fix (a damaged ledger exits 3 and still lists every node)
+    const reason = `the test-fix ledger could not be read: ${led.json && led.json.error ? trim(String(led.json.error), 300) : ckError(led)}`
+    const rec = { fix: null, blocked: n, held: [], source: 'conflict', tests: nodes, outcome: 'to-me', proof: null, scope: null, review: null, reason }
+    testFixRecords.push(rec)
+    return { records: [rec], fixed: [], findings: [], toMe: [reason] }
+  }
+  const prior = led.json.alreadyFixed
+  const plan = testFixPlan({ conflicts, alreadyFixed: [...prior, ...conflicts.filter(c => testFixLedger.has(conflictKey(c))).map(c => ({ node: conflictNode(c), at: 'this run', fix: 'this run' }))] })
+  const out = { records: [], fixed: [], findings: [], toMe: [] }
+  for (const c of plan.toMe) {
+    const reason = `${conflictNode(c)} was already fixed once (testfix ledger); a second fix goes to you`
+    const rec = { fix: null, blocked: n, held: [], source: 'conflict', tests: [conflictNode(c)], outcome: 'to-me', proof: null, scope: null, review: null, reason }
+    out.records.push(rec)
+    out.toMe.push(reason)
+  }
+  for (const g of plan.groups) {
+    const k = ++testFixSeq
+    log(`Task ${n}: test-fixer ${k} for ${g.file} (${g.conflicts.length} test(s))`)
+    const rec = await runTestFix({ k, blocked: n, conflicts: g.conflicts })
+    out.records.push(rec)
+    if (rec.outcome === 'landed') out.fixed.push(...rec.tests)
+    else if (rec.outcome === 'test-correct') out.findings.push({ ...rec.finding, kind: 'assertion', message: rec.reason, tasks: [String(n)], command: null, node: rec.tests[0], file: rec.finding.file || g.file })
+    else out.toMe.push(`${g.file}: ${rec.reason}`)
+  }
+  testFixRecords.push(...out.records)
+  return out
+}
+
+// A task whose test fix goes to me: needs-input kind "test-fix" with the findings, parked (unattended) or asked (interactive).
+async function parkTestFix(n, rec, reasons, records) {
+  const action = parkAction({ interactive: INTERACTIVE })
+  const tests = [...new Set(records.flatMap(x => x.tests))]
+  const files = [...new Set(tests.map(t => t.split('::')[0]))]
+  const decision = `Task ${n} is blocked on tests that can never pass, and the automatic test fix did not land: ${reasons.join(' | ')}. Fix the tests yourself on ${INTO} (a test-track change: you decide), or tell the agent how to proceed; then resume the run${RUN_ID ? ` with the same runId ${RUN_ID}` : ''}.`
+  const entry = {
+    task: n, file: files.join(', '), files, kind: 'test-fix', test: tests.join(', '), requirement: '', decision,
+    findings: reasons, fixes: records.map(x => x.fix).filter(Boolean), runId: RUN_ID || null, action, notification: null, escalatedTo: [],
+  }
+  releaseSlot(n)
+  if (action === 'park') {
+    const note = JSON.stringify({ file: entry.file, kind: 'test-fix', test: entry.test, requirement: '', decision })
+    const out = await thinCk('park', ['worktree', 'park', SPEC, n, '--json'], { stdin: note, label: `park ${n}`, phase: phaseOf(n), cwd: ROOT, what: `Parking step for Task ${n} of spec ${SPEC}` })
+    const p = out.json ? out.json : { parked: false, error: ckError(out) }
+    entry.notification = p && p.notification ? p.notification : 'failed'
+    entry.notificationDetail = (p && (p.detail || p.error)) || ''
+    if (!p || p.parked === false) {
+      entry.notification = 'failed'
+      entry.notificationDetail = 'park failed: ' + ((p && (p.error || p.detail)) || 'the park step returned nothing')
+    } else rec.parked = true
+  }
+  rec.needsInput = entry
+  rec.reason = `needs input: test fix (${trim(reasons.join(' | '), 300)})`
+  return rec
+}
+
 async function runTask(n) {
   const rec = { task: n, wave: waveOf(n), title: TITLES[n], attempts: 0, ok: false, escalations: [], resolves: 0 }
   const busy = r => worktreeOutcome(r).kind === 'busy'
@@ -1660,9 +1928,11 @@ async function runTask(n) {
       return rec
     }
     let escIdx = 0
+    let budgetBase = 0   // retries spent before a landed test fix do not count against the fresh attempt
     const rungs = ladderOf(n)
+    const ladder = async () => {
     for (;;) {
-      while (!ok(r) && !stop && retryNo() <= MAX_RETRIES && !busy(r) && !testConflictOf(r)) {
+      while (!ok(r) && !stop && retryNo() - budgetBase <= MAX_RETRIES && !busy(r) && !testConflictOf(r)) {
         log(`Task ${n}: ${r && !(r.commits || '').trim() ? 'no commits' : 'gate not passed'}, retry ${retryNo()}/${MAX_RETRIES}`)
         r = await call('task', retryPrompt(n, r, retryNo(), claimFlags('retry', codeOpts(n), retryNo() + 1)), { label: `${label(n)} retry ${retryNo()}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
         rec.attempts++
@@ -1685,6 +1955,10 @@ async function runTask(n) {
       if (stop) return await needInput()
       if (ok(r) || busy(r)) break
     }
+    return null
+    }
+    const early = await ladder()
+    if (early) return early
     if (testConflictOf(r)) {
       // Issue #8: one confirmation on the strongest rung (unless the claim already came from it):
       // a second agent that agrees makes the task blocked: test; one that passes the gate wins.
@@ -1699,12 +1973,32 @@ async function runTask(n) {
       rec.startedAt = rec.startedAt || (r && r.startedAt)
       const confirmed = testConflictOf(r)
       if (confirmed) {
+        // Task 86 (4.1-4.10): the confirmed conflicts go to a test-fixer; a landed fix or a test-correct verdict retries the task.
         releaseSlot(n)
         rec.result = r
         rec.finishedAt = r && r.finishedAt
         rec.testConflict = { ...confirmed, firstReport: first }
         rec.reason = `blocked: test (${confirmed.file}${confirmed.test ? ` ${confirmed.test}` : ''}): ${confirmed.reason}`
-        return rec
+        const fixed = await testFixFor(n, testConflictsOf(r))
+        if (fixed.toMe.length) return await parkTestFix(n, rec, fixed.toMe, fixed.records)
+        rec.testConflictFixed = rec.testConflict   // the conflict is resolved: a later ordinary failure is handled like any other
+        rec.testConflict = null
+        log(`Task ${n}: ${fixed.fixed.length ? `test fix landed for ${fixed.fixed.join(', ')}` : 'the tests are correct'}; retrying the task`)
+        budgetBase = retryNo()
+        await acquireSlot(n)
+        r = await call('task', `${retryPrompt(n, { ...r, failures: fixed.findings }, retryNo(), claimFlags('retry', codeOpts(n), retryNo() + 1))}\n${afterFixNote(fixed.fixed, fixed.findings)}`, { label: `${label(n)} retry ${retryNo()}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
+        rec.attempts++
+        lastModel = codeOpts(n).model
+        stop = guardStopOf(r)
+        rec.startedAt = rec.startedAt || (r && r.startedAt)
+        const again = await ladder()
+        if (again) return again
+        if (testConflictOf(r)) {
+          rec.result = r
+          rec.finishedAt = r && r.finishedAt
+          releaseSlot(n)
+          return await parkTestFix(n, rec, [`the task still reports a test that can never pass after its test fix: ${trim(testConflictOf(r).file, 120)}: ${trim(testConflictOf(r).reason, 300)}`], fixed.records)
+        }
       }
     }
     if (!ok(r) && busy(r)) {
@@ -1940,7 +2234,7 @@ const taskReport = Object.values(records).map(r => ({
   reason: r.reason,
   summary: r.result && r.result.summary,
   wrongTests: r.result && r.result.wrongTests,
-  testConflict: r.testConflict || null,
+  testConflict: r.testConflict || r.testConflictFixed || null,
   testConflicts: testConflictsOf(r.result),
   failures: (r.result && Array.isArray(r.result.failures) && r.result.failures) || [],
   outsideFiles: r.result && r.result.outsideFiles,
@@ -2060,14 +2354,11 @@ else if (notStarted.length || failedList.length || needsInput.length) {
 if (outcome === 'blocked') log(reason)
 if (relinks.length) log(`Relinked mid-run (verify-order cycles): ${relinks.map(r => `Task ${r.task}`).join(', ')}`)
 if (DIRECT_CK) log(`Direct ck steps (no agent): ${directCk.plan} plan, ${directCk.land} land, ${directCk.relink} relink, ${(directCk.ms / 60000).toFixed(1)} min${directCk.failures ? `, ${directCk.failures} without JSON` : ''}`)
-// Issue #8: the test-track fixes the run needs, one per task blocked on a test.
-const testFixes = Object.values(records).filter(r => r && r.testConflict).map(r => ({
-  task: r.task, file: r.testConflict.file, test: r.testConflict.test || null, criterion: r.testConflict.criterion || null,
-  reason: r.testConflict.reason, fix: r.testConflict.fix || null,
-}))
+// Task 86 (4.10): every test fix this run tried, as TestFixRecords (they replace the old report-only entries).
+const testFixes = testFixRecords
 if (testFixes.length) {
-  log(`Test-track fixes (${testFixes.length}): each task below is blocked on a test that two agents found can never pass; fix the test on ${INTO} (it is a test-track change: you decide), then run /spec:implement again`)
-  for (const f of testFixes) log(`  Task ${f.task}: ${f.file}${f.test ? ` ${f.test}` : ''}${f.criterion ? ` vs ${f.criterion}` : ''}: ${trim(f.reason, 300)}${f.fix ? ` -> fix: ${trim(f.fix, 300)}` : ''}`)
+  log(`Test fixes (${testFixes.length}): ${testFixes.map(f => `${f.fix || 'ledger'} for ${f.blocked ? `Task ${f.blocked}` : 'cross-test'} ${f.outcome}`).join('; ')}`)
+  for (const f of testFixes.filter(x => x.outcome === 'to-me')) log(`  ${f.fix || 'not started'}: ${f.tests.join(', ')}: ${trim(f.reason, 300)}`)
 }
 // Deterministic-fallback report section (5.1, 6.1): degraded mark, fallback
 // count and the triggering plan attempts.
