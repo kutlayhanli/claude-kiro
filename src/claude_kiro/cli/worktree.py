@@ -542,15 +542,43 @@ def merge_cmd(spec, tasks, into, keep, as_json):
     _emit(outcomes, as_json, bad_states=("CONFLICT", "ERROR", "BUSY", "PROTECTED"))
 
 
-def _gate_fn(spec: str):
-    """Run the task gate in-process in the target checkout: (green, failing part of the report, failure entries)."""
+def _testfix_changed(target: Path, num: str) -> list:
+    """The files the landed test fix `num` changed: its merge commit on the target against its first parent."""
+    import subprocess
+
+    def run(*args):
+        return subprocess.run(["git", "-C", str(target), *args], capture_output=True, text=True)
+
+    found = run("log", "--first-parent", "-1", "--format=%H", f"--grep=(task {num})", "HEAD").stdout.strip()
+    if not found:
+        return []
+    return [f for f in run("diff", "--name-only", "--no-renames", f"{found}^1", found).stdout.splitlines() if f]
+
+
+def _gate_fn(spec: str, scopes: dict = None):
+    """Run the task gate in-process in the target checkout: (green, failing part of the report, failure entries).
+
+    A `testfix<k>` landing is not a task: it gates the test tasks that own a file the fix changes
+    (`testfix.gate_scope`, 4.4), recorded in `scopes` for the land JSON's `gateTasks`; an empty scope is RED.
+    """
     from ..gate import run_gate
 
     def gate(target: Path, nums):
         spec_dir = next((r / spec for r in spec_roots(target) if (r / spec / "tasks.md").exists()), None)
         if spec_dir is None:
             return False, f"no tasks.md for {spec} in {target}", []
-        result = run_gate(target, spec_dir, list(nums))
+        tasks = [n for n in nums if not str(n).startswith("testfix")]
+        for num in (n for n in nums if str(n).startswith("testfix")):
+            from ..graph import build_graph
+            from ..testfix import gate_scope
+
+            scope = gate_scope(build_graph(target, spec_dir), _testfix_changed(target, num), [])
+            if scopes is not None:
+                scopes[num] = scope
+            if not scope:
+                return False, f"✗ test fix {num} changes no file a test task owns", []
+            tasks.extend(scope)
+        result = run_gate(target, spec_dir, list(dict.fromkeys(tasks)))
         if result.ok:
             return True, "", []
         lines = []
@@ -627,6 +655,7 @@ def land_cmd(spec, tasks, into, do_gate, do_install, release_claims, keep, progr
     """
     root = _root()
     name = _spec_name(spec)
+    scopes: dict = {}
     try:
         integ = wt.integration_branch(name)
         use_integ = wt.branch_exists(root, integ) and wt.checkout_of(root, integ) is not None
@@ -637,7 +666,7 @@ def land_cmd(spec, tasks, into, do_gate, do_install, release_claims, keep, progr
             name,
             list(tasks),
             into=target_branch,
-            gate=_gate_fn(name) if do_gate else None,
+            gate=_gate_fn(name, scopes) if do_gate else None,
             install=install_command(load_config(target or root), target or root) if do_install else None,
             keep=keep,
             release_claims=release_claims,
@@ -649,6 +678,9 @@ def land_cmd(spec, tasks, into, do_gate, do_install, release_claims, keep, progr
         else:
             click.echo(f"❌ {e}")
         sys.exit(3)
+    for item in result["tasks"]:
+        if str(item["task"]) in scopes:
+            item["gateTasks"] = list(scopes[str(item["task"])])
     if progress_run:
         result = _record_landing(name, progress_run, result)
     if as_json:
@@ -689,6 +721,7 @@ def approve_cmd(spec, task, into):
         sys.exit(2)
     root = _root()
     name = _spec_name(spec)
+    scopes: dict = {}
     try:
         integ = wt.integration_branch(name)
         target_branch = into or (integ if wt.branch_exists(root, integ) else wt.current_branch(root))
