@@ -180,7 +180,7 @@ def test_tc14_redteam_import_edit_reaches_graph_lint_and_plan_together(tmp_path)
              + block(3, "impl b", files=["src/mtr/b.py"], deps="Task 2"))
     test_file = "from mtr.b import f\n\n\ndef test_tc1_x():\n    assert f()\n"
     root = h.spec_graph_project(tmp_path, tasks=tasks, tests={"tests/test_t.py": test_file},
-                                sources={"src/mtr/a.py": "def f():\n    return 1\n", "src/mtr/b.py": "def f():\n    return 2\n"})
+                                sources={"src/mtr/a.py": "def f():\n    return 1\n", "src/mtr/b.py": "def g():\n    return 2\n"})
 
     def views():
         g = graph(root)
