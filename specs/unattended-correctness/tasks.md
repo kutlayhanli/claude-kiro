@@ -2280,7 +2280,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 99: Verify DeepSeek Harness's API and record the outcome
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 18.1, 18.3, 18.5
 **Description:** From DeepSeek Harness's official repository, check the current release. Fetch it only through hosts in ck's default `run.allowed_domains` (`github.com`, `codeload.github.com`, `objects.githubusercontent.com`; for example `git clone --depth 1 https://github.com/deepseek-ai/<repo>` into a temp dir), since `specs/ck.json` sets no `run.allowed_domains` and `raw.githubusercontent.com` and `api.github.com` are blocked under `ck run`; if the repository cannot be reached, return needs-input naming the host rather than guessing. Check: the version or commit checked, the date, and whether it can host the workflow's `agent()` and `ck()` calls (a way to run the workflow script and service its agent requests, and to run local processes for `ck()`), against the `Harness` interface in `harnesses.py`. Write `specs/unattended-correctness/dsh-verification.md` with the repository URL, version, date, the two answers, what is missing, and the evidence (links, file paths, API names). If either answer is no, this is the findings report (18.3): stop the `dsh` phase, and nothing else in the repo changes (18.5). Harness Contract owner: item 14's `dsh-verification.json` (design: `dsh-verification.md`, which carries the contract's keys `{repository, version, checkedAt, canHostAgent, canHostCk, missing, evidence}` in a fenced json block, as Task 98 reads it).
@@ -2290,8 +2290,8 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 98 (TC-154, TC-156)
 
 **Acceptance:**
-- [ ] The record names the official repository, the version checked, and whether `dsh` can host `agent()` and `ck()` calls (18.1)
-- [ ] When it cannot, the record lists what was checked, the version and what is missing, and no adapter is built (18.3, 18.5)
+- [x] The record names the official repository, the version checked, and whether `dsh` can host `agent()` and `ck()` calls (18.1)
+- [x] When it cannot, the record lists what was checked, the version and what is missing, and no adapter is built (18.3, 18.5)
 
 **Dependencies:** Task 62 (checks dsh against the `Harness` interface in harnesses.py), Task 98 (its tests are the oracle)
 **Complexity:** Medium
