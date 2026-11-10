@@ -6,8 +6,9 @@ real hooks. Only the agents are scripted (`tests/js/real_agents.mjs` plus the fa
 project's own code.
 
 Each scenario runs once (a module-scoped result) and several tests assert on it:
-- TC-176 / TC-178: Task 2's first commit breaks `tc1` (found only by the attributed gate at merge 2, N=2); a scripted
-  agent also attempts a raw `git merge --no-verify` of a protected branch during the run.
+- TC-176 / TC-178: Task 2's first commit breaks `tc1` (found only by the attributed gate at merge 2, N=2; the scripted
+  agents land in the order 2, 3, 7, 8, one per landing step); a scripted agent also attempts a raw
+  `git merge --no-verify` of a protected branch during the run.
 - TC-177 / TC-43b: a test asserting an unreachable value, a conflict and its confirmation, a scripted test-fixer, the
   real `ck testfix check` / `prove`, a scripted approve, the real land of the fix.
 - TC-179: the command edge from lint and relink, and the live edge at runtime without relink.
@@ -67,7 +68,21 @@ const ckRun = async argv => {
   const res = await exec(bin, [...pre, ...argv])
   return { ...res, json: parse(res.stdout) }
 }
-const ck = async argv => { const r = await ckRun(argv); ckCalls.push({ argv, code: r.code }); return r }
+// sc.landOrder: a task agent returns only after the landing step of every task before it in the order has run, so
+// the landing queue takes the tasks in that order, one per landing step (the next task is not queued before the
+// previous one's `ck worktree land` has returned). The agents still start together.
+const landed = {}
+const landSlot = n => landed[n] || (landed[n] = (() => { let resolve; const promise = new Promise(r => { resolve = r }); return { promise, resolve } })())
+const landedBefore = async n => {
+  const i = (sc.landOrder || []).indexOf(n)
+  if (i >= 0) await Promise.all(sc.landOrder.slice(0, i).map(m => landSlot(m).promise))
+}
+const ck = async argv => {
+  const r = await ckRun(argv)
+  ckCalls.push({ argv, code: r.code })
+  if (argv.includes('land')) for (const n of argv) if ((sc.landOrder || []).includes(n)) landSlot(n).resolve()
+  return r
+}
 const git = (dir, ...a) => exec('git', ['-C', dir, ...a])
 const commitFiles = async (dir, files, message) => {
   for (const [rel, content] of Object.entries(files)) {
@@ -118,6 +133,7 @@ const agent = async (prompt, opts) => {
     const res = await a.agent(prompt, opts)
     runs.push(...a.runs.map(r => ({ ...r, attempt: tr.attempts[n] })))
     if (!res.gatePassed) await ckRun(['-C', path.join(cfg.root, '.ck', 'worktrees', `${cfg.spec}-task-${n}`), 'worktree', 'release', cfg.spec, n])
+    await landedBefore(n)
     if (blocked) return { ...res, status: 'blocked', gatePassed: false, testConflict: conflict }
     return res
   }
@@ -293,6 +309,12 @@ def tc176_run(tmp_path_factory) -> Dict[str, Any]:
     scenario = calc_scenario()
     scenario["fix"] = {"calc.py": GOOD_CALC}
     scenario["raw"] = {"task": "7", "branch": branch}
+    # The agents start together (every branch off the same integrate/demo) but land in this order, one per landing
+    # step: Task 2 lands first through its task-scoped landing gate (2.10), which cannot see tc1, Task 3 is the
+    # second merge, and the attributed gate at merge 2 (N=2) is the first gate that runs the whole suite. Left to
+    # the finishing race, Task 2 lands in the batch that completes the spec, whose landing gate runs the full suite,
+    # goes red, and is bisected onto another task, so the scenario never happens.
+    scenario["landOrder"] = ["2", "3", "7", "8"]
     run = run_workflow(tmp, root, "demo", scenario, full_gate_every=2)
     return {"run": run, "root": root, "target": target, "branch": branch, "head_before": head_before}
 
@@ -329,7 +351,8 @@ def test_tc176_final_gate_is_green_with_no_excused_entries(tc176_run):
     assert code == 0, f"the real final gate is not green after the run: {err}"
     text = (tc176_run["target"] / "specs" / "demo" / "tasks.md").read_text()
     for n in ("2", "3", "7", "8"):
-        assert re.search(rf"### Task {n}:.*?\*\*Status:\*\* Done", text, re.S), f"Task {n} is not Done on integration"
+        block = re.search(rf"### Task {n}:.*?(?=\n### Task |\Z)", text, re.S).group(0)
+        assert "**Status:** Done" in block, f"Task {n} is not Done on integration"
 
 
 def test_tc178_raw_no_verify_merge_of_a_protected_branch_is_refused(tc176_run):
