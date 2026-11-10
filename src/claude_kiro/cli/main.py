@@ -15,7 +15,7 @@ from typing import Optional
 
 import click
 
-from .. import plugin, xdist
+from .. import harnesses, plugin, xdist
 from ..config import initial_config, load_config
 from ..paths import CONFIG_FILE, LEGACY_SPECS_DIR, SPECS_DIR, spec_roots
 from .agents import agents
@@ -704,32 +704,42 @@ def _setup_diff(loader) -> None:
 
 @cli.command()
 @click.option("--unattended", is_flag=True, help="Check this machine for unattended `ck run`s: sandbox tools, credentials, risky allow rules")
-@click.option("--harness", type=click.Choice(["claude", "opencode"]), default="claude", show_default=True, help="Check the Claude Code or OpenCode setup")
+@click.option("--harness", cls=harnesses.HarnessOption, default="claude", show_default=True,
+              base_help="Check the setup of a registered harness: claude (Claude Code), opencode (OpenCode)")
 def doctor(unattended: bool, harness: str):
     """Check Claude Kiro setup health.
 
     Reports how the project gets the spec commands (the plugin, or vendored
     copies), whether the plugin is installed on this machine, and checks
     files, hooks, the version stamp and verify commands.
-    With --harness opencode: the OpenCode plugin's node/ck/vendor/model/agent/
+    With the opencode harness: the OpenCode plugin's node/ck/vendor/model/agent/
     hook/git preflight, without starting a server.
     With --unattended: what an unattended `ck run` is exposed to here, with
     recommendations (always exits 0).
     """
-    if harness == "opencode":
-        from .doctor_opencode import doctor_opencode
-
-        raise SystemExit(doctor_opencode())
-
-    import shutil
-    from .. import manifest
-
+    try:
+        h = harnesses.select(harness)
+    except harnesses.HarnessError as e:
+        click.echo(f"❌ {e}")
+        sys.exit(2)
     project_dir = Path.cwd()
-    if unattended:
+    reason = h.available()
+    if reason:
+        click.echo(f"❌ {harness} harness unavailable: {reason}")
+        sys.exit(1)
+    if unattended and harness == "claude":
         from .run import doctor_unattended
 
         doctor_unattended(project_dir)
         return
+    raise SystemExit(h.doctor(project_dir))
+
+
+def doctor_claude(project_dir: Path) -> int:
+    """The Claude Code setup check behind `ck doctor` (the `claude` harness). Issues are printed; always 0."""
+    import shutil
+    from .. import manifest
+
     claude_dir = project_dir / ".claude"
     issues = []
     warnings = []
@@ -750,7 +760,7 @@ def doctor(unattended: bool, harness: str):
     if not claude_dir.exists():
         issues.append(".claude directory not found - run 'ck init'")
         _report_doctor_results(issues, warnings)
-        return
+        return 0
 
     stamp = manifest.read(project_dir)
     mode = plugin.mode(project_dir)
@@ -885,6 +895,7 @@ def doctor(unattended: bool, harness: str):
         pass
 
     _report_doctor_results(issues, warnings)
+    return 0
 
 
 @cli.command()

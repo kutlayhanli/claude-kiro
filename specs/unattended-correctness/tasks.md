@@ -1443,7 +1443,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 62: Replace the harness if/else with a registry
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 17.1, 17.2, 17.3, 17.4, 17.5, 18.4
 **Description:** Create `src/claude_kiro/harnesses.py` with a `Harness` record (name, `run_arm(cfg, arm, echo) -> dict`, `doctor(project_dir) -> int`, `available() -> Optional[str]` returning a reason when the harness cannot run, and its harness-specific option checks), `register(harness)`, `registered()`, and the seam `select(name, registry) -> Harness` raising `HarnessError('unknown harness "x" (registered: claude, opencode)')`. Register `claude` (today's claude bench path and doctor) and `opencode` (today's `run_arm_opencode` and `cli/doctor_opencode.py` doctor, unchanged) wrapping today's code and options, including the existing `--runner` with `--harness opencode` error. Extra harness modules can be loaded from `CK_HARNESS_MODULES` or entry points. In `cli/bench.py`, `--harness` becomes a free string validated through the registry (help lists the registered names), the opencode/claude branches move into the two registrations, arm results pass `check_arm_result`, and an arm whose harness reports `available()` refuses before cloning. In `cli/main.py`, `ck doctor --harness` validates and dispatches through the registry (unknown name: exit 2 listing names). No existing test pins `--harness` as a fixed `click.Choice` (`tests/test_doctor_opencode.py` and `tests/test_bench_opencode_run.py` only pass `--harness opencode`), so both stay unchanged and run in Verify as preservation checks. Harness Contract owner: item 3's `harnesses.register`, `names` and `get` (design: `register`, `registered`, `select`; the adapter's `available()` is the contract's `check()`).
@@ -1455,11 +1455,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 59 (TC-150 to TC-153), Task 60 (P-29 at `select` and the CLI)
 
 **Acceptance:**
-- [ ] Bench and doctor look harnesses up in one registry, and only registered names are valid (17.1)
-- [ ] An unknown name fails with an error listing the registered harnesses (17.2)
-- [ ] A harness registered from a test is selectable in bench and doctor with no dispatch change (17.3)
-- [ ] `claude` and `opencode` behave as today, including harness-specific options (17.4); every harness returns the same arm result keys (17.5)
-- [ ] A harness that reports itself unavailable is refused by bench and reported by doctor (18.4)
+- [x] Bench and doctor look harnesses up in one registry, and only registered names are valid (17.1)
+- [x] An unknown name fails with an error listing the registered harnesses (17.2)
+- [x] A harness registered from a test is selectable in bench and doctor with no dispatch change (17.3)
+- [x] `claude` and `opencode` behave as today, including harness-specific options (17.4); every harness returns the same arm result keys (17.5)
+- [x] A harness that reports itself unavailable is refused by bench and reported by doctor (18.4)
 
 **Dependencies:** Task 61 (calls `check_arm_result`), Task 57 (both edit cli/main.py; Task 57 runs first), Task 59 (its tests are the oracle), Task 60 (its tests are the oracle)
 **Complexity:** Medium
