@@ -735,7 +735,7 @@ class AuditMachine(RuleBasedStateMachine):
             self.counter += 1
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(f"v{self.counter}\n")
-            h.git(self.iw, "add", "--", path)
+            h.git(self.iw, "add", "-f", "--", path)
             self.content[path] = f"v{self.counter}\n"
         commit_without_hooks(self.iw, f"bypass {action} {path}")
 
