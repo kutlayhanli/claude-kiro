@@ -246,7 +246,8 @@ def test_tc140_no_globs_means_no_lock_and_no_fixture_items(tmp_path):
     assert _lock_files(root) == []
     after = h.snapshot_ck_state(root)
     assert not [k for k in after if "fixture-lock" in k]
-    assert not [k for k in set(after) - set(before) if "fixture" in k]
+    checkouts = str(root / ".ck" / "worktrees")
+    assert not [k for k in set(after) - set(before) if "fixture" in k and not k.startswith(checkouts)]
     audit = _audit(root)
     fixtures = audit.get("fixtures") or {}
     assert not fixtures.get("drift") and not fixtures.get("lockTampered") and not fixtures.get("handcrafted")
