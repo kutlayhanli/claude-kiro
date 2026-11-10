@@ -1245,12 +1245,12 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 10 (11.6 single-mapping cases across graph, lint, plan and gate (`tc14_redteam`)), Task 14 (TC-11 through `ck lint`), Task 17 (TC-110 to TC-112, TC-122b, TC-124b, TC-125), Task 26 (TC-69 to TC-74 through `ck lint --fidelity`), Task 27 (8.3, 8.6 through `ck lint --fidelity`), Task 52 (TC-168 for gate, graph, lint, relink, plan, land, hooks, audit, start and fixtures)
 
 **Acceptance:**
-- [ ] `ck lint --fidelity` checks `score() >= 4.50` against its row, reports `base * 1.1` compared with no literal as unparsed, and reads a BOM-prefixed test file (8.1, 8.3)
-- [ ] `ck plan --json` reports `overlaps`, `testVerifies`, `provides` and `graphProblems`; `--compact` prints only the scheduler keys (7.4, 12.5, 13.1)
-- [ ] `ck plan` leaves tasks.md byte-identical (13.6)
-- [ ] `ck lint --json` shows missing command edges, unknown commands, untagged tests and tasks without a write-set as warnings (12.1, 12.3, 13.4)
-- [ ] `ck relink SPEC --commands --apply` adds the missing edges, a second lint is clean, and a cyclic edge is refused (12.2, 12.7)
-- [ ] `ck lint --fidelity --task N --json` reports the fidelity lists and leaves files unchanged (8.1, 8.6)
+- [x] `ck lint --fidelity` checks `score() >= 4.50` against its row, reports `base * 1.1` compared with no literal as unparsed, and reads a BOM-prefixed test file (8.1, 8.3)
+- [x] `ck plan --json` reports `overlaps`, `testVerifies`, `provides` and `graphProblems`; `--compact` prints only the scheduler keys (7.4, 12.5, 13.1)
+- [x] `ck plan` leaves tasks.md byte-identical (13.6)
+- [x] `ck lint --json` shows missing command edges, unknown commands, untagged tests and tasks without a write-set as warnings (12.1, 12.3, 13.4)
+- [x] `ck relink SPEC --commands --apply` adds the missing edges, a second lint is clean, and a cyclic edge is refused (12.2, 12.7)
+- [x] `ck lint --fidelity --task N --json` reports the fidelity lists and leaves files unchanged (8.1, 8.6)
 
 **Dependencies:** Task 33 (calls the new `lint_spec` keys and `plan_command_relink`), Task 30 (calls `fidelity.check_task`), Task 57 (both edit cli/worktree.py; Task 57 runs first), Task 10 (its tests are the oracle), Task 14 (its tests are the oracle), Task 17 (its tests are the oracle), Task 26 (its tests are the oracle), Task 27 (its tests are the oracle), Task 52 (its tests are the oracle)
 **Complexity:** Medium

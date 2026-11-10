@@ -143,18 +143,37 @@ def _neighbor_name(operands: List[ast.AST], i: int) -> Optional[str]:
     return None
 
 
+def _has_literal_part(node: ast.AST) -> bool:
+    """Whether an expression is computed from a number, enum member or date somewhere inside it (`base * 1.1`)."""
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Constant) and type(sub.value) in (int, float):
+            return True
+        if isinstance(sub, ast.Attribute) and isinstance(sub.value, ast.Name) and sub.value.id[:1].isupper():
+            return True
+        if _date_iso(sub) is not None:
+            return True
+    return False
+
+
 def _compare_values(node: ast.Compare, test: str, out: List[TestValue]) -> None:
+    """A comparison's literal is checked whatever it is compared with (`score() >= 4.50`: no name needed). A
+    comparison with no literal operand reports a runtime operand computed from a number, enum or date (`score() ==
+    base * 1.1`) as unparsed; one computed from nothing concrete (`score()`, `obj.get("x")`) is not reported."""
     operands = [node.left, *node.comparators]
+    classes = [_classify(o, runtime=True) for o in operands]
+    has_literal = any(c is not None and c[0] != "runtime" for c in classes)
     for i, operand in enumerate(operands):
-        c = _classify(operand, runtime=True)
+        c = classes[i]
         if c is None:
             continue
         kind, text = c
         name = _neighbor_name(operands, i)
         if kind == "runtime":
-            if not _is_threshold(name):
-                continue
-            kind = "number"
+            if _is_threshold(name):
+                out.append(TestValue(test, "number", text, name, "asserted", operand.lineno))
+            elif not has_literal and _has_literal_part(operand):
+                out.append(TestValue(test, "runtime", text, name, "asserted", operand.lineno))
+            continue
         out.append(TestValue(test, kind, text, name, "asserted", operand.lineno))
 
 
@@ -262,6 +281,16 @@ def _row_facts(tc_id: str, scenario: str) -> RowFacts:
                     dates=tuple(sorted(set(dates))), words=frozenset(re.findall(r"\w+", scenario)))
 
 
+def _cells(line: str) -> List[str]:
+    """A Markdown table row's cells: the pipes split them, except an escaped `\\|`, which stays inside its cell."""
+    inner = line.strip()
+    if inner.startswith("|"):
+        inner = inner[1:]
+    if inner.endswith("|") and not inner.endswith("\\|"):
+        inner = inner[:-1]
+    return [c.strip() for c in re.split(r"(?<!\\)\|", inner)]
+
+
 def parse_row(test_plan_md: str, tc_id: str) -> Optional[RowFacts]:
     """The facts of the test-plan row whose ID cell is exactly `tc_id`, read from its Scenario cell; None if absent."""
     id_col, scenario_col, header_seen = 0, 3, False
@@ -269,7 +298,7 @@ def parse_row(test_plan_md: str, tc_id: str) -> Optional[RowFacts]:
         stripped = line.strip()
         if not stripped.startswith("|"):
             continue
-        cells = [c.strip() for c in stripped.strip("|").split("|")]
+        cells = _cells(stripped)
         lowered = [c.lower() for c in cells]
         if not header_seen and "id" in lowered:
             header_seen = True
@@ -367,11 +396,8 @@ def _check_numbers(test: str, items: List[TestValue], row: RowFacts, checked: Li
         if x is None:
             unparsed.append(_item(test, v, "runtime expression"))
             had_unparsed = True
-        elif v.name is None:
-            unparsed.append(_item(test, v, "no name"))
-            had_unparsed = True
         else:
-            literal.append((v, x))
+            literal.append((v, x))  # a comparison's literal needs no name: its row threshold decides it
     if not numbers:
         return
     ends = row.thresholds
@@ -410,7 +436,9 @@ def _check_test(test: str, items: List[TestValue], row: RowFacts, models: ModelF
                 unparsed: List[Dict[str, object]]) -> None:
     _check_numbers(test, items, row, checked, mismatches, unparsed)
     for v in items:
-        if v.kind == "date":
+        if v.kind == "runtime":
+            unparsed.append(_item(test, v, "runtime expression"))
+        elif v.kind == "date":
             if v.role != "fed":
                 continue
             if v.name is None:
@@ -465,7 +493,7 @@ def check_values(values: List[TestValue], row: Optional[RowFacts], models: Model
 
 def _read_text(path: Path) -> str:
     try:
-        return path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8-sig")  # an optional BOM is not part of the text
     except (OSError, UnicodeDecodeError):
         return ""
 
@@ -498,7 +526,7 @@ def check_task(project_dir, spec_dir, task: str) -> FidelityResult:
             unparsed.append({"test": rel, "value": None, "line": 0, "rule": "non-Python test"})
             continue
         try:
-            source = full.read_text(encoding="utf-8")
+            source = full.read_text(encoding="utf-8-sig")  # an optional BOM is not part of the source
             values.extend(extract_test_values(source, rel))
             names.extend(_test_names(source))
         except (OSError, SyntaxError, UnicodeDecodeError):
