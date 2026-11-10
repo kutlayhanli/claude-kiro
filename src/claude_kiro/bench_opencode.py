@@ -122,25 +122,31 @@ def _integration_target(
     env: Mapping[str, str],
     worktree_dir: Any,
 ) -> Tuple[str, Path]:
-    """`ck worktree integration` as the skill runs it, falling back to a direct merge into the clone.
+    """`ck worktree start` as the run starts it, falling back to a direct merge into the clone.
 
-    The current `ck` prints a human line; a future one may grow `--json`, so try that shape first
-    and parse it when it is there. Only an *unavailable* command falls back: a real failure (a git
-    error, a busy worktree) is raised, because merging into the bench branch would not be the same run.
+    `ck worktree start` creates the integration worktree and also installs the hooks, protects the
+    baseline and sweeps dead runs' claims. Its `--json` output is a `ck-run-start/1` document with
+    the integration worktree under `integration`; parse that when it is there. Only an *unavailable*
+    command falls back: a real failure (a git error, a busy worktree) is raised, because merging into
+    the bench branch would not be the same run.
     """
-    base = [*ck_cmd, "worktree", "integration", spec_name]
+    base = [*ck_cmd, "worktree", "start", spec_name]
     worktree = _default_target(clone, worktree_dir, spec_name)
     branch = f"integrate/{spec_name}"
 
     json_proc = _run([*base, "--json"], clone, env)
     if json_proc.returncode == 0:
         try:
-            parsed_branch, parsed_path = _from_json(json_proc.stdout)
+            doc = json.loads(json_proc.stdout)
         except json.JSONDecodeError:
-            parsed_branch, parsed_path = None, None
-        if parsed_branch or parsed_path:
-            target = _resolve_path(clone, parsed_path) if parsed_path else worktree
-            return str(parsed_branch or branch), target
+            doc = None
+        integration = doc.get("integration") if isinstance(doc, dict) else None
+        if isinstance(integration, dict):
+            parsed_branch = integration.get("branch")
+            parsed_path = integration.get("path")
+            if parsed_branch or parsed_path:
+                target = _resolve_path(clone, parsed_path) if parsed_path else worktree
+                return str(parsed_branch or branch), target
 
     plain_proc = _run(base, clone, env)
     if plain_proc.returncode == 0:

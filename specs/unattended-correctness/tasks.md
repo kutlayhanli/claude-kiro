@@ -1016,7 +1016,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Files:**
 - `tests/test_fixture_lock.py` - TC-134 to TC-138, TC-139a, TC-140, TC-141
 **Verify:** `uv run pytest -q tests/test_fixture_lock.py`
-**Verifies:** Task 48 (TC-139a), Task 49 (TC-134, TC-136, TC-137, TC-141), Task 51 (TC-135, TC-138, TC-140 (audit side))
+**Verifies:** Task 48 (TC-139a), Task 49 (TC-134, TC-141), Task 51 (TC-135, TC-136, TC-137, TC-138, TC-140 (audit side))
 
 **Acceptance:**
 - [x] Tests run real landings, the real fixtures CLI and the real audit
@@ -1155,8 +1155,8 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Description:** In `worktrees.land()`, after each task merges, gather the changed files matching `fixtures.recorded`, call `fixtures.lock_decision`, write new lock entries (task and time) for files landing for the first time, and report changes to locked files as `Landed.fixtureDrift` (`[{file, task, change}]`), printed in the land JSON as `tasks[].fixtureDrift` (empty list when none). Accepted handcrafted changes update the entry's hash and record the reason. With no globs nothing is written or reported; a config error is reported in the land result and no lock is kept for that landing. The landing itself is not refused by drift. Harness Contract owner: item 5's `fixtureDrift` in `ck worktree land --json`.
 **Files:**
 - `src/claude_kiro/worktrees.py` - fixture lock recording and `Landed.fixtureDrift` in `land()`
-**Verify:** `uv run pytest -q tests/test_fixture_lock.py -k "tc134_ or tc136_ or tc137_ or tc141_"`
-**Verified by:** Task 43 (TC-134, TC-136, TC-137, TC-141)
+**Verify:** `uv run pytest -q tests/test_fixture_lock.py -k "tc134_ or tc141_"`
+**Verified by:** Task 43 (TC-134, TC-141)
 
 **Acceptance:**
 - [ ] The first landing of a recorded fixture creates its lock entry (15.1)
@@ -1197,8 +1197,8 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Files:**
 - `src/claude_kiro/protect.py` - `audit()` input gathering
 - `src/claude_kiro/cli/worktree.py` - `ck worktree audit`
-**Verify:** `uv run pytest -q tests/test_protected_audit.py tests/test_protected_audit_redteam.py` `uv run pytest -q tests/test_protected_hooks_redteam.py -k "tc92_"` `uv run pytest -q tests/test_fixture_lock.py -k "tc135_ or tc138_ or tc140_"` `uv run pytest -q tests/test_protected_hooks_properties.py -k "tc175_p19 or real_audit"`
-**Verified by:** Task 38 (P-19 on the real audit), Task 40 (TC-92, bypasses reported by the audit), Task 41 (TC-96 to TC-100), Task 42 (red team of 10.5), Task 43 (TC-135, TC-138, TC-140 (audit side))
+**Verify:** `uv run pytest -q tests/test_protected_audit.py tests/test_protected_audit_redteam.py` `uv run pytest -q tests/test_protected_hooks_redteam.py -k "tc92_"` `uv run pytest -q tests/test_fixture_lock.py -k "tc135_ or tc136_ or tc137_ or tc138_ or tc140_"` `uv run pytest -q tests/test_protected_hooks_properties.py -k "tc175_p19 or real_audit"`
+**Verified by:** Task 38 (P-19 on the real audit), Task 40 (TC-92, bypasses reported by the audit), Task 41 (TC-96 to TC-100), Task 42 (red team of 10.5), Task 43 (TC-135, TC-136, TC-137, TC-138, TC-140 (audit side))
 
 **Acceptance:**
 - [ ] The audit lists each protected file added, changed or deleted without approval (10.1)
@@ -1466,7 +1466,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 63: Start bench OpenCode runs with `ck worktree start`
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 9.1, 16.2
 **Description:** In `src/claude_kiro/bench_opencode.py`, make `_integration_target` call `ck worktree start` (hooks, baseline, claim sweep) instead of `ck worktree integration`, parsing `ck-run-start/1` and returning the same value as today. Foundation task: its Verify is a smoke check (the existing bench OpenCode run suite); 9.1 and 16.2 are verified at Task 50 (run start) and by the reruns at Task 104.
@@ -1475,8 +1475,8 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verify:** `uv run pytest -q tests/test_bench_opencode_run.py`
 
 **Acceptance:**
-- [ ] A bench OpenCode arm's integration worktree has the hooks installed and stale claims released (9.1, 16.2)
-- [ ] `_integration_target` returns the same value as before
+- [x] A bench OpenCode arm's integration worktree has the hooks installed and stale claims released (9.1, 16.2)
+- [x] `_integration_target` returns the same value as before
 
 **Dependencies:** Task 50 (calls `ck worktree start`)
 **Complexity:** Low
@@ -2476,7 +2476,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 108: Install the hooks from `ck run` before launch and deny sandboxed writes to them
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 9.1, 9.10, 9.11, NFR sandbox
 **Description:** In `src/claude_kiro/cli/run.py`: before launching the harness, the unsandboxed `ck run` calls `protect.install_hooks(project)` (the repository config and `.git/hooks` are read-only inside Claude Code's sandbox, so in-sandbox steps can only check); an install problem is printed before launch and is what run start later reports (9.10). `sandbox_settings` adds `"denyWrite": [<git-common-dir>/ck/hooks, <git-common-dir>/ck/key]` to `filesystem`, leaving `<git-common-dir>/ck/tokens` and `<git-common-dir>/ck/<spec>` writable, so sandboxed processes can run the hooks and land with tokens but never edit hook code, `chain.json`, the interpreter record or the key (design Security). Bench arms launch `ck run`, so they get the same install. Update the existing `tests/test_run.py` cases that pin the exact `sandbox_settings` filesystem keys, in this task.
@@ -2487,9 +2487,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 39 (TC-189), Task 40 (TC-190)
 
 **Acceptance:**
-- [ ] `ck run` installs the hooks before the harness starts, so inside the sandbox run start reports them installed and active and a raw protected merge is refused (9.1, 9.11)
-- [ ] The sandbox settings deny writes to ck's hook directory and key, and keep tokens and per-spec state writable
-- [ ] An install failure is reported before launch, not raised (9.10)
+- [x] `ck run` installs the hooks before the harness starts, so inside the sandbox run start reports them installed and active and a raw protected merge is refused (9.1, 9.11)
+- [x] The sandbox settings deny writes to ck's hook directory and key, and keep tokens and per-spec state writable
+- [x] An install failure is reported before launch, not raised (9.10)
 
 **Dependencies:** Task 50 (TC-189 runs `ck worktree start`; `ensure_hooks` reports what this task installs), Task 45 (calls `install_hooks`), Task 39 (its tests are the oracle), Task 40 (its tests are the oracle)
 **Complexity:** Medium
