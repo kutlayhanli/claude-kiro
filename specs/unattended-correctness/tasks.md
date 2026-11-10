@@ -1190,7 +1190,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 51: Add the run-end audit `ck worktree audit`
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 10.1, 10.2, 10.3, 10.4, 10.5, 15.2, 15.5
 **Description:** In `protect.py`, add `audit(root, spec, into) -> AuditReport`, which gathers the inputs for `audit_decision`: the sealed approved state, the current blob ids of protected files on the integration branch head, the allow-list, `hook_status` (installed, active `core.hooksPath` in the integration worktree, scripts intact against the recorded sha256s) and the fixture report from `fixtures` (lock drift and tampering). In `cli/worktree.py`, add `ck worktree audit SPEC [--into BRANCH] --json` printing `ck-audit/1` (schema, spec, into, head, complete, clean, drift, hooks, fixtures, problems); exit 0 when clean, 1 on drift or hook problems, 3 when incomplete (approved state missing, unreadable or mac failed: `complete: false`, `clean: false`, problem "approved state unreadable: <reason>"). Harness Contract owner: item 4's `ck worktree audit SPEC --json` (`ck-audit/1`).

@@ -97,6 +97,7 @@ class AuditReport:
     hooks: HookStatus
     fixtures: Mapping[str, object]
     problems: Tuple[str, ...] = field(default_factory=tuple)
+    head: str = ""
 
 
 # --------------------------------------------------------------------------- path filter
@@ -567,6 +568,8 @@ def hook_status(root: Path, worktree: Optional[Path] = None) -> HookStatus:
                     break
         elif not meta:
             problems.append("ck's git hooks are not installed")
+        else:
+            problems.append("ck's git hook scripts are missing")
         if value and not active:
             problems.append(f"core.hooksPath is {value!r}, not ck's hooks directory")
         elif not value:
@@ -656,3 +659,71 @@ def protected_files_at(root: Path, commit: str) -> Dict[str, str]:
         if path and is_protected(path):
             files[path] = meta.split()[2].decode()
     return files
+
+
+# --------------------------------------------------------------------------- run-end audit
+
+def _fixture_audit(root: Path, spec: str, head: str, checkout: Path) -> Dict[str, Any]:
+    """Lock drift and tampering of recorded fixtures at `head` (15.2, 15.5), as the audit reports them."""
+    from . import fixtures
+    from .config import load_config
+
+    config = load_config(checkout)
+    out: Dict[str, Any] = {"drift": [], "lockTampered": False, "handcrafted": []}
+    try:
+        fixtures.fixture_globs(dict(config))
+    except fixtures.ConfigError as exc:
+        out["configError"] = str(exc)
+        return out
+    try:
+        entries, tampered = fixtures.read_lock(root, spec)
+    except OSError:
+        entries, tampered = {}, True  # a lock that cannot be read cannot be trusted
+    out["lockTampered"] = tampered
+    changes: Dict[str, Optional[str]] = {}
+    for path in sorted(entries):
+        proc = subprocess.run(["git", "-C", str(root), "show", f"{head}:{path}"], capture_output=True)
+        changes[path] = fixtures.sha256_text(proc.stdout) if proc.returncode == 0 else None
+    report = fixtures.lock_decision(entries, changes, fixtures.read_labels(checkout, config), tampered=tampered)
+    deleted_hand = [{"file": h["file"], "task": h["task"], "change": "deleted"}
+                    for h in report.handcrafted if changes[h["file"]] is None]
+    out["drift"] = [dict(d) for d in sorted([*report.drift, *deleted_hand], key=lambda d: d["file"])]
+    out["handcrafted"] = [dict(h) for h in report.handcrafted if changes[h["file"]] is not None]
+    return out
+
+
+def audit(root: Path, spec: str, into: Optional[str] = None) -> AuditReport:
+    """Gather the inputs of `audit_decision` for `into` (default integrate/<spec>) and decide (10.1-10.5)."""
+    from . import worktrees as wt
+
+    branch = into or wt.integration_branch(spec)
+    ref = f"refs/heads/{branch}"
+    checkout = wt.checkout_of(root, branch) or root
+    proc = subprocess.run(["git", "-C", str(root), "rev-parse", "--verify", "-q", f"{ref}^{{commit}}"],
+                          capture_output=True, text=True)
+    head = proc.stdout.strip() if proc.returncode == 0 else ""
+    approved = read_approved_state(root, spec, ref)
+    current = protected_files_at(root, head) if head else {}
+    hooks = hook_status(root, checkout)
+    try:
+        allow = wt.land_allow_paths(checkout)
+    except Exception:  # a config the audit cannot read must not hide the drift
+        allow = []
+    fixture_report = _fixture_audit(root, spec, head, checkout) if head else \
+        {"drift": [], "lockTampered": False, "handcrafted": []}
+    report = audit_decision(approved, current, allow, hooks,
+                            {**fixture_report, "lock_tampered": fixture_report.get("lockTampered")})
+    problems = list(report.problems)
+    if not report.complete:
+        if approved_state_file(root, spec) is None:
+            reason = "no approved state is recorded for this spec"
+        else:
+            reason = "it is damaged, sealed for another spec or ref, or fails its mac"
+        problems = [f"approved state unreadable: {reason}"] + problems[1:]
+    if not head:
+        problems.append(f"branch {branch} does not exist")
+    if fixture_report.get("configError"):
+        problems.append(f"fixtures config error: {fixture_report['configError']}")
+    clean = report.clean and bool(head) and not fixture_report.get("configError")
+    return AuditReport(complete=report.complete, clean=clean, drift=report.drift, hooks=hooks,
+                       fixtures=fixture_report, problems=tuple(problems), head=head)

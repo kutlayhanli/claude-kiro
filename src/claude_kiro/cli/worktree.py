@@ -455,6 +455,38 @@ def start_cmd(spec, base, run_key, as_json):
         click.echo(f"warning: {w}")
 
 
+@worktree.command("audit")
+@click.argument("spec")
+@click.option("--into", default=None, help="Integration branch to audit (default: integrate/SPEC)")
+@click.option("--json", "as_json", is_flag=True)
+def audit_cmd(spec, into, as_json):
+    """Run-end audit: protected files vs the approved state, ck's hooks, recorded-fixture lock.
+
+    Exit 0 when clean, 1 on drift or hook problems, 3 when incomplete (approved state missing or unreadable).
+    """
+    from .. import protect
+
+    root = _root()
+    name = _spec_name(spec)
+    branch = into or wt.integration_branch(name)
+    try:
+        report = protect.audit(root, name, branch)
+    except (OSError, ValueError, wt.WorktreeError) as e:
+        click.echo(f"❌ {e}")
+        sys.exit(3)
+    doc = {"schema": "ck-audit/1", "spec": name, "into": branch, "head": report.head,
+           "complete": report.complete, "clean": report.clean, "drift": [dict(d) for d in report.drift],
+           "hooks": protect.hook_status_json(report.hooks), "fixtures": dict(report.fixtures),
+           "problems": list(report.problems)}
+    if as_json:
+        click.echo(json.dumps(doc, indent=2))
+    else:
+        click.echo("audit clean" if report.clean else "audit NOT clean")
+        for p in report.problems:
+            click.echo(f"  {p}")
+    sys.exit(0 if report.clean else (1 if report.complete else 3))
+
+
 @worktree.command("claim")
 @click.argument("spec")
 @click.argument("task")
@@ -569,7 +601,7 @@ def _priority(target: Path, spec: str) -> dict:
 @worktree.command("land")
 @click.argument("spec")
 @click.argument("tasks", nargs=-1, required=True)
-@click.option("--into", help="Target branch (default: the main checkout's branch)")
+@click.option("--into", help="Target branch (default: integrate/SPEC if it exists, else the main checkout's branch)")
 @click.option("--gate", "do_gate", is_flag=True, help="Gate the batch (ck gate --task for every landed task) and bisect a red batch")
 @click.option("--install", "do_install", is_flag=True, help="Refresh dependencies in the target (specs/ck.json \"install\", or detected) before each gate")
 @click.option("--release", "release_claims", is_flag=True, help="Release claims left on the task worktrees (their agents have finished)")
@@ -596,7 +628,8 @@ def land_cmd(spec, tasks, into, do_gate, do_install, release_claims, keep, progr
     root = _root()
     name = _spec_name(spec)
     try:
-        target_branch = into or wt.current_branch(root)
+        integ = wt.integration_branch(name)
+        target_branch = into or (integ if wt.branch_exists(root, integ) else wt.current_branch(root))
         target = wt.checkout_of(root, target_branch)
         result = wt.land(
             root,
