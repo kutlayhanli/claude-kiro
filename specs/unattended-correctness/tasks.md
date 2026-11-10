@@ -2302,7 +2302,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 100: Add the `dsh` harness when the verification allows it
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 18.2, 18.4
 **Description:** Only if `dsh-verification.md` says `dsh` can host both calls; otherwise mark this task Done with no code change, citing the findings report. Create `src/claude_kiro/resources/workflow-runner.mjs` (a byte-identical copy of `opencode/src/runner.mjs`), `src/claude_kiro/workflow_host.py` (a Python parent for the runner that services `agent` messages through an `AgentExecutor` and lets the runner's own `ck()` run ck) and `src/claude_kiro/harness_dsh.py` (`run_arm_dsh` returning the shared arm result shape, `doctor_dsh`, and a version check used by `available()`: dsh missing from PATH or reporting an unsupported version is refused with the reason). Register `dsh` in `harnesses.py`. The `dsh` code is separate modules, registered only when built.
@@ -2319,6 +2319,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 - [ ] With `dsh` missing or at an unsupported version, doctor reports it and bench refuses the arm (18.4)
 
 **Dependencies:** Task 99 (reads the verification verdict), Task 62 (edits harnesses.py, which Task 62 creates), Task 98 (its tests are the oracle), Task 105 (its tests are the oracle)
+**Outcome:** No code change. `dsh-verification.md` (Task 99) concludes `canHostCk: false`, so per 18.3/18.5 the `dsh` phase stops: no adapter built, `dsh` not registered. The acceptance boxes above are conditional on the verification allowing it and do not apply.
 **Complexity:** High
 **Risk:** safety (drives a paid DeepSeek-backed harness)
 
