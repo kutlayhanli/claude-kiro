@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+"""A fake `dsh` implementing only the surface recorded in specs/unattended-correctness/dsh-verification.md.
+
+Recorded surface: `dsh --version`, and `dsh --profile sdk`, which speaks newline-delimited JSON-RPC on stdio.
+Client to server: initialize, session/prompt, session/wait, shutdown. Nothing else is implemented, and there is
+no process-execution request (the record says the protocol has none).
+Parameter and result field names (sessionId, prompt, finalResponse, {ok: true}) are PLACEHOLDERS: the record
+names only the methods and the Python SDK RunResult.final_response, not the wire shapes.
+Env: FAKE_DSH_VERSION (version printed, default 0.2.2-rc.1), FAKE_DSH_LOG (a file each request's method is appended to).
+"""
+import json
+import os
+import sys
+
+VERSION = os.environ.get("FAKE_DSH_VERSION", "0.2.2-rc.1")
+LOG = os.environ.get("FAKE_DSH_LOG")
+
+
+def main(argv):
+    if argv == ["--version"]:
+        print(f"dsh {VERSION}")
+        return 0
+    if argv[:2] != ["--profile", "sdk"]:
+        print("dsh: unknown arguments", file=sys.stderr)
+        return 2
+    sessions = {}
+    for line in sys.stdin:
+        if not line.strip():
+            continue
+        req = json.loads(line)
+        method, rid, params = req.get("method"), req.get("id"), req.get("params") or {}
+        if LOG:
+            with open(LOG, "a") as fh:
+                fh.write(json.dumps({"method": method, "params": params}) + "\n")
+        if method == "initialize":
+            result = {"ok": True}
+        elif method == "session/prompt":
+            sid = params.get("sessionId") or f"s{len(sessions) + 1}"
+            sessions[sid] = params.get("prompt", "")
+            result = {"sessionId": sid}
+        elif method == "session/wait":
+            result = {"finalResponse": "done: " + sessions.get(params.get("sessionId"), "")}
+        elif method == "shutdown":
+            print(json.dumps({"jsonrpc": "2.0", "id": rid, "result": {}}), flush=True)
+            return 0
+        else:
+            print(json.dumps({"jsonrpc": "2.0", "id": rid, "error": {"code": -32601, "message": f"unknown method {method}"}}), flush=True)
+            continue
+        print(json.dumps({"jsonrpc": "2.0", "id": rid, "result": result}), flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

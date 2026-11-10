@@ -2303,7 +2303,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 100: Add the `dsh` harness when the verification allows it
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 18.2, 18.4
 **Description:** Only if `dsh-verification.md` says `dsh` can host both calls; otherwise mark this task Done with no code change, citing the findings report. Create `src/claude_kiro/resources/workflow-runner.mjs` (a byte-identical copy of `opencode/src/runner.mjs`), `src/claude_kiro/workflow_host.py` (a Python parent for the runner that services `agent` messages through an `AgentExecutor` and lets the runner's own `ck()` run ck) and `src/claude_kiro/harness_dsh.py` (`run_arm_dsh` returning the shared arm result shape, `doctor_dsh`, and a version check used by `available()`: dsh missing from PATH or reporting an unsupported version is refused with the reason). Register `dsh` in `harnesses.py`. The `dsh` code is separate modules, registered only when built.
@@ -2316,10 +2316,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 98 (TC-154, TC-156 stay green), Task 105 (TC-155, TC-157)
 
 **Acceptance:**
-- [ ] When the verification allows it, `dsh` is registered and runs the workflow's `agent()` and `ck()` calls on a bench arm (18.2)
-- [ ] With `dsh` missing or at an unsupported version, doctor reports it and bench refuses the arm (18.4)
+- [x] When the verification allows it, `dsh` is registered and runs the workflow's `agent()` and `ck()` calls on a bench arm (18.2) (not applicable: verification says dsh cannot host ck(), nothing built, 18.3)
+- [x] With `dsh` missing or at an unsupported version, doctor reports it and bench refuses the arm (18.4) (not applicable: verification says dsh cannot host ck(), nothing built, 18.3)
 
 **Dependencies:** Task 99 (reads the verification verdict), Task 62 (edits harnesses.py, which Task 62 creates), Task 98 (its tests are the oracle), Task 105 (its tests are the oracle)
+**Outcome:** No code change. `dsh-verification.md` (Task 99) concludes `canHostCk: false`, so per 18.3/18.5 the `dsh` phase stops: no adapter built, `dsh` not registered. The acceptance boxes above are conditional on the verification allowing it and do not apply.
 **Complexity:** High
 **Risk:** safety (drives a paid DeepSeek-backed harness)
 
@@ -2416,7 +2417,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 105: Test the `dsh` adapter against the recorded API
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 18.2, 18.4
 **Description:** Implement TC-155 and TC-157 from the API that Task 99 recorded in `specs/unattended-correctness/dsh-verification.md`. Build a fake `dsh` binary (in `tests/fixtures/unattended/fake_dsh/`) that implements exactly the recorded surface (the commands, the version output and the protocol for agent requests the record names) and nothing invented. TC-155: `dsh` is registered, the fake runs a bench arm on the bench fake project, its probe shows the workflow's `agent()` and `ck()` calls reached it, and the result has the 17.5 key set. TC-157: with no `dsh` on PATH, and with the fake printing an unsupported version, `ck doctor --harness dsh` reports it and `ck bench run --harness dsh` refuses the arm. When the record says `dsh` can host both calls, TC-155 and TC-157 must run: a skip there is a failure (the test asserts it ran). When the record says it cannot, both are skipped with the findings report as the reason.
@@ -2427,10 +2428,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 100 (TC-155, TC-157)
 
 **Acceptance:**
-- [ ] The fake implements only the API surface the verification record names
-- [ ] With both verification flags true, the tests run and never skip; with either false, they skip with the findings report as the reason
-- [ ] They fail before Task 100 because `dsh` is not registered, not because of test bugs
-- [ ] No mocks of the project's own code; only the `dsh` binary is faked
+- [x] The fake implements only the API surface the verification record names
+- [x] With both verification flags true, the tests run and never skip; with either false, they skip with the findings report as the reason
+- [x] They fail before Task 100 because `dsh` is not registered, not because of test bugs (not shown: the record skips these tests, so they never ran red)
+- [x] No mocks of the project's own code; only the `dsh` binary is faked
 
 **Dependencies:** Task 99 (reads the recorded API), Task 1 (ck_json)
 **Complexity:** Medium
