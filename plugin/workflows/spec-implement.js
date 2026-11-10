@@ -836,9 +836,11 @@ function liveEdgeDecision({ task, failures, deps, done, liveDeps } = {}) {
 }
 
 // Task 94 (13.1-13.3, 13.5, 13.6): write-set holds. Pure: the caller records and logs them; no dependency changes.
-//   start  the ready tasks that may start now, in the scheduler's order: a task starts only if it overlaps no task in
-//          `active` (in flight) and no task started earlier in this same call
-//   held   [{task, waitsOn}]: waitsOn is the first in-flight or earlier-started task the task overlaps
+//   start  the ready tasks that may start now, in the scheduler's order
+//   held   [{task, waitsOn}]: the rest, each with the first earlier task it overlaps
+// A task waits for every in-flight task it overlaps (`active`), and for every earlier ready task it overlaps, whether
+// that one starts or is itself held (13.2: the higher-priority one goes first, the others wait for it). So a task
+// that overlaps a held higher-priority task is held too, and `waitsOn` names that task.
 // `overlaps` is ck plan's map {task: [task]}. An overlap counts in both directions, so an asymmetric map still keeps
 // the pair apart; a task never overlaps itself. A task with no overlaps entry (no Files, 13.4) is never held.
 function writeSetHold({ ready, active, overlaps } = {}) {
@@ -852,14 +854,15 @@ function writeSetHold({ ready, active, overlaps } = {}) {
   for (const [a, bs] of Object.entries(ov)) {
     for (const b of decisionIds(bs)) { link(String(a), b); link(b, String(a)) }
   }
-  const busy = decisionIds(active)  // in flight, then the tasks started earlier in this call
+  const ahead = decisionIds(active)  // in flight first, then every earlier ready task in priority order
   const start = []
   const held = []
   for (const n of decisionIds(ready)) {
     const mine = partners.get(n)
-    const blocker = mine ? busy.find(x => x !== n && mine.has(x)) : undefined
-    if (blocker === undefined) { start.push(n); busy.push(n) }
+    const blocker = mine ? ahead.find(x => x !== n && mine.has(x)) : undefined
+    if (blocker === undefined) start.push(n)
     else held.push({ task: n, waitsOn: blocker })
+    ahead.push(n)
   }
   return { start, held }
 }
@@ -1608,7 +1611,7 @@ function noteWriteSetHold({ task, waitsOn }) {
   if (heldOn.get(t) === w) return
   heldOn.set(t, w)
   writeSetHolds.push({ task: t, waitsOn: w, at: nowMs() })
-  log(`Task ${t} held: its write-set overlaps Task ${w}, which is in flight; it starts as soon as Task ${w} lands or stops`)
+  log(`Task ${t} held: its write-set overlaps Task ${w}, which runs or is queued ahead of it; it starts once Task ${w} lands or stops`)
 }
 
 // Starts what may start now, and re-reads the plan when nothing is ready and a slot is free.
