@@ -2315,8 +2315,8 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 98 (TC-154, TC-156 stay green), Task 105 (TC-155, TC-157)
 
 **Acceptance:**
-- [ ] When the verification allows it, `dsh` is registered and runs the workflow's `agent()` and `ck()` calls on a bench arm (18.2)
-- [ ] With `dsh` missing or at an unsupported version, doctor reports it and bench refuses the arm (18.4)
+- [x] When the verification allows it, `dsh` is registered and runs the workflow's `agent()` and `ck()` calls on a bench arm (18.2) (not applicable: verification says dsh cannot host ck(), nothing built, 18.3)
+- [x] With `dsh` missing or at an unsupported version, doctor reports it and bench refuses the arm (18.4) (not applicable: verification says dsh cannot host ck(), nothing built, 18.3)
 
 **Dependencies:** Task 99 (reads the verification verdict), Task 62 (edits harnesses.py, which Task 62 creates), Task 98 (its tests are the oracle), Task 105 (its tests are the oracle)
 **Outcome:** No code change. `dsh-verification.md` (Task 99) concludes `canHostCk: false`, so per 18.3/18.5 the `dsh` phase stops: no adapter built, `dsh` not registered. The acceptance boxes above are conditional on the verification allowing it and do not apply.
