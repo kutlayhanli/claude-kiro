@@ -1677,7 +1677,11 @@ async function runTestFix({ k, blocked, held = [], source = 'conflict', conflict
   const toMe = reason => { rec.outcome = 'to-me'; rec.reason = reason; return rec }
   const record = async outcome => {
     const out = await thinCk('testfix record', ['-C', ROOT, 'testfix', 'record', SPEC, fix, ...nodes.flatMap(x => ['--test', x]), '--outcome', outcome, '--json'], { label: `testfix record ${k}`, phase, cwd: ROOT, what: `Recording step for test fix ${fix} of spec ${SPEC}` }).catch(() => null)
-    if (!out || out.code !== 0) log(`Test fix ${fix}: ck testfix record did not confirm (${out ? trim(out.stderr || out.code, 200) : 'no answer'})`)
+    if (!out || out.code !== 0) {
+      rec.recordError = `ck testfix record did not confirm (${out ? trim(out.stderr || out.code, 200) : 'no answer'}); the cross-run ledger may lack ${fix}`
+      log(`Test fix ${fix}: ${rec.recordError}`)
+      runWarnings.push(`Test fix ${fix}: ${rec.recordError}`)
+    }
   }
   for (const n of nodes) testFixLedger.add(n)
   let fx = null
@@ -1715,10 +1719,10 @@ async function runTestFix({ k, blocked, held = [], source = 'conflict', conflict
     await record('to-me')
     return toMe(rv ? `the reviewer rejected the fix: ${trim((rv.findings || []).filter(f => f && f.severity === 'blocking').map(f => f.issue), 800) || rv.summary || rv.verdict}` : 'the reviewer returned nothing')
   }
-  while (landingBusy) await landingIdle   // the landing queue lands one batch at a time
   let res = null
   try {
-    const out = await thinCk('land', landArgv([fix]), { label: `land ${fix}`, phase, cwd: ROOT, gate: true, what: `Landing step for test fix ${fix} of spec ${SPEC}: it merges the fix into ${INTO} and gates the tests it changes` })
+    // the landing lock keeps this landing from running beside a batch landing (ck worktree land holds a non-blocking flock)
+    const out = await withLandingLock(() => thinCk('land', landArgv([fix]), { label: `land ${fix}`, phase, cwd: ROOT, gate: true, what: `Landing step for test fix ${fix} of spec ${SPEC}: it merges the fix into ${INTO} and gates the tests it changes` }))
     res = out.json && Array.isArray(out.json.tasks) ? out.json : { tasks: [], error: ckError(out) }
   } catch (e) {
     res = { tasks: [], error: e && e.message }
@@ -1739,7 +1743,14 @@ async function runTestFix({ k, blocked, held = [], source = 'conflict', conflict
 async function testFixFor(n, conflicts) {
   const nodes = [...new Set(conflicts.map(conflictNode))]
   const led = await thinCk('testfix ledger', ['-C', ROOT, 'testfix', 'check', SPEC, ...nodes.flatMap(x => ['--test', x]), '--json'], { label: `testfix ledger ${++ledgerSeq}`, phase: phaseOf(n), cwd: ROOT, what: `Ledger check for the test fixes of spec ${SPEC}` })
-  const prior = led.json && Array.isArray(led.json.alreadyFixed) ? led.json.alreadyFixed : []
+  if (!led.json || !Array.isArray(led.json.alreadyFixed)) {
+    // 4.8: a ledger that cannot be read never grants a fix
+    const reason = `the test-fix ledger could not be read: ${ckError(led)}`
+    const rec = { fix: null, blocked: n, held: [], source: 'conflict', tests: nodes, outcome: 'to-me', proof: null, scope: null, review: null, reason }
+    testFixRecords.push(rec)
+    return { records: [rec], fixed: [], findings: [], toMe: [reason] }
+  }
+  const prior = led.json.alreadyFixed
   const plan = testFixPlan({ conflicts, alreadyFixed: [...prior, ...nodes.filter(x => testFixLedger.has(x)).map(node => ({ node, at: 'this run', fix: 'this run' }))] })
   const out = { records: [], fixed: [], findings: [], toMe: [] }
   for (const c of plan.toMe) {
@@ -1922,6 +1933,8 @@ async function runTask(n) {
         rec.reason = `blocked: test (${confirmed.file}${confirmed.test ? ` ${confirmed.test}` : ''}): ${confirmed.reason}`
         const fixed = await testFixFor(n, testConflictsOf(r))
         if (fixed.toMe.length) return await parkTestFix(n, rec, fixed.toMe, fixed.records)
+        rec.testConflictFixed = rec.testConflict   // the conflict is resolved: a later ordinary failure is handled like any other
+        rec.testConflict = null
         log(`Task ${n}: ${fixed.fixed.length ? `test fix landed for ${fixed.fixed.join(', ')}` : 'the tests are correct'}; retrying the task`)
         budgetBase = retryNo()
         working.add(n)
@@ -2173,7 +2186,7 @@ const taskReport = Object.values(records).map(r => ({
   reason: r.reason,
   summary: r.result && r.result.summary,
   wrongTests: r.result && r.result.wrongTests,
-  testConflict: r.testConflict || null,
+  testConflict: r.testConflict || r.testConflictFixed || null,
   testConflicts: testConflictsOf(r.result),
   failures: (r.result && Array.isArray(r.result.failures) && r.result.failures) || [],
   outsideFiles: r.result && r.result.outsideFiles,
