@@ -2190,6 +2190,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 - [ ] Holds never change the task list's dependencies (13.6)
 
 **Dependencies:** Task 93 (both edit spec-implement.js; Task 93 runs first), Task 53 (reads `ck plan`'s `overlaps`), Task 88 (its tests are the oracle), Task 89 (its tests are the oracle), Task 91 (its tests are the oracle), Task 92 (its tests are the oracle)
+**Notes (attempt 2):** `writeSetHold` and the scheduler wiring are in; command_deps, P-25 and the schedule properties pass. Blocked on test-track fixes. write_set_redteam: the "parks instead of merging" test uses `failUntil` (a failing task fails, it is never parked; parking is for guard stops, protected landings and test fixes), and the "never gains the blocker" spy reads `a.deps` on the thin plan call's `{exitCode, json}` envelope (19.1, 19.3). The real `ck plan` surface-form tests (dot segment, `//`, unbackticked entries, bare directory, case) and the done-task overlap test need `graph.py` / `ck plan` changes outside this task. Smoke: TC-176's scripted Task 3 writes a whole stale tasks.md; under the hold 13.1 requires it starts after Task 2 merged and reverts Task 2 to Not Started, so tc1 is excused. TC-43b's scripted agent never merges integrate after the test fix lands. TC-179's fixture has no Verify lines, so Task 2's gate runs nothing and no live edge can arise.
 **Complexity:** Medium
 **Risk:** normal
 
