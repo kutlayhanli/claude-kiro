@@ -317,7 +317,7 @@ ck worktree land SPEC TASKS... --json                            # tasks[].failu
 - `audit` prints `ck-audit/1` (Data Models); exit 0 when `clean`, 1 when drift or hook problems, 3 when
   incomplete.
 - `approve` refuses (exit 2, no change) unless stdin and stdout are a TTY and I type the 6-character code it
-  prints; then it lands the task with `land(..., approved={task: files})` and prints the landing line. It never
+  prints; then it lands the task with `land(..., approved={task: files}, keep=True)` (the task branch and worktree stay, as the record of what I approved) and prints the landing line. It never
   takes `--json` or a code on the command line.
 
 ### `ck graph` (Story 11)

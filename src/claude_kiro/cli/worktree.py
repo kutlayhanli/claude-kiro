@@ -721,7 +721,8 @@ def approve_cmd(spec, task, into):
         if wt.git(root, "rev-parse", branch).stdout.strip() != tip:
             click.echo(f"❌ refused: {branch} changed after the prompt (was {tip[:10]}); nothing landed")
             sys.exit(2)
-        result = wt.land(root, name, [task], into=target_branch, approved={task: files})
+        # keep: the task branch stays as the record of exactly what I approved.
+        result = wt.land(root, name, [task], into=target_branch, approved={task: files}, keep=True)
     except (wt.WorktreeError, OSError) as e:
         click.echo(f"❌ {e}")
         sys.exit(3)
