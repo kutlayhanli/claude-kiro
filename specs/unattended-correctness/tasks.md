@@ -1016,7 +1016,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Files:**
 - `tests/test_fixture_lock.py` - TC-134 to TC-138, TC-139a, TC-140, TC-141
 **Verify:** `uv run pytest -q tests/test_fixture_lock.py`
-**Verifies:** Task 48 (TC-139a), Task 49 (TC-134, TC-136, TC-137, TC-141), Task 51 (TC-135, TC-138, TC-140 (audit side))
+**Verifies:** Task 48 (TC-139a), Task 49 (TC-134, TC-141), Task 51 (TC-135, TC-136, TC-137, TC-138, TC-140 (audit side))
 
 **Acceptance:**
 - [x] Tests run real landings, the real fixtures CLI and the real audit
@@ -1155,8 +1155,8 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Description:** In `worktrees.land()`, after each task merges, gather the changed files matching `fixtures.recorded`, call `fixtures.lock_decision`, write new lock entries (task and time) for files landing for the first time, and report changes to locked files as `Landed.fixtureDrift` (`[{file, task, change}]`), printed in the land JSON as `tasks[].fixtureDrift` (empty list when none). Accepted handcrafted changes update the entry's hash and record the reason. With no globs nothing is written or reported; a config error is reported in the land result and no lock is kept for that landing. The landing itself is not refused by drift. Harness Contract owner: item 5's `fixtureDrift` in `ck worktree land --json`.
 **Files:**
 - `src/claude_kiro/worktrees.py` - fixture lock recording and `Landed.fixtureDrift` in `land()`
-**Verify:** `uv run pytest -q tests/test_fixture_lock.py -k "tc134_ or tc136_ or tc137_ or tc141_"`
-**Verified by:** Task 43 (TC-134, TC-136, TC-137, TC-141)
+**Verify:** `uv run pytest -q tests/test_fixture_lock.py -k "tc134_ or tc141_"`
+**Verified by:** Task 43 (TC-134, TC-141)
 
 **Acceptance:**
 - [ ] The first landing of a recorded fixture creates its lock entry (15.1)
@@ -1197,8 +1197,8 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Files:**
 - `src/claude_kiro/protect.py` - `audit()` input gathering
 - `src/claude_kiro/cli/worktree.py` - `ck worktree audit`
-**Verify:** `uv run pytest -q tests/test_protected_audit.py tests/test_protected_audit_redteam.py` `uv run pytest -q tests/test_protected_hooks_redteam.py -k "tc92_"` `uv run pytest -q tests/test_fixture_lock.py -k "tc135_ or tc138_ or tc140_"` `uv run pytest -q tests/test_protected_hooks_properties.py -k "tc175_p19 or real_audit"`
-**Verified by:** Task 38 (P-19 on the real audit), Task 40 (TC-92, bypasses reported by the audit), Task 41 (TC-96 to TC-100), Task 42 (red team of 10.5), Task 43 (TC-135, TC-138, TC-140 (audit side))
+**Verify:** `uv run pytest -q tests/test_protected_audit.py tests/test_protected_audit_redteam.py` `uv run pytest -q tests/test_protected_hooks_redteam.py -k "tc92_"` `uv run pytest -q tests/test_fixture_lock.py -k "tc135_ or tc136_ or tc137_ or tc138_ or tc140_"` `uv run pytest -q tests/test_protected_hooks_properties.py -k "tc175_p19 or real_audit"`
+**Verified by:** Task 38 (P-19 on the real audit), Task 40 (TC-92, bypasses reported by the audit), Task 41 (TC-96 to TC-100), Task 42 (red team of 10.5), Task 43 (TC-135, TC-136, TC-137, TC-138, TC-140 (audit side))
 
 **Acceptance:**
 - [ ] The audit lists each protected file added, changed or deleted without approval (10.1)
