@@ -2156,10 +2156,16 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 88 (P-24 at `liveEdgeDecision`), Task 90 (red team of 12.5, 12.7)
 
 **Acceptance:**
-- [ ] A missing command provided by an unfinished task adds a live edge; the task waits for the provider to merge and retries without spending a retry or raising a conflict (12.5)
-- [ ] A missing command no task provides becomes a test conflict on the tests that invoke it (12.6)
-- [ ] A live edge that would close a cycle is refused and the task is blocked naming the cycle (12.7)
-- [ ] Live edges are logged and listed in the results (12.8)
+- [x] A missing command provided by an unfinished task adds a live edge; the task waits for the provider to merge and retries without spending a retry or raising a conflict (12.5)
+- [x] A missing command no task provides becomes a test conflict on the tests that invoke it (12.6)
+- [x] A live edge that would close a cycle is refused and the task is blocked naming the cycle (12.7)
+- [x] Live edges are logged and listed in the results (12.8)
+
+**Implementation notes (Task 93):**
+- `liveEdgeDecision` returns `{action, edges, cycle, command, tests, refused}`. With a provider that is unfinished and safe it returns `wait` with one edge per safe provider. With a provider that would close a cycle it also returns `cycle`, and `refused` lists those providers. The script blocks the task whenever `refused` is not empty (12.7), even if another provider is safe, and records no edge for it. P-24 requires the `wait` action in that mixed case, and the red team requires the blocked outcome, so the script resolves the two this way.
+- `liveEdges` is listed in the result only when the run added at least one edge. TC-73 pins the result's key set for runs without live edges.
+- A waiting task is kept in `waitingLive` and excluded from the plan until every provider is Done or merged in this run. It is not in `failed`, and its wait spends no retry.
+- Thin plan calls now pass `--compact`.
 
 **Dependencies:** Task 87 (both edit spec-implement.js; Task 87 runs first), Task 53 (reads `ck plan`'s `provides` and `--compact`), Task 88 (its tests are the oracle), Task 90 (its tests are the oracle)
 **Complexity:** Medium
