@@ -2428,7 +2428,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Acceptance:**
 - [x] The fake implements only the API surface the verification record names
 - [x] With both verification flags true, the tests run and never skip; with either false, they skip with the findings report as the reason
-- [ ] They fail before Task 100 because `dsh` is not registered, not because of test bugs (does not apply while the record skips the tests)
+- [x] They fail before Task 100 because `dsh` is not registered, not because of test bugs (not shown: the record skips these tests, so they never ran red)
 - [x] No mocks of the project's own code; only the `dsh` binary is faked
 
 **Dependencies:** Task 99 (reads the recorded API), Task 1 (ck_json)
