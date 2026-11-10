@@ -957,23 +957,49 @@ function gateOutcome(out) {
 
 // Task 86 (4.8, 4.9): which conflicts a test-fixer may take. Each distinct (file, test) is kept once, first wins; one whose
 // node is in `alreadyFixed` (ledger entries {node, at, fix}) goes to me; the rest are grouped by file, one group per file.
+// Nodes and files are compared by their canonical form (design: Node canonicalisation), as ck's ledger keys them.
 function testFixPlan({ conflicts, alreadyFixed } = {}) {
-  const nodeOf = c => (c.test ? `${c.file}::${c.test}` : String(c.file))
-  const fixed = new Set((Array.isArray(alreadyFixed) ? alreadyFixed : []).map(e => String(e && typeof e === 'object' ? e.node : e)))
+  const nodeOf = c => canonicalNode(c.test ? `${c.file}::${c.test}` : String(c.file))
+  const fixed = new Set((Array.isArray(alreadyFixed) ? alreadyFixed : []).map(e => canonicalNode(String(e && typeof e === 'object' ? e.node : e))))
   const seen = new Set()
   const groups = []
   const toMe = []
   for (const c of Array.isArray(conflicts) ? conflicts : []) {
     if (!c || typeof c !== 'object' || !c.file) continue
-    const k = JSON.stringify([c.file, c.test || null])
+    const k = nodeOf(c)
     if (seen.has(k)) continue
     seen.add(k)
-    if (fixed.has(nodeOf(c))) { toMe.push(c); continue }
-    let g = groups.find(x => x.file === c.file)
-    if (!g) { g = { file: c.file, conflicts: [] }; groups.push(g) }
+    if (fixed.has(k)) { toMe.push(c); continue }
+    const fk = canonicalNode(String(c.file))
+    let g = groups.find(x => x.key === fk)
+    if (!g) { g = { file: c.file, conflicts: [] }; Object.defineProperty(g, 'key', { value: fk, enumerable: false }); groups.push(g) }
     g.conflicts.push(c)
   }
   return { groups, toMe }
+}
+
+// The JS mirror of ck's canonical_node (testfix.py): `\\` becomes `/`, repeated slashes and `./` / `..` segments are
+// normalised, a trailing `[param]` id is dropped, and the result is lower-cased.
+function canonicalNode(node) {
+  const text = String(node ?? '').trim().replace(/\\/g, '/')
+  const i = text.indexOf('::')
+  let path = i < 0 ? text : text.slice(0, i)
+  const sep = i < 0 ? '' : '::'
+  let rest = i < 0 ? '' : text.slice(i + 2)
+  path = path.replace(/\/{2,}/g, '/')
+  if (path) {
+    const abs = path.startsWith('/')
+    const out = []
+    for (const seg of path.split('/')) {
+      if (seg === '' || seg === '.') continue
+      if (seg === '..' && out.length && out[out.length - 1] !== '..') out.pop()
+      else if (seg === '..' && abs) continue
+      else out.push(seg)
+    }
+    path = (abs ? '/' : '') + out.join('/') || (abs ? '/' : '.')
+  }
+  rest = rest.replace(/\[.*\]\s*$/, '').trim()
+  return (path + sep + rest).toLowerCase()
 }
 
 // --- end decisions ---
@@ -1225,13 +1251,18 @@ async function runPlan(trigger) {
 
 // Run fn while no landing step runs (and keep new landings queued until it returns): a relink
 // commits tasks.md on INTO, so it must never interleave with a merge into it.
+// While it holds the lock it publishes a promise that settles on release, so a second caller waiting in the loop
+// below really waits (an already-settled landingIdle would spin on microtasks and starve the holder's I/O).
 async function withLandingLock(fn) {
   while (landingBusy) await landingIdle
+  let release
+  landingIdle = new Promise(r => { release = r })
   landingBusy = true
   try {
     return await fn()
   } finally {
     landingBusy = false
+    release()
     if (landQueue.length) pumpLandings()
   }
 }
@@ -1286,11 +1317,23 @@ function requestPlan(trigger) {
   return planRun
 }
 
-// A task's implementing agent finished; its slot is free.
+// A task's implementing agent finished; its slot is free. A task waiting to take a slot back (acquireSlot) gets it
+// first, before the scheduler can start a new task in it.
 function releaseSlot(n) {
   if (!working.delete(n)) return
+  const w = slotWaiters.shift()
+  if (w) { working.add(w.n); w.resolve() }
   requestPlan('freed')
   poke()
+}
+
+// A task that gave its slot up (a test fix) takes one again before its next agent runs, so the run never holds more
+// than its configured slots.
+const slotWaiters = []   // { n, resolve }
+function acquireSlot(n) {
+  if (working.has(n)) return Promise.resolve()
+  if (!(working.size >= MAX_CONCURRENT)) { working.add(n); return Promise.resolve() }
+  return new Promise(resolve => slotWaiters.push({ n, resolve }))
 }
 
 function startTask(n) {
@@ -1648,6 +1691,7 @@ const testFixLedger = new Set()   // nodes a fix was tried for this run (the ck 
 let testFixSeq = 0
 let ledgerSeq = 0
 const conflictNode = c => (c.test ? `${c.file}::${c.test}` : String(c.file))
+const conflictKey = c => canonicalNode(conflictNode(c))   // the run ledger's key, as ck's ledger keys it (4.8)
 const conflictEntry = c => ({ file: String(c.file ?? ''), test: String(c.test ?? ''), criterion: String(c.criterion ?? ''), reason: String(c.reason ?? ''), fix: String(c.fix ?? '') })
 // 4.5: the workflow does not trust in_scope alone.
 const scopeRefusal = sc => {
@@ -1673,7 +1717,7 @@ async function runTestFix({ k, blocked, held = [], source = 'conflict', conflict
   const entries = conflicts.map(conflictEntry)
   const nodes = conflicts.map(conflictNode)
   const phase = blocked != null ? phaseOf(blocked) : 'Test fix'
-  const rec = { fix, blocked: blocked ?? null, held: [...held], source, tests: nodes, outcome: 'to-me', proof: null, scope: null, review: null, reason: '', finding: null }
+  const rec = { fix, blocked: blocked ?? null, held: [...held], source, tests: nodes, changedTests: [], outcome: 'to-me', proof: null, scope: null, review: null, reason: '', finding: null }
   const toMe = reason => { rec.outcome = 'to-me'; rec.reason = reason; return rec }
   const record = async outcome => {
     const out = await thinCk('testfix record', ['-C', ROOT, 'testfix', 'record', SPEC, fix, ...nodes.flatMap(x => ['--test', x]), '--outcome', outcome, '--json'], { label: `testfix record ${k}`, phase, cwd: ROOT, what: `Recording step for test fix ${fix} of spec ${SPEC}` }).catch(() => null)
@@ -1683,7 +1727,7 @@ async function runTestFix({ k, blocked, held = [], source = 'conflict', conflict
       runWarnings.push(`Test fix ${fix}: ${rec.recordError}`)
     }
   }
-  for (const n of nodes) testFixLedger.add(n)
+  for (const c of conflicts) testFixLedger.add(conflictKey(c))
   let fx = null
   try {
     fx = await call('testfix', testFixPrompt(k, blocked, entries), { label: blocked != null ? `testfix ${k} (Task ${blocked})` : `testfix ${k} (cross-test)`, phase, schema: TESTFIX, ...TEST })
@@ -1697,6 +1741,7 @@ async function runTestFix({ k, blocked, held = [], source = 'conflict', conflict
     rec.reason = trim(rec.finding.issue || fx.summary, 400)
     return rec
   }
+  if (Array.isArray(fx.changedTests)) rec.changedTests = fx.changedTests.map(String)
   if (fx.verdict !== 'fixed') return toMe(`the test-fixer cannot fix it: ${trim(fx.summary, 400)}`)
   if (fx.finding && typeof fx.finding === 'object') return toMe(`the test-fixer's report contradicts itself (verdict fixed with a finding about the code): ${trim(fx.finding, 300)}`)
   const proveArgv = ['-C', ROOT, 'testfix', 'prove', SPEC, fix, ...(blocked != null ? ['--blocked', String(blocked)] : held.flatMap(h => ['--held', String(h)])), ...nodes.flatMap(x => ['--test', x]), '--into', INTO, '--json']
@@ -1704,6 +1749,9 @@ async function runTestFix({ k, blocked, held = [], source = 'conflict', conflict
   if (!pv.json) { await record('to-me'); return toMe(`ck testfix prove gave no result: ${ckError(pv)}`) }
   rec.scope = pv.json.scope ?? null
   rec.proof = pv.json.proof ?? null
+  // 4.10: the record names the tests the fix changed; ck's proof is the authority when it lists them
+  const proved = pv.json.changedTests ?? (rec.proof && rec.proof.changedTests) ?? (rec.scope && rec.scope.changedTests)
+  if (Array.isArray(proved)) rec.changedTests = proved.map(String)
   const refusedScope = scopeRefusal(rec.scope)
   if (refusedScope) { await record('to-me'); return toMe(refusedScope) }
   const refusedProof = proofRefusal(rec.proof)
@@ -1743,15 +1791,15 @@ async function runTestFix({ k, blocked, held = [], source = 'conflict', conflict
 async function testFixFor(n, conflicts) {
   const nodes = [...new Set(conflicts.map(conflictNode))]
   const led = await thinCk('testfix ledger', ['-C', ROOT, 'testfix', 'check', SPEC, ...nodes.flatMap(x => ['--test', x]), '--json'], { label: `testfix ledger ${++ledgerSeq}`, phase: phaseOf(n), cwd: ROOT, what: `Ledger check for the test fixes of spec ${SPEC}` })
-  if (!led.json || !Array.isArray(led.json.alreadyFixed)) {
-    // 4.8: a ledger that cannot be read never grants a fix
-    const reason = `the test-fix ledger could not be read: ${ckError(led)}`
+  if (!led.json || !Array.isArray(led.json.alreadyFixed) || led.json.error || led.code !== 0) {
+    // 4.8: a ledger that cannot be read never grants a fix (a damaged ledger exits 3 and still lists every node)
+    const reason = `the test-fix ledger could not be read: ${led.json && led.json.error ? trim(String(led.json.error), 300) : ckError(led)}`
     const rec = { fix: null, blocked: n, held: [], source: 'conflict', tests: nodes, outcome: 'to-me', proof: null, scope: null, review: null, reason }
     testFixRecords.push(rec)
     return { records: [rec], fixed: [], findings: [], toMe: [reason] }
   }
   const prior = led.json.alreadyFixed
-  const plan = testFixPlan({ conflicts, alreadyFixed: [...prior, ...nodes.filter(x => testFixLedger.has(x)).map(node => ({ node, at: 'this run', fix: 'this run' }))] })
+  const plan = testFixPlan({ conflicts, alreadyFixed: [...prior, ...conflicts.filter(c => testFixLedger.has(conflictKey(c))).map(c => ({ node: conflictNode(c), at: 'this run', fix: 'this run' }))] })
   const out = { records: [], fixed: [], findings: [], toMe: [] }
   for (const c of plan.toMe) {
     const reason = `${conflictNode(c)} was already fixed once (testfix ledger); a second fix goes to you`
@@ -1937,7 +1985,7 @@ async function runTask(n) {
         rec.testConflict = null
         log(`Task ${n}: ${fixed.fixed.length ? `test fix landed for ${fixed.fixed.join(', ')}` : 'the tests are correct'}; retrying the task`)
         budgetBase = retryNo()
-        working.add(n)
+        await acquireSlot(n)
         r = await call('task', `${retryPrompt(n, { ...r, failures: fixed.findings }, retryNo(), claimFlags('retry', codeOpts(n), retryNo() + 1))}\n${afterFixNote(fixed.fixed, fixed.findings)}`, { label: `${label(n)} retry ${retryNo()}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
         rec.attempts++
         lastModel = codeOpts(n).model
