@@ -874,8 +874,13 @@ only when the test's row states that member, so `"buy"` matches a row saying BUY
 side does not); a threshold-like number (a comparison operand, or a name containing
 `threshold`, `min`, `max`, `limit`, `cutoff`) when the row states exactly one threshold and the test's
 threshold-like numbers do not include it (percent and fraction forms both accepted) -> mismatch; an ISO date fed
-by the test when the row lists dates and the date is not among them -> mismatch. A row with several thresholds, a
-value with no name, or a non-Python test -> unparsed. It never writes a file (8.6).
+by the test when the row lists dates and the date is not among them -> mismatch. A comparison's literal is checked whatever it is compared with (`score() >= 4.50` under a row
+stating 4.50 is checked, `score() >= 4.15` is a mismatch); the other operands are its subject, not values. A row
+with several thresholds; a runtime expression asserted or fed as a threshold-like name (`quote.min_price >= f(y)`,
+`fee_threshold = base * 1.1`), or compared with no literal beside it when it is computed from a number, enum or date
+(`score() == base * 1.1`; `score()` and `obj.get("x")` state no value and are not items); an enum or date with no
+name (a positional argument, `make() == Side.BUY`); or a non-Python test -> unparsed. Test files are read as UTF-8
+with an optional BOM, and an escaped `\|` stays inside its test-plan cell. It never writes a file (8.6).
 
 ### JSON: `ck-gate/1`
 
