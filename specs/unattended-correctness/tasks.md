@@ -1234,7 +1234,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 53: Wire the graph into `ck plan`, `ck lint`, `ck relink` and `ck lint --fidelity`
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 7.4, 8.1, 8.3, 8.6, 11.6, 12.1, 12.2, 12.3, 12.5, 12.7, 13.1, 13.4, 13.6
 **Description:** In `src/claude_kiro/cli/worktree.py`: `_plan` adds `overlaps` (from `graph.write_set_overlaps`), `testVerifies` (test file -> impl tasks it verifies), `provides` (command -> providing tasks) and `graphProblems`; a new `--compact` flag prints only the scheduler keys (`done`, `remaining`, `deps`, `ready`, `cycles`, `verifyCycles`, `overlaps`, `testVerifies`, `provides`); `ck plan` never writes tasks.md. `lint` prints the new `lint_spec` keys (`commandEdges`, `unknownCommands`, `untaggedTests`, `noWriteSet`, `graphProblems`) in `--json` and as warnings in text mode, keeping the exit code rule (1 only for cycles); `lint --fidelity [--task N] --json` prints `{checked, mismatches, unparsed, unmatched}` from `fidelity.check_task` and exits 1 on mismatches. `relink` gains `--commands` (TASK becomes optional with it) that runs `plan_command_relink` / `apply_command_relink` with today's `--apply`, `--commit` and `--json` behaviour, reporting refused cyclic edges. All of these build the same graph (11.6) and make no network calls. Harness Contract owner: item 4's `ck fidelity` (design: `ck lint --fidelity`) and item 5's `ck plan --json` `overlaps`/`provides`, the `ck lint --json` keys and `ck relink --commands`. In `src/claude_kiro/fidelity.py`, so that Task 27's `ck lint --fidelity` cases pass: a comparison's literal is checked whatever it is compared with (`score() >= 4.50` against the row's threshold, no `no name` item for it); a comparison with no literal reports an operand computed from a number, enum or date (`score() == base * 1.1`) as unparsed and one computed from nothing concrete (`score()`, `obj.get("x")`) as nothing; test files are read as UTF-8 with an optional BOM; `parse_row` keeps an escaped `\|` inside its cell.
@@ -1245,12 +1245,12 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 10 (11.6 single-mapping cases across graph, lint, plan and gate (`tc14_redteam`)), Task 14 (TC-11 through `ck lint`), Task 17 (TC-110 to TC-112, TC-122b, TC-124b, TC-125), Task 26 (TC-69 to TC-74 through `ck lint --fidelity`), Task 27 (8.3, 8.6 through `ck lint --fidelity`), Task 52 (TC-168 for gate, graph, lint, relink, plan, land, hooks, audit, start and fixtures)
 
 **Acceptance:**
-- [ ] `ck lint --fidelity` checks `score() >= 4.50` against its row, reports `base * 1.1` compared with no literal as unparsed, and reads a BOM-prefixed test file (8.1, 8.3)
-- [ ] `ck plan --json` reports `overlaps`, `testVerifies`, `provides` and `graphProblems`; `--compact` prints only the scheduler keys (7.4, 12.5, 13.1)
-- [ ] `ck plan` leaves tasks.md byte-identical (13.6)
-- [ ] `ck lint --json` shows missing command edges, unknown commands, untagged tests and tasks without a write-set as warnings (12.1, 12.3, 13.4)
-- [ ] `ck relink SPEC --commands --apply` adds the missing edges, a second lint is clean, and a cyclic edge is refused (12.2, 12.7)
-- [ ] `ck lint --fidelity --task N --json` reports the fidelity lists and leaves files unchanged (8.1, 8.6)
+- [x] `ck lint --fidelity` checks `score() >= 4.50` against its row, reports `base * 1.1` compared with no literal as unparsed, and reads a BOM-prefixed test file (8.1, 8.3)
+- [x] `ck plan --json` reports `overlaps`, `testVerifies`, `provides` and `graphProblems`; `--compact` prints only the scheduler keys (7.4, 12.5, 13.1)
+- [x] `ck plan` leaves tasks.md byte-identical (13.6)
+- [x] `ck lint --json` shows missing command edges, unknown commands, untagged tests and tasks without a write-set as warnings (12.1, 12.3, 13.4)
+- [x] `ck relink SPEC --commands --apply` adds the missing edges, a second lint is clean, and a cyclic edge is refused (12.2, 12.7)
+- [x] `ck lint --fidelity --task N --json` reports the fidelity lists and leaves files unchanged (8.1, 8.6)
 
 **Dependencies:** Task 33 (calls the new `lint_spec` keys and `plan_command_relink`), Task 30 (calls `fidelity.check_task`), Task 57 (both edit cli/worktree.py; Task 57 runs first), Task 10 (its tests are the oracle), Task 14 (its tests are the oracle), Task 17 (its tests are the oracle), Task 26 (its tests are the oracle), Task 27 (its tests are the oracle), Task 52 (its tests are the oracle)
 **Complexity:** Medium
@@ -1443,7 +1443,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 62: Replace the harness if/else with a registry
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 17.1, 17.2, 17.3, 17.4, 17.5, 18.4
 **Description:** Create `src/claude_kiro/harnesses.py` with a `Harness` record (name, `run_arm(cfg, arm, echo) -> dict`, `doctor(project_dir) -> int`, `available() -> Optional[str]` returning a reason when the harness cannot run, and its harness-specific option checks), `register(harness)`, `registered()`, and the seam `select(name, registry) -> Harness` raising `HarnessError('unknown harness "x" (registered: claude, opencode)')`. Register `claude` (today's claude bench path and doctor) and `opencode` (today's `run_arm_opencode` and `cli/doctor_opencode.py` doctor, unchanged) wrapping today's code and options, including the existing `--runner` with `--harness opencode` error. Extra harness modules can be loaded from `CK_HARNESS_MODULES` or entry points. In `cli/bench.py`, `--harness` becomes a free string validated through the registry (help lists the registered names), the opencode/claude branches move into the two registrations, arm results pass `check_arm_result`, and an arm whose harness reports `available()` refuses before cloning. In `cli/main.py`, `ck doctor --harness` validates and dispatches through the registry (unknown name: exit 2 listing names). No existing test pins `--harness` as a fixed `click.Choice` (`tests/test_doctor_opencode.py` and `tests/test_bench_opencode_run.py` only pass `--harness opencode`), so both stay unchanged and run in Verify as preservation checks. Harness Contract owner: item 3's `harnesses.register`, `names` and `get` (design: `register`, `registered`, `select`; the adapter's `available()` is the contract's `check()`).
@@ -1455,11 +1455,11 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 59 (TC-150 to TC-153), Task 60 (P-29 at `select` and the CLI)
 
 **Acceptance:**
-- [ ] Bench and doctor look harnesses up in one registry, and only registered names are valid (17.1)
-- [ ] An unknown name fails with an error listing the registered harnesses (17.2)
-- [ ] A harness registered from a test is selectable in bench and doctor with no dispatch change (17.3)
-- [ ] `claude` and `opencode` behave as today, including harness-specific options (17.4); every harness returns the same arm result keys (17.5)
-- [ ] A harness that reports itself unavailable is refused by bench and reported by doctor (18.4)
+- [x] Bench and doctor look harnesses up in one registry, and only registered names are valid (17.1)
+- [x] An unknown name fails with an error listing the registered harnesses (17.2)
+- [x] A harness registered from a test is selectable in bench and doctor with no dispatch change (17.3)
+- [x] `claude` and `opencode` behave as today, including harness-specific options (17.4); every harness returns the same arm result keys (17.5)
+- [x] A harness that reports itself unavailable is refused by bench and reported by doctor (18.4)
 
 **Dependencies:** Task 61 (calls `check_arm_result`), Task 57 (both edit cli/main.py; Task 57 runs first), Task 59 (its tests are the oracle), Task 60 (its tests are the oracle)
 **Complexity:** Medium

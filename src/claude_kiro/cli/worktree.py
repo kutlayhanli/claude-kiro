@@ -69,12 +69,14 @@ def waves(spec: str, as_json: bool):
 
 
 def _plan(project_dir: Path, spec: str, exclude: set) -> dict:
+    from ..graph import build_graph, write_set_overlaps
     from ..hooks._shared.spec_parser import parse_tasks
     from ..lint import lint_spec, task_risk
     from ..waves import plan_waves
 
     spec_dir = _spec_dir(project_dir, spec)
     lint = lint_spec(spec_dir, project_dir)
+    graph = build_graph(project_dir, spec_dir)
     tasks = parse_tasks(spec_dir / "tasks.md")
     if lint["cycles"]:
         plan = {
@@ -113,7 +115,24 @@ def _plan(project_dir: Path, spec: str, exclude: set) -> dict:
         "remaining": [n for n in plan["deps"] if n not in done],
         # Absolute directory of this spec's task worktrees (spec-implement's worktreeDir arg).
         "worktreeDir": _worktree_dir(project_dir, spec_dir.name),
+        # The spec graph (11.6): the same graph lint reads, so every consumer sees one mapping (plan never writes).
+        "overlaps": write_set_overlaps({t.num: t.files for t in tasks}),
+        "testVerifies": {path[len("file:"):]: [n[len("task:"):] for n in nums] for path, nums in graph.test_verifies.items()},
+        "provides": _provides_by_command(graph),
     }
+
+
+def _provides_by_command(graph) -> dict:
+    """{command: the tasks that provide it}, from the graph's provides edges."""
+    out: dict = {}
+    for e in graph.edges:
+        if e.kind == "provides" and e.src.startswith("task:") and e.dst.startswith("cmd:"):
+            out.setdefault(e.dst[len("cmd:"):], set()).add(e.src[len("task:"):])
+    return {cmd: sorted(nums, key=lambda n: (not n.isdigit(), int(n) if n.isdigit() else 0, n)) for cmd, nums in sorted(out.items())}
+
+
+# The keys `ck plan --compact` prints: what the scheduler reads.
+COMPACT_KEYS = ("done", "remaining", "deps", "ready", "cycles", "verifyCycles", "overlaps", "testVerifies", "provides")
 
 
 def _worktree_dir(project_dir: Path, spec: str):
@@ -147,10 +166,14 @@ def _chain_lengths(deps: dict, done: set) -> dict:
 @click.option("--json", "as_json", is_flag=True, hidden=True)  # output is always JSON; accepted because the docs and workflow pass it
 @click.option("--progress-run", default=None, help="Run key whose progress file records --failed tasks")
 @click.option("--failed", default="", help="Comma-separated tasks that failed (recorded once each in the progress file)")
-def plan(spec: str, exclude: str, as_json: bool, progress_run, failed: str):
+@click.option("--compact", is_flag=True, help="Print only the scheduler keys (done, remaining, deps, ready, cycles, verifyCycles, overlaps, testVerifies, provides)")
+def plan(spec: str, exclude: str, as_json: bool, progress_run, failed: str, compact: bool):
     """Machine-readable plan for SPEC (JSON): deps, done, ready-to-start tasks (longest remaining chain first), lint results, and display waves."""
     excluded = {x.strip() for x in exclude.split(",") if x.strip()}
-    click.echo(json.dumps(_plan(Path.cwd(), spec, excluded), indent=2))
+    result = _plan(Path.cwd(), spec, excluded)
+    if compact:
+        result = {k: result[k] for k in COMPACT_KEYS}
+    click.echo(json.dumps(result, indent=2))
     ids = [x.strip() for x in failed.split(",") if x.strip()]
     if progress_run and ids:
         _record_failed(_spec_name(spec), progress_run, ids)
@@ -230,6 +253,19 @@ def lint(spec: str, as_json: bool, contracts: bool, fidelity: bool, tasks, base,
             click.echo(f"  ⚠ Task {item['task']} touches risk path {item['file']} but has no **Risk:** safety (matches {item['pattern']} in risk_paths)")
         if result["riskUntagged"]:
             click.echo("      It is routed as safety anyway. Add \"**Risk:** safety (one-line reason)\" so the spec says so.")
+        # The spec graph's findings are warnings, never fatal (12.1, 12.3, 13.4).
+        for item in result["commandEdges"]:
+            click.echo(f"  ⚠ {item['message']}")
+        if result["commandEdges"]:
+            click.echo(f"      `ck relink {spec} --commands --apply` adds the missing edges.")
+        for item in result["unknownCommands"]:
+            click.echo(f"  ⚠ {item['message']}")
+        for item in result["untaggedTests"]:
+            click.echo(f"  ⚠ {item['message']}")
+        for item in result["noWriteSet"]:
+            click.echo(f"  ⚠ {item['message']}")
+        for item in result["graphProblems"]:
+            click.echo(f"  ⚠ {item['source']}: {item['problem']}")
         path = result["criticalPath"]
         if path:
             click.echo(f"  ℹ critical path ({len(path)} of {len(result['remaining'])} open tasks): {' -> '.join(path)}")
@@ -916,19 +952,68 @@ def resolve_cmd(spec, task, as_json):
         click.echo(f"resolved {name} task {task}: {path}")
 
 
+def _relink_commands(project: Path, spec: str, do_apply: bool, commit: bool, as_json: bool) -> None:
+    """`ck relink SPEC --commands`: add the **Dependencies:** edges a test task's commands need (12.2). Cyclic edges are
+    refused and reported; a second run changes nothing. Exit 1 when an edge was refused or the commit failed."""
+    import subprocess
+
+    from .. import relink as rl
+    from ..graph import build_graph
+    from ..hooks._shared.spec_parser import parse_tasks_text
+
+    spec_dir = _spec_dir(project, spec)
+    tasks_md = spec_dir / "tasks.md"
+    try:
+        raw = tasks_md.read_bytes()  # bytes, so CRLF endings and everything else outside the edges stay as they are
+    except OSError as e:
+        click.echo(f"❌ cannot read {tasks_md}: {e}")
+        sys.exit(2)
+    text = raw.decode("utf-8")
+    tasks = {t.num: t for t in parse_tasks_text(text)}
+    r = rl.plan_command_relink(build_graph(project, spec_dir), tasks)
+    new_text = rl.apply_command_relink(text, r)
+    out = {**r.to_dict(), "applied": False}
+    if do_apply and r.adds:
+        tasks_md.write_bytes(new_text.encode("utf-8"))
+        out["applied"] = True
+        if commit:
+            rel = os.path.relpath(tasks_md, project)
+            msg = f"relink: add command dependency edges ({spec_dir.name})"
+            res = subprocess.run(["git", "-C", str(project), "commit", "-q", "-m", msg, "--", rel], capture_output=True, text=True)
+            out["committed"] = res.returncode == 0
+            if res.returncode != 0:
+                out["commitError"] = (res.stderr or res.stdout).strip()[-400:]
+    if as_json:
+        click.echo(json.dumps(out, indent=2))
+    else:
+        if not r.adds and not r.refused:
+            click.echo("no command edges are missing: nothing to relink")
+        for a in out["adds"]:
+            click.echo(f"  Task {a['task']} depends on Task {a['dependsOn']} (provides `{a['command']}`)")
+        for item in r.refused:
+            click.echo(f"  refused: {item['message']}")
+        if r.adds:
+            click.echo("  written to tasks.md" + (" and committed" if out.get("committed") else "") if out["applied"]
+                       else "  (dry run: add --apply to write it)")
+    sys.exit(1 if r.refused or out.get("commitError") else 0)
+
+
 @click.command()
 @click.argument("spec")
-@click.argument("task")
+@click.argument("task", required=False)
+@click.option("--commands", is_flag=True, help="Instead: add the dependency edges that test commands need (a test invokes a command another task provides). TASK is not needed")
 @click.option("--apply", "do_apply", is_flag=True, help="Write the relinked tasks.md (default: show the edits only)")
 @click.option("--commit", is_flag=True, help="With --apply: commit tasks.md on the current branch")
 @click.option("--json", "as_json", is_flag=True, help="Machine-readable result")
-def relink(spec: str, task: str, do_apply: bool, commit: bool, as_json: bool):
+def relink(spec: str, task, do_apply: bool, commit: bool, as_json: bool, commands: bool):
     """Break TASK's verify-order cycle in SPEC's tasks.md, the way `ck lint` suggests.
 
     TASK becomes a foundation task: the test task whose tests need a later task verifies that later
     task instead, and TASK's Verify commands that run those tests are dropped. Refused (exit 1) when
     nothing would verify TASK afterwards, or when the relinked plan still has a cycle at TASK.
     Exit 0 when relinked (or, without --apply, when a relink is possible).
+
+    With --commands (no TASK), adds the **Dependencies:** edges that test commands need instead.
     """
     import subprocess
 
@@ -937,6 +1022,11 @@ def relink(spec: str, task: str, do_apply: bool, commit: bool, as_json: bool):
     from ..hooks._shared.spec_parser import parse_tasks_text
 
     project = Path.cwd()
+    if commands:
+        _relink_commands(project, spec, do_apply, commit, as_json)
+        return
+    if task is None:
+        raise click.UsageError("TASK is required unless --commands is given")
     tasks_md = _spec_dir(project, spec) / "tasks.md"
     try:
         text = tasks_md.read_text(encoding="utf-8")
