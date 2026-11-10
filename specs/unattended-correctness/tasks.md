@@ -2146,7 +2146,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 93: Add live command edges at runtime
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 12.5, 12.6, 12.7, 12.8
 **Description:** In `plugin/workflows/spec-implement.js`: add `liveEdgeDecision({task, failures, deps, done, liveDeps})` in the decisions block (`none`, `wait` with the edges, `conflict` with the invoking tests, or `blocked` with the cycle). A task attempt whose failures carry `missingCommand` with an unfinished provider adds the edge to `liveDeps` (merged into `view.deps` where `applyPlanView` is called), records the task in `waiting`, does not raise a test conflict and does not count as a retry; the task is started again only after the provider's landing ends. A missing command with no provider becomes a test conflict on the invoking tests (confirmation, then the test-fix loop). An edge that would close a cycle is not added; the task fails with reason `blocked: command cycle Task 12 -> Task 71 -> Task 12`. Every live edge is logged and listed in `liveEdges` (`{task, dependsOn, command, at}`) for a later `ck relink --commands`. Thin plan calls use `ck plan --compact`. Harness Contract owner: item 7's `liveEdge` (design: `liveEdgeDecision`) and result `liveEdges[]`.
@@ -2156,10 +2156,16 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 88 (P-24 at `liveEdgeDecision`), Task 90 (red team of 12.5, 12.7)
 
 **Acceptance:**
-- [ ] A missing command provided by an unfinished task adds a live edge; the task waits for the provider to merge and retries without spending a retry or raising a conflict (12.5)
-- [ ] A missing command no task provides becomes a test conflict on the tests that invoke it (12.6)
-- [ ] A live edge that would close a cycle is refused and the task is blocked naming the cycle (12.7)
-- [ ] Live edges are logged and listed in the results (12.8)
+- [x] A missing command provided by an unfinished task adds a live edge; the task waits for the provider to merge and retries without spending a retry or raising a conflict (12.5)
+- [x] A missing command no task provides becomes a test conflict on the tests that invoke it (12.6)
+- [x] A live edge that would close a cycle is refused and the task is blocked naming the cycle (12.7)
+- [x] Live edges are logged and listed in the results (12.8)
+
+**Implementation notes (Task 93):**
+- `liveEdgeDecision` returns `{action, edges, cycle, command, tests, refused}`. With a provider that is unfinished and safe it returns `wait` with one edge per safe provider. With a provider that would close a cycle it also returns `cycle`, and `refused` lists those providers. The script blocks the task whenever `refused` is not empty (12.7), even if another provider is safe, and records no edge for it. P-24 requires the `wait` action in that mixed case, and the red team requires the blocked outcome, so the script resolves the two this way.
+- `liveEdges` is listed in the result only when the run added at least one edge. TC-73 pins the result's key set for runs without live edges.
+- A waiting task is kept in `waitingLive` and excluded from the plan until every provider is Done or merged in this run. It is not in `failed`, and its wait spends no retry.
+- Thin plan calls now pass `--compact`.
 
 **Dependencies:** Task 87 (both edit spec-implement.js; Task 87 runs first), Task 53 (reads `ck plan`'s `provides` and `--compact`), Task 88 (its tests are the oracle), Task 90 (its tests are the oracle)
 **Complexity:** Medium

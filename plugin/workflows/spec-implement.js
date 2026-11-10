@@ -439,7 +439,7 @@ async function releaseClaim(n) {
 const directCkOut = () => (DIRECT_CK ? { ...directCk, minutes: Math.round(directCk.ms / 600) / 100 } : null)
 const ckError = out => `ck exited ${out && out.code} with no JSON: ${trim((out && (out.stderr || out.stdout)) || '', 400)}`
 const planArgv = exclude => {
-  const argv = ['-C', TARGET, 'plan', SPEC, '--json']
+  const argv = ['-C', TARGET, 'plan', SPEC, '--json', '--compact']
   if (exclude.length) argv.push('--exclude', exclude.join(','))
   if (PROGRESS_RUN) {
     argv.push('--progress-run', PROGRESS_RUN)
@@ -755,14 +755,82 @@ const blockedOf = view => [
 ]
 
 // The scheduler's view after a plan returns. Merges never un-happen: Done = plan.done ∪ mergedInRun (1.6).
-function applyPlanView(plan, mergedInRun) {
+// Live command edges (12.5, Task 93) join the deps: a waiting task depends on the provider it waits for. A provider
+// the plan does not list as a key still gets one, so the edge can be met once the provider is Done.
+function applyPlanView(plan, mergedInRun, liveDeps) {
+  const deps = { ...(plan.deps || {}) }
+  for (const [t, ps] of Object.entries(liveDeps || {})) {
+    deps[t] = [...new Set([...decisionIds(deps[t]), ...decisionIds(ps)])]
+    for (const p of decisionIds(ps)) if (!hasKey(deps, p)) deps[p] = []
+  }
   return {
     order: decisionIds(plan.remaining),
-    deps: plan.deps || {},
+    deps,
     done: new Set([...decisionIds(plan.done), ...decisionIds(mergedInRun)]),
     cycles: (plan.cycles || []).map(c => decisionIds(c)),
     verifyCycles: [...(plan.verifyCycles || [])],
   }
+}
+
+// Task 93 (12.5-12.7): what a task whose gate failed on a missing command does next. Pure: the caller records it.
+//   none      no failure carries a missing-command mark, or every provider is Done or the task itself
+//   wait      edges: [{task, dependsOn}] to the unfinished providers that do not close a cycle
+//   conflict  no task provides the command: tests are the invoking tests (a test conflict)
+//   blocked   every unfinished provider would close a cycle: cycle names it, e.g. [2, 5, 2]
+// `refused` lists the providers whose edge would close a cycle. When it is not empty, the caller blocks the task
+// (12.7) and records no edge, even if other providers are safe. A provider is a task of the run (in deps) only.
+function liveEdgeDecision({ task, failures, deps, done, liveDeps } = {}) {
+  const v = String(task)
+  const marked = (Array.isArray(failures) ? failures : []).filter(f => f && typeof f === 'object' && f.missingCommand && typeof f.missingCommand === 'object')
+  const none = { action: 'none', edges: [], cycle: null, command: null, tests: [], refused: [] }
+  if (!marked.length) return none
+  const command = marked[0].missingCommand.command == null ? null : String(marked[0].missingCommand.command)
+  const providers = [...new Set(marked.flatMap(f => decisionIds(f.missingCommand.providers)))]
+  if (!providers.length) {
+    const tests = marked.map(f => ({ file: f.file || '', test: f.node || '', reason: f.message || '' }))
+    return { ...none, action: 'conflict', command, tests }
+  }
+  const depMap = deps && typeof deps === 'object' ? deps : {}
+  const doneSet = new Set(decisionIds(done))
+  // The graph the edges are judged in: declared deps plus the live edges already added.
+  const graph = new Map()
+  for (const [k, ds] of Object.entries(depMap)) graph.set(String(k), decisionIds(ds))
+  for (const [k, ds] of Object.entries(liveDeps || {})) graph.set(String(k), [...new Set([...(graph.get(String(k)) || []), ...decisionIds(ds)])])
+  const reaches = (from, goal) => {
+    const seen = new Set()
+    const stack = [from]
+    while (stack.length) {
+      const t = stack.pop()
+      if (t === goal) return true
+      if (seen.has(t)) continue
+      seen.add(t)
+      stack.push(...(graph.get(t) || []))
+    }
+    return false
+  }
+  // The path from `from` to `goal` over the graph, as ids; [] when there is none.
+  const pathTo = (from, goal) => {
+    const parent = new Map([[from, null]])
+    const queue = [from]
+    while (queue.length) {
+      const t = queue.shift()
+      if (t === goal) {
+        const path = []
+        for (let x = goal; x !== null; x = parent.get(x)) path.unshift(x)
+        return path
+      }
+      for (const m of graph.get(t) || []) if (!parent.has(m)) { parent.set(m, t); queue.push(m) }
+    }
+    return []
+  }
+  const candidates = providers.filter(p => p !== v && !doneSet.has(p) && hasKey(depMap, p))
+  if (!candidates.length) return { ...none, command }
+  // A provider that already depends on the task would close the cycle v -> p -> ... -> v.
+  const refused = candidates.filter(p => reaches(p, v))
+  const safe = candidates.filter(p => !refused.includes(p))
+  const cycle = refused.length ? [v, ...pathTo(refused[0], v)] : null
+  if (!safe.length) return { action: 'blocked', edges: [], cycle, command, tests: [], refused }
+  return { action: 'wait', edges: safe.map(p => ({ task: v, dependsOn: p })), cycle, command, tests: [], refused }
 }
 
 // Whether a plan agent's copy holds together: our readiness over its view equals its ready list (minus
@@ -1067,6 +1135,18 @@ const records = {}           // task -> record
 const failed = new Map()     // task -> reason
 const parked = new Map()     // task -> needsInput entry: guard-stopped through the ladder; not failed, never retried, dependents wait
 const mergedInRun = new Set()  // tasks this run landed: they stay Done whatever a plan snapshot says (1.6)
+// Live command edges (Task 93, 12.5-12.8). liveDeps: task -> providers it waits for (merged into the plan view);
+// waitingLive: task -> { on, command } while a provider is unfinished, a task not counted as failed and not retried;
+// liveEdges: every edge added this run, for the result and `ck relink --commands`.
+const liveDeps = {}
+const waitingLive = new Map()
+const liveEdges = []
+const providerDone = p => view.done.has(p) || mergedInRun.has(p)
+// The waiting tasks whose providers are still unfinished. A task whose providers are all Done is released (and dropped).
+function stillWaitingLive() {
+  for (const [n, w] of [...waitingLive]) if (w.on.every(providerDone)) waitingLive.delete(n)
+  return [...waitingLive.keys()]
+}
 let stopLaunching = false
 let stopReason = null
 let redTarget = false
@@ -1245,7 +1325,7 @@ let queuedTrigger = null    // a trigger that arrived while one was in flight: o
 let idleArmed = true
 let recordSeq = 0           // failed task records seen so far: a landing plan disarms the idle plan only if none arrived while it ran (an ok record waits for its landing, so it changes nothing)
 let deferring = false
-const excluded = () => new Set([...running.keys(), ...failed.keys(), ...parked.keys(), ...mergedInRun, ...crossHeld, ...crossPendingHeld()])
+const excluded = () => new Set([...running.keys(), ...failed.keys(), ...parked.keys(), ...mergedInRun, ...crossHeld, ...crossPendingHeld(), ...stillWaitingLive()])
 function planContext() {
   const exclude = excluded()
   const ready = SCRIPT_READINESS ? readyTasks({ order: view.order, deps: view.deps, done: view.done, exclude, blocked: blockedOf(view) }) : []
@@ -1289,7 +1369,7 @@ async function runPlan(trigger) {
       if (!namesNothingRunnable && planConsistent(n, [...exclude, ...n.busy.map(b => b.task)])) {
         if (p.error) log(`${label}: the planning agent left a note (not a failure): ${trim(p.error, 300)}`)
         current = n
-        view = applyPlanView(n, mergedInRun)
+        view = applyPlanView(n, mergedInRun, liveDeps)
         // The dep-less fallback layer: the last consistent plan's ready/deps/order.
         // A consistent first attempt or retry success counts no fallback (1.4).
         lastGood = { ready: [...n.ready], deps: n.deps || {}, order: [...n.remaining] }
@@ -1443,6 +1523,26 @@ function startTask(n) {
   running.set(n, runTask(n).then(rec => finishTask(n, rec)))
 }
 
+// Task 93 (12.5, 12.8): records the live edges of a wait and returns the task's record as waiting (not failed).
+function recordLiveWait(n, rec, r, live) {
+  const task = String(n)
+  const on = []
+  for (const e of live.edges) {
+    const p = String(e.dependsOn)
+    if (on.includes(p)) continue
+    on.push(p)
+    liveDeps[task] = [...new Set([...(liveDeps[task] || []), p])]
+    if (!liveEdges.some(x => x.task === task && x.dependsOn === p)) liveEdges.push({ task, dependsOn: p, command: live.command, at: nowMs() })
+    log(`live edge Task ${task} -> Task ${p} (${live.command}): Task ${task} waits for Task ${p} to merge; no retry spent`)
+  }
+  waitingLive.set(task, { on, command: live.command })
+  rec.result = r
+  rec.finishedAt = r && r.finishedAt
+  rec.waiting = { on, command: live.command }
+  rec.reason = `waiting for ${on.map(p => `Task ${p}`).join(', ')} (live edge: ${live.command})`
+  return rec
+}
+
 function finishTask(n, rec) {
   releaseSlot(n)
   running.delete(n)
@@ -1452,6 +1552,9 @@ function finishTask(n, rec) {
   if (!rec.ok && rec.needsInput) {
     parked.set(n, rec.needsInput)  // listed apart from failed; never triggers onFailure: halt
     log(`Task ${n}: needs input (${rec.needsInput.action}); independent tasks continue, its dependents wait`)
+  } else if (!rec.ok && rec.waiting) {
+    // Task 93 (12.5): waits for its live providers; not failed, no retry spent. It starts again after their landings.
+    log(`Task ${n}: waiting for ${rec.waiting.on.map(p => `Task ${p}`).join(', ')} (${rec.waiting.command}); no retry spent`)
   } else if (!rec.ok && rec.testConflict) {
     failed.set(n, rec.reason)  // its dependents wait; it never halts the run (issue #8)
     log(`Task ${n}: ${rec.reason}; independent tasks continue, the test-track fix is in the report`)
@@ -2098,10 +2201,14 @@ async function runTask(n) {
     }
     let escIdx = 0
     let budgetBase = 0   // retries spent before a landed test fix do not count against the fresh attempt
+    // Task 93 (12.5-12.7): a missing command another unfinished task provides is a live edge (wait), one no task
+    // provides is a test conflict, and an edge that would close a cycle blocks the task. None of them is retried.
+    const liveOf = res => (res && !ok(res) && !guardStopOf(res) ? liveEdgeDecision({ task: n, failures: res.failures, deps: view.deps, done: [...view.done, ...mergedInRun], liveDeps }) : { action: 'none', edges: [], cycle: null, command: null, tests: [], refused: [] })
+    const liveConflicts = res => { const lv = liveOf(res); return lv.action === 'conflict' ? { ...res, testConflicts: [...testConflictsOf(res), ...lv.tests] } : res }
     const rungs = ladderOf(n)
     const ladder = async () => {
     for (;;) {
-      while (!ok(r) && !stop && retryNo() - budgetBase <= MAX_RETRIES && !busy(r) && !testConflictOf(r)) {
+      while (!ok(r) && !stop && retryNo() - budgetBase <= MAX_RETRIES && !busy(r) && !testConflictOf(r) && liveOf(r).action === 'none') {
         log(`Task ${n}: ${r && !(r.commits || '').trim() ? 'no commits' : 'gate not passed'}, retry ${retryNo()}/${MAX_RETRIES}`)
         r = await call('task', retryPrompt(n, r, retryNo(), claimFlags('retry', codeOpts(n), retryNo() + 1)), { label: `${label(n)} retry ${retryNo()}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
         rec.attempts++
@@ -2109,7 +2216,7 @@ async function runTask(n) {
         stop = guardStopOf(r)
         rec.startedAt = rec.startedAt || (r && r.startedAt)
       }
-      while (escIdx < rungs.length && !ok(r) && !stop && !busy(r) && !testConflictOf(r)) {
+      while (escIdx < rungs.length && !ok(r) && !stop && !busy(r) && !testConflictOf(r) && liveOf(r).action === 'none') {
         const model = rungs[escIdx++]
         log(`Task ${n}: still failing after ${retryNo()} attempt(s), escalating to ${model}`)
         r = await call('task', retryPrompt(n, r, retryNo(), claimFlags('escalation', escalated(codeOpts(n), model), retryNo() + 1)), { label: `${label(n)} retry ${retryNo()} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
@@ -2128,6 +2235,22 @@ async function runTask(n) {
     }
     const early = await ladder()
     if (early) return early
+    const live = liveOf(r)
+    // A refused cycle (12.7) blocks the task even when another provider is safe: no edge is recorded for it.
+    if (live.action === 'blocked' || live.refused.length) {
+      releaseSlot(n)
+      rec.result = r
+      rec.finishedAt = r && r.finishedAt
+      rec.reason = `blocked: command cycle ${(live.cycle || []).map(x => `Task ${x}`).join(' -> ')}`
+      log(`Task ${n}: ${rec.reason}; the live edge is not added`)
+      return rec
+    }
+    if (live.action === 'wait') {
+      // 12.5, 12.8: the edges are recorded and logged; the task waits for them and spends no retry.
+      releaseSlot(n)
+      return recordLiveWait(n, rec, r, live)
+    }
+    r = liveConflicts(r)
     if (testConflictOf(r)) {
       // Issue #8: one confirmation on the strongest rung (unless the claim already came from it):
       // a second agent that agrees makes the task blocked: test; one that passes the gate wins.
@@ -2140,6 +2263,7 @@ async function runTask(n) {
       rec.attempts++
       if (!onTop) { rec.escalations.push({ stage: 'test-conflict', model: top }); lastModel = top }
       rec.startedAt = rec.startedAt || (r && r.startedAt)
+      r = liveConflicts(r)
       const confirmed = testConflictOf(r)
       if (confirmed) {
         // Task 86 (4.1-4.10): the confirmed conflicts go to a test-fixer; a landed fix or a test-correct verdict retries the task.
@@ -2596,6 +2720,8 @@ return {
   overhead,
   relinks,
   testFixes,
+  // Task 93 (12.8): listed when the run added live edges; a run without any keeps the result's pinned key set.
+  ...(liveEdges.length ? { liveEdges } : {}),
   directCk: directCkOut(), thinAgent: thinAgentOut(),
   stats: { initiallyDone, merged: merged.length, failed: failedList.length, notStarted: notStarted.length, planSteps: refills, planFailures, planFallbacks: planFallbacks.length, fixes: fixCount, landings: landings.length, bisected: landings.filter(l => l.bisected).length },
 }
