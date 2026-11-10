@@ -1190,7 +1190,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 51: Add the run-end audit `ck worktree audit`
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 10.1, 10.2, 10.3, 10.4, 10.5, 15.2, 15.5
 **Description:** In `protect.py`, add `audit(root, spec, into) -> AuditReport`, which gathers the inputs for `audit_decision`: the sealed approved state, the current blob ids of protected files on the integration branch head, the allow-list, `hook_status` (installed, active `core.hooksPath` in the integration worktree, scripts intact against the recorded sha256s) and the fixture report from `fixtures` (lock drift and tampering). In `cli/worktree.py`, add `ck worktree audit SPEC [--into BRANCH] --json` printing `ck-audit/1` (schema, spec, into, head, complete, clean, drift, hooks, fixtures, problems); exit 0 when clean, 1 on drift or hook problems, 3 when incomplete (approved state missing, unreadable or mac failed: `complete: false`, `clean: false`, problem "approved state unreadable: <reason>"). Harness Contract owner: item 4's `ck worktree audit SPEC --json` (`ck-audit/1`).
@@ -1201,10 +1201,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 38 (P-19 on the real audit), Task 40 (TC-92, bypasses reported by the audit), Task 41 (TC-96 to TC-100), Task 42 (red team of 10.5), Task 43 (TC-135, TC-136, TC-137, TC-138, TC-140 (audit side))
 
 **Acceptance:**
-- [ ] The audit lists each protected file added, changed or deleted without approval (10.1)
-- [ ] Missing, altered or inactive hooks are reported (10.2); a clean run says `clean: true` (10.3)
-- [ ] Allow-listed and approved landings are not reported (10.4); an unreadable approved state makes the audit incomplete, never clean (10.5)
-- [ ] Fixture drift and lock tampering appear in the audit (15.2, 15.5)
+- [x] The audit lists each protected file added, changed or deleted without approval (10.1)
+- [x] Missing, altered or inactive hooks are reported (10.2); a clean run says `clean: true` (10.3)
+- [x] Allow-listed and approved landings are not reported (10.4); an unreadable approved state makes the audit incomplete, never clean (10.5)
+- [x] Fixture drift and lock tampering appear in the audit (15.2, 15.5)
 
 **Dependencies:** Task 50 (both edit cli/worktree.py; Task 50 runs first), Task 49 (reads the fixture lock that landing writes), Task 46 (reads the approved state that landing records), Task 38 (its tests are the oracle), Task 40 (its tests are the oracle), Task 41 (its tests are the oracle), Task 42 (its tests are the oracle), Task 43 (its tests are the oracle)
 **Complexity:** Medium
