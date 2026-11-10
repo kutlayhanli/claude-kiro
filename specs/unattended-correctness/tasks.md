@@ -1892,7 +1892,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 82: Add run start, the run-end audit and the protected-approval park
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 2.13, 9.1, 9.8, 9.10, 10.1, 10.3, 10.5, 16.1, 16.2, 16.6
 **Description:** In `plugin/workflows/spec-implement.js`: before the first task agent, call `thinCk('run start', ['worktree', 'start', SPEC, '--run', runId, '--json'])` once and keep its JSON as `runStart` (log released claims and any hook problem; a hook problem is also a result warning); pass `--progress-run <runId>` in every claim command so claims carry the run ID. At run end, on every outcome (complete, red stop, halted, refused, thrown step error), call `thinCk('audit', ['worktree', 'audit', SPEC, '--json'])` after the last step and store it as `audit`; a failed or unparseable audit is recorded as incomplete, never clean. A landing that comes back `PROTECTED` parks the task as needs-input with `kind: "protected"`, the files, the command `ck worktree approve <spec> <task>` for me to run in my own terminal, and the resume: run `/spec:implement <spec>` again with the same `runId` (2.13); no agent lands it. A pass started with a `runId` whose earlier pass parked a task that is now Done needs nothing special: run start treats that run's claims as its own (16.7), the task's dependents become ready from `ck plan`, and the final attributed gate runs after the last merge (2.11). Harness Contract owner: item 7's result `audit` and `sweep` (design: `runStart`), the `audit` and `run start` labels, and the direct `worktree audit` / `worktree start` calls.
@@ -1902,10 +1902,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 75 (TC-98b, TC-101, TC-131b, TC-148b, TC-159, TC-161 to TC-164a, TC-188; the suite needs run start and the audit this task adds), Task 83 (TC-84c, selected with the suite's TC argv filter)
 
 **Acceptance:**
-- [ ] Every run calls `ck worktree start` once before its first task agent and records `runStart`, including a hook-install problem (9.1, 9.10, 16.2, 16.6)
-- [ ] Claims carry the run ID (16.1)
-- [ ] Every run ends with one audit call, and the result carries the audit; an audit failure is incomplete, never clean (10.1, 10.3, 10.5)
-- [ ] A PROTECTED landing goes to needs-input with the approve command (9.8)
+- [x] Every run calls `ck worktree start` once before its first task agent and records `runStart`, including a hook-install problem (9.1, 9.10, 16.2, 16.6)
+- [x] Claims carry the run ID (16.1)
+- [x] Every run ends with one audit call, and the result carries the audit; an audit failure is incomplete, never clean (10.1, 10.3, 10.5)
+- [x] A PROTECTED landing goes to needs-input with the approve command (9.8)
 
 **Dependencies:** Task 81 (the run-end audit follows the final gate Task 81 adds in spec-implement.js), Task 50 (calls `ck worktree start`), Task 51 (calls `ck worktree audit`), Task 47 (the park note names `ck worktree approve`), Task 75 (its tests are the oracle), Task 83 (its tests are the oracle)
 **Complexity:** Medium

@@ -1545,9 +1545,38 @@ async function landTask(n, rec) {
       continue
     }
     if (t.state === 'SKIP') return { merged: false, error: 'no commits' }
-    if (t.state === 'PROTECTED') return { merged: false, error: `needs a human: changes protected files (${(t.files || []).join(', ')}); not landed. ${t.detail || ''}` }
+    if (t.state === 'PROTECTED') return { merged: false, protected: { files: t.files || [], detail: t.detail || '' }, error: `needs a human: changes protected files (${(t.files || []).join(', ')}); not landed. ${t.detail || ''}` }
     return { merged: false, error: `${t.state}: ${t.detail || ''}` }
   }
+}
+
+// A landing that comes back PROTECTED (2.13, 9.8): no agent lands it. The task is parked as needs-input with the files,
+// the approve command for me to run in my own terminal, and the resume (the same runId).
+async function parkProtected(n, rec, protectedInfo) {
+  const action = parkAction({ interactive: INTERACTIVE })
+  const files = (protectedInfo.files || []).map(String)
+  const command = `ck worktree approve ${SPEC} ${n}`
+  const resume = `/spec:implement ${SPEC}${RUN_ID ? ` with the same runId ${RUN_ID}` : ''}`
+  const decision = `Task ${n} changes protected files (${files.join(', ') || 'see the landing'}), so no agent lands it. Review the change, then approve it in your own terminal: ${command}. Then resume the run: ${resume}.`
+  const entry = {
+    task: n, file: files.join(', '), files, kind: 'protected', test: '', requirement: '', decision,
+    command, resume, runId: RUN_ID || null, action, notification: null, escalatedTo: [],
+  }
+  releaseSlot(n)
+  if (action === 'park') {
+    const note = JSON.stringify({ file: entry.file, kind: 'protected', test: '', requirement: '', decision })
+    const out = await thinCk('park', ['worktree', 'park', SPEC, n, '--json'], { stdin: note, label: `park ${n}`, phase: phaseOf(n), cwd: ROOT, what: `Parking step for Task ${n} of spec ${SPEC}` })
+    const p = out.json ? out.json : { parked: false, error: ckError(out) }
+    entry.notification = p && p.notification ? p.notification : 'failed'
+    entry.notificationDetail = (p && (p.detail || p.error)) || ''
+    if (!p || p.parked === false) {
+      entry.notification = 'failed'
+      entry.notificationDetail = 'park failed: ' + ((p && (p.error || p.detail)) || 'the park step returned nothing')
+    } else rec.parked = true
+  }
+  rec.needsInput = entry
+  rec.reason = `needs input: protected files (${files.join(', ')})`
+  return rec
 }
 
 async function runTask(n) {
@@ -1765,6 +1794,7 @@ async function runTask(n) {
     }
     pendingReview.delete(n)
     rec.merge = m
+    if (m && m.protected) return parkProtected(n, rec, m.protected)
     rec.mergedAt = m && m.mergedAt
     if (!m || !m.merged) {
       rec.reason = `merge failed: ${(m && m.error) || 'no result'}`
@@ -1792,6 +1822,46 @@ function buildOverhead() {
   const share = total > 0 ? (at('plan') + at('review') + at('review-wave') + at('land')) / total : null
   return { share, threshold: OVERHEAD_WARN_THRESHOLD, warned: overheadWarning(share) }
 }
+// Run start (9.1, 9.10, 16.2, 16.6): `ck worktree start` once, before the first task agent. It sweeps the claims of
+// earlier runs, installs or checks the hooks and records the baseline. A hook problem is a result warning.
+let runStart = null
+const runWarnings = []
+async function startRun() {
+  const argv = ['worktree', 'start', SPEC, ...(RUN_ID ? ['--run', RUN_ID] : []), '--json']
+  const out = await thinCk('run start', argv, { label: 'run start', phase: 'Plan', cwd: ROOT, what: `Run start step for spec ${SPEC}` })
+  runStart = out.json ? out.json : { error: ckError(out) }
+  if (out.json) {
+    for (const c of runStart.releasedClaims || []) log(`Run start released the claim on Task ${c.task}${c.reason ? ` (${c.reason})` : ''}`)
+    const h = runStart.hooks
+    const problems = (h && Array.isArray(h.problems) ? h.problems : []).map(String)
+    if (problems.length) {
+      runWarnings.push(...problems.map(x => `hooks: ${x}`))
+      log(`Run start: hook problem: ${problems.join('; ')}`)
+    }
+    for (const w of runStart.warnings || []) if (!runWarnings.includes(`run start: ${w}`)) runWarnings.push(`run start: ${w}`)
+  } else {
+    runWarnings.push(`run start failed: ${runStart.error}`)
+    log(`Run start failed: ${runStart.error}`)
+  }
+}
+
+// Run end (10.1, 10.3, 10.5): one `ck worktree audit` after the last step, on every outcome. A failed or unparseable
+// audit is incomplete, never clean.
+async function auditRun() {
+  let out = null
+  try {
+    out = await thinCk('audit', ['worktree', 'audit', SPEC, '--json'], { label: 'audit', phase: 'Report', cwd: ROOT, what: `Run-end audit for spec ${SPEC}` })
+  } catch (e) {
+    out = { code: -1, json: null, stderr: String(e && e.message) }
+  }
+  const j = out && out.json
+  if (j && typeof j === 'object' && typeof j.complete === 'boolean' && typeof j.clean === 'boolean') return j
+  const error = j && j.error ? String(j.error) : ckError(out || {})
+  log(`Run-end audit could not complete: ${trim(error, 300)}`)
+  return { schema: 'ck-audit/1', spec: SPEC, into: INTO, complete: false, clean: false, drift: [], problems: [`audit did not complete: ${trim(error, 300)}`] }
+}
+
+async function mainRun() {
 const startPlan = await requestPlan('start')
 if (!startPlan) return { halted: true, refused: false, reason: PLAN_FAILED, into: INTO, degraded, planFallbacks, overhead: buildOverhead(), directCk: directCkOut(), thinAgent: thinAgentOut() }
 if (startPlan.cycles.length || startPlan.verifyCycles.length) {
@@ -1809,6 +1879,7 @@ if (startPlan.cycles.length || startPlan.verifyCycles.length) {
     directCk: directCkOut(), thinAgent: thinAgentOut(),
   }
 }
+await startRun()
 const initialPlan = startPlan
 const initiallyDone = startPlan.done.length
 doneAtStart = new Set(startPlan.done.map(String))
@@ -2056,3 +2127,14 @@ return {
   directCk: directCkOut(), thinAgent: thinAgentOut(),
   stats: { initiallyDone, merged: merged.length, failed: failedList.length, notStarted: notStarted.length, planSteps: refills, planFailures, planFallbacks: planFallbacks.length, fixes: fixCount, landings: landings.length, bisected: landings.filter(l => l.bisected).length },
 }
+}
+
+let mainResult = null
+let mainError = null
+try { mainResult = await mainRun() } catch (e) { mainError = e }
+const audit = await auditRun()
+if (mainError) {
+  try { mainError.audit = audit } catch {}
+  throw mainError
+}
+return { ...mainResult, runStart, runWarnings, sweep: runStart && !runStart.error ? { releasedClaims: runStart.releasedClaims || [], keptClaims: runStart.keptClaims || [] } : null, audit }
