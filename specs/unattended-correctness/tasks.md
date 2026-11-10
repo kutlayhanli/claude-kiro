@@ -2372,7 +2372,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 103: Write the four equity rerun bench configs
-**Status:** Not Started
+**Status:** Done - `bench-equity-reruns.json` written (dsh arm omitted per Task 99's findings report); TC-165 passes (4/4)
 **Track:** impl
 **Requirements:** 20.1, 20.4
 **Description:** Write `specs/unattended-correctness/bench-equity-reruns.json` with the four bench configs: the equity spec from `fix/mtr-spec-issues`; `ck_config.land.allow_paths` with exactly the 12 slash-command paths listed in requirement 20.1 and nothing else (no glob, so nothing covers `.claude/CLAUDE.md`); arms OpenCode `opencode-go/muse-spark-1.3-contributor` at medium and OpenCode `opencode-go/deepseek-v4.1-flash` at medium (both with no `roles` map, 20.4), Claude Code with default roles, and `dsh` (left out, with a note pointing at the findings report, when Task 99 stopped the phase). This task only writes the configs; the paid reruns are Task 104, which I run. Harness Contract owner: the bench configs TC-165 reads.
@@ -2382,9 +2382,9 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 101 (TC-165)
 
 **Acceptance:**
-- [ ] The configs use `fix/mtr-spec-issues` and pre-approve exactly the 12 paths of 20.1; `.claude/CLAUDE.md` stays protected (20.1)
-- [ ] OpenCode arms have no roles map (20.4)
-- [ ] No paid run is started by this task
+- [x] The configs use `fix/mtr-spec-issues` and pre-approve exactly the 12 paths of 20.1; `.claude/CLAUDE.md` stays protected (20.1)
+- [x] OpenCode arms have no roles map (20.4)
+- [x] No paid run is started by this task
 
 **Dependencies:** Task 61 (uses bench `ck_config`), Task 99 (the `dsh` arm depends on the verification outcome), Task 101 (its tests are the oracle)
 **Complexity:** Low
