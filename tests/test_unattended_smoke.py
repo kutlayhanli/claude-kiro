@@ -102,7 +102,11 @@ const agent = async (prompt, opts) => {
       const before = await git(cfg.target, 'rev-parse', 'HEAD')
       const r = await git(cfg.target, 'merge', '--no-verify', '--no-edit', sc.raw.branch)
       const after = await git(cfg.target, 'rev-parse', 'HEAD')
-      raw.push({ task: n, code: r.code, stderr: tail(r.stderr), before: before.stdout.trim(), after: after.stdout.trim() })
+      // The refusal leaves the merge's index and files behind (a merge in progress, or staged files after a
+      // fast-forward). The scripted agent cleans up after itself, as TC-76 and every hook test do, so the
+      // integration checkout is as it found it; the ref never moved, so this resets nothing but that residue.
+      const cleanup = await git(cfg.target, 'reset', '--hard', 'HEAD')
+      raw.push({ task: n, code: r.code, stderr: tail(r.stderr), before: before.stdout.trim(), after: after.stdout.trim(), cleanup: cleanup.code })
     }
     const conflict = sc.conflicts && sc.conflicts[n]
     if (conflict && /Check that claim yourself|confirm/i.test(prompt + label)) {
