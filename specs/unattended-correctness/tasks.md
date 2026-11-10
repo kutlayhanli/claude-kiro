@@ -2174,7 +2174,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 94: Hold tasks whose write-sets overlap
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 13.1, 13.2, 13.3, 13.5, 13.6
 **Description:** In `plugin/workflows/spec-implement.js`: add `writeSetHold({ready, active, overlaps})` in the decisions block (`{start, held: [{task, waitsOn}]}`): walk the ready list in the scheduler's current priority order, start a task only if it overlaps no active or already-started task (by `ck plan`'s `overlaps`), hold the rest with the task they wait on, and keep filling free slots with non-overlapping tasks; tasks with no Files are never held. Re-evaluate holds on every `schedule()` after a task finishes, stops or merges, so a held task starts as soon as a slot is free. Log held tasks with `waitsOn` in the run's progress and list them in `writeSetHolds` (`{task, waitsOn, at}`). Holds are script state only; tasks.md and the plan's `deps` are never changed. Harness Contract owner: item 7's `writeSetStart` (design: `writeSetHold`) and result `held` (design: `writeSetHolds`).
