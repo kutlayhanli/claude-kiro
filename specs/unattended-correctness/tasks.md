@@ -2146,7 +2146,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 93: Add live command edges at runtime
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 12.5, 12.6, 12.7, 12.8
 **Description:** In `plugin/workflows/spec-implement.js`: add `liveEdgeDecision({task, failures, deps, done, liveDeps})` in the decisions block (`none`, `wait` with the edges, `conflict` with the invoking tests, or `blocked` with the cycle). A task attempt whose failures carry `missingCommand` with an unfinished provider adds the edge to `liveDeps` (merged into `view.deps` where `applyPlanView` is called), records the task in `waiting`, does not raise a test conflict and does not count as a retry; the task is started again only after the provider's landing ends. A missing command with no provider becomes a test conflict on the invoking tests (confirmation, then the test-fix loop). An edge that would close a cycle is not added; the task fails with reason `blocked: command cycle Task 12 -> Task 71 -> Task 12`. Every live edge is logged and listed in `liveEdges` (`{task, dependsOn, command, at}`) for a later `ck relink --commands`. Thin plan calls use `ck plan --compact`. Harness Contract owner: item 7's `liveEdge` (design: `liveEdgeDecision`) and result `liveEdges[]`.
