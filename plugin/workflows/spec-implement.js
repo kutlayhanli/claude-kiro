@@ -529,6 +529,10 @@ Mark a finding "blocking" only if it should stop the merge; style and taste are 
 const asList = v => (Array.isArray(v) ? v : [])
 const WANT_EXTRA = n => TRACKS[n] === 'test' && !!DIRECT_CK
 async function testReviewExtra(n) {
+  if (TRACKS[n] === 'test' && !DIRECT_CK) {
+    const w = `Task ${n}: no direct ck, so the row-fidelity and fixture checks were not added to its review`
+    if (!runWarnings.includes(w)) runWarnings.push(w)
+  }
   if (!WANT_EXTRA(n)) return ''
   let text = ''
   try {
@@ -1096,11 +1100,13 @@ const MAX_RESOLVES = 3
 // started when its last test task finishes (or at the end, for a wave that never
 // finished). It runs beside the scheduler and never holds a slot or the landing.
 const crossTests = []
+const findings0 = r => ((r && r.findings) || []).filter(f => f && typeof f === 'object')
 const crossTestRuns = []
 const crossHeld = new Set()   // impl tasks the tests of an open cross-test finding verify: not started until the fix lands (7.4)
 let crossOpen = 0             // cross-test fixes in flight: they keep the scheduler loop alive without holding a slot
 const crossNeedsInput = []    // a cross-test fix that went to me (no blocked task to park)
 const crossTestDone = new Set()
+const crossInFlight = new Set()   // waves whose check is running or whose findings are still being routed: their impl dependents wait (7.4)
 let doneAtStart = new Set()
 const testTasksOf = w => Object.keys(TRACKS).filter(m => TRACKS[m] === 'test' && waveOf(m) === w && !doneAtStart.has(m))
 // While a wave's test tasks are still running or landing, the impl tasks that depend on one of them wait: the
@@ -1120,9 +1126,9 @@ function crossPendingHeld() {
   if (Object.values(TRACKS).filter(t => t === 'test').length < 2) return out
   const waves = new Set(Object.keys(TRACKS).filter(m => TRACKS[m] === 'test' && !doneAtStart.has(m)).map(m => waveOf(m)))
   for (const w of waves) {
-    if (crossTestDone.has(w)) continue
+    if (crossTestDone.has(w) && !crossInFlight.has(w)) continue
     const wave = testTasksOf(w)
-    if (!wave.length || wave.every(m => (records[m] && !running.has(m)) || mergedInRun.has(m) || view.done.has(m)) || wave.some(m => crossWaveDoomed(m))) continue
+    if (!wave.length || (!crossInFlight.has(w) && wave.every(m => (records[m] && !running.has(m)) || mergedInRun.has(m) || view.done.has(m))) || (!crossInFlight.has(w) && wave.some(m => crossWaveDoomed(m)))) continue
     for (const x of Object.keys((view && view.deps) || {})) {
       if (TRACKS[x] !== 'test' && view.deps[x].some(d => wave.includes(String(d)))) out.add(x)
     }
@@ -1138,8 +1144,12 @@ function maybeCrossTest(n, atEnd = false) {
   const merged = wave.filter(m => records[m] && records[m].ok)
   if (!merged.length) return
   crossTestDone.add(w)
+  crossInFlight.add(w)
+  crossOpen++
   crossTestRuns.push((async () => {
     let r = null
+    const replan = () => { if (!SCRIPT_READINESS) { idleArmed = true; requestPlan('landing') } }
+    try {
     try {
       r = await call('cross-test', crossTestPrompt(merged), { label: `cross-test wave ${w}`, phase: phaseOf(merged[0]), schema: REVIEW_SCHEMA, ...RISKY_REVIEW })
     } catch (e) {
@@ -1151,11 +1161,16 @@ function maybeCrossTest(n, atEnd = false) {
     crossTests.push(entry)
     log(`cross-test consistency (wave ${w}): ${r ? `${findings.length} blocking finding(s)${findings.length ? `: ${trim(findings.map(f => f.issue), 600)}` : ''}` : 'the check returned nothing'}`)
     // without args.deps the plan agent's ready list is used once: a task it was filtered out of needs a new plan
-    const replan = () => { if (!SCRIPT_READINESS) { idleArmed = true; requestPlan('landing') } }
     if (findings.length) {
       entry.routed = true
-      crossOpen++
-      try { await routeCrossFindings(w, findings, replan) } catch (e) { log(`cross-test fix for wave ${w} failed: ${trim(e && e.message, 300)}`) } finally { crossOpen--; poke() }
+      try { await routeCrossFindings(w, findings, replan, entry) } catch (e) { log(`cross-test fix for wave ${w} failed: ${trim(e && e.message, 300)}`) }
+    }
+    } finally {
+      // the hold on the wave's dependents ends only now: crossHeld is set (or there was nothing to hold)
+      crossInFlight.delete(w)
+      crossOpen--
+      replan()  // without args.deps the plan agent's list is read once: the released tasks need a new plan
+      poke()
     }
   })())
 }
@@ -1937,7 +1952,7 @@ async function parkTestFix(n, rec, reasons, records) {
 
 // Task 87 (7.2, 7.4): the findings of a cross-test check are test conflicts with no blocked task. The impl tasks
 // their tests verify wait (crossHeld) until the fix lands; a fix that does not land keeps them waiting and goes to me.
-async function routeCrossFindings(w, findings, replan) {
+async function routeCrossFindings(w, findings, replan, entry0 = null) {
   const conflicts = findings.map(f => ({
     file: String(f.file || (f.test && String(f.test).includes('::') ? String(f.test).split('::')[0] : '') || ''),
     test: String(f.test || ''),
@@ -1952,6 +1967,9 @@ async function routeCrossFindings(w, findings, replan) {
   // The scheduler holds only the verified tasks not yet done or merged.
   const held = verified.filter(t => !view.done.has(t) && !mergedInRun.has(t))
   for (const t of held) crossHeld.add(t)
+  // crossHeld now says exactly what waits: the wave's other dependents no longer need the blanket hold of the check window
+  crossInFlight.delete(w)
+  poke()
   if (held.length) log(`cross-test (wave ${w}): holding Task ${held.join(', ')} until the test fix lands`)
   if (!conflicts.length) {
     log(`cross-test (wave ${w}): no finding names a test file; nothing to fix`)
@@ -1988,6 +2006,13 @@ async function routeCrossFindings(w, findings, replan) {
   }
   for (const t of held) crossHeld.delete(t)
   if (held.length) replan()  // re-read the plan: it lists the released tasks again
+  if (fixed.findings.length) {
+    // the test-fixer judged the tests correct: that is not a landed fix, and its reason reaches the report
+    const why = fixed.findings.map(f => trim(String(f.message || f.issue || ''), 300))
+    if (entry0) entry0.testCorrect = why
+    log(`cross-test (wave ${w}): the tests are correct, no fix was needed (${why.join(' | ')})${fixed.fixed.length ? '; test fix landed for the rest' : ''}; ${held.length ? `Task ${held.join(', ')} released` : 'no task was held'}`)
+    return
+  }
   log(`cross-test (wave ${w}): test fix landed; ${held.length ? `Task ${held.join(', ')} released` : 'no task was held'}`)
 }
 
