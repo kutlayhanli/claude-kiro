@@ -311,7 +311,8 @@ def test_tc185_held_proof_skipped_test_is_not_proved(tmp_path):
 
 
 def test_tc185_neither_blocked_nor_held_is_a_usage_error(tmp_path):
-    root = make_scenario(tmp_path, base={TEST_FILE: passing_test()}, fix={TEST_FILE: passing_test()}, with_task4=False)
+    # base and fix differ so the fixture has a fix to commit; the refusal must not depend on the fix's content.
+    root = make_scenario(tmp_path, base={TEST_FILE: feat4_test(41)}, fix={TEST_FILE: passing_test()}, with_task4=False)
     before = runs(root)
     code, obj, err = ck_json(root, "testfix", "prove", "demo", "testfix1", "--test", NODE, "--json")
     assert code != 0, "no --blocked and no --held must be refused"
