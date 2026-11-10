@@ -826,11 +826,15 @@ await test('reviewer: a test-track task gets the contract check against design.m
   assert.doesNotMatch(p.state.prompts[batch2], /--contracts/)
 })
 
-await test('cross-test consistency: off by default', async () => {
-  const p = project({ deps: { 1: [], 2: [], 3: ['1', '2'] } })
+await test('cross-test consistency: on by default (7.1; off only with cross_test false, 7.3)', async () => {
+  const p = project({ deps: { 1: [], 2: [], 3: ['1', '2'] }, crossTest: { verdict: 'approve', findings: [], summary: 'consistent' } })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, wave: { 1: 1, 2: 1, 3: 2 }, tracks: { 1: 'test', 2: 'test', 3: 'impl' }, agents: ROLES } })
-  assert.ok(!p.state.events.some(e => e.startsWith('cross-test')))
-  assert.deepEqual(result.crossTests, [])
+  assert.deepEqual(p.state.events.filter(e => e.startsWith('cross-test') && !e.endsWith(' end')), ['cross-test wave 1'])
+  assert.equal(result.crossTests.length, 1)
+  const off = project({ deps: { 1: [], 2: [], 3: ['1', '2'] } })
+  const out = await runWorkflow(SCRIPT, { agent: off.agent, args: { ...baseArgs, wave: { 1: 1, 2: 1, 3: 2 }, tracks: { 1: 'test', 2: 'test', 3: 'impl' }, agents: { ...ROLES, reviewer: { ...ROLES.reviewer, cross_test: false } } } })
+  assert.ok(!off.state.events.some(e => e.startsWith('cross-test')))
+  assert.deepEqual(out.result.crossTests, [])
 })
 
 await test('cross-test consistency: reviewer.cross_test runs one check once a wave of test tasks has merged, starting with ck lint --contracts', async () => {
