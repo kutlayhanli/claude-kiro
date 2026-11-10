@@ -296,7 +296,7 @@ await test('14.1: on the OpenCode path every base agent call carries its role; e
   assert.ok(base.length >= 2 && escalated.length >= 2, 'both base and escalated steps ran')
   for (const c of base) assert.equal(c.opts.role, 'implementer', `${c.label} is a base implementer call`)
   for (const c of escalated) assert.ok(!('role' in c.opts) || c.opts.role == null, `${c.label} is escalated and carries no role`)
-  assert.equal(calls.find(c => c.label === 'task 2').opts.role, 'test_writer')
+  assert.equal(calls.find(c => c.label === 'task 2 [test]').opts.role, 'test_writer')  // test-track calls are labelled [test]
   const review = calls.find(c => /^review/.test(c.label))
   assert.ok(review, 'a review ran')
   assert.equal(review.opts.role, 'reviewer')

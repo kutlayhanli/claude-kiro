@@ -601,7 +601,7 @@ def _priority(target: Path, spec: str) -> dict:
 @worktree.command("land")
 @click.argument("spec")
 @click.argument("tasks", nargs=-1, required=True)
-@click.option("--into", help="Target branch (default: integrate/SPEC if it exists, else the main checkout's branch)")
+@click.option("--into", help="Target branch (default: integrate/SPEC if it is checked out, else the main checkout's branch)")
 @click.option("--gate", "do_gate", is_flag=True, help="Gate the batch (ck gate --task for every landed task) and bisect a red batch")
 @click.option("--install", "do_install", is_flag=True, help="Refresh dependencies in the target (specs/ck.json \"install\", or detected) before each gate")
 @click.option("--release", "release_claims", is_flag=True, help="Release claims left on the task worktrees (their agents have finished)")
@@ -629,7 +629,8 @@ def land_cmd(spec, tasks, into, do_gate, do_install, release_claims, keep, progr
     name = _spec_name(spec)
     try:
         integ = wt.integration_branch(name)
-        target_branch = into or (integ if wt.branch_exists(root, integ) else wt.current_branch(root))
+        use_integ = wt.branch_exists(root, integ) and wt.checkout_of(root, integ) is not None
+        target_branch = into or (integ if use_integ else wt.current_branch(root))
         target = wt.checkout_of(root, target_branch)
         result = wt.land(
             root,
