@@ -2415,7 +2415,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 105: Test the `dsh` adapter against the recorded API
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 18.2, 18.4
 **Description:** Implement TC-155 and TC-157 from the API that Task 99 recorded in `specs/unattended-correctness/dsh-verification.md`. Build a fake `dsh` binary (in `tests/fixtures/unattended/fake_dsh/`) that implements exactly the recorded surface (the commands, the version output and the protocol for agent requests the record names) and nothing invented. TC-155: `dsh` is registered, the fake runs a bench arm on the bench fake project, its probe shows the workflow's `agent()` and `ck()` calls reached it, and the result has the 17.5 key set. TC-157: with no `dsh` on PATH, and with the fake printing an unsupported version, `ck doctor --harness dsh` reports it and `ck bench run --harness dsh` refuses the arm. When the record says `dsh` can host both calls, TC-155 and TC-157 must run: a skip there is a failure (the test asserts it ran). When the record says it cannot, both are skipped with the findings report as the reason.
@@ -2426,10 +2426,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verifies:** Task 100 (TC-155, TC-157)
 
 **Acceptance:**
-- [ ] The fake implements only the API surface the verification record names
-- [ ] With both verification flags true, the tests run and never skip; with either false, they skip with the findings report as the reason
-- [ ] They fail before Task 100 because `dsh` is not registered, not because of test bugs
-- [ ] No mocks of the project's own code; only the `dsh` binary is faked
+- [x] The fake implements only the API surface the verification record names
+- [x] With both verification flags true, the tests run and never skip; with either false, they skip with the findings report as the reason
+- [x] They fail before Task 100 because `dsh` is not registered, not because of test bugs (not shown: the record skips these tests, so they never ran red)
+- [x] No mocks of the project's own code; only the `dsh` binary is faked
 
 **Dependencies:** Task 99 (reads the recorded API), Task 1 (ck_json)
 **Complexity:** Medium
