@@ -1981,7 +1981,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 86: Repair confirmed bad tests with a test-fixer
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 3.9, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 4.10
 **Description:** In `plugin/workflows/spec-implement.js`, after a confirmed conflict: `testFixPlan({conflicts, alreadyFixed})` in the decisions block groups conflicts by test file and sends nodes already fixed once to me; `thinCk('testfix ledger <k>', ['testfix', 'check', ...])` reads the ledger; `ck worktree create SPEC testfix<k> --base INTO` makes the branch; one test-fixer agent per file group runs with the test-writer's model and effort (role `test_writer`) and the `TESTFIX` schema (`{verdict: 'fixed'|'test-correct'|'cannot-fix', changedTests, commits, finding, summary}`), receiving the structured conflict entries. `fixed` -> `thinCk('testfix prove <k>', ['testfix', 'prove', ...])`: out of scope or proof failed -> needs-input (`kind: "test-fix"`) with the scope or proof result; proved -> a reviewer at the risky tier (the reviewer's risky model and effort) checks the diff against the test-plan rows of the changed tests with the guard checklist (no weakened test, no requirements or existing row edits); rejected -> needs-input with the findings; approved -> `thinCk('land', ['worktree', 'land', SPEC, 'testfix<k>', '--gate', ...])`, then `ck testfix record`, a fresh attempt of the blocked task, and release of its waiting dependents; a RED, PROTECTED or CONFLICT land goes to me. `test-correct` -> no test change, retry the blocked task with the finding as a `Failure`; `cannot-fix` -> me. Record every outcome as a `TestFixRecord` in `testFixes` (this supersedes today's report-only `testFixes` entries `{task, file, test, criterion, reason, fix}`; update the cases that pin them in `tests/js/spec_implement.test.mjs`, around lines 105-128, to the new loop and record shape). In `plugin/agents/test-writer.md`, add one line saying the test writer may be started as a test-fixer. Harness Contract owner: item 7's `testFixAction` (design: `testFixPlan`), the test-fix labels (design: `testfix <k> (Task <n>)`, `testfix review <k>`), result `testFixes[]` and the direct `testfix *` calls.
@@ -1993,15 +1993,17 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 55 (workflow cases for 4.6), Task 56 (P-11 at `testFixPlan`, P-33b in the workflow), Task 83 (TC-38, TC-40, TC-42 to TC-49 in `test_fix.test.mjs`)
 
 **Acceptance:**
-- [ ] A confirmed conflict starts a test-fixer with the test-writer's model and effort on a branch from the integration branch, carrying the conflict entries (4.1)
-- [ ] No fix lands without a passing proof, and an out-of-scope fix is refused before review (4.2, 4.5)
-- [ ] A proved fix is reviewed at the risky tier against the test-plan rows, and lands through `ck worktree land` only when approved; the blocked task then retries and its dependents are released (4.3, 4.4)
-- [ ] Proof failure or rejection sends the conflict to me with the findings (4.6); a test-correct verdict retries the task with the finding (4.7)
-- [ ] An already-fixed test goes to me (4.8); conflicts in one file share one test-fixer (4.9); each outcome is recorded (4.10)
+- [x] A confirmed conflict starts a test-fixer with the test-writer's model and effort on a branch from the integration branch, carrying the conflict entries (4.1)
+- [x] No fix lands without a passing proof, and an out-of-scope fix is refused before review (4.2, 4.5)
+- [x] A proved fix is reviewed at the risky tier against the test-plan rows, and lands through `ck worktree land` only when approved; the blocked task then retries and its dependents are released (4.3, 4.4)
+- [x] Proof failure or rejection sends the conflict to me with the findings (4.6); a test-correct verdict retries the task with the finding (4.7)
+- [x] An already-fixed test goes to me (4.8); conflicts in one file share one test-fixer (4.9); each outcome is recorded (4.10)
 
 **Dependencies:** Task 82 (both edit spec-implement.js; Task 82 runs first), Task 57 (calls `ck testfix check|prove|record`), Task 80 (calls `testConflictsOf`), Task 55 (its tests are the oracle), Task 56 (its tests are the oracle), Task 83 (its tests are the oracle)
 **Complexity:** High
 **Risk:** safety (lands automatic test changes on the integration branch)
+
+**Implementation notes:** a test-fixer report with verdict `fixed` that also carries a `finding` is treated as contradictory and goes to me (the harness turns a null verdict into `fixed`, and `test_tc45_redteam_fixer_that_did_not_fix_lands_nothing[None]` needs that case refused). Also updated in `tests/js/spec_implement.test.mjs`: the issue #8 case (new loop), the PROTECTED case (now needs-input, as TC-84) and `SNAPSHOT_KEYS` (Task 82's `runStart`, `audit`, `sweep`, `runWarnings`), which already failed on the base branch.
 
 ---
 

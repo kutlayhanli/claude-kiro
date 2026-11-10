@@ -582,12 +582,12 @@ await test('the final gate starts ck gate in the background and waits for its EX
   assert.ok(prompt.includes('${TMPDIR:-/tmp}/ck-gate-') && prompt.includes('^EXIT='))
 })
 
-await test('a PROTECTED landing fails the task as needing a human: no resolver, no fixer, no retry', async () => {
+await test('a PROTECTED landing parks the task as needing a human (needs-input, not failed): no resolver, no fixer, no retry', async () => {
   const p = project({ deps: { 1: [], 2: [], 3: ['2'] }, protectedTasks: ['2'] })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })
   assert.deepEqual(result.merged, ['1'])
-  const f = result.failed.find(x => x.task === '2')
-  assert.ok(f && /needs a human/.test(f.reason) && /\.claude\/settings\.json/.test(f.reason), JSON.stringify(result.failed))
+  const f = (result.needsInput || []).find(x => x.task === '2')
+  assert.ok(f && f.kind === 'protected' && /\.claude\/settings\.json/.test(f.file), JSON.stringify(result.needsInput))
   assert.ok(!p.state.events.some(e => /^(resolve|fix) /.test(e)))
   assert.equal(p.state.landings.filter(l => l.includes('2')).length, 1)
   assert.ok(!p.state.events.includes('task 3'), 'its dependents never start')
@@ -1015,6 +1015,26 @@ const SNAPSHOT_KEYS = [
   "agents.reviewer",
   "agents.reviewer_risky",
   "agents.test_writer",
+  "audit",
+  "audit.clean",
+  "audit.complete",
+  "audit.drift",
+  "audit.fixtures",
+  "audit.fixtures.drift",
+  "audit.fixtures.handcrafted",
+  "audit.fixtures.lockTampered",
+  "audit.fixtures.newLocks",
+  "audit.head",
+  "audit.hooks",
+  "audit.hooks.active",
+  "audit.hooks.chainedTo",
+  "audit.hooks.installed",
+  "audit.hooks.intact",
+  "audit.hooks.problems",
+  "audit.into",
+  "audit.problems",
+  "audit.schema",
+  "audit.spec",
   "blocked",
   "blockedOn",
   "crossTests",
@@ -1080,6 +1100,23 @@ const SNAPSHOT_KEYS = [
   "reason",
   "relinks",
   "reportSource",
+  "runStart",
+  "runStart.baseline",
+  "runStart.baseline.commit",
+  "runStart.baseline.files",
+  "runStart.hooks",
+  "runStart.hooks.active",
+  "runStart.hooks.chainedTo",
+  "runStart.hooks.installed",
+  "runStart.hooks.intact",
+  "runStart.hooks.problems",
+  "runStart.integration",
+  "runStart.integration.branch",
+  "runStart.integration.state",
+  "runStart.keptClaims",
+  "runStart.releasedClaims",
+  "runStart.warnings",
+  "runWarnings",
   "stats",
   "stats.bisected",
   "stats.failed",
@@ -1091,6 +1128,9 @@ const SNAPSHOT_KEYS = [
   "stats.planFailures",
   "stats.planFallbacks",
   "stats.planSteps",
+  "sweep",
+  "sweep.keptClaims",
+  "sweep.releasedClaims",
   "targetGreen",
   "taskAgents",
   "taskAgents.effort",
@@ -1146,7 +1186,7 @@ const SNAPSHOT_KEYS = [
   "timing.phases[].minutes",
   "timing.phases[].start",
   "timing.phases[].tasks",
-  "timing.start"
+  "timing.start",
 ]
 const keyPaths = (v, prefix = '') => {
   if (Array.isArray(v)) return v.flatMap(x => keyPaths(x, prefix + '[]'))
