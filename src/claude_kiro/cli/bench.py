@@ -1,7 +1,6 @@
 """`ck bench`: compare agent configurations by running whole specs and scoring them on hidden tests."""
 
 import json
-import os
 import shlex
 import sys
 from pathlib import Path
@@ -9,6 +8,7 @@ from pathlib import Path
 import click
 
 from .. import bench as b
+from .. import harnesses
 
 
 def _fail(e: Exception) -> None:
@@ -34,8 +34,8 @@ def bench():
 @click.option("--force", is_flag=True, help="Re-run arms that already have a result")
 @click.option("--only", multiple=True, metavar="ARM_ID", help="Run only these arms (repeatable), e.g. calc--haiku--r1")
 @click.option("--runner", default=None, help="Command used instead of `ck` to launch `run` (testing; e.g. a fake)")
-@click.option("--harness", type=click.Choice(["claude", "opencode"]), default="claude", show_default=True,
-              help="Run the arms through Claude Code (`ck run`) or OpenCode (the workflow bridge)")
+@click.option("--harness", cls=harnesses.HarnessOption, default="claude", show_default=True,
+              base_help="Run the arms through a registered harness: claude (`ck run`), opencode (the workflow bridge)")
 def run_cmd(config: str, dry_run: bool, force: bool, only: tuple, runner: str, harness: str):
     """Run every arm in CONFIG sequentially, each in a fresh clone at the pinned base.
 
@@ -43,15 +43,19 @@ def run_cmd(config: str, dry_run: bool, force: bool, only: tuple, runner: str, h
     skipped unless --force, so an interrupted bench resumes where it stopped.
     """
     try:
+        h = harnesses.select(harness)
+    except harnesses.HarnessError as e:
+        _fail(e)
+    try:
         cfg = b.load_config(Path(config))
     except b.BenchError as e:
         _fail(e)
+    try:
+        h.check_options(cfg, runner)
+    except b.BenchError as e:
+        _fail(e)
     if runner:
-        if harness == "opencode":
-            _fail(b.BenchError("--runner is only for the Claude harness; OpenCode arms use opencode.bin in the config"))
         cfg["runner"] = shlex.split(runner)
-    if harness == "opencode" and not cfg.get("opencode", {}).get("plugin") and not os.environ.get("CK_OPENCODE_PLUGIN"):
-        _fail(b.BenchError("opencode arms need opencode.plugin in the bench config (or CK_OPENCODE_PLUGIN)"))
     arms = [a for a in b.plan_arms(cfg) if not only or a["id"] in only]
     results = Path(cfg["results_dir"])
     if dry_run:
@@ -60,6 +64,9 @@ def run_cmd(config: str, dry_run: bool, force: bool, only: tuple, runner: str, h
             done = " (done)" if (results / f"{a['id']}.json").exists() else ""
             click.echo(f"  {i:3}. {a['id']}{done}")
         return
+    reason = h.available()
+    if reason:
+        _fail(b.BenchError(f"{harness} harness unavailable: {reason}"))
     failed = 0
     for i, a in enumerate(arms, 1):
         if (results / f"{a['id']}.json").exists() and not force:
@@ -67,10 +74,15 @@ def run_cmd(config: str, dry_run: bool, force: bool, only: tuple, runner: str, h
             continue
         click.echo(f"[{i}/{len(arms)}] {a['id']}")
         try:
-            r = b.run_arm_opencode(cfg, a, echo=click.echo) if harness == "opencode" else b.run_arm(cfg, a, echo=click.echo)
+            r = h.run_arm(cfg, a, echo=click.echo)
         except b.BenchError as e:
             failed += 1
             click.echo(f"❌ {a['id']}: {e}")
+            continue
+        problems = b.check_arm_result(r)
+        if problems:
+            failed += 1
+            click.echo(f"❌ {a['id']}: arm result does not match the shared shape: {'; '.join(problems)}")
             continue
         rep = r["report"]
         cost = r["cost"]["usd"]
