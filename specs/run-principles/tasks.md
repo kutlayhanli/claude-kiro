@@ -1451,7 +1451,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 62: Property tests for routing a stop to the arbiter
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.10, 4.8, 8.12
 **Description:** Implement P-12, P-13, P-14, P-16, P-43 and P-44 with Hypothesis in `tests/test_arbiter_run.py`, named `test_p<N>_...`, all (W) through the bridge. P-12: for any spec claim, across stop type, attempt, `escalate` lists, review rounds, individual or batched review, the event immediately after the report that stops is the arbiter step, with no `guard`, confirmation or `revise (model)` label. P-13: for any `failUntil`, retries and `escalate` of length 0-3, the arbiter runs exactly when every configured attempt failed. P-14: BUSY and ERROR on any task and DAG never call the arbiter. P-16: for each `arbiter_failures()` form, a needs-input entry and no fallback. P-43 at `normalizeReview` (decisions block through the bridge, `max_examples=200`): a `noRequirement` finding, even one marked blocking, is minor, and the review is `approve` exactly when no other blocking finding remains. P-44 at `settleFindings` (`max_examples=200`): a finding matching a settled one by file and issue, with case and whitespace variants, or a reworded one marked `settledBy`, is removed, and a different issue on the same file stays. Settings `@settings(derandomize=True, max_examples=30, database=None, deadline=None)`. Start the file's `PROPERTIES` map with these six.
@@ -1462,12 +1462,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 65 (P-14, P-16), Task 68 (P-13), Task 69 (P-12, P-43, P-44)
 
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the P-12, P-13, P-14, P-16, P-43 and P-44 rows
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] The tests call the workflow's decisions through the bridge, not a server
-- [ ] Tests exercise the real boundary named in the test plan (real workflow under the fake runtime, real `ck`)
-- [ ] Tests fail before the implementation exists for the right reason (no arbiter step)
-- [ ] No mocks of the project's own code in integration tests
+- [x] The generators cover every surface form and negative listed in the P-12, P-13, P-14, P-16, P-43 and P-44 rows
+- [x] Settings are deterministic (derandomized, no database)
+- [x] The tests call the workflow's decisions through the bridge, not a server
+- [x] Tests exercise the real boundary named in the test plan (real workflow under the fake runtime, real `ck`)
+- [x] Tests fail before the implementation exists for the right reason (no arbiter step)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (strategies), Task 61 (same test file)
 **Complexity:** High
