@@ -1865,7 +1865,8 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - [x] Tests fail before the implementation exists for the right reason (no arbiter steps in create)
 - [x] No mocks of the project's own code in integration tests
 
-**Implementation notes:** The cases extend the TC-27 driver in `tests/test_arbiter_create.py` (it now also records each agent call's options, applies `arbiter_edits` for a step, and throws on an override `{"__throw": true}`). They pin these names the design leaves open: step labels `arbiter refuted|cuts|drift` with a ` risky` suffix, one call per step answering one ruling per `claim`; result keys `review.arbiter.{ran,lost,rulings,missing}`, `review.proposedCuts`, `review.refutedCount`, `review.result`; a drift ruling's `claim` is an arbiter-given id (`D1`); a rejected cut has `verdict` other than `sound`.
+**Implementation notes:** The cases extend the TC-27 driver in `tests/test_arbiter_create.py` (it now also records each agent call's options, applies `arbiter_edits` for a step, and throws on an override `{"__throw": true}`). They pin these names the design leaves open: step labels `arbiter refuted|cuts|drift` with a ` risky` suffix, one call per step answering one ruling per `claim`; result keys `review.arbiter.{ran,lost,rulings,missing}`, `review.proposedCuts`, `review.refutedCount`, `review.result`; a drift ruling's `claim` is an arbiter-given id (`D1`); a rejected cut has `verdict` other than `sound`. Answers are wrapped as `{"rulings": [...]}`; `args.agents.arbiter` may carry `risky_model` and `risky_effort` for the ` risky` steps.
+
 **Dependencies:** Task 78 (same test file)
 **Complexity:** High
 **Risk:** normal
