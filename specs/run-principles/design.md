@@ -191,7 +191,7 @@ Every seam is pure: no I/O, clock or network, and all inputs are arguments.
 |---|---|---|
 | `is_arbiter_caller(hook_input)` | `Any -> bool`. True only when `agent_id` is a non-empty string and `agent_type` is exactly `spec:arbiter` or `ck-arbiter`. Environment, tool arguments and prompt text are not inputs. | 9.5, 9.6, 9.7 |
 | `decide_arbiter_edit(facts)` | `ArbiterEditFacts -> GuardDecision`. Lists the only paths allowed; everything else is denied. | 9.1, 9.2, 9.3, 11.5 (guard side), 11.7, 11.10 |
-| `decide_arbiter_bash(command, cwd)` | `str, str -> GuardDecision`. First denies any command holding `$(`, a backtick, `<(` or `>(` outside single quotes (an unterminated quote is denied too), because `_segment_read_only` was written as a pre-filter and treats substitution as read-only. Then allows read-only commands (existing `_segment_read_only`), and `git add` of lane files or `git commit -m` in an arbiter worktree. Any `git -c`, `--amend` or `--no-verify` is denied. A commit message is a plain `-m '...'` in single quotes, and the arbiter's prompt says so: `git commit -m "$(cat <<'EOF' ...)"` is denied, and `-F` would need a file outside the lane. | 9.4 |
+| `decide_arbiter_bash(command, cwd)` | `str, str -> GuardDecision`. First denies any command holding `$` (any parameter expansion, `$NAME`, `${...}` or `$(`), a backtick, `<(` or `>(` outside single quotes (an unterminated quote is denied too), because `_segment_read_only` was written as a pre-filter and models neither substitution nor expansion: `git diff ${X}--output=tests/t.py` or `git commit -m x${IFS}--amend` would otherwise hide an option from every word check (9.4). Then allows read-only commands (existing `_segment_read_only`), and `git add` of lane files or `git commit -m` in an arbiter worktree. Any `git -c`, `--amend` or `--no-verify` is denied. A commit message is a plain `-m '...'` in single quotes, and the arbiter's prompt says so: `git commit -m "$(cat <<'EOF' ...)"` is denied, and `-F` would need a file outside the lane. | 9.4 |
 | `arbiter_block_reason(rel)` | `str -> str` | 9.8 |
 
 `decide_arbiter_edit` allows exactly:
@@ -253,7 +253,7 @@ Every seam is pure: no I/O, clock or network, and all inputs are arguments.
 | `settleFindings(review, settled)` | `(Review, string[]) -> Review` | 8.12 |
 | `normalizeReview(review)` | `Review -> Review` (a `noRequirement` finding is minor; a review left with no blocking finding is `approve`) | 4.8 |
 | `nextLandingBatch(queue, window)` | `(Entry[], number) -> Entry[]` (a spec edit lands alone) | 8.1 |
-| `crossPassedOf({ checks, testVerifies })` | `-> Set<string>`: the test tasks a cross-test check in this run passed. A check that returned a result passes the test tasks it covered, less those that `testVerifies` maps from a file a blocking finding names; a check that returned nothing, or a finding naming a file `testVerifies` lacks, passes none of that check's tasks | 13.9 |
+| `crossPassedOf({ checks, testVerifies })` | `-> { tests: Set<string>, held: Set<string> }`: `tests` are the test tasks covered by a cross-test check in this run that returned a result; `held` are the impl tasks that `testVerifies` maps from a file a blocking finding names. A check that returned nothing, or a finding naming a file `testVerifies` lacks, puts none of that check's test tasks in `tests`. `auditDue` skips an impl task only when every test task verifying it is in `tests` and the task is not in `held` | 13.9 |
 | `auditDue({ track, verifiedBy, done, audited, crossPassed })` | `-> boolean`. `verifiedBy` is the current plan's entry. False when every test task in it is in `crossPassed` | 8.3, 13.1, 13.6, 13.7, 13.9 |
 | `auditAction(audit)` | `-> { start: boolean, problems: [], missed: boolean }` | 13.2, 13.3, 13.5 |
 
@@ -534,6 +534,8 @@ A RED task's `checkTail` and `failures` are equal to those of the gate in `gates
 
 // The arbiter's answer (agent schema). outcome is an unconstrained string so that a malformed answer
 // reaches validate_ruling and my needs-input entry instead of failing in the agent tool (7.2).
+// The ruling prompt states the claim on its own line, `Claim key: <key>` (the `key` of OpenResult), and the arbiter
+// copies it into `claim`; settle compares the two (7.1).
 const RULING = { type: 'object', properties: {
   claim: { type: 'string', description: 'the claim key you were given, copied' },
   status: { type: 'string', description: 'ruled | needs_stronger_look' },
@@ -562,7 +564,7 @@ const RULING = { type: 'object', properties: {
 
 // Plan fields (ck plan --json, read from out.json): `verifyScope: [ScopeFinding]` and `verifiedBy: {task: [test tasks]}`.
 // applyPlanView gains `verifyScope` and `verifiedBy` keys beside order, deps, done, cycles, verifyCycles and overlaps;
-// a missing key reads as [] / {}. `ck plan` already outputs `testVerifies` (test file -> test tasks), which the
+// a missing key reads as [] / {}. `ck plan` already outputs `testVerifies` (test file -> the impl tasks its owning test task verifies, as `graph.py` builds it), which the
 // cross-test hold uses; `verifiedBy` is still needed because auditDue asks, per impl task, which test tasks verify it
 // (Verified by and Verifies), which a file-keyed map cannot answer when a test file is shared or not yet on disk.
 
@@ -734,7 +736,7 @@ land_group(group, whole):
 land_group(batch, True)
 ```
 
-**Gate scope below the batch.** `gate.py` widens a gate to the full suite (`verify`) when the tasks Done in the target's `tasks.md` plus the gated tasks cover the whole spec (`spec_complete`). Task branches commit their own `**Status:** Done`, so once a left half is MERGED its tasks are Done on the target, and a gate on the last remaining half or single task would see the spec complete, run the full suite, fail on an earlier task's regression, and blame the last task by its own red gate: the TC-176 misblame by another path. So only the batch gate (`whole=True`) may widen. Every gate below it is called with `whole=False`, which `_gate_fn` passes to `run_gate(..., escalate_complete=False)`, and runs task-scoped and green-only, as for a task in a spec that is not yet complete, whatever is Done on the target (15.1, 15.2). A failure that only the full suite sees can then never end in a RED task; it ends as `unreproduced` and goes to the attributed full gate, which finds the task it belongs to (15.3). `land` calls the batch gate as `gate(target, group)` and every gate below it as `gate(target, group, whole=False)`, so an existing two-argument gate function still works for a batch that is not bisected. A batch in which only one task merges is gated with `whole=False` too (D25): a single task is never gated with the full suite at landing, so it can never be RED on a failure only the full suite sees. The run's final full gate, which follows the last task, runs the full suite and its attributed fixer.
+**Gate scope below the batch.** `gate.py` widens a gate to the full suite (`verify`) when the tasks Done in the target's `tasks.md` plus the gated tasks cover the whole spec (`spec_complete`). Task branches commit their own `**Status:** Done`, so once a left half is MERGED its tasks are Done on the target, and a gate on the last remaining half or single task would see the spec complete, run the full suite, fail on an earlier task's regression, and blame the last task by its own red gate: the TC-176 misblame by another path. So only the batch gate (`whole=True`) may widen. Every gate below it is called with `whole=False`, which `_gate_fn` passes to `run_gate(..., escalate_complete=False)`, and runs task-scoped and green-only, as for a task in a spec that is not yet complete, whatever is Done on the target (15.1, 15.2). A failure that only the full suite sees can then never end in a RED task; it ends as `unreproduced` and goes to the attributed full gate, which finds the task it belongs to (15.3). `land` calls the batch gate as `gate(target, group)` and every gate below it as `gate(target, group, whole=False)`, so every `GateFn` must accept the `whole` keyword, since a one-task batch is called with `whole=False` too (D25). A batch in which only one task merges is gated with `whole=False` too (D25): a single task is never gated with the full suite at landing, so it can never be RED on a failure only the full suite sees. The run's final full gate, which follows the last task, runs the full suite and its attributed fixer.
 
 Each node of the bisection tree runs one gate, so a batch of n runs at most 2n-1 (NFR). The right half is gated on top of whatever the left half landed, so a failure that needs both shows in the right half's gates and is blamed on the first task whose own task-scoped gate fails with it. After `land_group(batch, True)`, when the batch gate was red and no task ended RED, the result carries `unreproduced` with the batch gate's tail and failures (15.3). The tasks whose own gates passed are MERGED (15.3), so the target now holds the failure the batch gate saw.
 
@@ -791,7 +793,7 @@ Each node of the bisection tree runs one gate, so a batch of n runs at most 2n-1
 - **Identity comes from the harness.** `agent_type` is set by Claude Code, and the check takes no environment, argument or prompt input (9.5). A main session could still start an agent of type `spec:arbiter`. That gives the agent only the lane, and only in an arbiter worktree or under a ticket.
 - **Fail closed for this caller.** `pre_tool_guard.hook` fails open for others, by design. The arbiter path denies on any exception, and its configured guard modes do not apply: the lane holds even when `guard` is switched off in `specs/ck.json`.
 - **The audit is read-only by its tool list.**
-- **Shell substitution is denied first.** `decide_arbiter_bash` refuses `$(`, backticks and process substitution before any allowlist check, so an inner command cannot run inside a read-only one.
+- **Shell substitution and expansion are denied first.** `decide_arbiter_bash` refuses any `$` outside single quotes (parameter expansion and `$(`), backticks and process substitution before any allowlist check, so neither an inner command nor an expanded word (an empty variable, `${IFS}` splitting) can slip an option past the word checks.
 - **Lint imports no project code.** `lint_scope.py` uses `ast` and text only (NFR).
 - **Recovery cannot move a ref.** `recover_target` resets only to the checkout's current head, and its token is bound to that old value, tree and parents, so it cannot be used to land anything. A forged or stale refusal record can at worst discard tracked changes in a managed integration checkout, which `ck worktree land` would refuse to land into anyway.
 

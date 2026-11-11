@@ -702,7 +702,7 @@ def decide_arbiter_edit(facts: ArbiterEditFacts) -> GuardDecision:
 
 
 def _has_substitution(command: str) -> bool:
-    """True for `$(`, a backtick, `<(` or `>(` outside single quotes, or an unterminated quote."""
+    """True for a `$`, a backtick, `<(` or `>(` outside single quotes, or an unterminated quote."""
     i, n = 0, len(command)
     in_double = False
     while i < n:
@@ -720,10 +720,8 @@ def _has_substitution(command: str) -> bool:
             in_double = not in_double
             i += 1
             continue
-        if c == "`" or command.startswith("$(", i):
-            return True
-        if command.startswith("$'", i) and not in_double:
-            return True  # ANSI-C quoting: `\'` inside it does not end the quote; deny rather than model it
+        if c == "`" or c == "$":
+            return True  # any `$` (parameter expansion, `$(`, ANSI-C `$'`) can hide an option or a command
         if c == "#" and not in_double and (i == 0 or command[i - 1] in " \t\n;&|()"):
             return True  # a comment can hide quotes from this scan; deny rather than model it
         if command.startswith("<(", i) or command.startswith(">(", i):

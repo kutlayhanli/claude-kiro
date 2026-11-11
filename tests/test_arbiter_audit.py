@@ -130,7 +130,8 @@ VB = {"2": ["1"]}
 
 
 def ruling(outcome: str = "code", **extra) -> dict:
-    base = {"status": "ruled", "outcome": outcome, "principle": PRINCIPLE, "reasoning": "the principle decides it"}
+    # "@key": the fake arbiter copies the claim key from its prompt (tests/js/fake_project.mjs), as 7.1 requires
+    base = {"claim": "@key", "status": "ruled", "outcome": outcome, "principle": PRINCIPLE, "reasoning": "the principle decides it"}
     if outcome == "code":
         base["code"] = "make the code provide the later command first"
     if outcome == "test_repair":

@@ -170,14 +170,14 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - `plugin/agents/auditor.md` - new read-only role prompt
 - `src/claude_kiro/plugin.py` - two `AGENT_ROLES` entries
 **Verify:** `uv run pytest tests/test_plugin.py -q -k "not dogfood and not vendored_workflow and not skills_use_the_plugin_root"`
-**Verified by:** Task 88 (the agent set and shipped prompts)
+**Verified by:** none (Task 88 extends `tests/test_plugin.py` once this task has landed)
 
 **Acceptance:**
 - [ ] Both agent files exist, and the auditor's tool list has no write or shell tool
 - [ ] `AGENT_ROLES` holds both, with `auditor` following the `reviewer` role
 - [ ] The arbiter prompt requires one outcome, the claim key and a cited principle id, and limits edits to the three lane files
 
-**Dependencies:** Task 5 (`agent_type_files` reads the arbiter role), Task 88 (its tests are the oracle)
+**Dependencies:** Task 5 (`agent_type_files` reads the arbiter role)
 **Complexity:** Medium
 **Risk:** normal
 
@@ -282,7 +282,8 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Description:** Create `src/claude_kiro/principles.py` with the starter text from design.md and the pure seams `parse_principles`, `plan_section`, `effective_principles` and `plan_may_be_decided`, plus the `Principle` and `EffectivePrinciples` dataclasses. A principle is a top-level `-` bullet with its continuation lines; its id is `<layer>:<slug>` or `<layer>:<position>`. Handle `**Overrides <slug>:**`, `**Reason:**`, `**Reserves <scope>:**` and `**Nothing to add:**`. An override with no reason text is not citable and does not displace the default. A plan text that claims to grant requirements changes has no effect, because nothing here takes a grant as input. Harness Contract owner: `arbiter.effective_principles`, which is `principles.effective_principles` over `parse_principles`.
 **Files:**
 - `src/claude_kiro/principles.py` - new module
-**Verify:** `uv run pytest tests/test_principles.py -q -k "p1_ or p40_"`
+**Verify:** `uv run python -c "from claude_kiro.principles import parse_principles, plan_section, effective_principles, plan_may_be_decided"`
+**Note:** a foundation task (smoke Verify) since the run of 2026-11-11: `ck lint` counts the `arbiter_policy` imports of `tests/test_principles.py` helpers against any selection of that file, so a `-k "p1_ or p40_"` Verify reads as a verify-order cycle through Task 30. P-1 and P-40 still check this task through Task 8's suite, which runs once Task 30 is Done.
 **Verified by:** Task 8 (P-1 at `effective_principles`, P-40 at `plan_may_be_decided`)
 
 **Acceptance:**
@@ -522,7 +523,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 22: Simulate each task's gate and report Verify-scope findings
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 12.1, 12.2, 12.3, 12.4, 12.9, 12.10
 **Description:** In `src/claude_kiro/lint_scope.py`, add `SimTest`, `SimInput`, `ScopeFinding`, `ScopeResult`, `load_sim_input` (from tasks.md and test files, with `ast` and text only, parsing each test file once), `scope_findings(sim)` and `dedupe_scope(result, existing)`. For each not-Done task, simulate which suites are due and what they select. Report `unfiltered-shared-suite` findings, the only kind: a selected test that calls a later task's command gives no finding, since live command edges handle it at run time (D30, 12.3). Report nothing when a suite is not due, its filter excludes the tests, or the task depends directly or transitively on the tasks those tests are for. A bare `pytest`, a directory, a glob, a shell variable, an unreadable `-k` or a selected file not yet on disk (`not on disk yet`) goes to `not_checked`. Sort findings by (int task, kind, suite, testTask). Import no project code and use no network. Harness Contract owner: `lint.verify_scope`, which is `lint_scope.scope_findings` and `dedupe_scope`.
@@ -532,11 +533,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 20 (P-31, P-32, P-33 at `scope_findings` and `dedupe_scope`)
 
 **Acceptance:**
-- [ ] An unfiltered shared suite due while another of its test tasks' tasks is not Done gives a finding naming the task and suite
-- [ ] A selected test calling a command only a later task provides gives no finding
-- [ ] Not due, filtered out, and direct or transitive dependency each give no finding
-- [ ] An unresolvable Verify selection is `not_checked` and has no exit effect
-- [ ] A problem already in an existing lint key is not reported again, and order is stable
+- [x] An unfiltered shared suite due while another of its test tasks' tasks is not Done gives a finding naming the task and suite
+- [x] A selected test calling a command only a later task provides gives no finding
+- [x] Not due, filtered out, and direct or transitive dependency each give no finding
+- [x] An unresolvable Verify selection is `not_checked` and has no exit effect
+- [x] A problem already in an existing lint key is not reported again, and order is stable
 
 **Dependencies:** Task 17 (extends `lint_scope.py` and calls `suite_due` and `done_at_gate`), Task 20 (its tests are the oracle)
 **Complexity:** High
@@ -833,10 +834,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Description:** In `src/claude_kiro/hooks/_shared/guard_policy.py`, add `ArbiterEditFacts`, `is_arbiter_caller`, `decide_arbiter_edit`, `decide_arbiter_bash` and `arbiter_block_reason`. `is_arbiter_caller` is true only when `agent_id` is a non-empty string and `agent_type` is exactly `spec:arbiter` or `ck-arbiter`; environment, arguments and prompt text are not inputs. `decide_arbiter_edit` allows only the paths listed in design.md: in a `<spec>-task-arbiter<k>` worktree, that spec's `tasks.md`, `design.md` and `test-plan.md`; with a lane ticket in a non-arbiter checkout, those three and `requirements.md` only while implementation has not started. `decide_arbiter_bash` first denies any command holding `$(`, a backtick, `<(` or `>(` outside single quotes (an unterminated quote is denied too), then allows read-only commands, `git add` of lane files and `git commit -m` in an arbiter worktree, and denies any `git -c`, `--amend` or `--no-verify`. The arbiter's commit message is a plain `-m '...'`. `classify_caller`, `Caller` and every existing decision stay unchanged. Harness Contract owner: `guard_policy.arbiter_may_edit`, which is `decide_arbiter_edit`. The contract's `Caller` value `arbiter` is replaced by `is_arbiter_caller`, so `Caller` stays as it is.
 **Files:**
 - `src/claude_kiro/hooks/_shared/guard_policy.py` - lane seams
-**Verify:** `uv run pytest tests/test_arbiter_guard.py -q -n auto -k "p22_ or p24_ or p25_ or p45_"`
+**Verify:** `uv run pytest tests/test_arbiter_guard.py -q -n auto -k "p22_ or p24_ or p25_ or p45 or tc211_"`
 **Verified by:** Task 34 (P-22, P-24, P-25, P-45 at the lane seams)
 
 **Acceptance:**
+- [x] Any `$` outside single quotes is denied (parameter expansion as well as `$(`), so `git diff ${X}--output=tests/t.py`, `rg ${X}--pre=rm`, `file ${X}-C` and `git commit -m x${IFS}--amend` are all blocked (review of the 2026-11-11 run)
 - [x] Only the three canonical paths of the ruling's spec are allowed in a run, and every denial names the file and the lane
 - [x] `requirements.md` is allowed only under a lane ticket with implementation not started, and PLAN.md never
 - [x] A claim by environment, argument or prompt text, a near-miss type, or a missing agent id is not the arbiter
@@ -864,7 +866,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - [ ] An exception on the arbiter path denies
 - [ ] A task agent and a main session get today's decisions
 
-**Dependencies:** Task 1 (its tests are the oracle), Task 32 (reads the lane tickets it writes), Task 33 (its tests are the oracle), Task 34 (its tests are the oracle), Task 35 (calls the lane seams), Task 82 (its tests are the oracle)
+**Dependencies:** Task 1 (its tests are the oracle), Task 32 (reads the lane tickets it writes), Task 33 (its tests are the oracle), Task 34 (its tests are the oracle), Task 35 (calls the lane seams), Task 82 (its tests are the oracle), Task 37 (provides `cmd:ck arbiter open`), Task 38 (provides `cmd:ck arbiter settle`), Task 42 (provides `cmd:ck arbiter record`)
 **Complexity:** High
 **Risk:** safety (enforces the lane at edit time; a hole lets a wrong ruling change requirements, tests or code)
 
@@ -1141,7 +1143,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - [x] Setting Status to Decided is conditional on `ck principles check`
 - [x] An override is recorded only with a reason, and an item is removed only on my acceptance
 
-**Dependencies:** Task 9 (its tests are the oracle)
+**Dependencies:** Task 9 (its tests are the oracle), Task 31 (provides `cmd:ck principles init`)
 **Complexity:** Medium
 **Risk:** normal
 
@@ -1381,7 +1383,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 59: Test how spec-edit, code and review rulings are applied
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 8.2, 8.3, 8.11, 8.12, 7.3, 7.4, 7.5, 6.3, 8.9
 **Description:** Implement TC-62, TC-63, TC-74, TC-75, TC-146 and TC-210 in `tests/test_arbiter_run.py`, named `test_tc<N>_...`. TC-62: after a spec edit lands the task resumes and `attempts` and escalations are as before the ruling. TC-63: a landed edit that adds a dependency on a not-started task changes the next plan's schedule (real `ck plan`). TC-74: a code ruling: the retry prompt holds the ruling text and a failing gate after it leaves the task unfinished. TC-75: the re-review prompt holds the ruling and the settled finding raised again does not block. TC-146: after a ruling on a review deadlock, a different blocking finding on the same file gets its own ruling, and the same finding raised again unsettled makes no call and is an entry with the ruling; a deadlock mixing a ruled finding and a new one sends the ruled finding to me with its ruling and only the new one to the arbiter. TC-210: a review deadlock ruled `test_repair` goes to the test-fixer (fake_project `testFix`), and once the fix lands the task is reviewed again, the re-review prompt carrying the ruling, with no revision or attempt spent (D33).
@@ -1391,10 +1393,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 66 (TC-74), Task 67 (TC-62, TC-63), Task 69 (TC-75, TC-146, TC-210)
 
 **Acceptance:**
-- [ ] TC-62 and TC-63 use a real landing of the fake arbiter's real commit (`arbiterEdits`) and real `ck plan`
-- [ ] Tests exercise the real boundary named in the test plan (workflow, real git, real `ck`)
-- [ ] Tests fail before the implementation exists for the right reason (no spec-edit landing or resume)
-- [ ] No mocks of the project's own code in integration tests
+- [x] TC-62 and TC-63 use a real landing of the fake arbiter's real commit (`arbiterEdits`) and real `ck plan`
+- [x] Tests exercise the real boundary named in the test plan (workflow, real git, real `ck`)
+- [x] Tests fail before the implementation exists for the right reason (no spec-edit landing or resume)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 58 (same test file)
 **Complexity:** High
@@ -1524,7 +1526,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Status:** Not Started
 **Track:** impl
 **Requirements:** 1.6, 1.7, 1.9, 5.3, 5.4, 5.5, 5.6, 5.7, 6.1, 6.2, 6.7, 6.8, 6.9, 6.10, 6.13, 7.1, 7.2
-**Description:** In `plugin/workflows/spec-implement.js`, add the `arbiterAgent` and `agents.arbiter` args, the `RULING` agent schema, the `openResultOf` and `settleResultOf` validity checks over `out.json` (every `ck` call goes through `thinCk` with the generic `CK_CALL` envelope, so `OpenResult` and `SettleResult` are shapes read from `out.json`, and a missing or wrong-typed field is a failed `ck arbiter` call, 6.10; design.md "Workflow schemas"), `claimTrigger` in the decisions block (with the `live` input, `liveEdgeDecision`'s result: a `wait` with nothing refused returns null so `recordLiveWait` runs as today; a `blocked` action or a non-empty `refused` is a `command-cycle` claim, keyed `command:<provider>:<command>`, sent to `arbitrate` in place of today's `blocked: command cycle` exit, with no live edge recorded and no retry spent (6.13, D29); `conflict` is a `test-conflict`), and `arbitrate(n, rec, claim)`, which calls `ck arbiter open`, runs the arbiter agent at the returned tier, calls `ck arbiter settle`, and re-runs once at the risky tier on `rerun` with the first reasoning. The ruling prompt carries the stop type, claim, evidence, task, models tried, both layers and the spec paths. `ask`, no `arbiterAgent`, a thrown or empty agent call and a failed `ck arbiter` call all give a needs-input entry, except that on an `audit` claim no `arbiterAgent`, a failed call or one returning nothing usable, and `ask` with reason `principles-missing` let the task start (13.8, Task 74); a malformed ruling and any other `ask` on an audit claim are still entries (7.2). Pass `TaskMeta` on `ck arbiter open`'s stdin, with `risk` from `ck plan`'s `risk` map, so a `risk_paths` match counts as safety. Remove `confirmConflictPrompt`, `climbGuard`, `needInput` and `guardLadder`. In the confirmed-conflict block of `runTask` (~2303-2346), the confirmation attempt goes and the (live-merged) test conflict goes straight to `arbitrate`; keep its post-fix code (`testFixFor`, `parkTestFix`, the `budgetBase` reset, the retry with `afterFixNote`, the `ladder()` re-run and the "still reports a test that can never pass" park) intact for Task 66 to move under `handOffTestRepair`; do not delete it. A guard stop in the first `ladder()` pass, in the `ladder()` pass after a landed test fix, and in `revised()` goes to `arbitrate` with trigger `guard-stop` in place of `climbGuard` (design.md "Guard stops, wherever they occur"). A worktree that is busy or could not be created does not. The test-fixer suites (`test_fix.test.mjs`, `command_deps.test.mjs`, `attributed_gates.test.mjs`, TC-177) go red here and turn green again at Task 66 through Task 102's migration. The task stays in `running` while a ruling is pending, its slot is released first, and `'arbiter'` joins `UNBLOCKER_KINDS`. Use no `Date.now`, `new Date` or `Math.random`. Harness Contract owner: labels `arbiter task <n>`, `arbiter task <n> risky` and the `arbiter-` thin steps (their prompts hold one `ck` line and at most one fenced JSON block), the agent options from `args.agents.arbiter` (`model`, `effort`, `schema`), and the design names replacing the contract's `arbiter-decide` and `arbiter-route`.
+**Description:** In `plugin/workflows/spec-implement.js`, add the `arbiterAgent` and `agents.arbiter` args, the `RULING` agent schema, the `openResultOf` and `settleResultOf` validity checks over `out.json` (every `ck` call goes through `thinCk` with the generic `CK_CALL` envelope, so `OpenResult` and `SettleResult` are shapes read from `out.json`, and a missing or wrong-typed field is a failed `ck arbiter` call, 6.10; design.md "Workflow schemas"), `claimTrigger` in the decisions block (with the `live` input, `liveEdgeDecision`'s result: a `wait` with nothing refused returns null so `recordLiveWait` runs as today; a `blocked` action or a non-empty `refused` is a `command-cycle` claim, keyed `command:<provider>:<command>`, sent to `arbitrate` in place of today's `blocked: command cycle` exit, with no live edge recorded and no retry spent (6.13, D29); `conflict` is a `test-conflict`), and `arbitrate(n, rec, claim)`, which calls `ck arbiter open`, runs the arbiter agent at the returned tier, calls `ck arbiter settle`, and re-runs once at the risky tier on `rerun` with the first reasoning. The ruling prompt carries the stop type, claim, evidence, task, models tried, both layers and the spec paths. `ask`, no `arbiterAgent`, a thrown or empty agent call and a failed `ck arbiter` call all give a needs-input entry, except that on an `audit` claim no `arbiterAgent`, a failed call or one returning nothing usable, and `ask` with reason `principles-missing` let the task start (13.8, Task 74); a malformed ruling and any other `ask` on an audit claim are still entries (7.2). Pass `TaskMeta` on `ck arbiter open`'s stdin, with `risk` from `ck plan`'s `risk` map, so a `risk_paths` match counts as safety. Remove `confirmConflictPrompt`, `climbGuard`, `needInput` and `guardLadder`. In the confirmed-conflict block of `runTask` (~2303-2346), the confirmation attempt goes and the (live-merged) test conflict goes straight to `arbitrate`; keep its post-fix code (`testFixFor`, `parkTestFix`, the `budgetBase` reset, the retry with `afterFixNote`, the `ladder()` re-run and the "still reports a test that can never pass" park) intact for Task 66 to move under `handOffTestRepair`; do not delete it. A guard stop in the first `ladder()` pass, in the `ladder()` pass after a landed test fix, and in `revised()` goes to `arbitrate` with trigger `guard-stop` in place of `climbGuard` (design.md "Guard stops, wherever they occur"). A worktree that is busy or could not be created does not. The test-fixer suites (`test_fix.test.mjs`, `command_deps.test.mjs`, `attributed_gates.test.mjs`, TC-177) go red here and turn green again at Task 66 through Task 102's migration. The task stays in `running` while a ruling is pending, its slot is released first, and `'arbiter'` joins `UNBLOCKER_KINDS`. Use no `Date.now`, `new Date` or `Math.random`. Harness Contract owner: labels `arbiter task <n>`, `arbiter task <n> risky` and the `arbiter-` thin steps (their prompts hold one `ck` line and at most one fenced JSON block), the agent options from `args.agents.arbiter` (`model`, `effort`, `schema`), and the design names replacing the contract's `arbiter-decide` and `arbiter-route`. The ruling prompt states the claim on its own line, `Claim key: <key>`, with the `key` from `ck arbiter open`, so the arbiter can copy it into the ruling's `claim` (design.md, RULING).
 **Files:**
 - `plugin/workflows/spec-implement.js` - schemas, `claimTrigger`, `arbitrate`, removal of the confirmation and guard ladder
 **Verify:** `uv run pytest tests/test_arbiter_run.py -q -n auto -k "tc7_ or tc9_ or tc11_ or tc37_ or tc38_ or tc39_ or tc40_ or tc41_ or tc42_ or tc43_ or tc49_ or tc50_ or tc51_ or tc52_ or tc54_ or tc157_ or tc203_ or tc204_ or p11_ or p14_ or p16_"`
@@ -1539,7 +1541,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - [ ] Every failure form of the arbiter call gives a needs-input entry and no fallback runs
 - [ ] Dependents wait and independent tasks continue while a ruling is pending
 
-**Dependencies:** Task 2 (its tests are the oracle), Task 6 (runs the `spec:arbiter` agent), Task 38 (calls `ck arbiter open` and `settle`), Task 50 (its tests are the oracle), Task 52 (its tests are the oracle), Task 55 (its tests are the oracle), Task 56 (its tests are the oracle), Task 57 (its tests are the oracle), Task 58 (its tests are the oracle), Task 62 (its tests are the oracle), Task 63 (its tests are the oracle)
+**Dependencies:** Task 2 (its tests are the oracle), Task 6 (runs the `spec:arbiter` agent), Task 38 (calls `ck arbiter open` and `settle`), Task 50 (its tests are the oracle), Task 52 (its tests are the oracle), Task 55 (its tests are the oracle), Task 56 (its tests are the oracle), Task 57 (its tests are the oracle), Task 58 (its tests are the oracle), Task 62 (its tests are the oracle), Task 63 (its tests are the oracle), Task 43 (provides `cmd:ck arbiter context`)
 **Complexity:** High
 **Risk:** safety (parks tasks and can notify me through the needs-input route)
 
@@ -1564,7 +1566,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - [ ] A requirements or missing-requirement ruling creates an entry and leaves requirements.md unchanged
 - [ ] The result's `rulings` holds this run's rulings only, and entries are in `needsInput`, not `failed`
 
-**Dependencies:** Task 2 (its tests are the oracle), Task 42 (calls `ck arbiter record`), Task 53 (its tests are the oracle), Task 55 (its tests are the oracle), Task 56 (its tests are the oracle), Task 58 (its tests are the oracle), Task 59 (its tests are the oracle), Task 60 (its tests are the oracle), Task 61 (its tests are the oracle), Task 63 (its tests are the oracle), Task 65 (calls `arbitrate`), Task 100 (its tests are the oracle), Task 102 (its tests are the oracle)
+**Dependencies:** Task 2 (its tests are the oracle), Task 42 (calls `ck arbiter record`), Task 53 (its tests are the oracle), Task 55 (its tests are the oracle), Task 56 (its tests are the oracle), Task 58 (its tests are the oracle), Task 59 (its tests are the oracle), Task 60 (its tests are the oracle), Task 61 (its tests are the oracle), Task 63 (its tests are the oracle), Task 65 (calls `arbitrate`), Task 100 (its tests are the oracle), Task 102 (its tests are the oracle), Task 43 (provides `cmd:ck arbiter context`)
 **Complexity:** High
 **Risk:** safety (sends needs-input notifications and starts the test-fixer, which lands test changes on the integration branch)
 
@@ -1586,7 +1588,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - [ ] A failed landing is recorded as not landed, with why, and creates a needs-input entry
 - [ ] A failed record after a landing leaves the task unresumed and creates a needs-input entry saying the edit landed
 
-**Dependencies:** Task 2 (its tests are the oracle), Task 44 (calls `ck worktree land SPEC arbiter<k>`), Task 59 (its tests are the oracle), Task 61 (its tests are the oracle), Task 63 (its tests are the oracle), Task 66 (extends the arbiter paths)
+**Dependencies:** Task 2 (its tests are the oracle), Task 44 (calls `ck worktree land SPEC arbiter<k>`), Task 59 (its tests are the oracle), Task 61 (its tests are the oracle), Task 63 (its tests are the oracle), Task 66 (extends the arbiter paths), Task 43 (provides `cmd:ck arbiter context`)
 **Complexity:** High
 **Risk:** safety (lands changes on the integration branch)
 
@@ -1736,7 +1738,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Status:** Not Started
 **Track:** impl
 **Requirements:** 7.2, 8.3, 8.9, 8.16, 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7, 13.8, 13.9
-**Description:** In `plugin/workflows/spec-implement.js`, add the `auditorAgent` and `verifiedBy` args (the arg only until the first plan; `auditDue` then reads the current plan's `verifiedBy`, so a landed spec edit that rewires Verified by changes the audit decision), the `AUDIT` schema, and `crossPassedOf`, `auditDue` and `auditAction` to the decisions block. `auditDue` takes `crossPassed`, from `crossPassedOf` over this run's cross-test checks and the plan's `testVerifies`, and is false when every test task verifying the task is in it (13.9, D28). At the start of `runTask`, if `auditDue`, a thin call gets `ck lint --simulate --task N --json`, then one auditor agent, started with `agentType` from `auditorAgent` (`spec:auditor` under the plugin, `ck-auditor` when vendored), reads the selected tests against the spec. Each problem goes to `settleClaims` (`next` `start`) as an `audit` claim before any attempt. A `code` ruling goes into the first attempt's prompt. A `test_repair` ruling goes to the test-fixer; once the fix lands the task starts its first attempt with no retry spent, and a fix not landed is a `test-fix` entry and the task does not start (D33). A failure of either step, an arbiter call on an audit claim that failed or returned nothing usable, or `ask` with reason `principles-missing`, notes the task in `missedAudits` and the task starts, with no needs-input entry (13.8). A malformed ruling on an audit claim is a needs-input entry with the arbiter's output and the task does not start (7.2). No audit for a retry, an escalation, a test-track task, a task with no verifying tests, or a task whose verifying test tasks a cross-test check in this run passed. Harness Contract owner: the `audit task <n>` label and `missedAudits`.
+**Description:** In `plugin/workflows/spec-implement.js`, add the `auditorAgent` and `verifiedBy` args (the arg only until the first plan; `auditDue` then reads the current plan's `verifiedBy`, so a landed spec edit that rewires Verified by changes the audit decision), the `AUDIT` schema, and `crossPassedOf`, `auditDue` and `auditAction` to the decisions block. `auditDue` takes `crossPassed`, from `crossPassedOf` over this run's cross-test checks and the plan's `testVerifies` (test file -> the impl tasks it verifies), and is false when every test task verifying the task is in `crossPassed.tests` and the task is not in `crossPassed.held` (13.9, D28; design.md's `crossPassedOf` row). At the start of `runTask`, if `auditDue`, a thin call gets `ck lint --simulate --task N --json`, then one auditor agent, started with `agentType` from `auditorAgent` (`spec:auditor` under the plugin, `ck-auditor` when vendored), reads the selected tests against the spec. Each problem goes to `settleClaims` (`next` `start`) as an `audit` claim before any attempt. A `code` ruling goes into the first attempt's prompt. A `test_repair` ruling goes to the test-fixer; once the fix lands the task starts its first attempt with no retry spent, and a fix not landed is a `test-fix` entry and the task does not start (D33). A failure of either step, an arbiter call on an audit claim that failed or returned nothing usable, or `ask` with reason `principles-missing`, notes the task in `missedAudits` and the task starts, with no needs-input entry (13.8). A malformed ruling on an audit claim is a needs-input entry with the arbiter's output and the task does not start (7.2). No audit for a retry, an escalation, a test-track task, a task with no verifying tests, or a task whose verifying test tasks a cross-test check in this run passed. Harness Contract owner: the `audit task <n>` label and `missedAudits`.
 **Files:**
 - `plugin/workflows/spec-implement.js` - `crossPassedOf`, `auditDue`, `auditAction`, audit step, `missedAudits`
 **Verify:** `uv run pytest tests/test_arbiter_audit.py -q -n auto` `uv run pytest tests/test_arbiter_nfr.py -q -m "not serial" -k "tc127_ or tc131_"`
@@ -1752,7 +1754,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - [ ] An arbiter call on an audit problem that failed or returned nothing usable lets the task start and notes the missed audit
 - [ ] A malformed ruling on an audit problem is a needs-input entry and the task does not start
 
-**Dependencies:** Task 2 (its tests are the oracle), Task 6 (runs the `spec:auditor` agent), Task 24 (calls `ck lint --simulate`), Task 45 (its tests are the oracle), Task 70 (edits the same workflow; calls `arbitrate`), Task 71 (its tests are the oracle), Task 72 (its tests are the oracle), Task 73 (its tests are the oracle), Task 87 (its tests are the oracle)
+**Dependencies:** Task 2 (its tests are the oracle), Task 6 (runs the `spec:auditor` agent), Task 24 (calls `ck lint --simulate`), Task 45 (its tests are the oracle), Task 70 (edits the same workflow; calls `arbitrate`), Task 71 (its tests are the oracle), Task 72 (its tests are the oracle), Task 73 (its tests are the oracle), Task 87 (its tests are the oracle), Task 43 (provides `cmd:ck arbiter context`)
 **Complexity:** High
 **Risk:** normal
 
@@ -1791,7 +1793,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - `plugin/resources/spec-implement-brief.md` - arbiter route
 - `plugin/resources/without-workflow-tool.md` - manual path
 **Verify:** `uv run pytest tests/test_implement_skill_args.py -q` `uv run pytest tests/test_arbiter_skill_contracts.py -q -k "implement_skill"`
-**Verified by:** Task 75 (the implement skill text), Task 88 (the guide names `spec:arbiter` and `spec:auditor`)
+**Verified by:** Task 75 (the implement skill text)
 
 **Acceptance:**
 - [ ] The skill passes all four new args
@@ -1799,7 +1801,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - [ ] The report lists this run's rulings and proposed cuts
 - [ ] A single-task run and the no-Workflow path run the read-only audit before the first attempt, and an audit problem there is a needs-input entry
 
-**Dependencies:** Task 5 (reads the arbiter role settings), Task 70 (passes the args and reports the results that workflow uses), Task 75 (its tests are the oracle), Task 88 (its tests are the oracle)
+**Dependencies:** Task 5 (reads the arbiter role settings), Task 70 (passes the args and reports the results that workflow uses), Task 75 (its tests are the oracle)
 **Complexity:** Low
 **Risk:** normal
 
@@ -1850,7 +1852,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 79: Test the arbiter's steps in /spec:create
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 11.1, 11.2, 11.3, 11.4, 11.6, 11.8, 11.9, 11.11, 11.12, 1.12
 **Description:** Implement TC-97, TC-98, TC-99, TC-100, TC-102, TC-104, TC-105, TC-107, TC-108, TC-141, TC-148 and TC-158 in `tests/test_arbiter_create.py`, named `test_tc<N>_...`. TC-97: each refuted finding gets exactly one ruling in the `arbiter refuted` answer and is neither dropped nor majority-voted. TC-98: a finding ruled standing is in the revise prompt; one ruled refuted stays listed as refuted with the ruling. TC-99: with PLAN.md, `arbiter drift` runs after Revise, with fixes and with none; with no PLAN.md it does not. TC-100: each cut gets a ruling in `arbiter cuts`; a rejected cut is absent from the report and present in `decisions.md`. TC-102: a drift ruling that would change a decision is not applied and appears in review.md and the result. TC-104: an arbiter change with Revise applying no fixes still runs the consistency check. TC-105: rulings start normal, re-run once at risky, get one ruling per finding, fail validity on the same forms as TC-54, and reach `decisions.md` with commit none. TC-107: with no refuted findings and no cuts, no refuted or cuts step runs. TC-108: when the arbiter throws or returns junk, findings stay as they stood, `review.arbiter.lost` names the step and the result is not Ready. TC-141: with `specs/PRINCIPLES.md` unusable, no arbiter label runs, the findings stand as they were, review.md and the report name the file and `ck principles init`, and the result is not Ready. TC-148: each arbiter step is started with `agentType` from `args.arbiterAgent` and tier model and effort from `args.agents.arbiter`, by plain `agent` (its prompt holds no `ck progress` line), its `ck arbiter` steps run through `runnerAgent`, and with no `arbiterAgent` the steps with subjects are lost and the result is not Ready. TC-158: a drift ruling with a `requirements` item lands in Needs Your Decision and review.md's Result is `Ready after decisions`; a lost drift step sets it to `Needs work`.
@@ -1860,10 +1862,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 84 (TC-97, 98, 100, 105, 107, 108, 141, 148), Task 85 (TC-99, 102, 104, 158)
 
 **Acceptance:**
-- [ ] Each case asserts rulings per finding from the real validation (`ck arbiter review`), not from the fake's answer alone
-- [ ] Tests exercise the real boundary named in the test plan (real `spec-create.js`, real `ck`, real files)
-- [ ] Tests fail before the implementation exists for the right reason (no arbiter steps in create)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each case asserts rulings per finding from the real validation (`ck arbiter review`), not from the fake's answer alone
+- [x] Tests exercise the real boundary named in the test plan (real `spec-create.js`, real `ck`, real files)
+- [x] Tests fail before the implementation exists for the right reason (no arbiter steps in create)
+- [x] No mocks of the project's own code in integration tests
+
+**Implementation notes:** The cases extend the TC-27 driver in `tests/test_arbiter_create.py` (it now also records each agent call's options, applies `arbiter_edits` for a step, and throws on an override `{"__throw": true}`). They pin these names the design leaves open: step labels `arbiter refuted|cuts|drift` with a ` risky` suffix, one call per step answering one ruling per `claim`; result keys `review.arbiter.{ran,lost,rulings,missing}`, `review.proposedCuts`, `review.refutedCount`, `review.result`; a drift ruling's `claim` is an arbiter-given id (`D1`); a rejected cut has `verdict` other than `sound`. Answers are wrapped as `{"rulings": [...]}`; `args.agents.arbiter` may carry `risky_model` and `risky_effort` for the ` risky` steps.
 
 **Dependencies:** Task 78 (same test file)
 **Complexity:** High
@@ -1872,7 +1876,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 80: Property tests for rulings during /spec:create
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 4.3, 11.1, 11.2, 11.4, 11.6, 11.9, 11.12, 4.4, 4.5, 11.11
 **Description:** Implement P-28, P-29, P-30, P-42 and P-46 with Hypothesis in `tests/test_arbiter_create.py`, named `test_p<N>_...`, (W except P-42). P-28: any mix of findings, refutations and verdicts across lenses: every refuted finding gets exactly one ruling, confirmed plus refuted equals all findings. P-29: no proposed cut and no plan-changing ruling reaches a revise prompt, and normal fixes still do. P-30: each cut gets one ruling; for any `arbiter_failures()` on any subset, a failed one is unchanged and the result is not Ready; shown cuts equal the soundly reasoned ones. P-42 at `arbiter_policy.decide_cut`, over all approved and started pairs, with `max_examples=200`. P-46: with no refuted findings and no cuts, alone or mixed with confirmed findings, in create and review modes, no `arbiter refuted` or `arbiter cuts` label runs and neither step is in `review.arbiter.ran` or `lost`. Settings `@settings(derandomize=True, max_examples=30, database=None, deadline=None)`. The file declares `PROPERTIES = {"P-28": ..., "P-29": ..., "P-30": ..., "P-42": ..., "P-46": ...}`.
@@ -1883,12 +1887,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 84 (P-28, P-30, P-46), Task 85 (P-29), Task 86 (P-42 at `decide_cut`)
 
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the P-28, P-29, P-30, P-42 and P-46 rows
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] The tests call the workflow through the bridge, not a server
-- [ ] Tests exercise the real boundary named in the test plan (real workflow under the fake runtime, real `ck`)
-- [ ] Tests fail before the implementation exists for the right reason (no arbiter steps in create)
-- [ ] No mocks of the project's own code in integration tests
+- [x] The generators cover every surface form and negative listed in the P-28, P-29, P-30, P-42 and P-46 rows
+- [x] Settings are deterministic (derandomized, no database)
+- [x] The tests call the workflow through the bridge, not a server
+- [x] Tests exercise the real boundary named in the test plan (real workflow under the fake runtime, real `ck`)
+- [x] Tests fail before the implementation exists for the right reason (no arbiter steps in create)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (strategies), Task 79 (same test file)
 **Complexity:** High
@@ -1957,7 +1961,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - [ ] A lens that throws counts in `lensesLost`
 - [ ] review.md says so when no cut is proposed
 
-**Dependencies:** Task 77 (its tests are the oracle), Task 90 (its tests are the oracle)
+**Dependencies:** Task 77 (its tests are the oracle), Task 90 (its tests are the oracle), Task 31 (provides `cmd:ck principles init`), Task 43 (provides `cmd:ck arbiter context`)
 **Complexity:** Medium
 **Risk:** normal
 
@@ -2001,7 +2005,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - [ ] A ruling that would change a decision is not applied and appears in review.md and the result
 - [ ] An arbiter change with no Revise fixes still runs the Consistency Check
 
-**Dependencies:** Task 90 (its tests are the oracle), Task 79 (its tests are the oracle), Task 80 (its tests are the oracle), Task 82 (its tests are the oracle), Task 84 (edits `spec-create.js`, uses its context and lane), Task 87 (its tests are the oracle)
+**Dependencies:** Task 90 (its tests are the oracle), Task 79 (its tests are the oracle), Task 80 (its tests are the oracle), Task 82 (its tests are the oracle), Task 84 (edits `spec-create.js`, uses its context and lane), Task 87 (its tests are the oracle), Task 24 (provides `cmd:ck lint --simulate`)
 **Complexity:** Medium
 **Risk:** normal
 
@@ -2061,7 +2065,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Files:**
 - `tests/test_plugin.py` - `AGENTS` gains `arbiter` and `auditor`
 **Verify:** `uv run pytest tests/test_plugin.py -q -k "not dogfood and not vendored_workflow"`
-**Verifies:** Task 6 (the agent files and generated copies), Task 76 (the guide names both agents)
+**Verifies:** none: it runs after Tasks 6 and 76 (its `AGENTS` entries fail until their files exist, and `tests/test_plugin.py` is an existing suite that must stay green), and checks their files once they have landed
 
 **Acceptance:**
 - [ ] `AGENTS` holds both new agents with their roles
@@ -2070,7 +2074,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - [ ] Tests fail before the implementation exists for the right reason (the agent files do not exist)
 - [ ] No mocks of the project's own code in integration tests
 
-**Dependencies:** None
+**Dependencies:** Task 6 (creates the agent files the new `AGENTS` entries read), Task 76 (adds `spec:arbiter` and `spec:auditor` to the guide)
 **Complexity:** Low
 **Risk:** normal
 
@@ -2194,7 +2198,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - [x] An allowed or tokened update leaves no record
 - [x] A record that cannot be written changes nothing about the refusal
 
-**Dependencies:** Task 93 (its tests are the oracle)
+**Dependencies:** Task 93 (its tests are the oracle), Task 31 (provides `cmd:ck principles init`), Task 37 (provides `cmd:ck arbiter open`), Task 42 (provides `cmd:ck arbiter record`)
 **Complexity:** Low
 **Risk:** safety (edits the hooks that refuse protected changes)
 
@@ -2504,7 +2508,6 @@ graph TD
     T3 --> T5
     T4 --> T5
     T5 --> T6
-    T88 --> T6
     T1 --> T7
     T1 --> T8
     T7 --> T8
@@ -2688,7 +2691,6 @@ graph TD
     T5 --> T76
     T70 --> T76
     T75 --> T76
-    T88 --> T76
     T1 --> T77
     T2 --> T77
     T77 --> T78
@@ -2763,6 +2765,8 @@ graph TD
     T102 --> T66
     T100 --> T66
     T55 --> T66
+    T6 --> T88
+    T76 --> T88
     classDef test fill:#e8f0fe,stroke:#4a6fa5,stroke-dasharray: 4 2
 ```
 
