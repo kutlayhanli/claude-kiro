@@ -1040,7 +1040,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 44: Land an arbiter spec edit through the merge queue
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 8.1, 8.4, 8.5, 8.6, 8.7, 1.7
 **Description:** In `src/claude_kiro/worktrees.py`, add the `REFUSED` state, `commit` and `moved` on `Landed`, and `land_spec_edit` under `land_lock` with a bounded wait of 120 seconds (a task landing keeps `wait_s=0` and refuses as today; the workflow's `withLandingLock` is what serializes the two inside a run): refuse a conflict found by `git merge-tree`; take a lint result and test selections on the target; merge the branch and take them again; call `decide_spec_edit` on the difference, passing the reservations in the target's effective principles as `reserved`; gate only the Done tasks from `gate_scope_of_edit`; reset the target to its earlier commit on any refusal or red gate. In `src/claude_kiro/cli/worktree.py`, `land_cmd` routes an `arbiter<k>` number to `land_spec_edit`, returning one entry with state, commit and moved. Harness Contract owner: `ck arbiter land`, which is `ck worktree land SPEC arbiter<k> --into BRANCH --gate --json`.
@@ -1051,10 +1051,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 39 (TC-61, 64 to 70, 138, 149, 156), Task 40 (P-36 through real landings)
 
 **Acceptance:**
-- [ ] An edit on an arbiter branch lands with state MERGED, a commit and any moved tests
-- [ ] A conflict, a red gate, a refused path, a new cycle, a new blocking finding, and a Status or mark change each leave the target HEAD unchanged
-- [ ] An arbiter landing waits for a task landing that holds the lock, and both merge
-- [ ] A reserved file changed by a ruling that does not report it is refused
+- [x] An edit on an arbiter branch lands with state MERGED, a commit and any moved tests
+- [x] A conflict, a red gate, a refused path, a new cycle, a new blocking finding, and a Status or mark change each leave the target HEAD unchanged
+- [x] An arbiter landing waits for a task landing that holds the lock, and both merge
+- [x] A reserved file changed by a ruling that does not report it is refused
 
 **Dependencies:** Task 24 (edits `cli/worktree.py` and reads its lint result), Task 36 (TC-156 goes through the real hook), Task 37 (TC-156 starts at `ck arbiter open`), Task 39 (its tests are the oracle), Task 40 (its tests are the oracle), Task 41 (calls `decide_spec_edit`), Task 42 (adds `land_lock`'s `wait_s`, in the same file)
 **Complexity:** High
