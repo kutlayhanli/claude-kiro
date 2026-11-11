@@ -5,12 +5,16 @@ real `bash -c`. The arbiter's identity comes only from `arbiter_helpers.arbiter_
 imported inside function bodies, so the file collects before the lane exists.
 """
 
+import os
 import subprocess
 import sys
 import uuid
 from pathlib import Path
+from unittest import mock
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 import arbiter_helpers as ah
 import guard_helpers as gh
@@ -442,3 +446,307 @@ def test_tc134_the_hook_and_the_policy_seam_agree(project):
         seam_allows = not may_edit(facts).block
         hook_allows = not denied(write_call(caller, str(checkout / rel), "x\n"))
         assert seam_allows == hook_allows == expected, rel
+
+
+# --------------------------------------------------------------------------- properties (P-22 to P-25, P-39, P-45)
+
+PROPERTIES = {
+    "P-22": "test_p22_arbiter_edits_only_its_three_spec_files",
+    "P-23": "test_p23_every_shell_form_of_a_denied_change_is_denied",
+    "P-24": "test_p24_only_the_arbiter_type_with_an_agent_id_is_the_arbiter",
+    "P-25": "test_p25_non_arbiter_callers_keep_todays_edit_decisions",
+    "P-39": "test_p39_a_path_form_never_changes_the_lanes_decision",
+    "P-45": "test_p45_requirements_are_in_the_lane_only_under_a_ticket_before_implementation",
+}
+
+PROP = dict(derandomize=True, max_examples=200, database=None, deadline=None)
+PROP_G = dict(derandomize=True, max_examples=30, database=None, deadline=None,
+              suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture])
+
+LANE = ("tasks.md", "design.md", "test-plan.md")
+CANONICAL = [f"specs/demo/{n}" for n in LANE]
+
+
+def _casefold_variants(path):
+    return st.lists(st.booleans(), min_size=len(path), max_size=len(path)).map(
+        lambda flags: "".join(c.upper() if f else c for c, f in zip(path, flags)))
+
+
+_SEG = st.text(alphabet="abcdxyz-_.", min_size=1, max_size=6).filter(lambda s: s not in (".", ".."))
+FIXED_RELS = CANONICAL + [
+    "specs/demo/TASKS.md", "specs/demo/Design.md", "SPECS/DEMO/TASKS.MD", "specs/demo/tasks.md.bak",
+    "specs/demo/tasks.md/x", "specs/demo/tasks.mdx", "specs/demo/sub/tasks.md", "specs/demo/sub/design.md",
+    "specs/other/tasks.md", "specs/other/design.md", "specs/demo-x/tasks.md", "specs/demox/test-plan.md",
+    "specs/demo/requirements.md", "specs/demo/PLAN.md", "specs/demo/decisions.md", "specs/PRINCIPLES.md",
+    "specs/ck.json", "tests/test_greet.py", "tests/x.py", "src/greet.py", ".claude/x", ".claude/settings.json",
+    "tasks.md", "design.md", "/specs/demo/tasks.md", "",
+]
+LANE_RELS = st.one_of(
+    st.sampled_from(FIXED_RELS),
+    st.sampled_from(CANONICAL).flatmap(_casefold_variants),
+    st.lists(_SEG, min_size=1, max_size=4).map("/".join),
+    st.tuples(st.sampled_from(["demo", "other", "demo2"]), _SEG, st.sampled_from(LANE + ("requirements.md", "PLAN.md")))
+    .map(lambda parts: f"specs/{parts[0]}/{parts[1]}/{parts[2]}"),
+)
+
+
+def _facts(rel, *, worktree="demo", lanes=(), started=False):
+    from claude_kiro.hooks._shared import guard_policy
+
+    return guard_policy.ArbiterEditFacts(rel=rel, arbiter_worktree_spec=worktree, lane_specs=tuple(lanes),
+                                         implementation_started=started)
+
+
+@settings(**PROP)
+@given(rel=LANE_RELS, started=st.booleans(), spec=st.sampled_from(["demo", "other"]))
+def test_p22_arbiter_edits_only_its_three_spec_files(rel, started, spec):
+    may_edit = ah.seam("guard_policy.arbiter_may_edit")
+    reason_of = ah.seam("guard_policy.arbiter_block_reason")
+    decision = may_edit(_facts(rel, worktree=spec, started=started))
+    allowed = rel in [f"specs/{spec}/{n}" for n in LANE]
+    assert (not decision.block) == allowed, (rel, spec)
+    if not allowed:
+        text = reason_of(rel)
+        assert rel in text, text
+        assert "lane" in text.lower() and "arbiter" in text.lower(), text
+
+
+# --------------------------------------------------------------------------- P-45
+
+
+@settings(**PROP)
+@given(spec=st.sampled_from(["demo", "other"]), name=st.sampled_from(["requirements.md", "PLAN.md", "tasks.md"]),
+       lanes=st.sets(st.sampled_from(["demo", "other"])), started=st.booleans(),
+       worktree=st.sampled_from([None, "demo", "other"]))
+def test_p45_requirements_are_in_the_lane_only_under_a_ticket_before_implementation(spec, name, lanes, started, worktree):
+    may_edit = ah.seam("guard_policy.arbiter_may_edit")
+    rel = f"specs/{spec}/{name}"
+    decision = may_edit(_facts(rel, worktree=worktree, lanes=sorted(lanes), started=started))
+    if name == "requirements.md":
+        expected = spec in lanes and not started and worktree is None
+    elif name == "PLAN.md":
+        expected = False
+    else:
+        expected = (worktree == spec) or (worktree is None and spec in lanes)
+    assert (not decision.block) == expected, (rel, sorted(lanes), started, worktree)
+
+
+# --------------------------------------------------------------------------- P-24
+
+_AGENT_IDS = st.sampled_from([None, "", "  ", "agent-1", "a", 0, 7, True, [], {"id": "x"}])
+_AGENT_TYPES = st.sampled_from(["spec:arbiter", "ck-arbiter", "spec:arbiter ", " ck-arbiter", "ck-arbiter ", "CK-ARBITER",
+                                "SPEC:ARBITER", "ck-arbiter2", "spec:arbiter2", "arbiter", "spec:auditor", "ck-auditor",
+                                "workflow-subagent", "general-purpose", "", None, 7, ["spec:arbiter"], {"t": "ck-arbiter"}])
+_JSON_LEAF = st.one_of(st.none(), st.booleans(), st.integers(-3, 3), st.text(max_size=8))
+_CLAIMS = st.fixed_dictionaries({}, optional={
+    "env": st.dictionaries(st.sampled_from(["CK_ARBITER", "CK_CALLER", "CK_AGENT_TYPE", "CLAUDE_AGENT_TYPE"]),
+                           st.sampled_from(["1", "ck-arbiter", "spec:arbiter"]), max_size=3),
+    "tool_input": st.dictionaries(st.sampled_from(["ck-arbiter", "subagent_type", "agent_type", "agent_id", "description"]),
+                                  st.one_of(_JSON_LEAF, st.sampled_from(["ck-arbiter", "spec:arbiter"])), max_size=4),
+    "prompt": st.sampled_from(["You are the arbiter (spec:arbiter).", "agent_type: ck-arbiter", "The arbiter's lane applies."]),
+    "tool_name": st.sampled_from(["Edit", "Write", "Bash", "Task", "Agent"]),
+})
+
+
+@settings(**PROP)
+@given(agent_id=_AGENT_IDS, agent_type=_AGENT_TYPES, claims=_CLAIMS, has_id=st.booleans(), has_type=st.booleans(),
+       junk=st.one_of(_JSON_LEAF, st.lists(_JSON_LEAF, max_size=3)))
+def test_p24_only_the_arbiter_type_with_an_agent_id_is_the_arbiter(agent_id, agent_type, claims, has_id, has_type, junk):
+    is_arbiter = ah.seam("guard_policy.is_arbiter_caller")
+    data = {"session_id": "s", "cwd": "/x", "tool_name": claims.get("tool_name", "Write"),
+            "tool_input": dict(claims.get("tool_input", {})), "extra": junk}
+    if "prompt" in claims:
+        data["prompt"] = claims["prompt"]
+    if has_id:
+        data["agent_id"] = agent_id
+    if has_type:
+        data["agent_type"] = agent_type
+    establishes = (has_id and isinstance(agent_id, str) and agent_id != "" and has_type
+                   and isinstance(agent_type, str) and agent_type in ("spec:arbiter", "ck-arbiter"))
+    with mock.patch.dict(os.environ, claims.get("env", {})):
+        got = is_arbiter(data)
+    assert got is establishes, data
+    if not establishes:
+        bare = {"session_id": "s", "cwd": "/x", "tool_name": "Write", "tool_input": {}}
+        if has_id:
+            bare["agent_id"] = agent_id
+        assert is_arbiter(bare) is False
+        for key, val in (("subagent_type", "ck-arbiter"), ("caller", "arbiter"), ("agent", "ck-arbiter"),
+                         ("role", "spec:arbiter")):
+            near = dict(data)
+            near.pop("agent_type", None)
+            near[key] = val
+            assert is_arbiter(near) is False, near
+    for other in (None, "ck-arbiter", 7, [], ["agent_type", "ck-arbiter"]):
+        assert is_arbiter(other) is False
+
+
+# --------------------------------------------------------------------------- P-25
+
+_TARGETS = st.sampled_from(["test", "requirements", "test_plan", "other"])
+_WEAK = st.lists(st.sampled_from(["removes an assertion", "adds a skip", "loosens a bound"]), max_size=3, unique=True)
+_RELS = st.sampled_from(["tests/test_a.py", "specs/demo/requirements.md", "specs/demo/test-plan.md", "src/a.py", "x"])
+_OTHER_TYPES = st.sampled_from(["general-purpose", "workflow-subagent", "spec:auditor", "ck-arbiter ", "CK-ARBITER", None])
+
+
+@settings(**PROP)
+@given(target=_TARGETS, weakening=_WEAK, owned=st.booleans(), exists=st.sampled_from([True, False, None]),
+       started=st.booleans(), only_adds=st.booleans(), rel=_RELS, mode=st.sampled_from([None, "ask", "deny", "off", 3]),
+       with_id=st.booleans(), agent_type=_OTHER_TYPES)
+def test_p25_non_arbiter_callers_keep_todays_edit_decisions(target, weakening, owned, exists, started, only_adds, rel,
+                                                            mode, with_id, agent_type):
+    from claude_kiro.hooks._shared import guard_policy as gp
+
+    hook = {"agent_id": "agent-task-1" if with_id else None, "agent_type": agent_type}
+    if not with_id:
+        hook.pop("agent_id")
+    assert not ah.seam("guard_policy.is_arbiter_caller")(hook)
+    caller = gp.classify_caller(hook, {}, False)
+    assert caller == ("task_agent" if with_id else "main_session")
+    facts = gp.EditFacts(rel=rel, target=target, weakening=tuple(weakening), owned=owned, exists_on_base=exists,
+                         implementation_started=started, only_adds=only_adds)
+    eff = None if mode not in ("ask", "deny") else ("deny" if caller == "task_agent" else mode)
+    if eff is None:
+        expected = gp.GuardDecision(False)
+    elif target == "test":
+        blocked = bool(weakening) and not owned and exists is not False
+        expected = gp.GuardDecision(True, eff, (rel,), tuple(weakening), "test_weakening") if blocked else gp.GuardDecision(False)
+    elif target in ("requirements", "test_plan"):
+        free = (not started) or only_adds or caller == "main_session"
+        expected = gp.GuardDecision(False) if free else gp.GuardDecision(True, eff, (rel,), (), "spec_edit")
+    else:
+        expected = gp.GuardDecision(False)
+    assert gp.decide_edit(facts, caller, mode) == expected
+
+
+# --------------------------------------------------------------------------- P-23 and P-39 share a real arbiter worktree
+
+PLANTED = {"tests/test_greet.py": "def test_greet():\n    assert True\n", "tests/x.py": "x = 1\n",
+           "src/greet.py": "def greet():\n    return 'hi'\n", "specs/other/tasks.md": "# Implementation Tasks: Other\n",
+           ".claude/x": "x\n"}
+
+
+@pytest.fixture(scope="module")
+def lane_world(tmp_path_factory):
+    project = ah.arbiter_project(tmp_path_factory.mktemp("lane-world"))
+    caller = ah.arbiter_caller(project)
+    checkout = Path(caller["cwd"])
+    for rel, text in PLANTED.items():
+        path = checkout / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    outside = checkout.parent / "outside-the-checkout"
+    outside.mkdir(exist_ok=True)
+    (outside / "x.md").write_text("x\n")
+    links = {"link-tasks": "specs/demo/tasks.md", "link-spec-dir": "specs/demo", "specs/demo/link-src.md": "../../src/greet.py",
+             "specs/demo/link-esc.md": str(outside / "x.md"), "specs/demo/link-req.md": "requirements.md"}
+    for name, target in links.items():
+        (checkout / name).symlink_to(target)
+    return caller, checkout
+
+
+UNIVERSE = ["specs/demo/requirements.md", "specs/demo/PLAN.md", "specs/PRINCIPLES.md", "tests/test_greet.py",
+            "src/greet.py", "specs/other/tasks.md", ".claude/x"]
+LANE_FILES = CANONICAL
+WRITE_FORMS = ["rm {p}", "git rm {p}", "git rm -f {p}", "mv {p} {p}.bak", "mv {p}.bak {p}", "echo x > {p}", "echo x >> {p}",
+               "echo x | tee {p}", "echo x | tee -a {p}", "cp specs/demo/design.md {p}", "sed -i s/a/b/ {p}",
+               "perl -i -pe s/a/b/ {p}", "python -c \"open('{p}','w').write('x')\"", "truncate -s 0 {p}",
+               "dd if=/dev/zero of={p} count=1"]
+READ_FORMS = ["cat {p}", "head -n 3 {p}", "grep -c '' {p}", "ls -l {p}", "wc -l {p}"]
+
+
+@st.composite
+def denied_shell(draw, cwd):
+    path = draw(st.sampled_from(UNIVERSE + LANE_FILES))
+    if draw(st.booleans()):
+        path = f"{cwd}/{path}"
+    inner = draw(st.sampled_from(WRITE_FORMS)).format(p=path)
+    shape = draw(st.sampled_from([
+        "{c}", "true && {c}", "{c} && true", "true ; {c}", "{c} ; true", "cd " + cwd + " && {c}", "cd " + cwd + "; {c}",
+        'echo "$({c})"', "echo $({c})", 'echo "`{c}`"', "echo `{c}`", "cat <({c})", "echo x >({c})", 'cat "<({c})"',
+        'echo "$(true; {c})"',
+    ]))
+    if "$(" in shape or "`" in shape or "<(" in shape or ">(" in shape:
+        if draw(st.booleans()):  # any command inside a substitution is denied, a read included
+            inner = draw(st.sampled_from(READ_FORMS)).format(p=path)
+    return shape.format(c=inner)
+
+
+@st.composite
+def allowed_shell(draw, cwd):
+    kind = draw(st.sampled_from(["read", "read-chain", "status", "add-commit"]))
+    path = draw(st.sampled_from(UNIVERSE + LANE_FILES))
+    if kind == "read":
+        return ("read", draw(st.sampled_from(READ_FORMS)).format(p=path))
+    if kind == "read-chain":
+        a, b = (draw(st.sampled_from(READ_FORMS)).format(p=path) for _ in range(2))
+        return ("read", f"{a} {draw(st.sampled_from(['&&', ';']))} {b}")
+    if kind == "status":
+        return ("read", draw(st.sampled_from(["git status --short", "git diff --stat", "git log -1 --oneline", "ck lint demo"])))
+    return ("commit", draw(st.text(alphabet="abcdefghij klm", min_size=1, max_size=12)).strip() or "m")
+
+
+@settings(**PROP_G)
+@given(data=st.data())
+def test_p23_every_shell_form_of_a_denied_change_is_denied(lane_world, data):
+    decide = ah.seam("guard_policy.decide_arbiter_bash")
+    _, checkout = lane_world
+    cwd = str(checkout)
+    if data.draw(st.booleans()):
+        command = data.draw(denied_shell(cwd))
+        assert decide(command, cwd).block, command
+        return
+    kind, command = data.draw(allowed_shell(cwd))
+    if kind == "read":
+        assert not decide(command, cwd).block, command
+        done = subprocess.run(["bash", "-c", command], cwd=cwd, capture_output=True, text=True)
+        if not command.startswith("ck "):
+            assert done.returncode == 0, (command, done.stderr)
+        return
+    path = checkout / "specs/demo/design.md"
+    path.write_text(path.read_text() + f"\nruling {uuid.uuid4().hex}\n")
+    for step in ("git add specs/demo/design.md", f"git commit -m '{command}'"):
+        assert not decide(step, cwd).block, step
+        done = subprocess.run(["bash", "-c", step], cwd=cwd, capture_output=True, text=True)
+        assert done.returncode == 0, (step, done.stderr)
+
+
+# --------------------------------------------------------------------------- P-39
+
+
+@st.composite
+def path_forms(draw, checkout):
+    target = draw(st.sampled_from(UNIVERSE + LANE_FILES + ["link-tasks", "link-spec-dir/design.md", "link-spec-dir/requirements.md",
+                                                               "specs/demo/link-src.md", "specs/demo/link-esc.md",
+                                                               "specs/demo/link-req.md", "specs/demo/new.md"]))
+    form = draw(st.sampled_from(["relative", "absolute", "dot", "reenter", "escape-back", "escape-out", "abs-dotdot"]))
+    root = str(checkout)
+    if form == "relative":
+        return target
+    if form == "absolute":
+        return f"{root}/{target}"
+    if form == "dot":
+        return f"./{target}"
+    if form == "reenter":
+        return f"specs/demo/../../{target}" if not target.startswith("specs/demo/") else f"specs/demo/sub/../{target[len('specs/demo/'):]}"
+    if form == "escape-back":  # leaves the checkout and comes back by name
+        return f"../{checkout.name}/{target}"
+    if form == "escape-out":
+        return f"../outside-the-checkout/../{checkout.name}/{target}" if draw(st.booleans()) else "../outside-the-checkout/x.md"
+    return f"{root}/specs/demo/../../{target}"
+
+
+@settings(**PROP_G)
+@given(data=st.data())
+def test_p39_a_path_form_never_changes_the_lanes_decision(lane_world, data):
+    caller, checkout = lane_world
+    form = data.draw(path_forms(checkout))
+    resolved = Path(os.path.realpath(checkout / form))
+    first = call(caller, "Write", file_path=form, content="x\n")
+    canonical = call(caller, "Write", file_path=str(resolved), content="x\n")
+    assert denied(first) == denied(canonical), (form, str(resolved))
+    try:
+        rel = resolved.relative_to(os.path.realpath(checkout)).as_posix()
+    except ValueError:
+        rel = None
+    assert (not denied(first)) == (rel in CANONICAL), (form, rel)
