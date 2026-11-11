@@ -546,7 +546,13 @@ def tier_of(out, label="arbiter task 1"):
     return (out["opts"][label]["model"], out["opts"][label]["effort"])
 
 
-def tier_run(bridge, project, options, **args):
+def tier_run(bridge, project, options, complexity=None, **args):
+    """Pass risk and Complexity as a real run does: as workflow args (what the workflow reads) and in the plan answer."""
+    if options.get("risk"):
+        args["risk"] = options["risk"]
+    if complexity:
+        args["complexity"] = complexity
+        options = {**options, "planSeq": [{"complexity": complexity}] * 8}
     return run(bridge, project, options, agents=tier_roles(), **args)
 
 
@@ -585,7 +591,7 @@ def test_tc38_a_claim_returning_after_a_failed_arbiter_call_runs_at_the_risky_ti
 
 def test_tc39_a_high_complexity_task_with_no_other_signal_gets_the_normal_tier(bridge, tmp_path):  # noqa: F811
     project = arbiter_project(tmp_path)
-    out = tier_run(bridge, project, {**CLAIM, "rulings": {"1": [REQ]}, "planSeq": [{"complexity": {"1": "high"}}] * 8})
+    out = tier_run(bridge, project, {**CLAIM, "rulings": {"1": [REQ]}}, complexity={"1": "High"})
     assert arbiter_calls(out["events"]) == ["arbiter task 1"], ", ".join(out["events"])
     assert tier_of(out) == NORMAL_TIER
 
@@ -634,7 +640,7 @@ def test_tc157_a_risk_path_match_with_no_risk_tag_starts_at_the_risky_tier_and_c
     tiers = []
     for level in ("High", "Low"):
         plain = arbiter_project(tmp_path / level)
-        out = tier_run(bridge, plain, {**CLAIM, "rulings": {"1": [REQ]}, "planSeq": [{"complexity": {"1": level.lower()}}] * 8})
+        out = tier_run(bridge, plain, {**CLAIM, "rulings": {"1": [REQ]}}, complexity={"1": level})
         assert arbiter_calls(out["events"]) == ["arbiter task 1"], ", ".join(out["events"])
         tiers.append(tier_of(out))
     assert tiers[0] == tiers[1] == NORMAL_TIER, tiers
