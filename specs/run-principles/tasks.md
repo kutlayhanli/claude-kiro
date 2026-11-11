@@ -389,7 +389,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 16: Find stories with no justification
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 2.5, 3.1, 3.2, 3.3, 3.4, 3.5
 **Description:** Create `src/claude_kiro/justifications.py` with `JustificationFinding` and the pure `justification_findings(text)`. Walk the requirements text per story section, outside fenced code. A line counts only inside its own story's section. Content is the text after `**Without it:**` through its paragraph, with `*_\`~#>:-` and whitespace removed; empty counts as missing. Any non-empty content passes. `None` or text with no stories returns `[]`. Findings come out in document order. Harness Contract owner: `lint.justification_findings`, which is `justifications.justification_findings`.
@@ -399,9 +399,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 13 (P-5, P-6 at `justification_findings`)
 
 **Acceptance:**
-- [ ] A story with no line, or a line with only whitespace or markup, is reported with number and title
-- [ ] A line outside the story's section or in a fence counts for no story
-- [ ] Criteria are never required to carry a line, and `None` returns no finding
+- [x] A story with no line, or a line with only whitespace or markup, is reported with number and title
+- [x] A line outside the story's section or in a fence counts for no story
+- [x] Criteria are never required to carry a line, and `None` returns no finding
 
 **Dependencies:** Task 13 (its tests are the oracle)
 **Complexity:** Medium
@@ -665,7 +665,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 28: Property test for the append-only record
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 10.4, 10.5, 10.6
 **Description:** Implement P-26 with Hypothesis in `tests/test_arbiter_cli.py`, named `test_p26_...`. Any sequence of records keeps each earlier prefix byte-identical, numbers strictly increase, and there is no file before the first record, with entry text holding `## 3`, `---`, fences, CRLF, unicode and very long lines, and runs split across real processes (G, through `ck arbiter record` and `arbiter_policy.append_entry`, `next_number`). Settings `@settings(derandomize=True, max_examples=30, database=None, deadline=None)`. Add it to the file's `PROPERTIES` map.
@@ -676,12 +676,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 42 (P-26 at `append_entry` and `ck arbiter record`)
 
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the P-26 row
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] The tests call the decision seams, plus real subprocesses for the row's process split, not a server
-- [ ] Tests exercise the real boundary named in the test plan (real files, real subprocesses)
-- [ ] Tests fail before the implementation exists for the right reason (no record command or seam)
-- [ ] No mocks of the project's own code in integration tests
+- [x] The generators cover every surface form and negative listed in the P-26 row
+- [x] Settings are deterministic (derandomized, no database)
+- [x] The tests call the decision seams, plus real subprocesses for the row's process split, not a server
+- [x] Tests exercise the real boundary named in the test plan (real files, real subprocesses)
+- [x] Tests fail before the implementation exists for the right reason (no record command or seam)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (strategies), Task 27 (same test file)
 **Complexity:** Medium
@@ -690,7 +690,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 29: Decide whether a claim may be ruled on, and at which tier
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.9, 5.3, 5.4, 5.5, 7.3, 7.4, 7.5, 7.6, 7.8, 7.9
 **Description:** Create `src/claude_kiro/arbiter_policy.py` with `Tier`, `Trigger`, `Outcome`, `Step`, `Claim`, `PriorClaim`, `TaskMeta`, `PrinciplesRead`, `ClaimFacts`, `ClaimDecision`, and the pure `claim_key`, `claim_facts` and `decide_claim`. `claim_key` follows the identity table in design.md (task, `|`, subject; test names normalized; evidence and claim text ignored; a review deadlock's key is the sorted identities of its findings never ruled on, so a different finding on the same file is a different claim, and a finding already covered by an applied ruling is `ask` with reason `repeat-after-ruling`; a `command-cycle` claim's subject is `command:<provider>:<command>`, D29). `claim_facts` builds `ClaimFacts`: `safety` from `TaskMeta.risk`, `principles_readable` from the read result, `prior` by key, and rulings and calls counted for this task only, whatever the ledger's order. `decide_claim` returns `ask` with the reasons `principles-missing`, `repeat-after-ruling`, `exhausted`, `claim-call-limit`, `task-ruling-limit` or `task-call-limit`, and otherwise `rule` with a tier: risky for a safety task, a guard stop or a prior claim with status `open` or `failed`, else normal. `claim_facts` never reads Complexity. Enforce the non-functional bound: at most 6 calls per task and 2 per claim. Harness Contract owner: `arbiter.claim_id` and `arbiter.decide_call`, which are `arbiter_policy.claim_key` and `decide_claim`.
@@ -700,10 +700,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 8 (P-4 at `claim_facts` and `decide_claim`), Task 26 (P-10, P-18, P-19 at `claim_facts` and `decide_claim`)
 
 **Acceptance:**
-- [ ] The same claim on another attempt has the same key; changing file, test or criterion changes it; changing evidence does not
-- [ ] A claim that returns after a ruling, the 4th ruling on a task, and an unreadable principles file each give `ask` with the right reason
-- [ ] Tier is risky exactly for a safety task, a guard stop or an unruled repeat, whatever the Complexity
-- [ ] No sequence yields more than 2 calls per claim or 6 per task
+- [x] The same claim on another attempt has the same key; changing file, test or criterion changes it; changing evidence does not
+- [x] A claim that returns after a ruling, the 4th ruling on a task, and an unreadable principles file each give `ask` with the right reason
+- [x] Tier is risky exactly for a safety task, a guard stop or an unruled repeat, whatever the Complexity
+- [x] No sequence yields more than 2 calls per claim or 6 per task
 
 **Dependencies:** Task 8 (its tests are the oracle), Task 26 (its tests are the oracle)
 **Complexity:** Medium
@@ -1337,7 +1337,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 57: Test the arbiter's tier choice in a run
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.3, 5.4, 5.5, 5.6, 5.7
 **Description:** Implement TC-37 to TC-41 and TC-157 in `tests/test_arbiter_run.py`, named `test_tc<N>_...`. TC-37: a safety task, a guard stop and a repeat claim each start at the risky model; a plain conflict on a normal task starts at the normal model. TC-38: when an earlier arbiter call on the same claim failed, the claim returning runs at the risky tier, across a resume. TC-39: a High Complexity task with no other signal gets the normal tier. TC-40: "needs a stronger look" at the normal tier runs `arbiter task 1 risky` once and its prompt holds the first reasoning. TC-41: "needs a stronger look" at the risky tier means no further call and the entry holds what was established. TC-157: a task matching `risk_paths` with no Risk tag starts at the risky tier (5.3, through `ck plan`'s `risk` map), and a High and a Low Complexity task with no other signal get the same tier.
@@ -1347,10 +1347,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 65 (TC-37 to 41, 157)
 
 **Acceptance:**
-- [ ] Each case asserts the model and effort the fake runtime actually received on the agent call
-- [ ] Tests exercise the real boundary named in the test plan (workflow, agent options, real `ck`)
-- [ ] Tests fail before the implementation exists for the right reason (no arbiter step)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each case asserts the model and effort the fake runtime actually received on the agent call
+- [x] Tests exercise the real boundary named in the test plan (workflow, agent options, real `ck`)
+- [x] Tests fail before the implementation exists for the right reason (no arbiter step)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 56 (same test file)
 **Complexity:** Medium

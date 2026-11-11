@@ -524,3 +524,137 @@ def test_tc12_without_a_plan_principles_section_the_arbiter_rules_and_the_entry_
     assert arbiter_calls(ev) == ["arbiter task 1"], "the arbiter ran: " + ", ".join(ev)
     assert "a test states what the requirement says" in out["prompts"]["arbiter task 1"], "the project layer alone"
     assert "absent" in plan_layer_of(project), decisions_entries(project, "target")
+
+
+# --------------------------------------------------------------------------- TC-37 to TC-41, TC-157 (the tier)
+
+NORMAL_TIER = ("sonnet", "medium")
+RISKY_TIER = ("opus", "max")
+CLAIM = {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT}}}
+# The claim key of CLAIM, in design.md's identity form (`19|test:tests/test_x.py::test_a`).
+KEY = f"1|test:{CONFLICT['file']}::{CONFLICT['test']}"
+# A valid "needs a stronger look" answer (7.1): the claim it answers, its reasoning and a citable principle.
+STRONGER = {"status": "needs_stronger_look", "claim": KEY, "reasoning": "the first reading cannot tell the wording from the intent",
+            "principle": PRINCIPLE, "established": "the greeting test compares a rounded value with exact equality"}
+
+
+def tier_roles(complexity_routing=False):
+    """Roles whose arbiter normal and risky tiers differ in both model and effort, so the tier shows in the agent options."""
+    base = roles("haiku", [])
+    base["implementer"]["complexity_routing"] = complexity_routing
+    return {**base, "arbiter": {"model": NORMAL_TIER[0], "effort": NORMAL_TIER[1], "risky_model": RISKY_TIER[0], "risky_effort": RISKY_TIER[1]}}
+
+
+def tier_of(out, label="arbiter task 1"):
+    assert label in out["opts"], f"no {label!r} agent call: " + ", ".join(out["events"])
+    return (out["opts"][label]["model"], out["opts"][label]["effort"])
+
+
+def tier_run(bridge, project, options, complexity=None, complexity_routing=False, **args):
+    """Pass risk and Complexity as a real run does: as workflow args (what the workflow reads) and in the plan answer."""
+    if options.get("risk"):
+        args["risk"] = options["risk"]
+    if complexity:
+        args["complexity"] = complexity
+        options = {**options, "planSeq": [{"complexity": complexity}] * 8}
+    return run(bridge, project, options, agents=tier_roles(complexity_routing), **args)
+
+
+def tc37_start(bridge, tmp_path, name, **options):
+    project = arbiter_project(tmp_path / name)
+    out = tier_run(bridge, project, {**CLAIM, "rulings": {"1": [REQ]}, **options})
+    assert arbiter_calls(out["events"]) == ["arbiter task 1"], name + ": " + ", ".join(out["events"])
+    return tier_of(out)
+
+
+def test_tc37_safety_guard_stop_and_repeat_claim_start_at_the_risky_tier_and_a_plain_conflict_at_the_normal_one(bridge, tmp_path):  # noqa: F811
+    assert tc37_start(bridge, tmp_path, "plain") == NORMAL_TIER, "a plain conflict on a normal task"
+    assert tc37_start(bridge, tmp_path, "safety", risk={"1": "safety"}) == RISKY_TIER, "a safety task"
+    guard = arbiter_project(tmp_path / "guard")
+    stopped = tier_run(bridge, guard, {"deps": {"1": []}, "guardStops": {"1": "always"}, "rulings": {"1": [REQ]}})
+    assert arbiter_calls(stopped["events"]) == ["arbiter task 1"], ", ".join(stopped["events"])
+    assert tier_of(stopped) == RISKY_TIER, "a guard stop"
+    repeat = arbiter_project(tmp_path / "repeat")
+    first = tier_run(bridge, repeat, {**CLAIM, "rulings": {"1": [None]}})
+    assert tier_of(first) == NORMAL_TIER, "the first time the claim is seen"
+    second = tier_run(bridge, repeat, {**CLAIM, "rulings": {"1": [REQ]}})
+    assert arbiter_calls(second["events"]) == ["arbiter task 1"], ", ".join(second["events"])
+    assert tier_of(second) == RISKY_TIER, "the same claim again after an unruled call"
+
+
+def test_tc38_a_claim_returning_after_a_failed_arbiter_call_runs_at_the_risky_tier_across_a_resume(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    first = tier_run(bridge, project, {**CLAIM, "rulings": {"1": ["throw"]}})
+    assert arbiter_calls(first["events"]) == ["arbiter task 1"], ", ".join(first["events"])
+    assert tier_of(first) == NORMAL_TIER
+    assert len(needs(first)) == 1, json.dumps(first["result"].get("needsInput"))
+    resumed = tier_run(bridge, project, {**CLAIM, "rulings": {"1": [REQ]}})
+    assert arbiter_calls(resumed["events"]) == ["arbiter task 1"], ", ".join(resumed["events"])
+    assert tier_of(resumed) == RISKY_TIER, "the claim returned after a failed call"
+
+
+def test_tc39_a_high_complexity_task_with_no_other_signal_gets_the_normal_tier(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    out = tier_run(bridge, project, {**CLAIM, "rulings": {"1": [REQ]}}, complexity={"1": "High"})
+    assert arbiter_calls(out["events"]) == ["arbiter task 1"], ", ".join(out["events"])
+    assert tier_of(out) == NORMAL_TIER
+
+
+def test_tc40_needs_a_stronger_look_at_the_normal_tier_reruns_once_at_the_risky_tier_with_the_first_reasoning(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    risky_req = ruling("requirements", claim=KEY)
+    out = tier_run(bridge, project, {**CLAIM, "rulings": {"1": [STRONGER, risky_req]}})
+    ev = out["events"]
+    assert arbiter_calls(ev) == ["arbiter task 1", "arbiter task 1 risky"], "exactly one re-run, at the risky tier: " + ", ".join(ev)
+    assert tier_of(out) == NORMAL_TIER
+    assert tier_of(out, "arbiter task 1 risky") == RISKY_TIER
+    assert STRONGER["reasoning"] in out["prompts"]["arbiter task 1 risky"], out["prompts"]["arbiter task 1 risky"]
+    entries = needs(out)
+    assert len(entries) == 1, "the risky requirements ruling ends the run with one needs-input entry: " + json.dumps(out["result"].get("needsInput"))
+    assert "invalid-ruling" not in json.dumps(entries[0]), "both answers are valid rulings: " + json.dumps(entries[0])
+
+
+def test_tc41_needs_a_stronger_look_at_the_risky_tier_makes_no_further_call_and_the_entry_holds_what_was_established(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    out = tier_run(bridge, project, {**CLAIM, "risk": {"1": "safety"}, "rulings": {"1": [STRONGER, REQ]}})
+    ev = out["events"]
+    assert arbiter_calls(ev) == ["arbiter task 1"], "one call, no re-run: " + ", ".join(ev)
+    assert tier_of(out) == RISKY_TIER
+    entries = needs(out)
+    assert len(entries) == 1, json.dumps(out["result"].get("needsInput"))
+    assert STRONGER["established"] in json.dumps(entries[0]), json.dumps(entries[0])
+    assert "invalid-ruling" not in json.dumps(entries[0]), "a valid stronger-look answer is routed as exhausted (5.7), not invalid: " + json.dumps(entries[0])
+
+
+def untagged_risk_path_project(tmp_path, complexity):
+    block = ("### Task 1: Gate\n**Status:** Not Started\n**Track:** impl\n**Requirements:** 1.1\n**Description:** Gate.\n"
+             f"**Files:**\n- `src/shop/gate.py` - the gate\n**Verify:** `true`\n**Dependencies:** None\n**Complexity:** {complexity}\n\n---\n")
+    project = arbiter_project(tmp_path, tasks="# Implementation Tasks: Demo\n\n## Task Breakdown\n\n" + block)
+    config = {**json.loads((project.root / "specs" / "ck.json").read_text()), "risk_paths": ["**/gate.py"]}
+    (project.root / "specs" / "ck.json").write_text(json.dumps(config))
+    return project
+
+
+def test_tc157_a_risk_path_match_with_no_risk_tag_starts_at_the_risky_tier_and_complexity_never_changes_it(bridge, tmp_path):  # noqa: F811
+    project = untagged_risk_path_project(tmp_path / "paths", "Medium")
+    planned = project.ck("plan", "demo", "--json")
+    assert planned.returncode == 0, planned.stdout + planned.stderr
+    risk = json.loads(planned.stdout)["risk"]
+    assert risk == {"1": "safety"}, "ck plan's risk map counts the risk_paths match: " + planned.stdout
+    matched = tier_run(bridge, project, {**CLAIM, "risk": risk, "rulings": {"1": [REQ]}})
+    assert arbiter_calls(matched["events"]) == ["arbiter task 1"], ", ".join(matched["events"])
+    assert tier_of(matched) == RISKY_TIER
+    tiers = []
+    for level in ("High", "Low"):
+        plain = arbiter_project(tmp_path / level)
+        out = tier_run(bridge, plain, {**CLAIM, "rulings": {"1": [REQ]}}, complexity={"1": level})
+        assert arbiter_calls(out["events"]) == ["arbiter task 1"], ", ".join(out["events"])
+        tiers.append(tier_of(out))
+    assert tiers[0] == tiers[1] == NORMAL_TIER, tiers
+    routed = []
+    for level in ("High", "Low"):
+        plain = arbiter_project(tmp_path / f"routed-{level}")
+        out = tier_run(bridge, plain, {**CLAIM, "rulings": {"1": [REQ]}}, complexity={"1": level}, complexity_routing=True)
+        assert arbiter_calls(out["events"]) == ["arbiter task 1"], ", ".join(out["events"])
+        routed.append(tier_of(out))
+    assert routed[0] == routed[1] == NORMAL_TIER, "complexity routing on still never changes the arbiter tier: " + repr(routed)
