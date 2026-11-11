@@ -735,7 +735,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 31: Add ck principles init and check
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.1, 1.2, 1.4
 **Description:** Create `src/claude_kiro/cli/arbiter.py` with the `principles` group: `ck principles init [--commit]` (creates `specs/PRINCIPLES.md` from the starter text if missing, leaves an existing file untouched, prints `{"created", "path", "commit"}`; `--commit` also commits that file alone on the checkout's branch when it created it, so a launch gets it onto the target checkout) and `ck principles check SPEC --json` (`{"ok", "reason"}`, exit 1 when the plan may not be Decided). Create an empty `arbiter` group in the same file. Register both in `src/claude_kiro/cli/main.py`. Harness Contract owner: `ck principles init`.
@@ -747,9 +747,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 7 (TC-1, TC-3, TC-140), Task 10 (red team of 1.4 through `ck principles check`)
 
 **Acceptance:**
-- [ ] `init` creates the file with all four defaults and reports `created: true`
-- [ ] `init` on an existing file leaves bytes and mtime unchanged and reports `created: false`
-- [ ] `check` exits 1 for a plan with a missing or empty section
+- [x] `init` creates the file with all four defaults and reports `created: true`
+- [x] `init` on an existing file leaves bytes and mtime unchanged and reports `created: false`
+- [x] `check` exits 1 for a plan with a missing or empty section
 
 **Dependencies:** Task 7 (its tests are the oracle), Task 10 (its tests are the oracle), Task 11 (calls the starter text and `plan_may_be_decided`)
 **Complexity:** Low
