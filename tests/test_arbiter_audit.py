@@ -190,18 +190,21 @@ def test_tc123_the_shipped_and_generated_auditor_list_exactly_read_grep_glob(tmp
     from claude_kiro import agents as ag
 
     shipped = REPO / "plugin" / "agents" / "auditor.md"
-    assert shipped.exists(), "plugin/agents/auditor.md is missing"
-    assert tools_of(shipped.read_text()) == "Read, Grep, Glob"
+    text = shipped.read_text() if shipped.exists() else ""
+    assert tools_of(text) == "Read, Grep, Glob", f"the shipped auditor lists tools {tools_of(text)!r}, not exactly Read, Grep, Glob"
     monkeypatch.setenv("CK_CONFIG_HOME", str(tmp_path / "none"))
     generated = tmp_path / "generated"
     generated.mkdir()
     for name, text in ag.agent_type_files(ag.resolve(tmp_path)["roles"]).items():
         (generated / name).write_text(text)
-    assert (generated / "ck-auditor.md").exists(), "ck-auditor.md is not generated"
-    assert tools_of((generated / "ck-auditor.md").read_text()) == "Read, Grep, Glob"
+    made = generated / "ck-auditor.md"
+    got = tools_of(made.read_text()) if made.exists() else None
+    assert got == "Read, Grep, Glob", f"the generated ck-auditor.md lists tools {got!r}, not exactly Read, Grep, Glob"
 
 
 def tools_of(text: str) -> Optional[str]:
+    if text.count("---") < 2:
+        return None
     head = text.split("---")[1]
     for line in head.splitlines():
         if line.startswith("tools:"):
