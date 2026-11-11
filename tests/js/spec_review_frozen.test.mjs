@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { runWorkflow } from './load_workflow.mjs'
+import { thinCkDefault } from './fake_create.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const SCRIPT = path.join(here, '../../plugin/workflows/spec-create.js')
@@ -23,6 +24,9 @@ function stub() {
     if (l === 'review: fidelity') return { findings: [
       finding('R1', 'requirements.md', `Reword requirement 1.1 to: ${PROPOSED}`),
       finding('R2', 'requirements.md', 'Add requirement 1.9 covering the new flag') ] }
+    if (/^arbiter (refuted|cuts|drift)( risky)?$/.test(l)) return { rulings: [] }
+    const thin = thinCkDefault(prompt, opts, { implementationStarted: true })
+    if (thin) return thin
     if (l.startsWith('review:')) return { findings: [] }
     if (l === 'refute: fidelity') return { verdicts: [{ id: 'R1', refuted: false, reason: 'real' }, { id: 'R2', refuted: false, reason: 'real' }] }
     if (l.startsWith('revise')) return {

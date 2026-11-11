@@ -24,6 +24,24 @@ await test('create: authoring stages, 4 lenses, refuted/decision findings routed
   assert.equal(result.files.length, 5)
 })
 
+await test('a refuted finding goes through the arbiter and its ruling is reported', async () => {
+  // The arbiter's answer is shaped like design.md's RULING schema; the ruling number is minted by `ck arbiter review`
+  // (played by the fake), which here answers 7 for R3.
+  const ruling = { claim: 'R3', status: 'ruled', outcome: 'spec_edit', reasoning: 'the finding is a style preference', verdict: 'the refutation stands' }
+  const s = stub({
+    'arbiter refuted': { rulings: [ruling] },
+    'ck arbiter review refuted': subjects => ({ results: subjects.map(x => ({ id: String(x.id), action: 'spec_edit', reason: '', stronger: false, ruling: x.id === 'R3' ? 7 : null })), lost: false }),
+  })
+  const { result } = await runWorkflow(SCRIPT, { agent: s.agent, args: args('create') })
+  // The context step is a thin ck call, matched by its command line: design.md pins no label for it.
+  assert.ok(Object.values(s.prompts).some(p => /\bck\b[^\n]*\barbiter context\b/.test(p)), 'the arbiter context step ran')
+  assert.ok(s.calls.includes('arbiter refuted'), 'the refuted R3 is a subject of the arbiter step')
+  assert.ok(!result.review.fixed.includes('R3'))
+  assert.equal(result.review.refutedCount, 1)
+  assert.ok(result.review.arbiter.ran.includes('refuted'))
+  assert.ok(result.review.arbiter.rulings.includes(7), 'the ruling for R3 appears in review.arbiter.rulings')
+})
+
 await test('review mode skips authoring', async () => {
   const s = stub()
   const { result } = await runWorkflow(SCRIPT, { agent: s.agent, args: args('review') })

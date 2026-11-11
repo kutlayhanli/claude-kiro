@@ -758,7 +758,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 32: Add lane tickets for /spec:create
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 11.5, 11.7
 **Description:** Create `src/claude_kiro/arbiter.py` with lane ticket helpers: open and close write and remove `<checkout>/.ck/arbiter-lane/<spec>.json` (`{"spec", "openedAt"}`). Add `ck arbiter lane open|close SPEC --json` to the `arbiter` group in `src/claude_kiro/cli/arbiter.py`. Foundation task: its Verify is a smoke check. Lane tickets are verified at Task 36 by Task 33 (TC-101, TC-103).
@@ -769,8 +769,8 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Provides:** `ck arbiter lane`
 
 **Acceptance:**
-- [ ] `ck arbiter lane open` writes the ticket and `close` removes it
-- [ ] Closing a lane with no ticket succeeds without error
+- [x] `ck arbiter lane open` writes the ticket and `close` removes it
+- [x] Closing a lane with no ticket succeeds without error
 
 **Dependencies:** Task 31 (adds to the `arbiter` group in `cli/arbiter.py`)
 **Complexity:** Low
@@ -1150,7 +1150,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 49: Commit this repository's principles file
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.9
 **Description:** Create `specs/PRINCIPLES.md` at the repository root with the starter text from `ck principles init`. It must be committed on `integrate/run-principles`, because the arbiter reads it from the target checkout and each claim otherwise becomes a needs-input entry. Foundation task: its Verify is a smoke check. It is the data file 1.9 reads, and the missing-file path is verified at Task 65 by Task 56 (TC-11).
@@ -1159,7 +1159,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verify:** `test -f specs/PRINCIPLES.md`
 
 **Acceptance:**
-- [ ] `specs/PRINCIPLES.md` holds the four defaults and is committed
+- [x] `specs/PRINCIPLES.md` holds the four defaults and is committed
 
 **Dependencies:** Task 31 (uses the starter text from `ck principles init`)
 **Complexity:** Low
@@ -1405,7 +1405,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 60: Test test-repair rulings and rulings that end with me
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.4, 8.8, 8.9, 8.10, 8.13, 8.14, 8.15, 8.16
 **Description:** Implement TC-71, TC-72, TC-73, TC-76, TC-77, TC-78, TC-199 and TC-205 in `tests/test_arbiter_run.py`, named `test_tc<N>_...`. The test-fixer is built, so the test-repair cases drive the real fixer route in `spec-implement.js` through fake_project's existing `testFix` and `priorFixes` options, which answer the `testfix ledger <k>` and `testfix prove <k>` steps (the real `ck testfix check` and `prove` run in Task 100's `tc177_run` smoke). TC-71: a test-repair ruling the fixer cannot take (`priorFixes` lists the test, then `ledgerFail`): one needs-input entry of kind `test-fix` carries `ruling` (the number) and `testRepair` with the exact change and why, no `testfix <k> (Task n)` label runs, and the test file is byte-identical. TC-72: a test-repair ruling leads to `testfix ledger <k>`, then `testfix <k> (Task n)`, whose prompt's conflict entry has `fix` = the ruling's `testRepair.change`, `reason` = its `why` and `ruling` deep-equal to the settled ruling; then the proof, the fix's land and a task retry that spends no retry budget; the shipped script has one `handOffTestRepair(` call site, and `testRepairEntries` through the bridge's `call` op gives that entry. TC-73: a test-repair ruling on a conflict runs no confirmation label, and the step after the ruling's record is `testfix ledger <k>`. TC-199: the same conflict reported again after its ruled fix landed gives one `test-fix` entry with `ruling`, `testRepair` and the new report as `evidence`, and no second arbiter or `testfix <k>` label. TC-205: a test-repair ruling the fixer answers `test-correct` (fake_project `testFix` verdict `test-correct` with a `finding`) gives one `test-fix` entry carrying `ruling`, `testRepair` and the fixer's `finding`, no task retry label after the fixer, and no second `arbiter task <n>` label (D27). TC-76: a requirements ruling makes an entry with the recommendation and requirements.md stays byte-identical. TC-77: a missing-requirement finding makes an entry with wording and reason; the task and dependents wait and independents continue. TC-78: a ruling's entry is in `needsInput`, not `failed`, does not halt on failure, and notifies through a real local `notify_command` when set.
@@ -1415,12 +1415,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 66 (TC-71 to 73, 76 to 78, 199, 205)
 
 **Acceptance:**
-- [ ] Byte-identity checks read the real files before and after
-- [ ] TC-72 drives the shipped fixer route (`testfix ledger <k>`, `testfix <k> (Task n)`, `testfix prove <k>`) through fake_project's `testFix`; no case sets a `testFixerAvailable` arg (there is none)
-- [ ] TC-78 runs a real `notify_command` and asserts it fired
-- [ ] Tests exercise the real boundary named in the test plan (workflow, real files, real notify command)
-- [ ] Tests fail before the implementation exists for the right reason (no ruling routes)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Byte-identity checks read the real files before and after
+- [x] TC-72 drives the shipped fixer route (`testfix ledger <k>`, `testfix <k> (Task n)`, `testfix prove <k>`) through fake_project's `testFix`; no case sets a `testFixerAvailable` arg (there is none)
+- [x] TC-78 runs a real `notify_command` and asserts it fired
+- [x] Tests exercise the real boundary named in the test plan (workflow, real files, real notify command)
+- [x] Tests fail before the implementation exists for the right reason (no ruling routes)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 59 (same test file)
 **Complexity:** High
@@ -2081,7 +2081,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 90: Migrate the /spec:create workflow suites to the arbiter steps
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 4.1, 11.1, 11.9, 11.12
 **Description:** Migrate `tests/js/spec_create.test.mjs`, `tests/js/spec_review_frozen.test.mjs` and `tests/js/spec_create_provides.test.mjs`, which run the real `spec-create.js` through `fake_create.mjs`. Its stub throws on any unknown label, and its default run has a refuted finding (R3), so Task 84's new steps would throw or lose the check. Give `fake_create.mjs` default answers for `ck arbiter context`, `ck arbiter lane open` and `close`, `arbiter refuted`, `arbiter cuts`, `arbiter drift` and the `should-exist` lens, kept out of what Task 2's `overrides` scenarios assert. Migrate the assertions on refuted findings to the arbiter route (a refuted finding gets a ruling and the result stays Ready or Ready after decisions, as those suites expect). Keep each assertion's intent, and do not delete one to get a pass.
@@ -2094,11 +2094,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 83 (the lens in both suites), Task 84 (the refuted and cuts steps), Task 85 (the drift step)
 
 **Acceptance:**
-- [ ] Every assertion about the replaced behaviour is migrated, none deleted to get a pass
-- [ ] Assertions unrelated to the arbiter are unchanged
-- [ ] Tests exercise the real boundary named in the test plan (the real `spec-create.js` under the fake runtime)
-- [ ] Tests fail before the implementation exists for the right reason (the arbiter steps do not run)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Every assertion about the replaced behaviour is migrated, none deleted to get a pass
+- [x] Assertions unrelated to the arbiter are unchanged
+- [x] Tests exercise the real boundary named in the test plan (the real `spec-create.js` under the fake runtime)
+- [x] Tests fail before the implementation exists for the right reason (the arbiter steps do not run)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 2 (`fake_create` options)
 **Complexity:** Medium
