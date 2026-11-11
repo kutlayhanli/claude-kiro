@@ -757,6 +757,9 @@ def _implement_metrics(result: Mapping, rows: List[dict], workflow_name: str, tr
     fallbacks = result.get("planFallbacks")
     if isinstance(fallbacks, list):
         local_result["planFallbacks"] = list(fallbacks)
+    rulings = result.get("rulings")
+    if isinstance(rulings, list):
+        local_result["rulings"] = [dict(r) for r in rulings if isinstance(r, Mapping)]
     metrics: Dict[str, Any] = {
         "reportSource": result.get("reportSource") if isinstance(result.get("reportSource"), str) else None,
         "taskSpanMinutes": _num(timing.get("minutes")),

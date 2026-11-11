@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 from datetime import datetime, timezone
 
 from .. import bench
+from ..arbiter_policy import rulings_summary
 
 COVERAGE: Dict[str, str] = {
     "task_minutes": (
@@ -242,6 +243,16 @@ def _plan_fallbacks_view(record: Mapping[str, Any]) -> Dict[str, Any]:
     if isinstance(entries, list):
         return {"recorded": True, "count": len(entries), "entries": list(entries)}
     return {"recorded": False, "count": None, "entries": None}
+
+
+def _rulings_view(record: Mapping[str, Any]) -> Dict[str, Any]:
+    """`rulings: { byTrigger, byOutcome, byTier }` counted over the run's rulings (10.8).
+    A run with no rulings, or a record from before rulings were carried, gives empty counts."""
+    result = record.get("result")
+    entries = result.get("rulings") if isinstance(result, Mapping) else None
+    summary = rulings_summary(entries if isinstance(entries, list) else [])
+    return {"byTrigger": dict(summary["byTrigger"]), "byOutcome": dict(summary["byOutcome"]),
+            "byTier": dict(summary["byTier"])}
 
 
 def _overhead_view(record: Mapping[str, Any], fb_recorded: bool) -> Dict[str, Any]:
@@ -588,6 +599,7 @@ def run_breakdown(record: Mapping[str, Any]) -> Dict[str, Any]:
         "wait_split": wait_split_summary(tasks),  # ms; {"review": None, "landing": None} when not recorded
         "plan_fallbacks": plan_fallbacks,
         "overhead": overhead,
+        "rulings": _rulings_view(record),
         "degraded": degraded if isinstance(degraded, bool) else None,
         "coverage": dict(COVERAGE),
         "missing": list(record.get("missing") or []),
@@ -877,6 +889,7 @@ def run_json(view: Mapping[str, Any]) -> Dict[str, Any]:
                 "landing": _pair(split.get("landing")),
             },
             "planFallbacks": dict(view.get("plan_fallbacks") or {"recorded": False, "count": None, "entries": None}),
+            "rulings": dict(view.get("rulings") or {"byTrigger": {}, "byOutcome": {}, "byTier": {}}),
             "overhead": dict(view.get("overhead") or {"recorded": False, "share": None,
                                                       "threshold": OVERHEAD_WARN_THRESHOLD, "warned": False}),
             "degraded": view.get("degraded"),
