@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { runWorkflow } from './load_workflow.mjs'
 import { project } from './fake_project.mjs'
+import { arbiterProject, repairRuling } from './arbiter_project.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const SCRIPT = path.join(here, '../../plugin/workflows/spec-implement.js')
@@ -57,16 +58,20 @@ await test('TC-114: a missing command of unfinished Task 5 adds a live edge: no 
   assert.ok(!failedRec(result, '2'), 'task 2 did not fail')
 })
 
-await test('TC-116: a missing command no task provides becomes a test conflict through confirmation, then the test-fixer (12.6)', async () => {
+await test('TC-116: a missing command no task provides becomes a test conflict through the arbiter\'s test_repair ruling, then the test-fixer (12.6)', async () => {
   const deps = { 2: [] }
-  const p = project({ deps, failUntil: { 2: 99 }, taskFailures: { 2: missing([]) }, testFix: { 'tests/test_cli.py': { verdict: 'fixed' } } })
-  const { result, trace } = await runWorkflow(SCRIPT, { agent: p.agent, args: withGraph(deps) })
+  const proj = arbiterProject()
+  // The conflict the invoking test makes; the arbiter's ruling takes its change and why from the conflict's fix and reason.
+  const conflict = { file: 'tests/test_cli.py', test: 'test_thesis_new', criterion: '12.6', reason: `the test invokes \`${CMD}\`, which no task provides`, fix: `invoke a command the CLI has instead of \`${CMD}\`` }
+  const p = project({ deps, failUntil: { 2: 99 }, taskFailures: { 2: missing([]) }, rulings: { 2: [repairRuling('2', conflict)] }, execCk: proj.execCk, testFix: { 'tests/test_cli.py': { verdict: 'fixed' } } })
+  const { result, trace } = await runWorkflow(SCRIPT, { agent: p.agent, args: withGraph(deps, { ...proj.args, arbiterAgent: 'spec:arbiter' }) })
   assert.deepEqual(result.liveEdges || [], [], 'no live edge for a command nobody provides')
   const labels = trace.filter(e => e.ev === 'request').map(e => e.label)
-  const confirm = labels.findIndex(l => /^task 2 retry/.test(l))
+  const arbiter = labels.findIndex(l => /^arbiter task 2/.test(l))
   const fixer = labels.findIndex(l => /^testfix \d+ \(Task 2\)/.test(l))
-  assert.ok(confirm >= 0, `confirmation attempt requested: ${labels.join(' | ')}`)
-  assert.ok(fixer > confirm, `the test-fixer comes after the confirmation: ${labels.join(' | ')}`)
+  assert.ok(arbiter >= 0, `the arbiter ruled: ${labels.join(' | ')}`)
+  assert.ok(fixer > arbiter, `the test-fixer comes after the arbiter: ${labels.join(' | ')}`)
+  assert.ok(!labels.some((l, i) => /^task 2 retry/.test(l) && i < fixer), `no confirmation attempt before the fixer: ${labels.join(' | ')}`)
 })
 
 await test('TC-117: a live edge that would close a cycle is not added; Task 2 is blocked naming it (12.7)', async () => {

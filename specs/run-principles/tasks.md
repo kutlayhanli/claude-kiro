@@ -941,7 +941,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 40: Property tests for spec-edit refusals and refused landings
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 8.4, 8.5, 8.6, 1.7
 **Description:** Implement P-21, P-36 and P-38 with Hypothesis in `tests/test_arbiter_land.py`, named `test_p<N>_...`. P-21: `arbiter_policy.spec_text_changes` lists a change exactly when a Status field or an acceptance mark changed, over Status forms (`**Status:** Done`, `In Progress`, added spaces, a moved line) and marks (`- [x]`, `- [X]`, `* [x]`, `- [ ]`, on any criterion), with negatives (Verify, Dependencies, description, a Status word inside prose); `max_examples=200`. P-36 (G, real git, `max_examples=30`): for conflict, red gate, refused path, cycle and new blocking finding, the target HEAD is equal before and after and there is no second ruling. P-38 at `decide_spec_edit`: a changed path matching a reserved file scope (`tasks.md`, `design.md`, `test-plan.md`) is refused with the ruling's `reservedBy` absent; reservations of `code` and `test repairs` are P-3 at `route_ruling` (Task 8), and do not affect this seam. Settings otherwise `derandomize=True, database=None, deadline=None`. The file declares `PROPERTIES = {"P-21": ..., "P-36": ..., "P-38": ...}`.
@@ -952,12 +952,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 41 (P-21 at `spec_text_changes`, P-38 at `decide_spec_edit`), Task 44 (P-36 through real landings)
 
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the P-21, P-36 and P-38 rows
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] The tests call the decision seam, and real git for P-36, not a server
-- [ ] Tests exercise the real boundary named in the test plan (seam, real git)
-- [ ] Tests fail before the implementation exists for the right reason (the seam and landing route do not exist)
-- [ ] No mocks of the project's own code in integration tests
+- [x] The generators cover every surface form and negative listed in the P-21, P-36 and P-38 rows
+- [x] Settings are deterministic (derandomized, no database)
+- [x] The tests call the decision seam, and real git for P-36, not a server
+- [x] Tests exercise the real boundary named in the test plan (seam, real git)
+- [x] Tests fail before the implementation exists for the right reason (the seam and landing route do not exist)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (strategies, project fixture), Task 39 (same test file)
 **Complexity:** High
@@ -1060,7 +1060,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 45: Test rulings in ck stats and the label corpus
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 10.8
 **Description:** Implement TC-95 in `tests/test_arbiter_stats.py`: a workflow result's `rulings` reach `ck stats show --json` as `rulings: {byTrigger, byOutcome, byTier}`, over a real run file, using `tests/stats_helpers.py`. Implement TC-137 as `test_tc137_...` in `tests/test_stats_label_corpus.py`: every label the workflows emit, including `arbiter task <n>`, `arbiter task <n> risky`, `arbiter <step>`, `audit task <n>`, the `arbiter-` steps and `full gate @<n> (unreproduced landing)`, parses to a known role through the real `parse_label`.
@@ -1071,11 +1071,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 46 (TC-137, the role map), Task 47 (TC-95), Task 74 (TC-137, the audit and arbiter labels of `spec-implement.js`), Task 84 (TC-137, the arbiter step labels of `spec-create.js`), Task 99 (TC-137, the `full gate @<n> (unreproduced landing)` label)
 
 **Acceptance:**
-- [ ] TC-95 runs the real `ck stats` over a real run file and asserts the counts
-- [ ] TC-137 uses the real scripts through `emit_labels.mjs` and the real `parse_label`
-- [ ] Tests exercise the real boundary named in the test plan (real stats, real scripts)
-- [ ] Tests fail before the implementation exists for the right reason (no `rulings` key; unknown labels)
-- [ ] No mocks of the project's own code in integration tests
+- [x] TC-95 runs the real `ck stats` over a real run file and asserts the counts
+- [x] TC-137 uses the real scripts through `emit_labels.mjs` and the real `parse_label`
+- [x] Tests exercise the real boundary named in the test plan (real stats, real scripts)
+- [x] Tests fail before the implementation exists for the right reason (no `rulings` key; unknown labels)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 2 (`emit_labels.mjs`)
 **Complexity:** Medium
@@ -2359,7 +2359,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 
 
 ### Task 102: Migrate the test-fixer suites to the arbiter's test-repair ruling
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.1, 8.9, 8.10
 **Description:** Task 65 removes the second-agent confirmation, and three unattended-correctness suites still start from it: `tests/js/test_fix.test.mjs` (its `run` helper: "Task 4's first two attempts (the report and the confirmation) return `conflicts`"; every case, from `tc38_ a confirmed conflict starts one test-fixer` on), `tests/js/command_deps.test.mjs` (TC-116: a missing command no task provides "becomes a test conflict through confirmation, then the test-fixer", asserting `fixer > confirm`) and `tests/js/attributed_gates.test.mjs` (TC-34: "testConflicts reach the confirmation agent"). Rewrite each confirmation step as a fake `rulings` answer for `arbiter task <n>` with outcome `test_repair` (its `testRepair.change` and `why` taken from the conflict's `fix` and `reason`), followed by the existing `testfix <k> (Task n)` labels: the conflict is reported once, then the arbiter rules, then the fixer runs. Keep each assertion's intent: the fixer, its model, its branch, its review, its proof, its landing, the retry and every `test-fix` entry assertion stay; an assertion that the prompt carries the structured conflict entries now expects the entries `testRepairEntries` builds, carrying the ruling. TC-116 asserts the arbiter step comes before the fixer, TC-34 that `testConflicts` reach the arbiter's claim and the result. Grep `tests/` for `Check that claim yourself|confirm` and leave files other tasks own (`spec_implement.test.mjs` is Task 51's, `test_unattended_smoke.py` is Task 100's). Task 2's fake throws on an `arbiter-` thin step when `execCk` is absent, so each migrated scenario that reaches the arbiter passes `execCk` and a run root pointing at a temporary git project holding `specs/PRINCIPLES.md` and the scenario's spec, as `tests/test_arbiter_run.py` does through the bridge; `ck arbiter open`, `settle` and `record` then run for real. These files run whole, so their Verify passes only once Task 66 rewires `handOffTestRepair` to `testFixFor`. Do not delete a test to get a pass.
@@ -2371,11 +2371,13 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 66 (the hand-off of a test-repair ruling to the test-fixer)
 
 **Acceptance:**
-- [ ] Every assertion about the replaced confirmation is migrated to the ruling, none deleted to get a pass
-- [ ] Every fixer-side assertion is unchanged
-- [ ] Tests exercise the real boundary named in the test plan (the real `spec-implement.js` under the fake runtime)
-- [ ] Tests fail before the implementation exists for the right reason (no `arbiter task <n>` label; the confirmation still runs)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Every assertion about the replaced confirmation is migrated to the ruling, none deleted to get a pass
+- [x] Every fixer-side assertion is unchanged
+- [x] Tests exercise the real boundary named in the test plan (the real `spec-implement.js` under the fake runtime)
+- [x] Tests fail before the implementation exists for the right reason (no `arbiter task <n>` label; the confirmation still runs)
+- [x] No mocks of the project's own code in integration tests
+
+**Implementation notes:** Shared helper `tests/js/arbiter_project.mjs` (a real temp git project with PRINCIPLES.md, the spec and an integration worktree, plus `repairRuling`) is outside the Files list. Deviation: `tc46_` (test-correct verdict) now asserts design 8.8/D27 (no retry, one `test-fix` entry carrying the finding and ruling) instead of the old retry with the finding. The three suites fail until Task 66 rewires `handOffTestRepair`.
 
 **Dependencies:** Task 2 (`rulings` answers in the fake runtime)
 **Complexity:** Medium
