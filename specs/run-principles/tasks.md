@@ -92,7 +92,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 3: Test the arbiter's role settings
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.1, 5.2
 **Description:** Implement TC-35 and TC-36 in `tests/test_arbiter_agents.py`, named `test_tc<N>_...`, reusing `home`, `ck`, `roles` from `tests/test_agents.py`. TC-35: `ck agents set arbiter.model fable` and each of the four keys show in `ck agents --json`, and an invalid value gets the same message as `reviewer.model`. TC-36: with the four unset, resolved values equal `reviewer.risky_model` and `reviewer.risky_effort`, including after those change.
@@ -102,10 +102,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 5 (TC-35, TC-36)
 
 **Acceptance:**
-- [ ] Each case goes through the real CLI against real config files
-- [ ] Tests exercise the real boundary named in the test plan (CLI, real config)
-- [ ] Tests fail before the implementation exists for the right reason (`arbiter` is an unknown role)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each case goes through the real CLI against real config files
+- [x] Tests exercise the real boundary named in the test plan (CLI, real config)
+- [x] Tests fail before the implementation exists for the right reason (`arbiter` is an unknown role)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** None
 **Complexity:** Low
@@ -1751,7 +1751,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 75: Contract tests over the implement, create and review skill text
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 4.2, 4.4, 4.5, 10.7, 12.5, 12.6, 1.1, 6.12, 11.9, 12.12
 **Description:** Added at Link, because the test plan has no row for this skill text and the impl tasks that write it would have no oracle; it follows the test plan's "Contract only" level for skill text. In `tests/test_arbiter_skill_contracts.py`, over the shipped `plugin/skills/implement/SKILL.md`, `plugin/skills/create/SKILL.md` and `plugin/skills/review/SKILL.md` only, never the vendored `.claude/commands/spec/*.md`. Name cases `test_implement_skill_...`, `test_create_skill_...` and `test_review_skill_...`, with the case id inside the name where one applies, so each impl task's Verify selects its own. Implement: the implement skill passes `arbiterAgent`, `auditorAgent`, `verifiedBy` and `agents.arbiter`; a `verify-scope` finding launches the workflow on a whole-spec run and refuses a single-task run whose task it names; it reports this run's rulings and proposed cuts. Create and review: each reports `review.proposedCuts` with the story, the weakness and what the cut saves. Create: an approved cut with no task started goes through `apply-cuts` and reports any new `ck lint` failure, and an approved cut after a task started tells me the requirements are frozen and the change is mine. TC-139: the create, review and implement skills run `ck principles init` (implement on the target checkout with `--commit`) and tell me when it created the file. TC-147: the implement skill and `without-workflow-tool.md` run the read-only audit before the first attempt of a single-task or no-Workflow run, and say a claim there, including an audit problem, is a needs-input entry with no guard ladder and no confirmation agent, and a single-task run refuses when a `verify-scope` entry names its task. TC-159: the create and review skills run `ck agents --json` and pass `arbiterAgent`, `runnerAgent` and `agents.arbiter`. Use we/you/me framing in any expected text.
@@ -1761,11 +1761,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 76 (the implement skill text), Task 86 (the create and review skill text)
 
 **Acceptance:**
-- [ ] Each case reads the real shipped skill text and asserts instruction order or conditions where the criterion is about order
-- [ ] No case reads a vendored `.claude/` copy
-- [ ] Tests exercise the real boundary named in the test plan (the shipped `SKILL.md` files)
-- [ ] Tests fail before the implementation exists for the right reason (the skills do not yet say these things)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each case reads the real shipped skill text and asserts instruction order or conditions where the criterion is about order
+- [x] No case reads a vendored `.claude/` copy
+- [x] Tests exercise the real boundary named in the test plan (the shipped `SKILL.md` files)
+- [x] Tests fail before the implementation exists for the right reason (the skills do not yet say these things)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** None
 **Complexity:** Low
