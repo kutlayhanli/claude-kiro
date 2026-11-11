@@ -25,10 +25,13 @@ from . import worktrees as wt
 from .arbiter_policy import (
     Claim,
     ClaimDecision,
+    RulingRecord,
     TaskMeta,
+    append_entry,
     claim_facts,
     claim_key,
     decide_claim,
+    next_number,
 )
 from .principles import effective_principles, parse_principles
 
@@ -358,3 +361,63 @@ def settle_claim(root: Path, spec: str, key: str, raw_text: str, tier: str) -> D
             "principle": {"id": principle.id, "text": principle.text} if principle is not None else None,
             "problems": list(check.problems),
         }
+
+
+# --------------------------------------------------------------------------- the record of rulings (Task 42)
+
+
+def decisions_rel(spec: str) -> Path:
+    return Path("specs") / spec / "decisions.md"
+
+
+def ruling_record_from_json(raw: Any) -> RulingRecord:
+    """The `RulingRecord` of the stdin object. `moved` is a list of objects, `landed` a [bool, why] pair or null."""
+    if not isinstance(raw, dict):
+        raise ArbiterError("the ruling record must be a JSON object")
+    names = {f.name for f in fields(RulingRecord)}
+    kw = {k: v for k, v in raw.items() if k in names}
+    try:
+        kw["moved"] = tuple(dict(m) for m in (raw.get("moved") or []))
+        landed = raw.get("landed")
+        kw["landed"] = None if landed is None else (bool(landed[0]), str(landed[1]))
+    except (TypeError, ValueError, IndexError, KeyError):
+        raise ArbiterError("moved must be a list of objects and landed a [bool, why] pair or null")
+    try:
+        return RulingRecord(**kw)
+    except TypeError as exc:
+        raise ArbiterError(f"the ruling record is missing a field: {exc}")
+
+
+def record_ruling(root: Path, spec: str, into: str, record: RulingRecord, lock_wait: float) -> Dict[str, Any]:
+    """`{number, commit}` for one ruling (design.md, `ck arbiter record`).
+
+    Takes the landing lock on INTO with a bounded wait, so concurrent records serialize; appends the entry to
+    `specs/<spec>/decisions.md` on INTO's checkout and commits that file alone. The first ruling creates the file.
+    A lock not acquired in time, or a failed write or commit, raises and leaves the file as it was.
+    """
+    checkout = wt.checkout_of(root, into)
+    if checkout is None:
+        raise ArbiterError(f"{into} is not checked out anywhere, so decisions.md cannot be written")
+    path = checkout / decisions_rel(spec)
+    rel = decisions_rel(spec).as_posix()
+    with wt.land_lock(root, into, wait_s=lock_wait):
+        existing = path.read_text(encoding="utf-8") if path.is_file() else None
+        ledger_last = int(load_ledger(ledger_path(root, spec)).get("lastEntry", 0))
+        number = next_number(existing, ledger_last)
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        head = existing if existing is not None else f"# Rulings: {spec}\n\n"
+        text = append_entry(head, replace(record, at=record.at or stamp), number)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            path.write_text(text, encoding="utf-8")
+            wt.git(checkout, "add", "--", rel)
+            wt.git(checkout, "commit", "--only", "-m", f"arbiter: record ruling {number}", "--", rel)
+            sha = wt.git(checkout, "rev-parse", "HEAD").stdout.strip()
+        except BaseException:
+            wt.git(checkout, "reset", "-q", "--", rel, check=False)
+            if existing is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.write_text(existing, encoding="utf-8")
+            raise
+    return {"number": number, "commit": sha}

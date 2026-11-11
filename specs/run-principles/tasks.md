@@ -991,7 +991,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 42: Record rulings in decisions.md
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.8, 10.9
 **Description:** In `src/claude_kiro/arbiter_policy.py`, add `RulingRecord`, `append_entry(existing, entry, number)` (output always starts with `existing`), `next_number(existing, ledger_last)` and `rulings_summary(rulings)`. Add `ck arbiter record SPEC --into BRANCH --json` (stdin: RulingRecord, stdout: `{"number", "commit"}`, option `--lock-wait`). It takes `land_lock` with a bounded wait of 120 seconds (`land_lock` gains `wait_s` for this, default 0, so concurrent records serialize instead of refusing), appends `specs/<spec>/decisions.md` in the format from design.md, and commits that file alone on the integration branch, so a landing's clean-target check still passes. The first ruling creates the file. A failed write, or a lock not acquired before the wait ends, exits non-zero and writes nothing. Harness Contract owner: `ck arbiter record`. The contract's `ck arbiter log` is not built: tests read `decisions.md` through `decisions_entries` in `tests/arbiter_helpers.py`, against the format this task writes.

@@ -11,7 +11,7 @@ Seams (design.md, `src/claude_kiro/arbiter_policy.py`):
 
 import re
 from dataclasses import dataclass
-from typing import Any, Literal, Mapping, Optional, Tuple
+from typing import Any, Literal, Mapping, Optional, Sequence, Tuple
 
 from claude_kiro.hooks._shared.spec_parser import _field, parse_tasks_text
 from claude_kiro.principles import EffectivePrinciples
@@ -434,3 +434,83 @@ def decide_spec_edit(facts: SpecEditFacts) -> SpecEditDecision:
         if path.lower() in scopes or name.lower() in scopes:
             reasons.append(f"{path} is reserved by the plan")
     return SpecEditDecision(not reasons, tuple(reasons))
+
+
+# --------------------------------------------------------------------------- the record of rulings (Task 42)
+
+_ENTRY_NUMBER = re.compile(r"^## Ruling (\d+):", re.MULTILINE)
+
+
+@dataclass(frozen=True)
+class RulingRecord:
+    """One applied ruling as `decisions.md` records it (design.md). `at` is stamped by the CLI, since the
+    seams here read no clock; it is the only field beyond design.md's list."""
+
+    trigger: str
+    claim_key: str
+    claim_text: str
+    task: Optional[str]            # None during /spec:create
+    tier: Tier
+    outcome: Outcome
+    reasoning: str
+    principle_id: str
+    principle_text: str
+    plan_layer: str
+    changed: str                   # what changed, or "nothing"
+    moved: Tuple[Mapping, ...]     # MovedTest as dicts
+    commit: Optional[str]          # None renders as "none"
+    landed: Optional[Tuple[bool, str]]   # None when no landing applies
+    at: str = ""
+
+
+def next_number(existing: Optional[str], ledger_last: int) -> int:
+    """One more than the highest ruling number in `existing` or the ledger's last entry, so numbers never repeat."""
+    seen = [int(n) for n in _ENTRY_NUMBER.findall(existing or "")]
+    return max([int(ledger_last), *seen]) + 1
+
+
+def render_entry(record: RulingRecord, number: int) -> str:
+    """One `## Ruling <n>` block. Every value is collapsed onto its field line, so no value can start a heading."""
+    title = f"Task {record.task} ({record.trigger})" if record.task is not None else record.trigger
+    what = _collapse(record.changed)
+    for m in record.moved:
+        where = _collapse(m.get("test") or m.get("command") or "")
+        what += f". Moved out of Verify: {_collapse(m.get('file', ''))}::{where} (Task {_collapse(m.get('task', ''))})"
+    commit = _collapse(record.commit) if record.commit else "none"
+    lines = [
+        f"## Ruling {number}: {_collapse(title)}",
+        "",
+        f"- **At:** {_collapse(record.at)}",
+        f"- **Trigger:** {_collapse(record.trigger)}",
+        f"- **Claim:** {_collapse(record.claim_key)} - {_collapse(record.claim_text)}",
+        f"- **Tier:** {_collapse(record.tier)}",
+        f"- **Ruling:** {_collapse(record.outcome)} - {_collapse(record.reasoning)}",
+        f"- **Principle cited:** {_collapse(record.principle_id)} - {_collapse(record.principle_text)}",
+        f"- **Plan layer:** {_collapse(record.plan_layer)}",
+        f"- **What changed:** {what}",
+        f"- **Commit:** {commit}",
+    ]
+    if record.landed is not None:
+        ok, why = record.landed
+        lines.append("- **Landed:** yes" if ok else f"- **Landed:** no: {_collapse(why) or 'no reason given'}")
+    return "\n".join(lines) + "\n"
+
+
+def append_entry(existing: Optional[str], entry: RulingRecord, number: int) -> str:
+    """`existing` with one entry appended; the output always starts with `existing` (10.1-10.4, 10.6).
+    With no `existing`, the file starts with a bare heading (the CLI passes the spec's own heading)."""
+    base = existing if existing is not None else "# Rulings\n\n"
+    return base + render_entry(entry, number) + "\n"
+
+
+def rulings_summary(rulings: Sequence[Mapping]) -> Mapping:
+    """Counts of a run's rulings by trigger, outcome and tier (10.8)."""
+    def count(field: str) -> dict:
+        counts: dict = {}
+        for r in rulings:
+            key = str(r.get(field))
+            counts[key] = counts.get(key, 0) + 1
+        return dict(sorted(counts.items()))
+
+    return {"total": len(rulings), "byTrigger": count("trigger"), "byOutcome": count("outcome"),
+            "byTier": count("tier")}
