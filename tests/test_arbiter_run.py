@@ -70,6 +70,9 @@ def run_args(project, **extra):
 
 
 def run(bridge, project, options, **args):
+    # Risk goes in the workflow args too (the workflow routes reviews from args, as tier_run does), as well as in the plan answer.
+    if options.get("risk") and "risk" not in args:
+        args["risk"] = options["risk"]
     return bridge.run(options, args=run_args(project, **args), exec_ck=project.exec_ck)
 
 

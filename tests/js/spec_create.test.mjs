@@ -7,7 +7,9 @@ import { stub } from './fake_create.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const SCRIPT = path.join(here, '../../plugin/workflows/spec-create.js')
-const args = mode => ({ mode, feature: 'f', projectRoot: '/p', specDir: '/p/specs/f', date: '2026-10-04' })
+// The arbiter args the create and review skills pass (as ARBITER_ARGS in tests/test_arbiter_create.py): without arbiterAgent
+// every arbiter step with subjects is lost and the result is not Ready (11.12).
+const args = mode => ({ mode, feature: 'f', projectRoot: '/p', specDir: '/p/specs/f', date: '2026-10-04', arbiterAgent: 'spec:arbiter', runnerAgent: 'spec:runner', agents: { arbiter: { model: 'sonnet', effort: 'medium', risky_model: 'opus', risky_effort: 'high' } } })
 
 async function test(name, fn) {
   try { await fn(); console.log('ok  ', name) } catch (e) { console.log('FAIL', name); console.log(e); process.exitCode = 1 }
@@ -30,7 +32,7 @@ await test('a refuted finding goes through the arbiter and its ruling is reporte
   const ruling = { claim: 'R3', status: 'ruled', outcome: 'spec_edit', reasoning: 'the finding is a style preference', verdict: 'the refutation stands' }
   const s = stub({
     'arbiter refuted': { rulings: [ruling] },
-    'ck arbiter review refuted': subjects => ({ results: subjects.map(x => ({ id: String(x.id), action: 'spec_edit', reason: '', stronger: false, ruling: x.id === 'R3' ? 7 : null })), lost: false }),
+    'ck arbiter review refuted': subjects => ({ results: subjects.map(x => ({ id: String(x.id), action: 'keep-refuted', reason: '', stronger: false, ruling: x.id === 'R3' ? 7 : null })), lost: false }),
   })
   const { result } = await runWorkflow(SCRIPT, { agent: s.agent, args: args('create') })
   // The context step is a thin ck call, matched by its command line: design.md pins no label for it.

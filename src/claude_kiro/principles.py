@@ -13,6 +13,7 @@ Seams (design.md, Decision Seams):
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Literal, Optional, Sequence, Tuple, List
 
@@ -135,8 +136,12 @@ def _reason_of(text: str) -> Optional[str]:
     if not m:
         return None
     reason = m.group(1).strip()
-    # A reason that is only markup or whitespace is no reason.
-    if not re.sub(r"[\s*_`~]", "", reason):
+    # A reason that is only markup or whitespace is no reason: empty links and images, HTML tags, emphasis marks,
+    # and any space or invisible format character (no-break, zero-width) count as nothing.
+    bare = re.sub(r"!?\[\s*\]\([^)]*\)", "", reason)
+    bare = re.sub(r"<[^>]*>", "", bare)
+    bare = "".join(c for c in bare if unicodedata.category(c) not in ("Cf", "Zs", "Zl", "Zp"))
+    if not re.sub(r"[\s*_`~]", "", bare):
         return None
     return reason
 
