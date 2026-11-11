@@ -1060,7 +1060,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 45: Test rulings in ck stats and the label corpus
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 10.8
 **Description:** Implement TC-95 in `tests/test_arbiter_stats.py`: a workflow result's `rulings` reach `ck stats show --json` as `rulings: {byTrigger, byOutcome, byTier}`, over a real run file, using `tests/stats_helpers.py`. Implement TC-137 as `test_tc137_...` in `tests/test_stats_label_corpus.py`: every label the workflows emit, including `arbiter task <n>`, `arbiter task <n> risky`, `arbiter <step>`, `audit task <n>`, the `arbiter-` steps and `full gate @<n> (unreproduced landing)`, parses to a known role through the real `parse_label`.
@@ -1071,11 +1071,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 46 (TC-137, the role map), Task 47 (TC-95), Task 74 (TC-137, the audit and arbiter labels of `spec-implement.js`), Task 84 (TC-137, the arbiter step labels of `spec-create.js`), Task 99 (TC-137, the `full gate @<n> (unreproduced landing)` label)
 
 **Acceptance:**
-- [ ] TC-95 runs the real `ck stats` over a real run file and asserts the counts
-- [ ] TC-137 uses the real scripts through `emit_labels.mjs` and the real `parse_label`
-- [ ] Tests exercise the real boundary named in the test plan (real stats, real scripts)
-- [ ] Tests fail before the implementation exists for the right reason (no `rulings` key; unknown labels)
-- [ ] No mocks of the project's own code in integration tests
+- [x] TC-95 runs the real `ck stats` over a real run file and asserts the counts
+- [x] TC-137 uses the real scripts through `emit_labels.mjs` and the real `parse_label`
+- [x] Tests exercise the real boundary named in the test plan (real stats, real scripts)
+- [x] Tests fail before the implementation exists for the right reason (no `rulings` key; unknown labels)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 2 (`emit_labels.mjs`)
 **Complexity:** Medium
