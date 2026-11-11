@@ -409,7 +409,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 17: Move suite_due into lint_scope and add the lint verdict
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.11, 3.1, 3.7, 12.1, 12.5
 **Description:** Create `src/claude_kiro/lint_scope.py` holding `suite_due(test_task, tasks, assumed_done)` (the `suite_due` closure in `_run_gate` in `src/claude_kiro/gate.py`, ~line 1000, which closes over `tasks` and `assumed_done` at ~998; the moved function takes both as parameters), `done_at_gate(tasks, num)`, and `lint_verdict(result)` with `LintVerdict`. `gate.py` calls the moved `suite_due`, so the gate and its simulation cannot disagree. `lint_verdict` sets `exit_nonzero` for cycles, verify cycles, verify scope and justifications, ignores warnings, and lists only verify-scope findings as `launch_blockers`. Harness Contract owner: `lint_scope.lint_verdict`, the exit rule behind `lint.verify_scope`. Foundation task: its Verify is a smoke check (the existing gate suites). `lint_verdict` and `done_at_gate` are verified at Task 23 by Task 12 and Task 13 (P-41), and at Task 24 by Task 18.
@@ -419,9 +419,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verify:** `uv run pytest tests/test_gate.py tests/test_gate_properties.py -q`
 
 **Acceptance:**
-- [ ] The gate's behaviour is unchanged, shown by the existing gate suites
-- [ ] `done_at_gate` returns Done tasks, the task and its transitive dependencies
-- [ ] `lint_verdict` never lists a justification finding or warning in `launch_blockers`, and warnings alone do not set `exit_nonzero`
+- [x] The gate's behaviour is unchanged, shown by the existing gate suites
+- [x] `done_at_gate` returns Done tasks, the task and its transitive dependencies
+- [x] `lint_verdict` never lists a justification finding or warning in `launch_blockers`, and warnings alone do not set `exit_nonzero`
 
 **Dependencies:** None
 **Complexity:** Medium
