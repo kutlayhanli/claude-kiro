@@ -167,8 +167,7 @@ def test_tc170_only_the_task_whose_own_gate_fails_is_red(tmp_path):
     # The RED task carries the tail and failures of its own gate: its Verify, no other task's.
     own = alone[0]
     assert by["3"]["checkTail"] == own["checkTail"]
-    if "failures" in own:
-        assert by["3"].get("failures") == own["failures"]
+    assert by["3"]["failures"] == own["failures"]
     assert "f3.txt" in by["3"]["checkTail"]
     assert "f1.txt" not in by["3"]["checkTail"] and "f2.txt" not in by["3"]["checkTail"]
     assert "unreproduced" not in data
@@ -228,7 +227,9 @@ def test_tc175_a_batch_of_four_costs_at_most_seven_gates(tmp_path, case, bad, br
     result, data, by = land(root, *nums)
     assert len(data["gates"]) <= 2 * 4 - 1, data["gates"]
     red = {n for n, t in by.items() if t["state"] == "RED"}
-    assert red == {str(n) for n in bad}, case
+    assert red == {str(n) for n in bad}, (case, result.output)
+    if bad:
+        assert result.exit_code == 1, result.output  # a RED task fails the landing
     if not bad:
         assert all(t["state"] == "MERGED" for t in by.values())
         assert "unreproduced" in data

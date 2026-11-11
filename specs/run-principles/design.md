@@ -516,8 +516,10 @@ def recover_target(root: Path, target: Path, into: str) -> Optional[Dict]:
 |---|---|---|
 | `recovered` | `{"paths": [str], "mergeInProgress": bool, "head": str}` | the target was restored before this landing |
 | `unreproduced` | `{"tasks": [str], "tail": str, "failures": [GateFailure]}` | the batch gate was red and no task ended RED |
+| `gates` | `[{"tasks": [str], "green": bool, "seconds": int, "checkTail": str, "failures": [GateFailure]}]` | always (existing key; `checkTail` and `failures` are new): one entry per gate run, in run order, the batch gate first. `checkTail` and `failures` are that gate's failing output and failure entries, `""` and `[]` when it was green |
+| `bisected` | `bool` | always (existing key): more than one gate ran |
 
-A RED task's `checkTail` and `failures` come from the gate in `gates` whose `tasks` is exactly that task (15.2).
+A RED task's `checkTail` and `failures` are equal to those of the gate in `gates` whose `tasks` is exactly that task (15.2).
 
 ### Workflow schemas (JavaScript)
 
