@@ -48,6 +48,12 @@ def _shape(root: Path, commit: str) -> Tuple[Optional[str], Tuple[str, ...]]:
     return tree, parents
 
 
+def _record(root: Path, ref: str, head: str) -> None:
+    if not re.fullmatch(r"[0-9a-f]{40,64}", head or ""):
+        head = _text(_git(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}"))
+    protect.record_refusal(root, protect.Refusal(ref, head, os.path.realpath(root), protect._now()))
+
+
 @click.group("git-hook", hidden=True)
 def git_hook():
     """Called by ck's git hooks; not for direct use."""
@@ -70,6 +76,7 @@ def reference_transaction(state):
         if not (re.fullmatch(r"[0-9a-f]{40,64}", old) and re.fullmatch(r"[0-9a-f]{40,64}", new)):
             # fail closed: an update of integrate/* whose values are not plain oids (a symref update) is refused
             failed = True
+            _record(root, ref, old)
             click.echo(f"refused: cannot verify the update of {ref} ({old} -> {new}); only plain commit updates "
                        "are allowed.", err=True)
             continue
@@ -93,12 +100,14 @@ def reference_transaction(state):
             diff = _git(root, "diff", "--name-only", "--no-renames", "-z", old, new)
             if diff.returncode != 0:
                 failed = True
+                _record(root, ref, old)
                 click.echo(f"refused: cannot compare {old} with {new} for {ref}.", err=True)
                 continue
             changed = _names(diff.stdout)
             decision = protect.ref_update_decision(update, changed, _allow_from(root, old), token_ok, None)
         if not decision.allow:
             failed = True
+            _record(root, ref, old)
             click.echo(decision.message, err=True)
         elif token_ok:
             used.append((token_id, update))
@@ -123,5 +132,6 @@ def pre_merge_commit():
         present = mac_ok and not used and rec.ref == head_ref and rec.old == head
     decision = protect.merge_commit_decision(head_ref, changed, _allow_from(root, "HEAD"), present)
     if not decision.allow:
+        _record(root, head_ref, head)
         click.echo(decision.message, err=True)
         sys.exit(1)
