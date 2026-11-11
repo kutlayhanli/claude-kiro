@@ -1108,7 +1108,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 47: Show rulings in ck stats
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 10.8
 **Description:** In `src/claude_kiro/analytics/collect.py`, read `rulings` from the workflow result; in `src/claude_kiro/analytics/show.py`, report counts by trigger, outcome and tier through `rulings_summary`. Harness Contract owner: `ck stats show --json` `rulings: {byTrigger, byOutcome, byTier}`.
@@ -1119,8 +1119,8 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 45 (TC-95)
 
 **Acceptance:**
-- [ ] `ck stats show --json` reports the counts by trigger, outcome and tier for a run with rulings
-- [ ] A run with no rulings reports no counts
+- [x] `ck stats show --json` reports the counts by trigger, outcome and tier for a run with rulings
+- [x] A run with no rulings reports no counts
 
 **Dependencies:** Task 42 (calls `rulings_summary`), Task 45 (its tests are the oracle)
 **Complexity:** Low
