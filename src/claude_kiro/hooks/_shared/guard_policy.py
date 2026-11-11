@@ -646,3 +646,124 @@ def post_check_reason(finding: PostCheckFinding) -> str:
     if finding.mode == "ask":
         return f"{head} Ask me before keeping this change."
     return f"{head} {restore}."
+
+
+# --- the arbiter's lane ---------------------------------------------------------------------------
+
+ARBITER_AGENT_TYPES = ("spec:arbiter", "ck-arbiter")
+_LANE_FILES = ("tasks.md", "design.md", "test-plan.md")
+_ARBITER_WORKTREE = re.compile(r"^(.+)-task-arbiter\d+$")
+
+
+@dataclass(frozen=True)
+class ArbiterEditFacts:
+    rel: str  # path relative to its checkout, symlinks and ".." resolved
+    arbiter_worktree_spec: Optional[str]  # the <spec> of a checkout named <spec>-task-arbiter<k>, else None
+    lane_specs: Tuple[str, ...]  # specs with an open lane ticket in this checkout
+    implementation_started: bool  # for the spec named by rel: any task In Progress or Done
+
+
+def is_arbiter_caller(hook_input: Any) -> bool:
+    """True only for a non-empty `agent_id` with `agent_type` exactly spec:arbiter or ck-arbiter."""
+    if not isinstance(hook_input, Mapping):
+        return False
+    agent_id = hook_input.get("agent_id")
+    agent_type = hook_input.get("agent_type")
+    return (
+        isinstance(agent_id, str)
+        and agent_id != ""
+        and isinstance(agent_type, str)
+        and agent_type in ARBITER_AGENT_TYPES
+    )
+
+
+def arbiter_block_reason(rel: str) -> str:
+    return (
+        f"[ck guard] Denied: {rel} is outside the arbiter's lane. The arbiter may change only "
+        "specs/<spec>/tasks.md, design.md and test-plan.md of the spec it rules on (requirements.md only "
+        "under a /spec:create lane ticket before implementation starts). Return a needs-input ruling "
+        "instead of editing this file."
+    )
+
+
+def decide_arbiter_edit(facts: ArbiterEditFacts) -> GuardDecision:
+    """Allow only the lane's paths; everything else is denied."""
+    parts = facts.rel.split("/") if isinstance(facts.rel, str) else []
+    allowed = False
+    if len(parts) == 3 and parts[0] == "specs" and parts[1]:
+        spec, name = parts[1], parts[2]
+        if facts.arbiter_worktree_spec is not None:
+            allowed = spec == facts.arbiter_worktree_spec and name in _LANE_FILES
+        elif spec in facts.lane_specs:
+            allowed = name in _LANE_FILES or (name == "requirements.md" and not facts.implementation_started)
+    if allowed:
+        return GuardDecision(False)
+    return GuardDecision(True, "deny", (facts.rel,), ("outside the arbiter's lane",), "arbiter_lane")
+
+
+def _has_substitution(command: str) -> bool:
+    """True for `$(`, a backtick, `<(` or `>(` outside single quotes, or an unterminated quote."""
+    i, n = 0, len(command)
+    in_double = False
+    while i < n:
+        c = command[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "'" and not in_double:
+            j = command.find("'", i + 1)
+            if j < 0:
+                return True
+            i = j + 1
+            continue
+        if c == '"':
+            in_double = not in_double
+            i += 1
+            continue
+        if c == "`" or command.startswith("$(", i):
+            return True
+        if command.startswith("<(", i) or command.startswith(">(", i):
+            return True
+        i += 1
+    return in_double
+
+
+def _in_arbiter_worktree(cwd: str) -> Optional[str]:
+    m = _ARBITER_WORKTREE.match(posixpath.basename(posixpath.normpath(cwd or "")))
+    return m.group(1) if m else None
+
+
+def decide_arbiter_bash(command: str, cwd: str) -> GuardDecision:
+    deny = GuardDecision(True, "deny", (), ("shell command outside the arbiter's lane",), "arbiter_lane")
+    if not isinstance(command, str) or _has_substitution(command):
+        return deny
+    segments = _scan(command)
+    spec = _in_arbiter_worktree(cwd)
+    for seg in segments:
+        if seg.paren:
+            continue
+        if _segment_read_only(seg):
+            continue
+        if seg.writes or seg.tee or spec is None:
+            return deny
+        words = _strip_prefix(seg.words)
+        if not words or words[0] != "git" or len(words) < 2:
+            return deny
+        sub, rest = words[1], words[2:]
+        if sub == "add":
+            lane = {f"specs/{spec}/{n}" for n in _LANE_FILES}
+            ops = [r for r in rest if r != "--"]
+            if not ops or any(_rel_to(cwd, o) not in lane for o in ops):
+                return deny
+        elif sub == "commit":
+            if len(rest) != 2 or rest[0] != "-m":
+                return deny
+        else:
+            return deny
+    return GuardDecision(False)
+
+
+def _rel_to(cwd: str, path: str) -> str:
+    absolute = _abs(cwd, path)
+    root = posixpath.normpath(cwd)
+    return absolute[len(root) + 1 :] if absolute.startswith(root + "/") else absolute
