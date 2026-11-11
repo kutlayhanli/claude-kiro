@@ -174,7 +174,7 @@ def assert_held_back(out, project, before: Dict[str, bytes], marker: str) -> Non
     assert docs(project) == before, "a spec document changed without my approval"
     result = out["result"] or {}
     for entry in (result.get("review") or {}).get("proposedCuts") or []:
-        assert entry.get("status") in ("sound", "unchecked", "needs_stronger_look", "risky"), entry
+        assert entry.get("status") in ("sound", "unchecked"), entry
     assert marker not in json.dumps((result.get("review") or {}).get("fixed")), "the cut was reported as fixed"
 
 
@@ -225,8 +225,9 @@ def test_a_cut_whose_id_collides_with_a_finding_id_is_not_revised_or_swallowed(t
     joined = "\n".join(revise_prompts(out))
     assert "REAL-FIX-ONE" in joined and "REAL-FIX-TWO" in joined, "the cut's id swallowed a real finding"
     assert_ruled_sound(out, colliding)
+    real = {"R1": "REAL-FIX-ONE", "R2": "REAL-FIX-TWO"}
     if colliding in ids:
-        assert fixmark(marker) not in joined
+        assert joined.count(real[colliding]) == 1, "the colliding id's real finding must reach Revise exactly once"
 
 
 def test_a_refuted_finding_with_the_cuts_id_does_not_unlock_the_cut(tmp_path):
@@ -338,7 +339,7 @@ def assert_frozen(out, project, before: Dict[str, bytes]) -> None:
     assert docs(project) == before, "a cut was applied after implementation started"
     text = json.dumps(out["result"]).lower()
     assert "frozen" in text, text
-    assert re.search(r"\bmine\b|\bmy to make\b|\byours\b|\byou to make\b|user's to make|\buser's\b", text), text
+    assert re.search(r"\b(mine|yours|the user's) to make\b", text), text
 
 
 def assert_applies(out) -> None:
