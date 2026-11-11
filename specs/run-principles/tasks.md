@@ -18,7 +18,7 @@ Task 91 (paid hook capture) and Task 92 (protected `.claude/` copies, through `c
 ## Task Breakdown
 
 ### Task 1: Build the Python harness for the arbiter tests
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.6, 7.1, 9.5, 9.6, 10.1
 **Description:** Build the Python side of the test infrastructure (test-plan "What must be added", items 1 and 6). Create `tests/arbiter_helpers.py`, test-owned, with project modules imported inside function bodies so every test file collects before the feature exists:
@@ -42,13 +42,13 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 36 (its identity fixture), Task 37 (its project fixture and strategies), Task 38 (its strategies), Task 42 (its record reader)
 
 **Acceptance:**
-- [ ] `arbiter_project` builds a real git repo with a real integration worktree and `exec_ck` runs the real CLI in it
-- [ ] `arbiter_caller` is the only identity knowledge in the suite and matches design.md's `is_arbiter_caller` inputs
-- [ ] `decisions_entries` is the only parser of `decisions.md`, and the interface map is the only place the Harness Contract and design names meet
-- [ ] Each strategy generates every form its test-plan row lists
-- [ ] Tests exercise the real boundary named in the test plan (real git, real `ck` subprocess)
-- [ ] Tests fail before the implementation exists for the right reason (the helpers that need `ck arbiter` report the missing command, not a broken helper)
-- [ ] No mocks of the project's own code in integration tests
+- [x] `arbiter_project` builds a real git repo with a real integration worktree and `exec_ck` runs the real CLI in it
+- [x] `arbiter_caller` is the only identity knowledge in the suite and matches design.md's `is_arbiter_caller` inputs
+- [x] `decisions_entries` is the only parser of `decisions.md`, and the interface map is the only place the Harness Contract and design names meet
+- [x] Each strategy generates every form its test-plan row lists
+- [x] Tests exercise the real boundary named in the test plan (real git, real `ck` subprocess)
+- [x] Tests fail before the implementation exists for the right reason (the helpers that need `ck arbiter` report the missing command, not a broken helper)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** None
 **Complexity:** High
@@ -1125,7 +1125,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 48: Ask for principles and justifications in /spec:plan
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.1, 1.3, 1.4, 1.5, 2.1, 2.2
 **Description:** In `plugin/skills/plan/SKILL.md`, using we/you/me framing: run `ck principles init` and tell me when it created the file; ask me directly for tie-breaking values, overrides and what may change without asking, and write them to a `## Principles` section of the PLAN.md template; ask for the reason before recording an override, and record it as `**Reason:** <text>`, the only form `principles.py` reads; ask what breaks without each In-scope item and record a `*Without it:*` note; offer to cut an item when nothing concrete breaks, removing it only if I accept; and run `ck principles check` before setting Status to Decided, with a plan that has nothing to add saying so.
@@ -1135,10 +1135,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 9 (TC-2, 4, 5, 6, 14, 15 over the shipped skill)
 
 **Acceptance:**
-- [ ] The skill runs `ck principles init` before recording decisions and tells me when it created the file
-- [ ] The template holds `## Principles` and the `*Without it:*` note
-- [ ] Setting Status to Decided is conditional on `ck principles check`
-- [ ] An override is recorded only with a reason, and an item is removed only on my acceptance
+- [x] The skill runs `ck principles init` before recording decisions and tells me when it created the file
+- [x] The template holds `## Principles` and the `*Without it:*` note
+- [x] Setting Status to Decided is conditional on `ck principles check`
+- [x] An override is recorded only with a reason, and an item is removed only on my acceptance
 
 **Dependencies:** Task 9 (its tests are the oracle)
 **Complexity:** Medium
