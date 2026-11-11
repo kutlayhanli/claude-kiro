@@ -690,7 +690,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 29: Decide whether a claim may be ruled on, and at which tier
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.9, 5.3, 5.4, 5.5, 7.3, 7.4, 7.5, 7.6, 7.8, 7.9
 **Description:** Create `src/claude_kiro/arbiter_policy.py` with `Tier`, `Trigger`, `Outcome`, `Step`, `Claim`, `PriorClaim`, `TaskMeta`, `PrinciplesRead`, `ClaimFacts`, `ClaimDecision`, and the pure `claim_key`, `claim_facts` and `decide_claim`. `claim_key` follows the identity table in design.md (task, `|`, subject; test names normalized; evidence and claim text ignored; a review deadlock's key is the sorted identities of its findings never ruled on, so a different finding on the same file is a different claim, and a finding already covered by an applied ruling is `ask` with reason `repeat-after-ruling`; a `command-cycle` claim's subject is `command:<provider>:<command>`, D29). `claim_facts` builds `ClaimFacts`: `safety` from `TaskMeta.risk`, `principles_readable` from the read result, `prior` by key, and rulings and calls counted for this task only, whatever the ledger's order. `decide_claim` returns `ask` with the reasons `principles-missing`, `repeat-after-ruling`, `exhausted`, `claim-call-limit`, `task-ruling-limit` or `task-call-limit`, and otherwise `rule` with a tier: risky for a safety task, a guard stop or a prior claim with status `open` or `failed`, else normal. `claim_facts` never reads Complexity. Enforce the non-functional bound: at most 6 calls per task and 2 per claim. Harness Contract owner: `arbiter.claim_id` and `arbiter.decide_call`, which are `arbiter_policy.claim_key` and `decide_claim`.
@@ -700,10 +700,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 8 (P-4 at `claim_facts` and `decide_claim`), Task 26 (P-10, P-18, P-19 at `claim_facts` and `decide_claim`)
 
 **Acceptance:**
-- [ ] The same claim on another attempt has the same key; changing file, test or criterion changes it; changing evidence does not
-- [ ] A claim that returns after a ruling, the 4th ruling on a task, and an unreadable principles file each give `ask` with the right reason
-- [ ] Tier is risky exactly for a safety task, a guard stop or an unruled repeat, whatever the Complexity
-- [ ] No sequence yields more than 2 calls per claim or 6 per task
+- [x] The same claim on another attempt has the same key; changing file, test or criterion changes it; changing evidence does not
+- [x] A claim that returns after a ruling, the 4th ruling on a task, and an unreadable principles file each give `ask` with the right reason
+- [x] Tier is risky exactly for a safety task, a guard stop or an unruled repeat, whatever the Complexity
+- [x] No sequence yields more than 2 calls per claim or 6 per task
 
 **Dependencies:** Task 8 (its tests are the oracle), Task 26 (its tests are the oracle)
 **Complexity:** Medium
