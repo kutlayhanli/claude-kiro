@@ -580,11 +580,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 13 (P-8 through real `ck plan`), Task 18 (TC-109 to 113, 117 to 119, 136, 145), Task 20 (P-34 through the CLI), Task 21 (red team of 12.9, 12.10 through `ck lint`), Task 87 (TC-129, 130, 132)
 
 **Acceptance:**
-- [ ] A finding makes `ck lint` exit non-zero and appears in `ck plan --json` `verifyScope`
-- [ ] Text and JSON each name the task and the suite
-- [ ] `ck lint --simulate --task N --json` returns due suites and selections for that task
-- [ ] Two runs on the same tree give byte-identical output, and lint imports no project code and opens no connection
-- [ ] A generated 108-task spec lints in under 10 seconds
+- [x] A finding makes `ck lint` exit non-zero and appears in `ck plan --json` `verifyScope`
+- [x] Text and JSON each name the task and the suite
+- [x] `ck lint --simulate --task N --json` returns due suites and selections for that task
+- [x] Two runs on the same tree give byte-identical output, and lint imports no project code and opens no connection
+- [x] A generated 108-task spec lints in under 10 seconds
 
 **Dependencies:** Task 13 (its tests are the oracle), Task 18 (its tests are the oracle), Task 20 (its tests are the oracle), Task 21 (its tests are the oracle), Task 22 (calls `scope_findings` and `load_sim_input`), Task 23 (edits the same code in `lint.py` and `cli/worktree.py`), Task 87 (its tests are the oracle)
 **Complexity:** High
