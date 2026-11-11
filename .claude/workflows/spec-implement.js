@@ -70,6 +70,10 @@ const INTERACTIVE = A.interactive === true || A.interactive === 'true'
 // a run key no prompt carries a progress flag and nothing else changes. No clock or timer code here.
 const PROGRESS_RUN = typeof A.progressRun === 'string' && A.progressRun ? A.progressRun : null
 const ETA_LINE = typeof A.etaLine === 'string' && A.etaLine ? A.etaLine : null
+// runnerAgent: the lean agent type that runs thin ck calls under Claude Code (`spec:runner`, or `ck-runner` in a
+// vendored project); null or absent means the default agent with a warning. runId defaults to the progress run key.
+const RUNNER_AGENT = typeof A.runnerAgent === 'string' && A.runnerAgent ? A.runnerAgent : null
+const RUN_ID = typeof A.runId === 'string' && A.runId ? A.runId : PROGRESS_RUN
 const BRIEF = !A.brief
   ? `${ROOT}/.claude/workflows/spec-implement-brief.md`
   : String(A.brief).startsWith('/') ? String(A.brief) : `${ROOT}/${String(A.brief).replace(/^\.\//, '')}`
@@ -91,7 +95,12 @@ const SCRIPT_READINESS = !!A.deps && typeof A.deps === 'object' && !Array.isArra
 // orchestrator role sets one; a merge that hits a conflict goes to the resolver.
 const ROLES = A.agents || {}
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
-function roleOpts(name, role, override) {
+// On hosts that provide the ck() global (OpenCode), each base agent call also carries its role
+// (`role` opt), so opencode.roles can map it to a model. Escalated ladder steps drop the tag
+// (see escalated), and Claude Code, which has no ck() global, never sees a role opt.
+const ROLE_TAGS = typeof ck === 'function'
+const ROLE_NAMES = ['implementer', 'test_writer', 'reviewer', 'reviewer_risky', 'fixer', 'orchestrator', 'resolver']
+function roleOpts(name, role, override, tag = name) {
   const model = (override && override.model) || (role && role.model)
   const effort = (override && override.effort) || (role && role.effort)
   const opts = {}
@@ -103,6 +112,7 @@ function roleOpts(name, role, override) {
     if (!EFFORTS.includes(effort)) throw new Error(`spec-implement: unknown effort "${effort}" for ${name} (use ${EFFORTS.join(', ')})`)
     opts.effort = effort
   }
+  if (ROLE_TAGS && ROLE_NAMES.includes(tag)) opts.role = tag
   return opts
 }
 const OVERRIDE = { model: A.model || null, effort: A.effort || null }
@@ -116,8 +126,9 @@ const EFFORT_RANK = e => EFFORTS.indexOf(e)
 const REVIEW_ROUNDS = Number.isInteger(REVIEWER.rounds) ? REVIEWER.rounds : 1
 // reviewer.cross_test: once every test-track task of a wave has finished, one read-only
 // agent (the risky reviewer's settings) compares the merged test files with each other
-// and with design.md. Report only: its findings go in the run's report.
-const CROSS_TEST = !!A.agents && REVIEWER.cross_test === true
+// and with design.md. On unless reviewer.cross_test is false. A finding blocks: it becomes a test conflict
+// for the test-fixer, and the impl tasks its tests verify wait until the fix lands (7.1-7.5).
+const CROSS_TEST = !!A.agents && REVIEWER.cross_test !== false
 const ORCH = roleOpts('orchestrator', ROLES.orchestrator, null)
 const LOW = { effort: 'low', ...ORCH }
 const RESOLVE = roleOpts('resolver', ROLES.resolver, null)
@@ -140,7 +151,12 @@ const desc = o => `${o.model || 'inherited'}/${o.effort || 'inherited'}`
 const up = list => (list.length ? ` (escalate ${list.join(' > ')})` : '')
 const baseOpts = n => (TRACKS[n] === 'test' ? TEST : IMPL)
 const baseLadder = n => (TRACKS[n] === 'test' ? TEST_UP : IMPL_UP)
-const escalated = (opts, model) => ({ ...opts, model })
+// An escalated step runs the named model: it drops the role tag so the alias map (or the ck role map) resolves it.
+const escalated = (opts, model) => {
+  const out = { ...opts, model }
+  delete out.role
+  return out
+}
 
 // Risk and complexity routing. Escalation only fires on failures we detect, and
 // the costly bugs (a send path or price tripwire that passes every test) are the
@@ -173,8 +189,9 @@ const ladderOf = n => {
 }
 // The risky reviewer: reviewer.risky_model/risky_effort, never below reviewer.model/effort.
 const RISKY_REVIEW = (() => {
-  const risky = roleOpts('reviewer.risky', { model: REVIEWER.risky_model || REVIEWER.model, effort: REVIEWER.risky_effort || REVIEWER.effort }, null)
+  const risky = roleOpts('reviewer.risky', { model: REVIEWER.risky_model || REVIEWER.model, effort: REVIEWER.risky_effort || REVIEWER.effort }, null, 'reviewer_risky')
   const opts = { ...REVIEW }
+  if (ROLE_TAGS) opts.role = 'reviewer_risky'
   if (risky.model && (!REVIEW.model || rank(risky.model) >= rank(REVIEW.model))) opts.model = risky.model
   if (risky.effort && (!REVIEW.effort || EFFORT_RANK(risky.effort) >= EFFORT_RANK(REVIEW.effort))) opts.effort = risky.effort
   return opts
@@ -191,27 +208,38 @@ const phaseOf = n => (waveOf(n) ? `Wave ${waveOf(n)}` : 'Tasks')
 const label = n => `task ${n}${TRACKS[n] === 'test' ? ' [test]' : ''}`
 const NOW = 'date -u +%Y-%m-%dT%H:%M:%SZ'
 
-const PLAN = {
+// The one output schema of every thin ck call (19.3): the exit code and the command's JSON, as printed.
+// A thin answer that does not match it is a failed call (thinResult).
+const CK_CALL = {
   type: 'object',
   properties: {
-    done: { type: 'array', items: { type: 'string' }, description: '"done" from ck plan' },
-    remaining: { type: 'array', items: { type: 'string' }, description: '"remaining" from ck plan' },
-    deps: { type: 'object', additionalProperties: { type: 'array', items: { type: 'string' } }, description: '"deps" from ck plan: task number -> its dependencies' },
-    ready: { type: 'array', items: { type: 'string' }, description: '"ready" from ck plan: task numbers (the "task" field, e.g. "12", never a path)' },
-    busy: {
-      type: 'array',
-      description: 'leave it empty: tasks are claimed by their own agents now',
-      items: { type: 'object', properties: { task: { type: 'string' }, detail: { type: 'string' } }, required: ['task', 'detail'] },
-    },
-    cycles: { type: 'array', items: { type: 'array', items: { type: 'string' } }, description: '"cycles" from ck plan' },
-    verifyCycles: {
-      type: 'array',
-      items: { type: 'object', properties: { task: { type: 'string' }, message: { type: 'string' } }, required: ['task', 'message'] },
-      description: '"verifyCycles" from ck plan: task and message only',
-    },
-    error: { type: 'string', description: 'only if a command failed to run; leave it out otherwise (no notes or remarks here)' },
+    exitCode: { type: 'integer', description: 'the exit code of the ck command' },
+    json: { type: ['object', 'null'], description: 'the JSON the command printed, copied exactly; null if it printed none' },
+    error: { type: 'string', description: 'only if the command could not run or printed no JSON: what happened' },
   },
-  required: ['done', 'remaining', 'deps', 'ready', 'cycles', 'verifyCycles'],
+  required: ['exitCode', 'json'],
+}
+// One failure, as `ck gate --json` prints it (D3): the task agent copies ck's entries unchanged.
+const FAILURE = {
+  type: 'object',
+  description: 'one entry of the "failures" array that ck gate --json prints, copied unchanged',
+  properties: {
+    node: { type: ['string', 'null'] },
+    tcId: { type: ['string', 'null'] },
+    tasks: { type: 'array', items: { type: 'string' } },
+    attributedBy: { type: 'string' },
+    file: { type: ['string', 'null'] },
+    kind: { type: 'string', enum: ['assertion', 'import', 'collection', 'timeout', 'error'] },
+    message: { type: 'string' },
+    truncated: { type: 'boolean' },
+    command: { type: ['string', 'null'] },
+  },
+}
+// One test that can never pass with code that meets the spec: one entry per test.
+const TEST_CONFLICT = {
+  type: 'object',
+  properties: { file: { type: 'string' }, test: { type: 'string' }, criterion: { type: 'string' }, reason: { type: 'string' }, fix: { type: 'string' } },
+  required: ['file', 'reason'],
 }
 const RESULT = {
   type: 'object',
@@ -242,53 +270,21 @@ const RESULT = {
       properties: { file: { type: 'string' }, test: { type: 'string' }, criterion: { type: 'string' }, reason: { type: 'string' }, fix: { type: 'string' } },
       required: ['file', 'reason'],
     },
+    testConflicts: {
+      type: 'array',
+      description: 'one entry per test that can never pass with code that meets requirements.md (file, test, criterion, reason, fix). Use this for more than one test; testConflict alone is also accepted.',
+      items: TEST_CONFLICT,
+    },
+    failures: {
+      type: 'array',
+      description: 'the "failures" array of your last ck gate --json run, copied unchanged (every entry)',
+      items: FAILURE,
+    },
     outsideFiles: { type: 'string' },
     startedAt: { type: 'string', description: `output of "${NOW}" when you started` },
     finishedAt: { type: 'string', description: `output of "${NOW}" when you finished` },
   },
   required: ['task', 'status', 'gatePassed', 'summary', 'commits'],
-}
-const PARKED = {
-  type: 'object',
-  properties: {
-    parked: { type: 'boolean' },
-    notification: { type: 'string', description: 'sent, not_configured, failed, deferred or skipped, as printed' },
-    detail: { type: 'string' },
-    error: { type: 'string', description: 'only if the command failed or printed no JSON: what happened' },
-  },
-  required: ['parked'],
-}
-const LAND = {
-  type: 'object',
-  properties: {
-    tasks: {
-      type: 'array',
-      description: '"tasks" from the ck worktree land JSON, every entry, copied as is',
-      items: {
-        type: 'object',
-        properties: {
-          task: { type: 'string' },
-          state: { type: 'string', enum: ['MERGED', 'RED', 'CONFLICT', 'DEFERRED', 'PROTECTED', 'SKIP', 'MISSING', 'BUSY', 'ERROR'] },
-          detail: { type: 'string' },
-          files: { type: 'array', items: { type: 'string' } },
-          checkGreen: { type: ['boolean', 'null'] },
-          checkTail: { type: 'string' },
-          mergedAt: { type: 'string' },
-        },
-        required: ['task', 'state'],
-      },
-    },
-    gates: {
-      type: 'array',
-      items: { type: 'object', properties: { tasks: { type: 'array', items: { type: 'string' } }, green: { type: 'boolean' }, seconds: { type: 'number' } }, required: ['tasks', 'green'] },
-    },
-    bisected: { type: 'boolean' },
-    eta: { type: 'string', description: 'the eta field from the JSON, copied as is' },
-    startedAt: { type: 'string' },
-    finishedAt: { type: 'string' },
-    error: { type: 'string', description: 'only if the command printed no JSON (or was refused): what happened' },
-  },
-  required: ['tasks'],
 }
 const RESOLVED = {
   type: 'object',
@@ -298,16 +294,6 @@ const RESOLVED = {
     error: { type: 'string', description: 'why it is not resolved, including a refused/blocked command' },
   },
   required: ['resolved'],
-}
-const RELINKED = {
-  type: 'object',
-  properties: {
-    fixable: { type: 'boolean', description: 'the relink was possible' },
-    applied: { type: 'boolean', description: 'tasks.md was written' },
-    committed: { type: 'boolean', description: 'tasks.md was committed on the target branch' },
-    reason: { type: 'string', description: 'what ck relink said' },
-  },
-  required: ['fixable', 'applied'],
 }
 
 const REVIEW_SCHEMA = {
@@ -322,6 +308,7 @@ const REVIEW_SCHEMA = {
           task: { type: 'string', description: 'the task number this finding is about (required in a batched review-wave)' },
           severity: { type: 'string', enum: ['blocking', 'minor'] },
           file: { type: 'string' },
+          test: { type: 'string', description: 'the test the finding is about (a test finding names its file and test)' },
           issue: { type: 'string', description: 'what is wrong, and the spec text it contradicts' },
           fix: { type: 'string', description: 'what the implementer should change' },
         },
@@ -332,6 +319,17 @@ const REVIEW_SCHEMA = {
     tasks: { type: 'array', items: { type: 'string' }, description: 'the wave tasks this verdict covers (batched reviews echo their coverage)' },
   },
   required: ['verdict', 'findings', 'summary'],
+}
+const TESTFIX = {
+  type: 'object',
+  properties: {
+    verdict: { type: 'string', enum: ['fixed', 'test-correct', 'cannot-fix'], description: 'fixed: you changed the tests and committed; test-correct: the tests are right and the code is wrong; cannot-fix: you cannot repair them within the rules' },
+    changedTests: { type: 'array', items: { type: 'object', properties: { file: { type: 'string' }, test: { type: 'string' } }, required: ['file'] } },
+    commits: { type: 'string', description: 'hashes of commits you made; empty if none' },
+    finding: { type: ['object', 'null'], description: 'test-correct only: what the blocked task\'s code gets wrong', properties: { file: { type: 'string' }, test: { type: 'string' }, issue: { type: 'string' } } },
+    summary: { type: 'string' },
+  },
+  required: ['verdict', 'summary'],
 }
 const VERIFY = {
   type: 'object',
@@ -344,7 +342,7 @@ const VERIFY = {
 
 const ok = r => r && r.status === 'done' && r.gatePassed === true
 // Issue #8: a task agent's structured claim that a test can never pass with correct code.
-const testConflictOf = r => (r && !ok(r) && r.testConflict && typeof r.testConflict === 'object' && r.testConflict.file ? r.testConflict : null)
+const testConflictOf = r => (r && !ok(r) ? testConflictsOf(r)[0] || null : null)
 const trim = (v, n = 3000) => JSON.stringify(v || null).slice(0, n)
 // Review findings go to the reviser and into the report whole: a finding cut
 // mid-sentence leaves the reviser guessing what was wrong. The cap only guards
@@ -385,18 +383,53 @@ const since = t0 => { const t = t0 === null ? null : nowMs(); return t === null 
 // command's JSON. Claude Code's Workflow runtime has no such global: there the agents run them.
 const DIRECT_CK = A.directCk !== false && typeof ck === 'function' ? ck : null
 const directCk = { plan: 0, land: 0, relink: 0, ms: 0, failures: 0 }
-async function runCk(kind, argv, cwd) {
+// The thin-call mode for this run (thinAgentMode): `direct` runs ck in-script, `lean` and `default` run it in an agent.
+// A lean call that throws on the agent type switches the rest of the run to `default` (and is retried once).
+const thin = { ...thinAgentMode({ runnerAgent: RUNNER_AGENT, unavailable: false, direct: !!DIRECT_CK }), fallback: false, proven: false }
+const thinAgentOut = () => ({ type: thin.type, fallback: thin.fallback, warning: thin.warning })
+// CkCallResult: {code, json, stderr, via}. Direct calls return the command's own answer; agent calls return the CK_CALL envelope.
+async function runCk(kind, argv, cwd, stdin) {
   const t0 = nowMs()
   let out = null
   try {
-    out = await DIRECT_CK(argv, { cwd })
+    out = await DIRECT_CK(argv, stdin == null ? { cwd } : { cwd, stdin })
   } catch (e) {
     out = { code: -1, stdout: '', stderr: String(e && e.message), json: null }
   }
   directCk[kind] = (directCk[kind] || 0) + 1
   directCk.ms += since(t0)
   if (!out || !out.json || typeof out.json !== 'object') directCk.failures++
-  return out || { code: -1, json: null, stderr: 'no result' }
+  return out ? { code: out.code, json: out.json, stderr: out.stderr || '', via: 'direct' } : { code: -1, json: null, stderr: 'no result', via: 'direct' }
+}
+// A thin answer is usable only if it carries an integer exit code and a JSON object (19.5); anything else is a failed call.
+const thinAnswerOk = a => !!a && typeof a === 'object' && Number.isInteger(a.exitCode) && !!a.json && typeof a.json === 'object'
+const thinResult = a => (thinAnswerOk(a)
+  ? { code: a.exitCode, json: a.json, stderr: a.error || '', via: 'agent' }
+  : { code: -1, json: null, stderr: `thin answer does not match CK_CALL: ${trim(a, 300)}`, via: 'agent' })
+const shellWord = s => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${String(s).replace(/'/g, `'\\''`)}'`)
+// One thin ck call. `argv` is ck's argument list; `what` says what the step is for. The agent prompt holds the ck command
+// on its own line; `stdin` (the park note) is passed as a here-document in the prompt and as stdin when run directly.
+async function thinCk(kind, argv, o = {}) {
+  if (thin.mode === 'direct') return runCk(kind, argv, o.cwd || ROOT, o.stdin)
+  const cmd = `ck ${argv.map(shellWord).join(' ')}`
+  const doc = o.stdin == null ? cmd : `${cmd} <<'CK_PARK'\n${o.stdin}\nCK_PARK`
+  const prompt = `${o.what || 'Mechanical step'}. Do exactly this, nothing else. ${GIT_NOTE}
+Run this command on its own line${o.cwd ? ` (in ${o.cwd})` : ''}, with no other command:
+${doc}
+${o.gate ? `${GATE_NOTE}\n` : ''}A non-zero exit is an answer, not a failure: still return its exit code and JSON.
+Return exitCode (the command's exit code) and json (its JSON output, copied exactly as printed; json must be an object). Put a message in error only if the command could not run or printed no JSON; no notes or remarks anywhere.`
+  const opts = () => (thin.mode === 'lean'
+    ? { label: o.label, phase: o.phase, schema: CK_CALL, agentType: thin.type }
+    : { label: o.label, phase: o.phase, schema: CK_CALL, ...LOW })
+  return call(kind, prompt, opts()).then(a => { thin.proven = true; return thinResult(a) }, e => {
+    // 19.4: only the first thin call can show the agent type is unknown; once one has run, a throw is a failed call.
+    if (thin.mode !== 'lean' || thin.proven) return thinResult({ error: e && e.message })
+    thin.mode = 'default'
+    thin.type = null
+    thin.fallback = true
+    thin.warning = `the lean thin agent type ${RUNNER_AGENT} is unavailable (${trim(e && e.message, 200)}); thin ck calls run on the default agent for the rest of the run`
+    return call(kind, prompt, opts()).then(thinResult, e2 => thinResult({ error: e2 && e2.message }))
+  })
 }
 // A revision that gives up may leave its claim, which would make the next run's task BUSY.
 async function releaseClaim(n) {
@@ -406,7 +439,7 @@ async function releaseClaim(n) {
 const directCkOut = () => (DIRECT_CK ? { ...directCk, minutes: Math.round(directCk.ms / 600) / 100 } : null)
 const ckError = out => `ck exited ${out && out.code} with no JSON: ${trim((out && (out.stderr || out.stdout)) || '', 400)}`
 const planArgv = exclude => {
-  const argv = ['-C', TARGET, 'plan', SPEC, '--json']
+  const argv = ['-C', TARGET, 'plan', SPEC, '--json', '--compact']
   if (exclude.length) argv.push('--exclude', exclude.join(','))
   if (PROGRESS_RUN) {
     argv.push('--progress-run', PROGRESS_RUN)
@@ -416,12 +449,6 @@ const planArgv = exclude => {
 }
 const landArgv = tasks => ['-C', ROOT, 'worktree', 'land', SPEC, ...tasks, '--into', INTO, '--gate', '--install', '--release', ...(PROGRESS_RUN ? ['--progress-run', PROGRESS_RUN] : []), '--json']
 
-const planFlags = () => (PROGRESS_RUN ? ` --progress-run ${PROGRESS_RUN}${failed.size ? ` --failed ${[...failed.keys()].join(',')}` : ''}` : '')
-
-const planPrompt = exclude => `Mechanical planning step for spec ${SPEC}. Do exactly this, nothing else. ${GIT_NOTE}
-Run:  ck -C ${TARGET} plan ${SPEC} --json${exclude.length ? ` --exclude ${exclude.join(',')}` : ''}${planFlags()}
-Copy into your answer: "done", "remaining", "deps", "ready", "cycles", and for "verifyCycles" only each entry's task and message. "ready", "done" and "remaining" hold task numbers (e.g. "12"), never worktree paths.
-Return the fields. Put a message in error only if the command itself failed to run; no notes or remarks anywhere.`
 
 // A note the agent leaves for whoever picks the task up next (a retry, a revision,
 // or a bigger model after escalation). It sits next to the worktree, not in it, so
@@ -432,6 +459,16 @@ const READ_HANDOFF = n => `Before anything else, read ${HANDOFF(n)} if it exists
 
 // A guard stop: a hook denied a change to a test, or the post-check caught one. The ladder (guardLadder) retries
 // the task on each higher model once; unresolved after the top, the task is parked (or asked about, if interactive).
+// Task 80 (3.6, 3.9): the gate runs whole (every Verify command, no stop at the first failure) and reports JSON, so
+// the failures reach the retry, the test-fix loop and the report in one format.
+const FAILURES_NOTE = n => `Run the gate as this command, on its own line:
+ck -C ${WT(n)} gate ${SPEC} --task ${n} --json
+and let the whole Verify run, without stopping at the first failure. Return ck's "failures" array unchanged in failures (every entry, as printed), and one testConflicts entry per test that can never pass.`
+// The previous attempt's failures for a retry (3.8): the first 50 in order as JSON, and per-file counts of the rest.
+const failuresBlock = prev => {
+  const f = failuresForPrompt(prev && prev.failures)
+  return `Its gate failures, as JSON ("shown" holds the first ${f.shown.length} of ${f.total} in order; "more" counts the rest per file): ${JSON.stringify(f)}`
+}
 const GUARD_NOTE = 'If a hook denies a command or edit with a "[ck guard]" message, or a "[ck post-check]" message says a test was changed, weakened or deleted: keep the test as it is, or restore it from the base branch if it was already changed, and never work around the denial (another tool, another path, a different command). Never run "ck guard". Stop, leave the task In Progress, and return status blocked with guardStop {file, kind, test, requirement}: the file, its kind (test, requirements, test_plan or other), the test quoted exactly as the denial names it, and the requirement it verifies quoted from specs. A bigger model will then try the task, or I will decide.'
 // My answer to a parked guard conflict, kept by `ck worktree resolve`. Every attempt reads it before anything else.
 const DECISION = n => `${WT(n)}.decision.md`
@@ -447,14 +484,15 @@ Otherwise (CREATED or EXISTS) claim it, on its own line:
 ck -C ${WT(n)} worktree claim ${SPEC} ${n}${cf}
 ${GIT_NOTE}
 ${GATE_NOTE}
+${FAILURES_NOTE(n)}
 ${WRITE_HANDOFF(n)}
 ${GUARD_NOTE}
 At the end, run "${NOW}" again for finishedAt. Return the schema fields with task "${n}". gatePassed is true only if your final "ck -C ${WT(n)} gate ${SPEC} --task ${n}" run exited 0. commits lists the commits you made (empty if none).`
 
-const confirmConflictPrompt = (n, prev, attempt, cf = '') => `${MANDATE}${READ_DECISION(n)}Continue Task ${n} of spec ${SPEC} (attempt ${attempt + 1}). The previous agent in ${WT(n)} (branch ${BR(n)}) stopped because it believes a test can never pass with code that meets the spec:
-${trim(prev && prev.testConflict)}
+const confirmConflictPrompt = (n, prev, attempt, cf = '') => `${MANDATE}${READ_DECISION(n)}Continue Task ${n} of spec ${SPEC} (attempt ${attempt + 1}). The previous agent in ${WT(n)} (branch ${BR(n)}) stopped because it believes these tests can never pass with code that meets the spec (every entry, one per test):
+${JSON.stringify(testConflictsOf(prev))}
 Its report: ${trim(prev || {})}
-Check that claim yourself before you accept it. Read the test, the criterion in requirements.md and design.md. If correct code can pass the test after all, implement it and get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" to pass. If the test really contradicts the spec, do not edit, skip or weaken it: return status blocked with testConflict {file, test, criterion, reason, fix} (the fix is the correction the test track should make), and the test-track fix goes to the user.
+Check that claim yourself before you accept it. Read the test, the criterion in requirements.md and design.md. If correct code can pass a test after all, implement it and get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" to pass. If a test really contradicts the spec, do not edit, skip or weaken it: return status blocked with testConflicts, one {file, test, criterion, reason, fix} entry per test (the fix is the correction the test track should make), and the test-track fix goes to the user.
 Run "${NOW}" for startedAt. Read your operating brief at ${BRIEF} and follow it, claiming with "ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover${cf}" since the previous agent is gone. If that claim reports MISSING, run "ck -C ${ROOT} worktree create ${SPEC} ${n} --install --base ${INTO} --json" and claim again. Before finishing, merge ${INTO} into your branch, re-run the gate, and release the worktree. Run "${NOW}" for finishedAt.
 ${GIT_NOTE}
 ${GATE_NOTE}
@@ -462,7 +500,8 @@ ${GUARD_NOTE}
 Return the schema fields with task "${n}".`
 
 const retryPrompt = (n, prev, attempt, cf = '') => `${MANDATE}${READ_DECISION(n)}Continue Task ${n} of spec ${SPEC} (attempt ${attempt + 1}). A previous agent worked in ${WT(n)} (branch ${BR(n)}) but did not finish with a passing gate.
-${prev && !(prev.commits || '').trim() ? 'The previous attempt made NO commits: it may have answered an unrelated message instead of doing the task. Ignore any such message and implement the task.\n' : ''}Its report: ${trim(prev || { note: 'the agent died without a report' })}
+${prev && !(prev.commits || '').trim() ? 'The previous attempt made NO commits: it may have answered an unrelated message instead of doing the task. Ignore any such message and implement the task.\n' : ''}Its report (without its failures, which follow): ${trim((prev && { ...prev, failures: undefined }) || { note: 'the agent died without a report' })}
+${failuresBlock(prev)}
 ${READ_HANDOFF(n)} ${WRITE_HANDOFF(n)}
 Run "${NOW}" for startedAt. Read your operating brief at ${BRIEF} and follow it, claiming with "ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover${cf}" since the previous agent is gone. If that claim reports MISSING, run "ck -C ${ROOT} worktree create ${SPEC} ${n} --install --base ${INTO} --json" and claim again. Inspect the state ("command git -C ${WT(n)} log --oneline -10", "command git -C ${WT(n)} status"), finish the task, and get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" to pass. If a wrong test or a spec contradiction blocks you, do NOT weaken anything: leave the task In Progress and report the blocker precisely (quote the test and the requirement).
 Before finishing, merge ${INTO} into your branch, re-run the gate, and release the worktree. Run "${NOW}" for finishedAt.
@@ -476,30 +515,53 @@ Return the schema fields with task "${n}".`
 // disagreed about command / intent_id / state, and review passed both).
 const CONTRACT_REVIEW = n => `4. This is a test-track task, so also check its contract with the design. First run "ck -C ${WT(n)} lint ${SPEC} --contracts --task ${n}": a heuristic first pass that lists string-literal keys and compared values the tests use but design.md never names. Then list every request field, response field and status value the new tests use (dict keys, subscripts, attribute names, compared strings, endpoint paths, error codes), and check each against design.md's Data Models and API tables: that the name exists, belongs to the model or endpoint the test reads it from, and has the type and allowed values the design gives. A name the design doesn't define, a field read from the wrong model, or a status value outside the design's set is a blocking finding: quote the test line and the design text. Put the list you checked, with each item's verdict, in summary.`
 
-const reviewPrompt = (n, r) => `Review Task ${n} of spec ${SPEC}${TITLES[n] ? ` ("${TITLES[n]}")` : ''} before it merges. You review; you do not edit, commit, or run the test suite.
+const reviewPrompt = (n, r, extra = '') => `Review Task ${n} of spec ${SPEC}${TITLES[n] ? ` ("${TITLES[n]}")` : ''} before it merges. You review; you do not edit, commit, or run the test suite.
 Worktree: ${WT(n)} (branch ${BR(n)}), to merge into ${INTO}. ${GIT_NOTE}
 1. Read the change: command git -C ${WT(n)} diff ${INTO}...${BR(n)}  (and its file list with --stat).
 2. Read Task ${n}'s block in ${WT(n)}/specs/${SPEC}/tasks.md, the requirements it covers in requirements.md, and the parts of design.md it implements (interfaces, file paths, error handling).
 3. The task's gate already passed, so do not re-check what the tests check. Look for what tests miss: behaviour that contradicts design.md or a requirement, a public interface that differs from design.md, missing error handling the design specifies, edits outside the task's files, weakened or skipped tests, and security problems.
-${TRACKS[n] === 'test' ? `${CONTRACT_REVIEW(n)}\n` : ''}The implementer reported: ${trim(r && { summary: r.summary, deviations: r.deviations, outsideFiles: r.outsideFiles }, 2000)}
+${TRACKS[n] === 'test' ? `${CONTRACT_REVIEW(n)}\n${extra}` : ''}The implementer reported: ${trim(r && { summary: r.summary, deviations: r.deviations, outsideFiles: r.outsideFiles }, 2000)}
 Mark a finding "blocking" only if it should stop the merge; style and taste are "minor". verdict is "changes" only if there is at least one blocking finding.`
+
+// Task 87 (8.3-8.5, 15.6): what ck found out about a test task's files, for its review. Row fidelity: only the
+// unparsed and unmatched items (a checked one needs no judgment); no section when both are empty. Fixtures: every
+// unlabeled recorded fixture is a blocking finding. Read through the direct ck global; without one nothing is added.
+const asList = v => (Array.isArray(v) ? v : [])
+const WANT_EXTRA = n => TRACKS[n] === 'test' && !!DIRECT_CK
+async function testReviewExtra(n) {
+  if (TRACKS[n] === 'test' && !DIRECT_CK) {
+    const w = `Task ${n}: no direct ck, so the row-fidelity and fixture checks were not added to its review`
+    if (!runWarnings.includes(w)) runWarnings.push(w)
+  }
+  if (!WANT_EXTRA(n)) return ''
+  let text = ''
+  try {
+    const fid = await runCk('lint', ['-C', WT(n), 'lint', SPEC, '--fidelity', '--task', String(n), '--json'], WT(n))
+    const unparsed = fid.json ? asList(fid.json.unparsed) : []
+    const unmatched = fid.json ? asList(fid.json.unmatched) : []
+    if (unparsed.length || unmatched.length) {
+      text += `Row fidelity: ck could not check these items against their test-plan rows, so judge each one: is the value or name the test uses what its row says? A mismatch is a blocking finding.\n${unparsed.length ? `Unparsed (a value the row states in a form ck cannot read): ${JSON.stringify(unparsed)}\n` : ''}${unmatched.length ? `Unmatched (a test no row names): ${JSON.stringify(unmatched)}\n` : ''}`
+    }
+  } catch (e) { /* no fidelity section without an answer */ }
+  try {
+    const fx = await runCk('fixtures', ['-C', WT(n), 'fixtures', 'status', SPEC, '--task', String(n), '--json'], WT(n))
+    const unlabeled = fx.json ? asList(fx.json.unlabeled) : []
+    if (unlabeled.length) text += `Unlabeled fixtures: these recorded fixtures have no capture metadata and are not marked handcrafted. Each one is a blocking finding (file: the fixture, fix: label it with "ck fixtures mark"): ${JSON.stringify(unlabeled)}\n`
+  } catch (e) { /* no fixture section without an answer */ }
+  return text
+}
 
 // Wave-batched review (4.1): one agent over the combined diff of the wave's
 // non-risky tasks. Names the wave, its tasks, the per-task diffs (and the
 // combined `git diff <merge-base>...<INTO>` range over their files), each
 // task's block/requirements, and design.md. The verdict echoes its coverage
 // in `tasks` and flags individual tasks via per-task findings.
-const waveReviewPrompt = (wave, tasks) => `Review Wave ${wave} of spec ${SPEC} before it merges: non-risky Tasks ${tasks.join(', ')} are about to land together into ${INTO}. You review; you do not edit, commit, or run the test suite.
+const waveReviewPrompt = (wave, tasks, extras = {}) => `Review Wave ${wave} of spec ${SPEC} before it merges: non-risky Tasks ${tasks.join(', ')} are about to land together into ${INTO}. You review; you do not edit, commit, or run the test suite.
 ${GIT_NOTE}
 1. Read the combined change: ${tasks.map(n => `command git -C ${WT(n)} diff ${INTO}...${BR(n)}`).join('; ')} (and each file list with --stat), or the combined range \`git diff <merge-base>...${INTO}\` over their files.
 2. Read each task's block in specs/${SPEC}/tasks.md, the requirements it covers in requirements.md, and design.md (interfaces, file paths, error handling).
 3. The tasks' gates already passed, so do not re-check what the tests check. Look for what tests miss: behaviour that contradicts design.md or a requirement, a public interface that differs from design.md, missing error handling the design specifies, edits outside the tasks' files, weakened or skipped tests, and security problems.
-${tasks.map(n => TRACKS[n] === 'test' ? `${CONTRACT_REVIEW(n)}\n` : '').join('')}Return verdict ("approve" or "changes") with per-task findings [{ task, severity, file, issue, fix }] and name every covered task in "tasks". Mark a finding "blocking" only if it should stop the wave; style and taste are "minor". verdict is "changes" only if there is at least one blocking finding.`
-
-const relinkPrompt = n => `Break a verify-order cycle at Task ${n} of spec ${SPEC} in tasks.md on ${INTO}. You run one command; you do not edit any file yourself.
-${GIT_NOTE}
-Run "ck -C ${TARGET} relink ${SPEC} ${n} --apply --commit --json". It rewrites only Task ${n}'s and its linked tasks' Verify / Verified by / Verifies lines the way \`ck lint\` suggests, and commits tasks.md on the checked-out ${INTO}; it refuses when the repair is not mechanical.
-Copy "fixable", "applied", "committed" and "reason" from its JSON exactly. If it printed no JSON, set fixable false and put what it printed in reason.`
+${tasks.map(n => TRACKS[n] === 'test' ? `${CONTRACT_REVIEW(n)}\n${extras[n] || ''}` : '').join('')}Return verdict ("approve" or "changes") with per-task findings [{ task, severity, file, issue, fix }] and name every covered task in "tasks". Mark a finding "blocking" only if it should stop the wave; style and taste are "minor". verdict is "changes" only if there is at least one blocking finding.`
 
 const crossTestPrompt = tasks => `Cross-test consistency check for spec ${SPEC}: test-track Tasks ${tasks.join(', ')} have merged into ${INTO}. You review; you do not edit, commit, or run the test suite. ${GIT_NOTE}
 Test tasks written in parallel drift apart: two test files can each look right on their own and still disagree about the same request, response or record (field names, which model a field lives on, status values, error codes, units). Each implementation can then satisfy only one of them.
@@ -518,20 +580,8 @@ ${GUARD_NOTE}
 Return the schema fields with task "${n}".`
 
 // Parking: one `ck worktree park` call. The note carries the quotes; the notification never does.
-const parkPrompt = (n, stop, decision) => `Parking step for Task ${n} of spec ${SPEC}: run ONE command and copy its JSON output. Nothing else: no other commands, no edits. ${GIT_NOTE}
-Command: "ck worktree park ${SPEC} ${n} --json", run in ${ROOT} and with the note on standard input (a here-document, never a pipe), so write it as:
-ck -C ${ROOT} worktree park ${SPEC} ${n} --json <<'CK_PARK'
-${JSON.stringify({ file: stop.file, kind: stop.kind || 'test', test: stop.test || '', requirement: stop.requirement || '', decision })}
-CK_PARK
-Copy "parked", "notification" and "detail" exactly as printed. A non-zero exit is a failure: put what it printed in error.`
-
 // Landing is one ck command: it prechecks with git merge-tree, merges the batch,
 // gates it in-process, and bisects a red batch by itself. The agent only runs it.
-const landPrompt = tasks => `Landing step for spec ${SPEC}: run ONE command and copy its JSON output. Nothing else: no git commands, no fixes, no retries, no edits. ${GIT_NOTE}
-Command:  ck -C ${ROOT} worktree land ${SPEC} ${tasks.join(' ')} --into ${INTO} --gate --install --release${PROGRESS_RUN ? ` --progress-run ${PROGRESS_RUN}` : ''} --json
-It merges the tasks into ${INTO}, gates them, and bisects a red batch itself. ${GATE_NOTE} The same holds for this command, which runs the gate: wait for its EXIT line.
-A non-zero exit is normal (1: a task is RED, 2: a CONFLICT, 3: busy, missing or PROTECTED); still copy the JSON. Copy "tasks" (every entry: task, state, detail, files, checkGreen, checkTail, mergedAt), "gates", "bisected", "startedAt" and "finishedAt" exactly as printed.${PROGRESS_RUN ? ' Copy "eta", the eta field from the JSON, as is (leave it out if the JSON has none).' : ''} Put a message in error only if the command printed no JSON (say what it printed, or that it was refused).`
-
 const resolvePrompt = (n, files, cf = '') => `Merge conflict for Task ${n} of spec ${SPEC}: ${BR(n)} conflicts with ${INTO}${files ? ` (${files})` : ''}. ${INTO} was not touched. ${GIT_NOTE} ${GATE_NOTE}
 1. Resolve it in the TASK WORKTREE, never in ${TARGET}:
      ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover${cf}
@@ -551,16 +601,7 @@ Fix it without weakening any test and without editing requirements.md or existin
 If the only way to green is to weaken a test or change a requirement, stop and explain precisely instead.
 Return green=true only if the task gate passes in ${WT(n)} after your commit, else failing with the reason.`
 
-const verifyPrompt = what => `Verification (${what}) for spec ${SPEC}. In ${TARGET} (branch ${INTO}):
-1. Refresh dependencies if the project has an install step (e.g. "uv sync -q --directory ${TARGET}").
-2. Run:  ck -C ${TARGET} gate ${SPEC}
-   It checks every Done task: acceptance boxes, the tests that should pass by now, test collection, and that no test was weakened.
-${GATE_NOTE}
-Do not modify anything. Return green=true only if "ck -C ${TARGET} gate ${SPEC}" exited 0; otherwise put the failing checks and the relevant output tail in failing.`
-
-const recheckPrompt = n => `Re-check for spec ${SPEC}. In ${TARGET} (branch ${INTO}): refresh dependencies if needed (e.g. "uv sync -q --directory ${TARGET}"), then run "ck -C ${TARGET} gate ${SPEC}${n ? ` --task ${n}` : ''}". ${GATE_NOTE} Do not modify anything. Return green=true only if it exited 0; otherwise put the failing part in failing.`
-
-const fixPrompt = (k, what, failure) => `${INTO} is red (${what}) for spec ${SPEC}. Failure: ${trim(failure, 4000)}
+const fixPrompt = (k, what, failure) => `${INTO} is red (${what}) for spec ${SPEC}. Failure: ${JSON.stringify(failure || null)}
 Fix it without weakening any test and without editing requirements.md or existing test-plan.md rows. ${GIT_NOTE} ${GATE_NOTE}
 1. Run: ck -C ${ROOT} worktree create ${SPEC} fix${k} --install --base ${INTO}   (worktree ${WT(`fix${k}`)}). Work only there.
 2. Diagnose with the failing check, fix the code (or a clearly broken fixture or harness), and confirm the failing check passes in the fix worktree.
@@ -568,12 +609,69 @@ Fix it without weakening any test and without editing requirements.md or existin
 If the only way to green is to weaken a test or change a requirement, stop and explain precisely instead.
 Return green=true only if ${INTO} is green after your merge, else failing with the reason.`
 
+
+// Task 86 (4.1): the test-fixer's brief. It is the test writer, started on a testfix<k> branch from INTO.
+const testFixPrompt = (k, n, entries) => `${MANDATE}You are a test-fixer for spec ${SPEC}. ${n != null ? `Task ${n} is blocked because` : 'A cross-test check found that'} these tests can never pass with code that meets the spec (every entry, one per test; the "fix" is the correction a first agent proposed):
+${JSON.stringify(entries)}
+Work on branch ${BR(`testfix${k}`)} in worktree ${WT(`testfix${k}`)}. Create it from the integration branch, on its own line:
+ck -C ${ROOT} worktree create ${SPEC} testfix${k} --install --base ${INTO} --json
+${GIT_NOTE}
+Read each test, the criterion in requirements.md and design.md. Then decide, for all of the tests together:
+- the tests are wrong: change only those tests (and fixtures they need) the smallest way that makes them demand exactly what the criterion demands. Do not loosen a test beyond its criterion, do not weaken or delete one, do not edit source code, requirements.md or existing test-plan.md rows. Commit on the branch with a message starting "test-fix:". Do not merge or land it. Return verdict "fixed", changedTests [{file, test}] and commits.
+- the tests are right and the code a task would write is what is wrong: change nothing. Return verdict "test-correct" and finding {file, test, issue} saying exactly what the code gets wrong.
+- you cannot repair them within these rules (for example a guard denies it): return verdict "cannot-fix" and say why in summary.
+Return the schema fields.`
+
+// Task 86 (4.3): the risky-tier review of a proved fix against the test-plan rows and the guard checklist.
+const testFixReviewPrompt = (k, entries, changed, scope) => {
+  const ids = [...new Set([...entries, ...changed].map(x => `${x.file || ''} ${x.test || ''}`).join(' ').match(/tc[-_]?\d+[a-z]?/gi) || [])].map(t => `TC-${t.replace(/^tc[-_]?/i, '')}`)
+  return `Review the test fix testfix${k} for spec ${SPEC} before it lands on ${INTO}. You review; you do not edit, commit, or run the test suite. ${GIT_NOTE}
+1. Read the diff: command git -C ${ROOT} diff ${INTO}...${BR(`testfix${k}`)}  (and its file list with --stat). It must change only the tests named below and what they need.
+2. The fix repairs these tests, which could never pass (every entry): ${JSON.stringify(entries)}
+3. Read the rows of ${WT(`testfix${k}`)}/specs/${SPEC}/test-plan.md for ${ids.length ? ids.join(', ') : 'each changed test (find its TC ID by name)'} and the criteria they verify in requirements.md. Check the changed tests still demand everything their rows say and the criterion says.
+4. Guard checklist, each a blocking finding if it fails: no test is weakened (a looser tolerance than the criterion allows, a removed or softened assertion, a skip or xfail, a deleted test); requirements.md is not edited; no existing test-plan.md row is reworded or deleted; no source file changes.
+The scope check found: ${trim(scope || {}, 800)}
+Mark a finding "blocking" only if the fix must not land. verdict is "changes" only if there is at least one blocking finding; name file and test in each finding.`
+}
+
+// Task 86: the retry prompt of a blocked task after its tests were fixed or found correct.
+const afterFixNote = (fixedTests, findings) => `${fixedTests.length ? `The tests ${fixedTests.join(', ')} were fixed and landed on ${INTO}: merge ${INTO} into your branch first, then finish the task.\n` : ''}${findings.length ? `A test-fixer found the tests correct and the code wrong: ${JSON.stringify(findings)}\n` : ''}`
+
 // --- decisions (pure; loaded by tests) ---
 // Every scheduling rule that allows, refuses or holds something. No script globals, no agent/log/args,
 // no clock and no I/O: tests/js/load_decisions.mjs cuts this block out and evaluates it on its own.
 
 const decisionIds = v => [...(v || [])].map(x => String(x && typeof x === 'object' ? x.task : x))
 const hasKey = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k)
+
+// Task 80 (3.7): every test conflict a result carries. `testConflicts` is a list; the older single `testConflict`
+// is read as a list of one. An entry without a file is not a conflict; each (file, test) is kept once, first wins.
+function testConflictsOf(result) {
+  const r = result && typeof result === 'object' ? result : {}
+  const single = r.testConflict && typeof r.testConflict === 'object' ? [r.testConflict] : []
+  const many = Array.isArray(r.testConflicts) ? r.testConflicts : []
+  const seen = new Set()
+  const out = []
+  for (const e of [...single, ...many]) {
+    if (!e || typeof e !== 'object' || !e.file) continue
+    const k = JSON.stringify([e.file, e.test || null])
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push(e)
+  }
+  return out
+}
+
+// Task 80 (3.8): a failure list for a prompt: the first `limit` entries in order, and how many of the rest each file has.
+function failuresForPrompt(failures, limit = 50) {
+  const list = Array.isArray(failures) ? failures : []
+  const more = {}
+  for (const f of list.slice(limit)) {
+    const file = f && f.file ? f.file : ''
+    more[file] = Object.prototype.hasOwnProperty.call(more, file) ? more[file] + 1 : 1
+  }
+  return { shown: list.slice(0, limit), more, total: list.length }
+}
 
 // Port of cli/worktree.py::_chain_lengths: for each open task, the number of open tasks on its longest
 // chain of dependents, itself included. Tasks are visited in `order` (tasks.md order, as ck plan's deps
@@ -605,6 +703,29 @@ function chainLengths(order, deps, done) {
   return out
 }
 
+// Task 87 (7.4): the impl tasks held while a cross-test finding is open: those verified by the test file each
+// finding names. A finding names its file in `file`, or as the node-id part of `test` ("file::name"); a bare
+// test name places nothing. Paths compare in one surface form (slashes, ./, case): holding too much is safe.
+function heldByCrossTest({ findings, testVerifies } = {}) {
+  const norm = p => String(p == null ? '' : p).trim().replace(/\\/g, '/').split('/').filter(x => x !== '' && x !== '.').join('/').toLowerCase()
+  const tv = testVerifies && typeof testVerifies === 'object' && !Array.isArray(testVerifies) ? testVerifies : {}
+  const byFile = new Map()
+  for (const [k, v] of Object.entries(tv)) {
+    const f = norm(k)
+    if (!f || !Array.isArray(v)) continue
+    byFile.set(f, [...(byFile.get(f) || []), ...v.map(String)])
+  }
+  const held = new Set()
+  for (const x of Array.isArray(findings) ? findings : []) {
+    if (!x || typeof x !== 'object') continue
+    const test = x.test == null ? '' : String(x.test)
+    const f = norm(x.file) || (test.includes('::') ? norm(test.split('::')[0]) : '')
+    if (!f) continue
+    for (const t of byFile.get(f) || []) held.add(t)
+  }
+  return held
+}
+
 // Which tasks may start, in ck plan's order: longest open chain first, then numeric id, stable over `order`.
 // A dependency is met only if it is a key of `deps` AND Done: a dependency the script has no entry for is
 // never met, even when `done` lists it (never start on a guess, 1.10).
@@ -634,14 +755,116 @@ const blockedOf = view => [
 ]
 
 // The scheduler's view after a plan returns. Merges never un-happen: Done = plan.done ∪ mergedInRun (1.6).
-function applyPlanView(plan, mergedInRun) {
+// Live command edges (12.5, Task 93) join the deps: a waiting task depends on the provider it waits for. A provider
+// the plan does not list as a key still gets one, so the edge can be met once the provider is Done.
+function applyPlanView(plan, mergedInRun, liveDeps) {
+  const deps = { ...(plan.deps || {}) }
+  for (const [t, ps] of Object.entries(liveDeps || {})) {
+    deps[t] = [...new Set([...decisionIds(deps[t]), ...decisionIds(ps)])]
+    for (const p of decisionIds(ps)) if (!hasKey(deps, p)) deps[p] = []
+  }
   return {
     order: decisionIds(plan.remaining),
-    deps: plan.deps || {},
+    deps,
     done: new Set([...decisionIds(plan.done), ...decisionIds(mergedInRun)]),
     cycles: (plan.cycles || []).map(c => decisionIds(c)),
     verifyCycles: [...(plan.verifyCycles || [])],
+    // Task 94: ck plan's write-set overlap map, read by writeSetHold; holds never change deps.
+    overlaps: plan.overlaps && typeof plan.overlaps === 'object' && !Array.isArray(plan.overlaps) ? plan.overlaps : {},
   }
+}
+
+// Task 93 (12.5-12.7): what a task whose gate failed on a missing command does next. Pure: the caller records it.
+//   none      no failure carries a missing-command mark, or every provider is Done or the task itself
+//   wait      edges: [{task, dependsOn}] to the unfinished providers that do not close a cycle
+//   conflict  no task provides the command: tests are the invoking tests (a test conflict)
+//   blocked   every unfinished provider would close a cycle: cycle names it, e.g. [2, 5, 2]
+// `refused` lists the providers whose edge would close a cycle. When it is not empty, the caller blocks the task
+// (12.7) and records no edge, even if other providers are safe. A provider is a task of the run (in deps) only.
+function liveEdgeDecision({ task, failures, deps, done, liveDeps } = {}) {
+  const v = String(task)
+  const marked = (Array.isArray(failures) ? failures : []).filter(f => f && typeof f === 'object' && f.missingCommand && typeof f.missingCommand === 'object')
+  const none = { action: 'none', edges: [], cycle: null, command: null, tests: [], refused: [] }
+  if (!marked.length) return none
+  const command = marked[0].missingCommand.command == null ? null : String(marked[0].missingCommand.command)
+  const providers = [...new Set(marked.flatMap(f => decisionIds(f.missingCommand.providers)))]
+  if (!providers.length) {
+    const tests = marked.map(f => ({ file: f.file || '', test: f.node || '', reason: f.message || '' }))
+    return { ...none, action: 'conflict', command, tests }
+  }
+  const depMap = deps && typeof deps === 'object' ? deps : {}
+  const doneSet = new Set(decisionIds(done))
+  // The graph the edges are judged in: declared deps plus the live edges already added.
+  const graph = new Map()
+  for (const [k, ds] of Object.entries(depMap)) graph.set(String(k), decisionIds(ds))
+  for (const [k, ds] of Object.entries(liveDeps || {})) graph.set(String(k), [...new Set([...(graph.get(String(k)) || []), ...decisionIds(ds)])])
+  const reaches = (from, goal) => {
+    const seen = new Set()
+    const stack = [from]
+    while (stack.length) {
+      const t = stack.pop()
+      if (t === goal) return true
+      if (seen.has(t)) continue
+      seen.add(t)
+      stack.push(...(graph.get(t) || []))
+    }
+    return false
+  }
+  // The path from `from` to `goal` over the graph, as ids; [] when there is none.
+  const pathTo = (from, goal) => {
+    const parent = new Map([[from, null]])
+    const queue = [from]
+    while (queue.length) {
+      const t = queue.shift()
+      if (t === goal) {
+        const path = []
+        for (let x = goal; x !== null; x = parent.get(x)) path.unshift(x)
+        return path
+      }
+      for (const m of graph.get(t) || []) if (!parent.has(m)) { parent.set(m, t); queue.push(m) }
+    }
+    return []
+  }
+  const candidates = providers.filter(p => p !== v && !doneSet.has(p) && hasKey(depMap, p))
+  if (!candidates.length) return { ...none, command }
+  // A provider that already depends on the task would close the cycle v -> p -> ... -> v.
+  const refused = candidates.filter(p => reaches(p, v))
+  const safe = candidates.filter(p => !refused.includes(p))
+  const cycle = refused.length ? [v, ...pathTo(refused[0], v)] : null
+  if (!safe.length) return { action: 'blocked', edges: [], cycle, command, tests: [], refused }
+  return { action: 'wait', edges: safe.map(p => ({ task: v, dependsOn: p })), cycle, command, tests: [], refused }
+}
+
+// Task 94 (13.1-13.3, 13.5, 13.6): write-set holds. Pure: the caller records and logs them; no dependency changes.
+//   start  the ready tasks that may start now, in the scheduler's order
+//   held   [{task, waitsOn}]: the rest, each with the first earlier task it overlaps
+// A task waits for every in-flight task it overlaps (`active`), and for every earlier ready task it overlaps, whether
+// that one starts or is itself held (13.2: the higher-priority one goes first, the others wait for it). So a task
+// that overlaps a held higher-priority task is held too, and `waitsOn` names that task.
+// `overlaps` is ck plan's map {task: [task]}. An overlap counts in both directions, so an asymmetric map still keeps
+// the pair apart; a task never overlaps itself. A task with no overlaps entry (no Files, 13.4) is never held.
+function writeSetHold({ ready, active, overlaps } = {}) {
+  const ov = overlaps && typeof overlaps === 'object' && !Array.isArray(overlaps) ? overlaps : {}
+  const partners = new Map()  // task -> Set of tasks it overlaps, both directions
+  const link = (a, b) => {
+    if (a === b) return
+    if (!partners.has(a)) partners.set(a, new Set())
+    partners.get(a).add(b)
+  }
+  for (const [a, bs] of Object.entries(ov)) {
+    for (const b of decisionIds(bs)) { link(String(a), b); link(b, String(a)) }
+  }
+  const ahead = decisionIds(active)  // in flight first, then every earlier ready task in priority order
+  const start = []
+  const held = []
+  for (const n of decisionIds(ready)) {
+    const mine = partners.get(n)
+    const blocker = mine ? ahead.find(x => x !== n && mine.has(x)) : undefined
+    if (blocker === undefined) start.push(n)
+    else held.push({ task: n, waitsOn: blocker })
+    ahead.push(n)
+  }
+  return { start, held }
 }
 
 // Whether a plan agent's copy holds together: our readiness over its view equals its ready list (minus
@@ -782,6 +1005,158 @@ function reviewGroups({ merged, risk } = {}) {
   return { batched, individual }
 }
 
+// How thin ck calls run (19.1, 19.4, 19.6, 2.2, 2.3): `direct` when the host has the `ck` global (OpenCode:
+// ck runs in-script), `lean` when the Claude Code run has a lean runner agent type, otherwise `default`
+// (the session's agent) with a warning that the lean type is unavailable.
+function thinAgentMode({ runnerAgent, unavailable, direct } = {}) {
+  if (direct) return { mode: 'direct', type: null, warning: null }
+  if (typeof runnerAgent === 'string' && runnerAgent && !unavailable) return { mode: 'lean', type: runnerAgent, warning: null }
+  return { mode: 'default', type: null, warning: `the lean thin agent type ${runnerAgent || '(runnerAgent not set)'} is unavailable; thin ck calls run on the default agent` }
+}
+
+// The verdict of one `ck gate ... --attribute --json` call (Task 81). A thin answer and a direct answer both arrive as
+// {code, json, stderr}; json is ck-gate/1 (full) or ck-gate-compact/1 (--compact). green: ck said ok, exit code 0, and
+// nothing in the object contradicts it. red: regressions go to the fixer. error: no valid gate object of either shape
+// or a self-contradicting one, so the gate never counts green (2.9, 19.5).
+const isPlainObj = v => !!v && typeof v === 'object' && !Array.isArray(v)
+// One failure entry must match the ck-gate/1 failure schema (design D3): required fields of the right type, a known status,
+// and a node or a file to point at.
+const FAILURE_KINDS = ['assertion', 'import', 'collection', 'timeout', 'error']
+const FAILURE_STATUSES = ['regression', 'excused', 'flaky', 'unattributed']
+const strOrNull = v => v === null || typeof v === 'string'
+function failureProblem(f) {
+  if (!isPlainObj(f)) return 'an entry that is not an object'
+  for (const k of ['node', 'tcId', 'tasks', 'attributedBy', 'file', 'kind', 'message', 'truncated', 'command']) {
+    if (!(k in f)) return `an entry without ${k}`
+  }
+  if (!strOrNull(f.node) || !strOrNull(f.file) || !strOrNull(f.command)) return 'an entry with a node, file or command of the wrong type'
+  if (f.node === null && f.file === null) return 'an entry with neither node nor file'
+  if (f.tcId !== null && !(typeof f.tcId === 'string' && /^TC-[0-9]+$/.test(f.tcId))) return 'an entry with a bad tcId'
+  if (!Array.isArray(f.tasks) || !f.tasks.every(t => typeof t === 'string')) return 'an entry whose tasks are not strings'
+  if (!['tc', 'file', 'command', 'none'].includes(f.attributedBy)) return 'an entry with a bad attributedBy'
+  if (!FAILURE_KINDS.includes(f.kind)) return 'an entry with a bad kind'
+  if (typeof f.message !== 'string' || f.message.length > 500) return 'an entry with a bad message'
+  if (typeof f.truncated !== 'boolean') return 'an entry with a bad truncated flag'
+  if (f.status !== undefined && !FAILURE_STATUSES.includes(f.status)) return 'an entry with an unknown status'
+  if (f.excusedBy !== undefined && !(Array.isArray(f.excusedBy) && f.excusedBy.every(t => typeof t === 'string'))) return 'an entry with a bad excusedBy'
+  return null
+}
+function gateOutcome(out) {
+  const fail = error => ({ state: 'error', green: false, regressions: [], excusedByTask: {}, flaky: [], report: null, error, reason: error })
+  if (!out || typeof out !== 'object') return fail('the gate call returned no result')
+  const j = out.json
+  if (!isPlainObj(j)) return fail(`ck gate printed no JSON object${out.stderr ? `: ${String(out.stderr).slice(0, 300)}` : ''}`)
+  if (typeof j.ok !== 'boolean') return fail('the gate JSON has no ok flag')
+  const report = typeof j.report === 'string' ? j.report : null
+  let regressions
+  let flaky
+  let unattributed
+  let excused
+  const excusedByTask = {}
+  if (j.schema === 'ck-gate/1') {
+    if (!Array.isArray(j.failures)) return fail('ck-gate/1 JSON has no failures array')
+    const entries = j.failures
+    for (const f of entries) {
+      const bad = failureProblem(f)
+      if (bad) return fail(`ck-gate/1 failures hold ${bad}`)
+      if (f.status === undefined) return fail('ck-gate/1 failures hold an entry without a status')
+    }
+    regressions = entries.filter(f => f.status === 'regression')
+    unattributed = entries.filter(f => f.status === 'unattributed')
+    flaky = entries.filter(f => f.status === 'flaky')
+    const ex = entries.filter(f => f.status === 'excused')
+    excused = ex.length
+    for (const f of ex) {
+      for (const t of Array.isArray(f.excusedBy) && f.excusedBy.length ? f.excusedBy : f.tasks) excusedByTask[t] = (excusedByTask[t] || 0) + 1
+    }
+  } else if (j.schema === 'ck-gate-compact/1') {
+    if (!Array.isArray(j.regressions) || !Array.isArray(j.flaky) || !isPlainObj(j.excusedByTask)) {
+      return fail('ck-gate-compact/1 JSON has a regressions, flaky or excusedByTask field of the wrong shape')
+    }
+    if (j.unattributed !== undefined && !Array.isArray(j.unattributed)) return fail('ck-gate-compact/1 unattributed is not an array')
+    regressions = j.regressions
+    flaky = j.flaky
+    unattributed = j.unattributed || []
+    for (const f of [...regressions, ...unattributed, ...flaky]) {
+      const bad = failureProblem(f)
+      if (bad) return fail(`ck-gate-compact/1 lists ${bad}`)
+    }
+    if (!Object.keys(j.excusedByTask).every(k => /^[0-9]+$/.test(k))) return fail('ck-gate-compact/1 excusedByTask has a key that is not a task number')
+    if (!Object.values(j.excusedByTask).every(v => Number.isInteger(v) && v >= 0)) return fail('ck-gate-compact/1 excusedByTask holds a count that is not a non-negative integer')
+    Object.assign(excusedByTask, j.excusedByTask)
+    excused = Object.values(excusedByTask).reduce((n, v) => n + (Number.isInteger(v) ? v : 0), 0)
+    if (Array.isArray(j.failedChecks) && j.ok && j.failedChecks.some(c => isPlainObj(c) && c.ok === false && !c.warning)) {
+      return fail('ck-gate-compact/1 says ok but holds a failed check')
+    }
+  } else {
+    return fail(`the gate JSON has an unknown schema ${JSON.stringify(j.schema)}`)
+  }
+  if (isPlainObj(j.summary)) {
+    const want = { regressions: regressions.length, unattributed: unattributed.length, flaky: flaky.length, excused }
+    for (const k of Object.keys(want)) {
+      if (j.summary[k] === undefined) continue
+      // The compact form sums one count per excusing task, while summary.excused counts failures: a failure excused by
+      // two tasks gives 2 here and 1 there. So compact only requires the sum to be at least the summary count.
+      if (k === 'excused' && j.schema === 'ck-gate-compact/1') {
+        if (typeof j.summary[k] !== 'number' || want[k] < j.summary[k]) return fail(`the gate summary says ${k}=${j.summary[k]} but the excusedByTask counts hold ${want[k]}`)
+        continue
+      }
+      if (j.summary[k] !== want[k]) return fail(`the gate summary says ${k}=${j.summary[k]} but the entries hold ${want[k]}`)
+    }
+  }
+  if (j.ok && (regressions.length || unattributed.length)) return fail('the gate says ok but lists regressions')
+  if (out.code !== (j.ok ? 0 : 1)) return fail(`the gate says ok=${j.ok} but ck exited ${out.code}`)
+  // A red gate hands the fixer both regressions and unattributed failures.
+  return { state: j.ok ? 'green' : 'red', green: j.ok === true, regressions: [...regressions, ...unattributed], excusedByTask, flaky, report, error: null, reason: null }
+}
+
+// Task 86 (4.8, 4.9): which conflicts a test-fixer may take. Each distinct (file, test) is kept once, first wins; one whose
+// node is in `alreadyFixed` (ledger entries {node, at, fix}) goes to me; the rest are grouped by file, one group per file.
+// Nodes and files are compared by their canonical form (design: Node canonicalisation), as ck's ledger keys them.
+function testFixPlan({ conflicts, alreadyFixed } = {}) {
+  const nodeOf = c => canonicalNode(c.test ? `${c.file}::${c.test}` : String(c.file))
+  const fixed = new Set((Array.isArray(alreadyFixed) ? alreadyFixed : []).map(e => canonicalNode(String(e && typeof e === 'object' ? e.node : e))))
+  const seen = new Set()
+  const groups = []
+  const toMe = []
+  for (const c of Array.isArray(conflicts) ? conflicts : []) {
+    if (!c || typeof c !== 'object' || !c.file) continue
+    const k = nodeOf(c)
+    if (seen.has(k)) continue
+    seen.add(k)
+    if (fixed.has(k)) { toMe.push(c); continue }
+    const fk = canonicalNode(String(c.file))
+    let g = groups.find(x => x.key === fk)
+    if (!g) { g = { file: c.file, conflicts: [] }; Object.defineProperty(g, 'key', { value: fk, enumerable: false }); groups.push(g) }
+    g.conflicts.push(c)
+  }
+  return { groups, toMe }
+}
+
+// The JS mirror of ck's canonical_node (testfix.py): `\\` becomes `/`, repeated slashes and `./` / `..` segments are
+// normalised, a trailing `[param]` id is dropped, and the result is lower-cased.
+function canonicalNode(node) {
+  const text = String(node ?? '').trim().replace(/\\/g, '/')
+  const i = text.indexOf('::')
+  let path = i < 0 ? text : text.slice(0, i)
+  const sep = i < 0 ? '' : '::'
+  let rest = i < 0 ? '' : text.slice(i + 2)
+  path = path.replace(/\/{2,}/g, '/')
+  if (path) {
+    const abs = path.startsWith('/')
+    const out = []
+    for (const seg of path.split('/')) {
+      if (seg === '' || seg === '.') continue
+      if (seg === '..' && out.length && out[out.length - 1] !== '..') out.pop()
+      else if (seg === '..' && abs) continue
+      else out.push(seg)
+    }
+    path = (abs ? '/' : '') + out.join('/') || (abs ? '/' : '.')
+  }
+  rest = rest.replace(/\[.*\]\s*$/, '').trim()
+  return (path + sep + rest).toLowerCase()
+}
+
 // --- end decisions ---
 
 // --- scheduler ---------------------------------------------------------------
@@ -794,13 +1169,28 @@ const records = {}           // task -> record
 const failed = new Map()     // task -> reason
 const parked = new Map()     // task -> needsInput entry: guard-stopped through the ladder; not failed, never retried, dependents wait
 const mergedInRun = new Set()  // tasks this run landed: they stay Done whatever a plan snapshot says (1.6)
+// Live command edges (Task 93, 12.5-12.8). liveDeps: task -> providers it waits for (merged into the plan view);
+// waitingLive: task -> { on, command } while a provider is unfinished, a task not counted as failed and not retried;
+// liveEdges: every edge added this run, for the result and `ck relink --commands`.
+const liveDeps = {}
+const waitingLive = new Map()
+const liveEdges = []
+const providerDone = p => view.done.has(p) || mergedInRun.has(p)
+// The waiting tasks whose providers are still unfinished. A task whose providers are all Done is released (and dropped).
+function stillWaitingLive() {
+  for (const [n, w] of [...waitingLive]) if (w.on.every(providerDone)) waitingLive.delete(n)
+  return [...waitingLive.keys()]
+}
 let stopLaunching = false
 let stopReason = null
 let redTarget = false
 let mergedCount = 0
 let fixCount = 0
 let refills = 0
-const fullGates = []
+const fullGates = []      // the periodic GateRun records (Task 81)
+const gates = []          // every attributed gate run: periodic, recheck and final GateRun records (Task 81)
+let finalGateError = false
+const GATE_ARGV = ['-C', TARGET, 'gate', SPEC, '--attribute', '--install', '--json']
 const fixerEscalations = []
 // Landing queue: finished tasks wait here; one `ck worktree land` runs at a time and
 // takes up to batchWindow of them. Waiting here never holds a slot.
@@ -824,10 +1214,41 @@ const MAX_RESOLVES = 3
 // started when its last test task finishes (or at the end, for a wave that never
 // finished). It runs beside the scheduler and never holds a slot or the landing.
 const crossTests = []
+const findings0 = r => ((r && r.findings) || []).filter(f => f && typeof f === 'object')
 const crossTestRuns = []
+const crossHeld = new Set()   // impl tasks the tests of an open cross-test finding verify: not started until the fix lands (7.4)
+let crossOpen = 0             // cross-test fixes in flight: they keep the scheduler loop alive without holding a slot
+const crossNeedsInput = []    // a cross-test fix that went to me (no blocked task to park)
 const crossTestDone = new Set()
+const crossInFlight = new Set()   // waves whose check is running or whose findings are still being routed: their impl dependents wait (7.4)
 let doneAtStart = new Set()
 const testTasksOf = w => Object.keys(TRACKS).filter(m => TRACKS[m] === 'test' && waveOf(m) === w && !doneAtStart.has(m))
+// While a wave's test tasks are still running or landing, the impl tasks that depend on one of them wait: the
+// cross-test check, which comes right after the last one merges, may name tests such a task verifies (7.4). A wave
+// whose test tasks cannot all merge (one failed, was parked, or waits on a failed task) is not waited for: its
+// check runs at the end.
+function crossWaveDoomed(m, seen = new Set()) {
+  if (failed.has(m) || parked.has(m)) return true
+  if (seen.has(m)) return false
+  seen.add(m)
+  if (view.done.has(m) || mergedInRun.has(m) || running.has(m)) return false
+  return ((view.deps && view.deps[m]) || []).some(d => !view.done.has(String(d)) && !mergedInRun.has(String(d)) && crossWaveDoomed(String(d), seen))
+}
+function crossPendingHeld() {
+  const out = new Set()
+  if (!CROSS_TEST || !Object.keys(TRACKS).length) return out
+  if (Object.values(TRACKS).filter(t => t === 'test').length < 2) return out
+  const waves = new Set(Object.keys(TRACKS).filter(m => TRACKS[m] === 'test' && !doneAtStart.has(m)).map(m => waveOf(m)))
+  for (const w of waves) {
+    if (crossTestDone.has(w) && !crossInFlight.has(w)) continue
+    const wave = testTasksOf(w)
+    if (!wave.length || (!crossInFlight.has(w) && wave.every(m => (records[m] && !running.has(m)) || mergedInRun.has(m) || view.done.has(m))) || (!crossInFlight.has(w) && wave.some(m => crossWaveDoomed(m)))) continue
+    for (const x of Object.keys((view && view.deps) || {})) {
+      if (TRACKS[x] !== 'test' && view.deps[x].some(d => wave.includes(String(d)))) out.add(x)
+    }
+  }
+  return out
+}
 function maybeCrossTest(n, atEnd = false) {
   if (!CROSS_TEST || TRACKS[n] !== 'test') return
   const w = waveOf(n)
@@ -837,16 +1258,34 @@ function maybeCrossTest(n, atEnd = false) {
   const merged = wave.filter(m => records[m] && records[m].ok)
   if (!merged.length) return
   crossTestDone.add(w)
+  crossInFlight.add(w)
+  crossOpen++
   crossTestRuns.push((async () => {
     let r = null
+    const replan = () => { if (!SCRIPT_READINESS) { idleArmed = true; requestPlan('landing') } }
+    try {
     try {
       r = await call('cross-test', crossTestPrompt(merged), { label: `cross-test wave ${w}`, phase: phaseOf(merged[0]), schema: REVIEW_SCHEMA, ...RISKY_REVIEW })
     } catch (e) {
       r = null
     }
-    const blocking = ((r && r.findings) || []).filter(f => f.severity === 'blocking')
-    crossTests.push({ wave: w, tasks: merged, verdict: r ? r.verdict : 'unchecked', findings: (r && r.findings) || [], summary: r && r.summary })
-    log(`cross-test consistency (wave ${w}): ${r ? `${blocking.length} blocking finding(s)${blocking.length ? `: ${trim(blocking.map(f => f.issue), 600)}` : ''}` : 'the check returned nothing'}`)
+    // 7.2: every finding of the cross-test check blocks; none proceeds as today (7.5).
+    const findings = ((r && r.findings) || []).filter(f => f && typeof f === 'object')
+    const entry = { wave: w, tasks: merged, verdict: r ? r.verdict : 'unchecked', findings: (r && r.findings) || [], summary: r && r.summary, blocking: findings.length, routed: false }
+    crossTests.push(entry)
+    log(`cross-test consistency (wave ${w}): ${r ? `${findings.length} blocking finding(s)${findings.length ? `: ${trim(findings.map(f => f.issue), 600)}` : ''}` : 'the check returned nothing'}`)
+    // without args.deps the plan agent's ready list is used once: a task it was filtered out of needs a new plan
+    if (findings.length) {
+      entry.routed = true
+      try { await routeCrossFindings(w, findings, replan, entry) } catch (e) { log(`cross-test fix for wave ${w} failed: ${trim(e && e.message, 300)}`) }
+    }
+    } finally {
+      // the hold on the wave's dependents ends only now: crossHeld is set (or there was nothing to hold)
+      crossInFlight.delete(w)
+      crossOpen--
+      replan()  // without args.deps the plan agent's list is read once: the released tasks need a new plan
+      poke()
+    }
   })())
 }
 
@@ -909,7 +1348,7 @@ function call(kind, prompt, opts) {
 }
 
 // The scheduler's view of the plan (applyPlanView) and what runs now.
-let view = { order: [], deps: {}, done: new Set(), cycles: [], verifyCycles: [] }
+let view = { order: [], deps: {}, done: new Set(), cycles: [], verifyCycles: [], overlaps: {} }
 let current = null          // the last plan applied
 let lastPlanReady = []      // without args.deps: the ready list of the plan that just returned, used once
 let planFallbacks = []    // one entry per fallback: { planStep, trigger, source, ready }
@@ -918,9 +1357,9 @@ let lastGood = null       // { ready, deps, order } of the last consistent plan:
 let planRun = null          // the plan agent in flight, if any
 let queuedTrigger = null    // a trigger that arrived while one was in flight: one follow-up
 let idleArmed = true
-let recordSeq = 0           // task records seen so far: a landing plan disarms the idle plan only if none arrived while it ran
+let recordSeq = 0           // failed task records seen so far: a landing plan disarms the idle plan only if none arrived while it ran (an ok record waits for its landing, so it changes nothing)
 let deferring = false
-const excluded = () => new Set([...running.keys(), ...failed.keys(), ...parked.keys(), ...mergedInRun])
+const excluded = () => new Set([...running.keys(), ...failed.keys(), ...parked.keys(), ...mergedInRun, ...crossHeld, ...crossPendingHeld(), ...stillWaitingLive()])
 function planContext() {
   const exclude = excluded()
   const ready = SCRIPT_READINESS ? readyTasks({ order: view.order, deps: view.deps, done: view.done, exclude, blocked: blockedOf(view) }) : []
@@ -939,14 +1378,10 @@ async function runPlan(trigger) {
   for (let attempt = 0; attempt < 2; attempt++) {
     const label = `plan ${refills}${attempt ? ' retry' : ''}`
     const exclude = [...excluded()]
-    let p = null
-    if (DIRECT_CK) {
-      const out = await runCk('plan', planArgv(exclude), ROOT)
-      p = out.json && typeof out.json === 'object' ? { ...out.json } : { error: ckError(out) }
-      if (p.error === undefined || p.error === null) delete p.error
-    } else {
-      try { p = await call('plan', planPrompt(exclude), { label, phase: 'Plan', schema: PLAN, ...LOW }) } catch (e) { p = { error: e && e.message } }
-    }
+    const out = await thinCk('plan', planArgv(exclude), { label, phase: 'Plan', cwd: ROOT, what: `Mechanical planning step for spec ${SPEC}` })
+    const p = out.json ? { ...out.json } : { error: ckError(out) }
+    if (out.json && out.stderr) p.error = out.stderr  // a note next to a usable plan is a remark, not a failure
+    if (p.error === undefined || p.error === null) delete p.error
     // An "error" next to a usable plan is a remark, not a failure; an empty plan with an error is a failure.
     if (usablePlan(p) && !(p.error && !p.done.length && !p.remaining.length)) {
       const n = normalizePlan(p)
@@ -968,7 +1403,7 @@ async function runPlan(trigger) {
       if (!namesNothingRunnable && planConsistent(n, [...exclude, ...n.busy.map(b => b.task)])) {
         if (p.error) log(`${label}: the planning agent left a note (not a failure): ${trim(p.error, 300)}`)
         current = n
-        view = applyPlanView(n, mergedInRun)
+        view = applyPlanView(n, mergedInRun, liveDeps)
         // The dep-less fallback layer: the last consistent plan's ready/deps/order.
         // A consistent first attempt or retry success counts no fallback (1.4).
         lastGood = { ready: [...n.ready], deps: n.deps || {}, order: [...n.remaining] }
@@ -1032,13 +1467,18 @@ async function runPlan(trigger) {
 
 // Run fn while no landing step runs (and keep new landings queued until it returns): a relink
 // commits tasks.md on INTO, so it must never interleave with a merge into it.
+// While it holds the lock it publishes a promise that settles on release, so a second caller waiting in the loop
+// below really waits (an already-settled landingIdle would spin on microtasks and starve the holder's I/O).
 async function withLandingLock(fn) {
   while (landingBusy) await landingIdle
+  let release
+  landingIdle = new Promise(r => { release = r })
   landingBusy = true
   try {
     return await fn()
   } finally {
     landingBusy = false
+    release()
     if (landQueue.length) pumpLandings()
   }
 }
@@ -1047,9 +1487,8 @@ async function relinkTask(n, vc) {
   let r = null
   try {
     r = await withLandingLock(async () => {
-      if (!DIRECT_CK) return call('relink', relinkPrompt(n), { label: `relink ${n}`, phase: phaseOf(n), schema: RELINKED, ...LOW })
-      const out = await runCk('relink', ['-C', TARGET, 'relink', SPEC, n, '--apply', '--commit', '--json'], TARGET)
-      return out.json && typeof out.json === 'object' ? out.json : { fixable: false, applied: false, reason: ckError(out) }
+      const out = await thinCk('relink', ['-C', TARGET, 'relink', SPEC, n, '--apply', '--commit', '--json'], { label: `relink ${n}`, phase: phaseOf(n), cwd: TARGET, what: `Break a verify-order cycle at Task ${n} of spec ${SPEC}` })
+      return out.json ? out.json : { fixable: false, applied: false, reason: ckError(out) }
     })
   } catch (e) {
     r = null
@@ -1094,11 +1533,23 @@ function requestPlan(trigger) {
   return planRun
 }
 
-// A task's implementing agent finished; its slot is free.
+// A task's implementing agent finished; its slot is free. A task waiting to take a slot back (acquireSlot) gets it
+// first, before the scheduler can start a new task in it.
 function releaseSlot(n) {
   if (!working.delete(n)) return
+  const w = slotWaiters.shift()
+  if (w) { working.add(w.n); w.resolve() }
   requestPlan('freed')
   poke()
+}
+
+// A task that gave its slot up (a test fix) takes one again before its next agent runs, so the run never holds more
+// than its configured slots.
+const slotWaiters = []   // { n, resolve }
+function acquireSlot(n) {
+  if (working.has(n)) return Promise.resolve()
+  if (!(working.size >= MAX_CONCURRENT)) { working.add(n); return Promise.resolve() }
+  return new Promise(resolve => slotWaiters.push({ n, resolve }))
 }
 
 function startTask(n) {
@@ -1106,16 +1557,38 @@ function startTask(n) {
   running.set(n, runTask(n).then(rec => finishTask(n, rec)))
 }
 
+// Task 93 (12.5, 12.8): records the live edges of a wait and returns the task's record as waiting (not failed).
+function recordLiveWait(n, rec, r, live) {
+  const task = String(n)
+  const on = []
+  for (const e of live.edges) {
+    const p = String(e.dependsOn)
+    if (on.includes(p)) continue
+    on.push(p)
+    liveDeps[task] = [...new Set([...(liveDeps[task] || []), p])]
+    if (!liveEdges.some(x => x.task === task && x.dependsOn === p)) liveEdges.push({ task, dependsOn: p, command: live.command, at: nowMs() })
+    log(`live edge Task ${task} -> Task ${p} (${live.command}): Task ${task} waits for Task ${p} to merge; no retry spent`)
+  }
+  waitingLive.set(task, { on, command: live.command })
+  rec.result = r
+  rec.finishedAt = r && r.finishedAt
+  rec.waiting = { on, command: live.command }
+  rec.reason = `waiting for ${on.map(p => `Task ${p}`).join(', ')} (live edge: ${live.command})`
+  return rec
+}
+
 function finishTask(n, rec) {
   releaseSlot(n)
   running.delete(n)
   records[n] = rec
-  recordSeq++
   maybeCrossTest(n)
-  if (!rec.ok) idleArmed = true  // a merged task was already followed by its landing plan; a failed one may change what is ready
+  if (!rec.ok) { idleArmed = true; recordSeq++ }  // only a failure can change what is ready before its landing; a merged task was already followed by its landing plan; a failed one may change what is ready
   if (!rec.ok && rec.needsInput) {
     parked.set(n, rec.needsInput)  // listed apart from failed; never triggers onFailure: halt
     log(`Task ${n}: needs input (${rec.needsInput.action}); independent tasks continue, its dependents wait`)
+  } else if (!rec.ok && rec.waiting) {
+    // Task 93 (12.5): waits for its live providers; not failed, no retry spent. It starts again after their landings.
+    log(`Task ${n}: waiting for ${rec.waiting.on.map(p => `Task ${p}`).join(', ')} (${rec.waiting.command}); no retry spent`)
   } else if (!rec.ok && rec.testConflict) {
     failed.set(n, rec.reason)  // its dependents wait; it never halts the run (issue #8)
     log(`Task ${n}: ${rec.reason}; independent tasks continue, the test-track fix is in the report`)
@@ -1129,6 +1602,18 @@ function finishTask(n, rec) {
   return { n, rec }
 }
 
+// Task 94 (13.3, 13.5): write-set holds this run made, {task, waitsOn, at}; listed in the result when there are any.
+const writeSetHolds = []
+const heldOn = new Map()  // task -> the task it is currently held behind; a repeat of the same hold is not logged twice
+function noteWriteSetHold({ task, waitsOn }) {
+  const t = String(task)
+  const w = String(waitsOn)
+  if (heldOn.get(t) === w) return
+  heldOn.set(t, w)
+  writeSetHolds.push({ task: t, waitsOn: w, at: nowMs() })
+  log(`Task ${t} held: its write-set overlaps Task ${w}, which runs or is queued ahead of it; it starts once Task ${w} lands or stops`)
+}
+
 // Starts what may start now, and re-reads the plan when nothing is ready and a slot is free.
 function schedule() {
   const ctx = planContext()
@@ -1138,7 +1623,10 @@ function schedule() {
     ready = lastPlanReady.map(String).filter(n => !ctx.exclude.has(n) && !view.done.has(n))
     lastPlanReady = []
   }
-  const d = startDecision({ finishFirst: FINISH_FIRST, inFlight, slots: AGENT_SLOTS, ready, working: working.size, maxConcurrent: MAX_CONCURRENT, stopLaunching })
+  // Task 94: a ready task whose write-set overlaps an in-flight task waits; in-flight is every running task, up to its landing's end.
+  const holds = writeSetHold({ ready, active: [...running.keys()], overlaps: view.overlaps })
+  for (const h of holds.held) noteWriteSetHold(h)
+  const d = startDecision({ finishFirst: FINISH_FIRST, inFlight, slots: AGENT_SLOTS, ready: holds.start, working: working.size, maxConcurrent: MAX_CONCURRENT, stopLaunching })
   for (const n of d.start) if (!running.has(n)) startTask(n)
   if (d.start.length) deferring = false
   if (d.deferred) {
@@ -1178,20 +1666,43 @@ function applyLint(p) {
   }
 }
 
-async function fixAndRecheck(what, failure, n) {
-  const ph = n ? phaseOf(n) : 'Final gate'
+// --- Attributed gates (Task 81) ---------------------------------------------------------------------------------
+// One GateRun record (Task 81): the verdict plus the gate's position and, when a fixer ran, its record.
+const gateRun = (kind, afterMerges, out) => ({ kind, afterMerges, ...gateOutcome(out), fix: null })
+// One attributed gate through thinCk. Claude Code asks for the compact answer (2.12); OpenCode reads the full JSON.
+// An error is retried once; a second error is the run's record and sends nothing to the fixer.
+async function attributedGate(kind, afterMerges, label, phaseName, what) {
+  const argv = [...GATE_ARGV, ...(thin.mode === 'direct' ? [] : ['--compact'])]
+  const ask = () => thinCk('gate', argv, { label, phase: phaseName, cwd: TARGET, gate: true, what })
+  const first = await ask()
+  let run = gateRun(kind, afterMerges, first)
+  // Only a call-level failure (no JSON object at all) is worth a retry; a JSON object of the wrong shape would be
+  // wrong again.
+  if (run.state === 'error' && !(first && isPlainObj(first.json))) {
+    log(`${label}: the gate call failed (${run.error}); retrying once`)
+    run = gateRun(kind, afterMerges, await ask())
+  }
+  return run
+}
+// A red gate (2.6, 2.7): the regressions go to the fixer as Failure entries (3.9), each recheck is again an attributed
+// gate, and the escalation ladder runs as before. Every recheck is recorded in `gates`.
+async function fixAndRecheck(what, first, afterMerges, phaseName) {
+  const ph = phaseName
+  const failuresOf = g => failuresForPrompt(g.regressions)
   fixCount++
-  let fix = await call('fix', fixPrompt(fixCount, what, failure), { label: `fix ${fixCount} (${what})`, phase: ph, schema: VERIFY, ...FIX })
-  let recheck = await call('recheck', recheckPrompt(n), { label: `re-check ${fixCount}`, phase: ph, schema: VERIFY, ...ORCH })
+  let fix = await call('fix', fixPrompt(fixCount, what, failuresOf(first)), { label: `fix ${fixCount} (${what})`, phase: ph, schema: VERIFY, ...FIX })
+  let recheck = await attributedGate('recheck', afterMerges, `re-check ${fixCount}`, ph, `Re-check for spec ${SPEC} in ${TARGET} (branch ${INTO})`)
+  gates.push(recheck)
   for (const model of FIX_UP) {
-    if (recheck && recheck.green) break
+    if (recheck.state !== 'red') break
     fixCount++
     log(`${what}: still red after the fix, escalating the fixer to ${model}`)
-    fix = await call('fix', fixPrompt(fixCount, what, recheck), { label: `fix ${fixCount} (${what}) [${model}]`, phase: ph, schema: VERIFY, ...escalated(FIX, model) })
-    recheck = await call('recheck', recheckPrompt(n), { label: `re-check ${fixCount}`, phase: ph, schema: VERIFY, ...ORCH })
-    fixerEscalations.push({ what, model, green: !!(recheck && recheck.green) })
+    fix = await call('fix', fixPrompt(fixCount, what, failuresOf(recheck)), { label: `fix ${fixCount} (${what}) [${model}]`, phase: ph, schema: VERIFY, ...escalated(FIX, model) })
+    recheck = await attributedGate('recheck', afterMerges, `re-check ${fixCount}`, ph, `Re-check for spec ${SPEC} in ${TARGET} (branch ${INTO})`)
+    gates.push(recheck)
+    fixerEscalations.push({ what, model, green: recheck.green })
   }
-  return { fix, recheck, green: !!(recheck && recheck.green) }
+  return { fix, recheck, green: recheck.green }
 }
 
 function requestLanding(n) {
@@ -1222,12 +1733,8 @@ async function landBatch(batch) {
   const used = batchWindow
   let res = null
   try {
-    if (DIRECT_CK) {
-      const out = await runCk('land', landArgv(tasks), ROOT)
-      res = out.json && typeof out.json === 'object' && Array.isArray(out.json.tasks) ? out.json : { tasks: [], error: ckError(out) }
-    } else {
-      res = await call('land', landPrompt(tasks), { label: `land ${tasks.join(' ')}`, phase: phaseOf(tasks[0]), schema: LAND, ...LOW })
-    }
+    const out = await thinCk('land', landArgv(tasks), { label: `land ${tasks.join(' ')}`, phase: phaseOf(tasks[0]), cwd: ROOT, gate: true, what: `Landing step for spec ${SPEC}: it merges the tasks into ${INTO}, gates them, and bisects a red batch itself` })
+    res = out.json && Array.isArray(out.json.tasks) ? out.json : { tasks: [], error: ckError(out) }
   } catch (e) {
     res = { tasks: [], error: e && e.message }
   }
@@ -1254,17 +1761,20 @@ async function landBatch(batch) {
   if (entry.bisected || entry.red.length) log(`Landing ${tasks.join(' ')}: red, bisected; ${entry.red.length ? `culprit(s) ${entry.red.join(', ')}` : 'no culprit (flaky?)'}; window now ${batchWindow}`)
 
   if (entry.merged.length && FULL_EVERY > 0 && Math.floor(mergedCount / FULL_EVERY) > Math.floor(before / FULL_EVERY)) {
-    let v = await call('gate', verifyPrompt(`full gate after ${mergedCount} merges`), { label: `full gate @${mergedCount}`, phase: phaseOf(tasks[0]), schema: VERIFY, ...ORCH })
-    if (!v || !v.green) {
+    const g = await attributedGate('periodic', mergedCount, `full gate @${mergedCount}`, phaseOf(tasks[0]), `Verification (full gate after ${mergedCount} merges) for spec ${SPEC}`)
+    gates.push(g)
+    fullGates.push(g)
+    if (g.state === 'red') {
       log(`Full gate red after ${mergedCount} merges, one fix attempt`)
-      const f = await fixAndRecheck(`full gate after ${mergedCount} merges`, v)
-      v = { ...(v || {}), fix: f, green: f.green }
-    }
-    fullGates.push({ afterMerges: mergedCount, green: !!v.green })
-    if (!v.green) {
-      redTarget = true
-      stopLaunching = true
-      stopReason = stopReason || `${INTO} is red: full gate after ${mergedCount} merges`
+      g.fix = await fixAndRecheck(`full gate after ${mergedCount} merges`, g, mergedCount, phaseOf(tasks[0]))
+      // A recheck that errors leaves the run going (2.9); only a verdict that is still red stops it.
+      if (g.fix.recheck.state === 'red') {
+        redTarget = true
+        stopLaunching = true
+        stopReason = stopReason || `${INTO} is red: full gate after ${mergedCount} merges`
+      }
+    } else if (g.state === 'error') {
+      log(`Full gate after ${mergedCount} merges could not run (${g.error}); the run goes on`)
     }
   }
   for (const [b, t] of outcomes) {
@@ -1291,7 +1801,7 @@ async function reviewBatch(batch) {
   const waveNo = ++reviewWaveCount
   let review = null
   try {
-    review = await call('review-wave', waveReviewPrompt(waveNo, ids), { label: `review-wave ${waveNo} tasks ${ids.join(' ')}`, phase: phaseOf(ids[0]), schema: REVIEW_SCHEMA, ...REVIEW })
+    review = await call('review-wave', waveReviewPrompt(waveNo, ids, Object.fromEntries(await Promise.all(ids.map(async n => [n, WANT_EXTRA(n) ? await testReviewExtra(n) : ''])))), { label: `review-wave ${waveNo} tasks ${ids.join(' ')}`, phase: phaseOf(ids[0]), schema: REVIEW_SCHEMA, ...REVIEW })
   } catch (e) {
     review = null
   }
@@ -1392,9 +1902,270 @@ async function landTask(n, rec) {
       continue
     }
     if (t.state === 'SKIP') return { merged: false, error: 'no commits' }
-    if (t.state === 'PROTECTED') return { merged: false, error: `needs a human: changes protected files (${(t.files || []).join(', ')}); not landed. ${t.detail || ''}` }
+    if (t.state === 'PROTECTED') return { merged: false, protected: { files: t.files || [], detail: t.detail || '' }, error: `needs a human: changes protected files (${(t.files || []).join(', ')}); not landed. ${t.detail || ''}` }
     return { merged: false, error: `${t.state}: ${t.detail || ''}` }
   }
+}
+
+// A landing that comes back PROTECTED (2.13, 9.8): no agent lands it. The task is parked as needs-input with the files,
+// the approve command for me to run in my own terminal, and the resume (the same runId).
+async function parkProtected(n, rec, protectedInfo) {
+  const action = parkAction({ interactive: INTERACTIVE })
+  const files = (protectedInfo.files || []).map(String)
+  const command = `ck worktree approve ${SPEC} ${n}`
+  const resume = `/spec:implement ${SPEC}${RUN_ID ? ` with the same runId ${RUN_ID}` : ''}`
+  const decision = `Task ${n} changes protected files (${files.join(', ') || 'see the landing'}), so no agent lands it. Review the change, then approve it in your own terminal: ${command}. Then resume the run: ${resume}.`
+  const entry = {
+    task: n, file: files.join(', '), files, kind: 'protected', test: '', requirement: '', decision,
+    command, resume, runId: RUN_ID || null, action, notification: null, escalatedTo: [],
+  }
+  releaseSlot(n)
+  if (action === 'park') {
+    const note = JSON.stringify({ file: entry.file, kind: 'protected', test: '', requirement: '', decision })
+    const out = await thinCk('park', ['worktree', 'park', SPEC, n, '--json'], { stdin: note, label: `park ${n}`, phase: phaseOf(n), cwd: ROOT, what: `Parking step for Task ${n} of spec ${SPEC}` })
+    const p = out.json ? out.json : { parked: false, error: ckError(out) }
+    entry.notification = p && p.notification ? p.notification : 'failed'
+    entry.notificationDetail = (p && (p.detail || p.error)) || ''
+    if (!p || p.parked === false) {
+      entry.notification = 'failed'
+      entry.notificationDetail = 'park failed: ' + ((p && (p.error || p.detail)) || 'the park step returned nothing')
+    } else rec.parked = true
+  }
+  rec.needsInput = entry
+  rec.reason = `needs input: protected files (${files.join(', ')})`
+  return rec
+}
+
+
+// --- the test-fix loop (Task 86, Story 4) ---
+// A confirmed conflict goes to a test-fixer (the test writer on a testfix<k> branch from INTO). A fix lands only when
+// ck's scope check and proof pass and a risky-tier reviewer approves it; anything else goes to me with the findings.
+const testFixRecords = []     // TestFixRecord[]: the result's testFixes
+const testFixLedger = new Set()   // nodes a fix was tried for this run (the ck ledger holds the ones from earlier runs)
+let testFixSeq = 0
+let ledgerSeq = 0
+const conflictNode = c => (c.test ? `${c.file}::${c.test}` : String(c.file))
+const conflictKey = c => canonicalNode(conflictNode(c))   // the run ledger's key, as ck's ledger keys it (4.8)
+const conflictEntry = c => ({ file: String(c.file ?? ''), test: String(c.test ?? ''), criterion: String(c.criterion ?? ''), reason: String(c.reason ?? ''), fix: String(c.fix ?? '') })
+// 4.5: the workflow does not trust in_scope alone.
+const scopeRefusal = sc => {
+  if (!sc || typeof sc !== 'object') return 'ck returned no scope decision'
+  const out = (sc.outside || []).map(String)
+  const docs = (sc.spec_docs_edited || []).map(String)
+  if (sc.in_scope !== true || out.length || docs.length || sc.requirements_edited) {
+    return `out of scope: ${out.length ? `changes ${out.join(', ')}` : ''}${docs.length ? ` edits ${docs.join(', ')}` : ''}${sc.requirements_edited ? ' edits requirements.md' : ''}${sc.reason ? ` (${sc.reason})` : ''}`.replace(/\s+/g, ' ')
+  }
+  return null
+}
+const proofRefusal = pf => {
+  if (!pf || typeof pf !== 'object') return 'ck returned no proof'
+  const bad = (Array.isArray(pf.outcomes) ? pf.outcomes : []).filter(o => o && !(o.passed === true || o.cls === 'not-built'))
+  if (pf.proved !== true || bad.length) return `the proof failed: ${pf.reason || ''}${bad.length ? ` ${JSON.stringify(bad)}` : ''}`.trim()
+  return null
+}
+const reviewApproved = rv => !!rv && rv.verdict === 'approve' && !(rv.findings || []).some(f => f && f.severity === 'blocking')
+
+// One test-fixer for one file group. `blocked` is the task the tests block (null for a cross-test fix, which holds `held`).
+async function runTestFix({ k, blocked, held = [], source = 'conflict', conflicts }) {
+  const fix = `testfix${k}`
+  const entries = conflicts.map(conflictEntry)
+  const nodes = conflicts.map(conflictNode)
+  const phase = blocked != null ? phaseOf(blocked) : 'Test fix'
+  const rec = { fix, blocked: blocked ?? null, held: [...held], source, tests: nodes, changedTests: [], outcome: 'to-me', proof: null, scope: null, review: null, reason: '', finding: null }
+  const toMe = reason => { rec.outcome = 'to-me'; rec.reason = reason; return rec }
+  const record = async outcome => {
+    const out = await thinCk('testfix record', ['-C', ROOT, 'testfix', 'record', SPEC, fix, ...nodes.flatMap(x => ['--test', x]), '--outcome', outcome, '--json'], { label: `testfix record ${k}`, phase, cwd: ROOT, what: `Recording step for test fix ${fix} of spec ${SPEC}` }).catch(() => null)
+    if (!out || out.code !== 0) {
+      rec.recordError = `ck testfix record did not confirm (${out ? trim(out.stderr || out.code, 200) : 'no answer'}); the cross-run ledger may lack ${fix}`
+      log(`Test fix ${fix}: ${rec.recordError}`)
+      runWarnings.push(`Test fix ${fix}: ${rec.recordError}`)
+    }
+  }
+  for (const c of conflicts) testFixLedger.add(conflictKey(c))
+  let fx = null
+  try {
+    fx = await call('testfix', testFixPrompt(k, blocked, entries), { label: blocked != null ? `testfix ${k} (Task ${blocked})` : `testfix ${k} (cross-test)`, phase, schema: TESTFIX, ...TEST })
+  } catch (e) {
+    return toMe(`the test-fixer agent failed: ${trim(e && e.message, 300)}`)
+  }
+  if (!fx || typeof fx !== 'object') return toMe('the test-fixer returned nothing')
+  if (fx.verdict === 'test-correct') {
+    rec.outcome = 'test-correct'
+    rec.finding = fx.finding && typeof fx.finding === 'object' ? fx.finding : { file: conflicts[0].file, test: conflicts[0].test || '', issue: fx.summary || 'the test is correct' }
+    rec.reason = trim(rec.finding.issue || fx.summary, 400)
+    return rec
+  }
+  if (Array.isArray(fx.changedTests)) rec.changedTests = fx.changedTests.map(String)
+  if (fx.verdict !== 'fixed') return toMe(`the test-fixer cannot fix it: ${trim(fx.summary, 400)}`)
+  if (fx.finding && typeof fx.finding === 'object') return toMe(`the test-fixer's report contradicts itself (verdict fixed with a finding about the code): ${trim(fx.finding, 300)}`)
+  const proveArgv = ['-C', ROOT, 'testfix', 'prove', SPEC, fix, ...(blocked != null ? ['--blocked', String(blocked)] : held.flatMap(h => ['--held', String(h)])), ...nodes.flatMap(x => ['--test', x]), '--into', INTO, '--json']
+  const pv = await thinCk('testfix prove', proveArgv, { label: `testfix prove ${k}`, phase, cwd: ROOT, what: `Proof step for test fix ${fix} of spec ${SPEC}: it checks the fix's scope, then that the tests pass with it` })
+  if (!pv.json) { await record('to-me'); return toMe(`ck testfix prove gave no result: ${ckError(pv)}`) }
+  rec.scope = pv.json.scope ?? null
+  rec.proof = pv.json.proof ?? null
+  // 4.10: the record names the tests the fix changed; ck's proof is the authority when it lists them
+  const proved = pv.json.changedTests ?? (rec.proof && rec.proof.changedTests) ?? (rec.scope && rec.scope.changedTests)
+  if (Array.isArray(proved)) rec.changedTests = proved.map(String)
+  const refusedScope = scopeRefusal(rec.scope)
+  if (refusedScope) { await record('to-me'); return toMe(refusedScope) }
+  const refusedProof = proofRefusal(rec.proof)
+  if (refusedProof) { await record('to-me'); return toMe(refusedProof) }
+  let rv = null
+  try {
+    rv = await call('review', testFixReviewPrompt(k, entries, Array.isArray(fx.changedTests) ? fx.changedTests : [], rec.scope), { label: `testfix review ${k}`, phase, schema: REVIEW_SCHEMA, ...RISKY_REVIEW })
+  } catch (e) {
+    rv = null
+  }
+  rec.review = rv ? { verdict: rv.verdict, findings: rv.findings || [], summary: rv.summary } : null
+  if (!reviewApproved(rv)) {
+    await record('to-me')
+    return toMe(rv ? `the reviewer rejected the fix: ${trim((rv.findings || []).filter(f => f && f.severity === 'blocking').map(f => f.issue), 800) || rv.summary || rv.verdict}` : 'the reviewer returned nothing')
+  }
+  let res = null
+  try {
+    // the landing lock keeps this landing from running beside a batch landing (ck worktree land holds a non-blocking flock)
+    const out = await withLandingLock(() => thinCk('land', landArgv([fix]), { label: `land ${fix}`, phase, cwd: ROOT, gate: true, what: `Landing step for test fix ${fix} of spec ${SPEC}: it merges the fix into ${INTO} and gates the tests it changes` }))
+    res = out.json && Array.isArray(out.json.tasks) ? out.json : { tasks: [], error: ckError(out) }
+  } catch (e) {
+    res = { tasks: [], error: e && e.message }
+  }
+  const t = (res.tasks || []).find(x => String(x.task) === fix) || { state: 'ERROR', detail: res.error || 'the landing step returned no result for the fix' }
+  if (t.state !== 'MERGED') {
+    await record('to-me')
+    return toMe(`the fix did not land (${t.state}${t.detail ? `: ${trim(t.detail, 300)}` : ''}${t.files && t.files.length ? ` ${t.files.join(', ')}` : ''})`)
+  }
+  await record('landed')
+  rec.outcome = 'landed'
+  rec.reason = 'the fix landed'
+  return rec
+}
+
+// A blocked task's confirmed conflicts: plan, run one test-fixer per file, record each outcome.
+// Returns {records, fixed: [node], findings: [Failure], toMe: [reason]}.
+async function testFixFor(n, conflicts, { held = [] } = {}) {
+  const src = n == null ? 'cross-test' : 'conflict'
+  const nodes = [...new Set(conflicts.map(conflictNode))]
+  const led = await thinCk('testfix ledger', ['-C', ROOT, 'testfix', 'check', SPEC, ...nodes.flatMap(x => ['--test', x]), '--json'], { label: `testfix ledger ${++ledgerSeq}`, phase: n != null ? phaseOf(n) : 'Test fix', cwd: ROOT, what: `Ledger check for the test fixes of spec ${SPEC}` })
+  if (!led.json || !Array.isArray(led.json.alreadyFixed) || led.json.error || led.code !== 0) {
+    // 4.8: a ledger that cannot be read never grants a fix (a damaged ledger exits 3 and still lists every node)
+    const reason = `the test-fix ledger could not be read: ${led.json && led.json.error ? trim(String(led.json.error), 300) : ckError(led)}`
+    const rec = { fix: null, blocked: n, held: [...held], source: src, tests: nodes, outcome: 'to-me', proof: null, scope: null, review: null, reason }
+    testFixRecords.push(rec)
+    return { records: [rec], fixed: [], findings: [], toMe: [reason] }
+  }
+  const prior = led.json.alreadyFixed
+  const plan = testFixPlan({ conflicts, alreadyFixed: [...prior, ...conflicts.filter(c => testFixLedger.has(conflictKey(c))).map(c => ({ node: conflictNode(c), at: 'this run', fix: 'this run' }))] })
+  const out = { records: [], fixed: [], findings: [], toMe: [] }
+  for (const c of plan.toMe) {
+    const reason = `${conflictNode(c)} was already fixed once (testfix ledger); a second fix goes to you`
+    const rec = { fix: null, blocked: n, held: [...held], source: src, tests: [conflictNode(c)], outcome: 'to-me', proof: null, scope: null, review: null, reason }
+    out.records.push(rec)
+    out.toMe.push(reason)
+  }
+  for (const g of plan.groups) {
+    const k = ++testFixSeq
+    log(`${n != null ? `Task ${n}` : 'Cross-test'}: test-fixer ${k} for ${g.file} (${g.conflicts.length} test(s))`)
+    const rec = await runTestFix({ k, blocked: n, held, source: src, conflicts: g.conflicts })
+    out.records.push(rec)
+    if (rec.outcome === 'landed') out.fixed.push(...rec.tests)
+    else if (rec.outcome === 'test-correct') out.findings.push({ ...rec.finding, kind: 'assertion', message: rec.reason, tasks: n != null ? [String(n)] : held.map(String), command: null, node: rec.tests[0], file: rec.finding.file || g.file })
+    else out.toMe.push(`${g.file}: ${rec.reason}`)
+  }
+  testFixRecords.push(...out.records)
+  return out
+}
+
+// A task whose test fix goes to me: needs-input kind "test-fix" with the findings, parked (unattended) or asked (interactive).
+async function parkTestFix(n, rec, reasons, records) {
+  const action = parkAction({ interactive: INTERACTIVE })
+  const tests = [...new Set(records.flatMap(x => x.tests))]
+  const files = [...new Set(tests.map(t => t.split('::')[0]))]
+  const decision = `Task ${n} is blocked on tests that can never pass, and the automatic test fix did not land: ${reasons.join(' | ')}. Fix the tests yourself on ${INTO} (a test-track change: you decide), or tell the agent how to proceed; then resume the run${RUN_ID ? ` with the same runId ${RUN_ID}` : ''}.`
+  const entry = {
+    task: n, file: files.join(', '), files, kind: 'test-fix', test: tests.join(', '), requirement: '', decision,
+    findings: reasons, fixes: records.map(x => x.fix).filter(Boolean), runId: RUN_ID || null, action, notification: null, escalatedTo: [],
+  }
+  releaseSlot(n)
+  if (action === 'park') {
+    const note = JSON.stringify({ file: entry.file, kind: 'test-fix', test: entry.test, requirement: '', decision })
+    const out = await thinCk('park', ['worktree', 'park', SPEC, n, '--json'], { stdin: note, label: `park ${n}`, phase: phaseOf(n), cwd: ROOT, what: `Parking step for Task ${n} of spec ${SPEC}` })
+    const p = out.json ? out.json : { parked: false, error: ckError(out) }
+    entry.notification = p && p.notification ? p.notification : 'failed'
+    entry.notificationDetail = (p && (p.detail || p.error)) || ''
+    if (!p || p.parked === false) {
+      entry.notification = 'failed'
+      entry.notificationDetail = 'park failed: ' + ((p && (p.error || p.detail)) || 'the park step returned nothing')
+    } else rec.parked = true
+  }
+  rec.needsInput = entry
+  rec.reason = `needs input: test fix (${trim(reasons.join(' | '), 300)})`
+  return rec
+}
+
+// Task 87 (7.2, 7.4): the findings of a cross-test check are test conflicts with no blocked task. The impl tasks
+// their tests verify wait (crossHeld) until the fix lands; a fix that does not land keeps them waiting and goes to me.
+async function routeCrossFindings(w, findings, replan, entry0 = null) {
+  const conflicts = findings.map(f => ({
+    file: String(f.file || (f.test && String(f.test).includes('::') ? String(f.test).split('::')[0] : '') || ''),
+    test: String(f.test || ''),
+    criterion: String(f.criterion || ''),
+    reason: String(f.issue || f.reason || ''),
+    fix: String(f.fix || ''),
+  })).filter(c => c.file)
+  // The proof and the record name every verified task (ck refuses a proof with neither --blocked nor --held). A file
+  // no impl task verifies falls back to the wave's test tasks, so the list is never empty.
+  const verified = [...heldByCrossTest({ findings, testVerifies: current && current.testVerifies })]
+  const proofHeld = verified.length ? verified : testTasksOf(w).map(String)
+  // The scheduler holds only the verified tasks not yet done or merged.
+  const held = verified.filter(t => !view.done.has(t) && !mergedInRun.has(t))
+  for (const t of held) crossHeld.add(t)
+  // crossHeld now says exactly what waits: the wave's other dependents no longer need the blanket hold of the check window
+  crossInFlight.delete(w)
+  poke()
+  if (held.length) log(`cross-test (wave ${w}): holding Task ${held.join(', ')} until the test fix lands`)
+  if (!conflicts.length) {
+    log(`cross-test (wave ${w}): no finding names a test file; nothing to fix`)
+    for (const t of held) crossHeld.delete(t)
+    // no automatic fix exists for these findings: list them as needing my input, so none goes unseen
+    const texts = findings.map(f => trim(String(f.issue || f.summary || f.reason || JSON.stringify(f)), 300))
+    crossNeedsInput.push({
+      task: held[0] != null ? held[0] : `cross-test wave ${w}`, file: '', files: [], kind: 'test-fix', test: '', requirement: '',
+      decision: `A cross-test check found blocking findings that name no test file, so no automatic test fix can be made: ${texts.join(' | ')}. Fix the tests yourself on ${INTO} (a test-track change: you decide), then resume the run${RUN_ID ? ` with the same runId ${RUN_ID}` : ''}.`,
+      findings: texts, fixes: [], runId: RUN_ID || null, action: 'ask', notification: null, escalatedTo: [], held,
+    })
+    if (held.length) replan()
+    return
+  }
+  const fixed = await testFixFor(null, conflicts, { held: proofHeld })
+  if (fixed.toMe.length) {
+    // the fix did not land: the held tasks stay held and the conflict goes to me
+    const reasons = fixed.toMe
+    const tests = [...new Set(fixed.records.flatMap(x => x.tests))]
+    const files = [...new Set(tests.map(t => t.split('::')[0]))]
+    const action = parkAction({ interactive: INTERACTIVE })
+    const decision = `A cross-test check found tests that disagree, and the automatic test fix did not land: ${reasons.join(' | ')}. ${held.length ? `Task ${held.join(', ')} stay held. ` : ''}Fix the tests yourself on ${INTO} (a test-track change: you decide), then resume the run${RUN_ID ? ` with the same runId ${RUN_ID}` : ''}.`
+    const entry = { task: held[0] != null ? held[0] : `cross-test wave ${w}`, file: files.join(', '), files, kind: 'test-fix', test: tests.join(', '), requirement: '', decision, findings: reasons, fixes: fixed.records.map(x => x.fix).filter(Boolean), runId: RUN_ID || null, action: held.length ? action : 'ask', notification: null, escalatedTo: [], held }
+    if (entry.action === 'park') {
+      const note = JSON.stringify({ file: entry.file, kind: 'test-fix', test: entry.test, requirement: '', decision })
+      const out = await thinCk('park', ['worktree', 'park', SPEC, entry.task, '--json'], { stdin: note, label: `park ${entry.task}`, phase: 'Test fix', cwd: ROOT, what: `Parking step for the held Task ${entry.task} of spec ${SPEC}` })
+      const pk = out.json ? out.json : { parked: false, error: ckError(out) }
+      entry.notification = pk && pk.notification ? pk.notification : 'failed'
+      entry.notificationDetail = (pk && (pk.detail || pk.error)) || ''
+      if (!pk || pk.parked === false) { entry.notification = 'failed'; entry.notificationDetail = 'park failed: ' + ((pk && (pk.error || pk.detail)) || 'the park step returned nothing') }
+    }
+    crossNeedsInput.push(entry)
+    return
+  }
+  for (const t of held) crossHeld.delete(t)
+  if (held.length) replan()  // re-read the plan: it lists the released tasks again
+  if (fixed.findings.length) {
+    // the test-fixer judged the tests correct: that is not a landed fix, and its reason reaches the report
+    const why = fixed.findings.map(f => trim(String(f.message || f.issue || ''), 300))
+    if (entry0) entry0.testCorrect = why
+    log(`cross-test (wave ${w}): the tests are correct, no fix was needed (${why.join(' | ')})${fixed.fixed.length ? '; test fix landed for the rest' : ''}; ${held.length ? `Task ${held.join(', ')} released` : 'no task was held'}`)
+    return
+  }
+  log(`cross-test (wave ${w}): test fix landed; ${held.length ? `Task ${held.join(', ')} released` : 'no task was held'}`)
 }
 
 async function runTask(n) {
@@ -1451,7 +2222,9 @@ async function runTask(n) {
       releaseSlot(n)
       if (action === 'park') {
         let p = null
-        try { p = await call('park', parkPrompt(n, stop, entry.decision), { label: `park ${n}`, phase: phaseOf(n), schema: PARKED, ...LOW }) } catch (e) { p = { parked: false, error: e && e.message } }
+        const note = JSON.stringify({ file: stop.file, kind: stop.kind || 'test', test: stop.test || '', requirement: stop.requirement || '', decision: entry.decision })
+        const out = await thinCk('park', ['worktree', 'park', SPEC, n, '--json'], { stdin: note, label: `park ${n}`, phase: phaseOf(n), cwd: ROOT, what: `Parking step for Task ${n} of spec ${SPEC}` })
+        p = out.json ? out.json : { parked: false, error: ckError(out) }
         entry.notification = p && p.notification ? p.notification : 'failed'
         entry.notificationDetail = (p && (p.detail || p.error)) || ''
         if (!p || p.parked === false) {
@@ -1476,9 +2249,15 @@ async function runTask(n) {
       return rec
     }
     let escIdx = 0
+    let budgetBase = 0   // retries spent before a landed test fix do not count against the fresh attempt
+    // Task 93 (12.5-12.7): a missing command another unfinished task provides is a live edge (wait), one no task
+    // provides is a test conflict, and an edge that would close a cycle blocks the task. None of them is retried.
+    const liveOf = res => (res && !ok(res) && !guardStopOf(res) ? liveEdgeDecision({ task: n, failures: res.failures, deps: view.deps, done: [...view.done, ...mergedInRun], liveDeps }) : { action: 'none', edges: [], cycle: null, command: null, tests: [], refused: [] })
+    const liveConflicts = res => { const lv = liveOf(res); return lv.action === 'conflict' ? { ...res, testConflicts: [...testConflictsOf(res), ...lv.tests] } : res }
     const rungs = ladderOf(n)
+    const ladder = async () => {
     for (;;) {
-      while (!ok(r) && !stop && retryNo() <= MAX_RETRIES && !busy(r) && !testConflictOf(r)) {
+      while (!ok(r) && !stop && retryNo() - budgetBase <= MAX_RETRIES && !busy(r) && !testConflictOf(r) && liveOf(r).action === 'none') {
         log(`Task ${n}: ${r && !(r.commits || '').trim() ? 'no commits' : 'gate not passed'}, retry ${retryNo()}/${MAX_RETRIES}`)
         r = await call('task', retryPrompt(n, r, retryNo(), claimFlags('retry', codeOpts(n), retryNo() + 1)), { label: `${label(n)} retry ${retryNo()}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
         rec.attempts++
@@ -1486,7 +2265,7 @@ async function runTask(n) {
         stop = guardStopOf(r)
         rec.startedAt = rec.startedAt || (r && r.startedAt)
       }
-      while (escIdx < rungs.length && !ok(r) && !stop && !busy(r) && !testConflictOf(r)) {
+      while (escIdx < rungs.length && !ok(r) && !stop && !busy(r) && !testConflictOf(r) && liveOf(r).action === 'none') {
         const model = rungs[escIdx++]
         log(`Task ${n}: still failing after ${retryNo()} attempt(s), escalating to ${model}`)
         r = await call('task', retryPrompt(n, r, retryNo(), claimFlags('escalation', escalated(codeOpts(n), model), retryNo() + 1)), { label: `${label(n)} retry ${retryNo()} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
@@ -1501,6 +2280,26 @@ async function runTask(n) {
       if (stop) return await needInput()
       if (ok(r) || busy(r)) break
     }
+    return null
+    }
+    const early = await ladder()
+    if (early) return early
+    const live = liveOf(r)
+    // A refused cycle (12.7) blocks the task even when another provider is safe: no edge is recorded for it.
+    if (live.action === 'blocked' || live.refused.length) {
+      releaseSlot(n)
+      rec.result = r
+      rec.finishedAt = r && r.finishedAt
+      rec.reason = `blocked: command cycle ${(live.cycle || []).map(x => `Task ${x}`).join(' -> ')}`
+      log(`Task ${n}: ${rec.reason}; the live edge is not added`)
+      return rec
+    }
+    if (live.action === 'wait') {
+      // 12.5, 12.8: the edges are recorded and logged; the task waits for them and spends no retry.
+      releaseSlot(n)
+      return recordLiveWait(n, rec, r, live)
+    }
+    r = liveConflicts(r)
     if (testConflictOf(r)) {
       // Issue #8: one confirmation on the strongest rung (unless the claim already came from it):
       // a second agent that agrees makes the task blocked: test; one that passes the gate wins.
@@ -1513,14 +2312,35 @@ async function runTask(n) {
       rec.attempts++
       if (!onTop) { rec.escalations.push({ stage: 'test-conflict', model: top }); lastModel = top }
       rec.startedAt = rec.startedAt || (r && r.startedAt)
+      r = liveConflicts(r)
       const confirmed = testConflictOf(r)
       if (confirmed) {
+        // Task 86 (4.1-4.10): the confirmed conflicts go to a test-fixer; a landed fix or a test-correct verdict retries the task.
         releaseSlot(n)
         rec.result = r
         rec.finishedAt = r && r.finishedAt
         rec.testConflict = { ...confirmed, firstReport: first }
         rec.reason = `blocked: test (${confirmed.file}${confirmed.test ? ` ${confirmed.test}` : ''}): ${confirmed.reason}`
-        return rec
+        const fixed = await testFixFor(n, testConflictsOf(r))
+        if (fixed.toMe.length) return await parkTestFix(n, rec, fixed.toMe, fixed.records)
+        rec.testConflictFixed = rec.testConflict   // the conflict is resolved: a later ordinary failure is handled like any other
+        rec.testConflict = null
+        log(`Task ${n}: ${fixed.fixed.length ? `test fix landed for ${fixed.fixed.join(', ')}` : 'the tests are correct'}; retrying the task`)
+        budgetBase = retryNo()
+        await acquireSlot(n)
+        r = await call('task', `${retryPrompt(n, { ...r, failures: fixed.findings }, retryNo(), claimFlags('retry', codeOpts(n), retryNo() + 1))}\n${afterFixNote(fixed.fixed, fixed.findings)}`, { label: `${label(n)} retry ${retryNo()}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
+        rec.attempts++
+        lastModel = codeOpts(n).model
+        stop = guardStopOf(r)
+        rec.startedAt = rec.startedAt || (r && r.startedAt)
+        const again = await ladder()
+        if (again) return again
+        if (testConflictOf(r)) {
+          rec.result = r
+          rec.finishedAt = r && r.finishedAt
+          releaseSlot(n)
+          return await parkTestFix(n, rec, [`the task still reports a test that can never pass after its test fix: ${trim(testConflictOf(r).file, 120)}: ${trim(testConflictOf(r).reason, 300)}`], fixed.records)
+        }
       }
     }
     if (!ok(r) && busy(r)) {
@@ -1553,7 +2373,7 @@ async function runTask(n) {
         log(`Task ${n}: reviewer asked for changes, revision ${round}/${REVIEW_ROUNDS}`)
         await revised(revisePrompt(n, review, round, claimFlags('revision', codeOpts(n), round + 1)), `${label(n)} revise ${round}`, codeOpts(n), codeOpts(n).model)
         if (stop) return { exit: await needInput() }
-        if (ok(r)) review = await call('review', reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts })
+        if (ok(r)) review = await call('review', reviewPrompt(n, r, WANT_EXTRA(n) ? await testReviewExtra(n) : ''), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts })
       }
       for (const model of ladderOf(n)) {
         if (!(review && review.verdict === 'changes' && ok(r))) break
@@ -1562,7 +2382,7 @@ async function runTask(n) {
         await revised(revisePrompt(n, review, round, claimFlags('escalation', escalated(codeOpts(n), model), round + 1)), `${label(n)} revise ${round} (${model})`, escalated(codeOpts(n), model), model)
         if (stop) return { exit: await needInput() }
         rec.escalations.push({ stage: 'revise', model })
-        if (ok(r)) review = await call('review', reviewPrompt(n, r), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts })
+        if (ok(r)) review = await call('review', reviewPrompt(n, r, WANT_EXTRA(n) ? await testReviewExtra(n) : ''), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts })
       }
       // model/effort: who judged the task, so an audit can count escapes (approved bugs) per reviewer tier.
       const by = { model: opts.model || 'inherited', effort: opts.effort || 'inherited', riskTag: rec.riskTag }
@@ -1579,7 +2399,7 @@ async function runTask(n) {
     }
     const individualReview = REVIEW_ON && reviewGroups({ merged: [n], risk: RISK }).individual.length > 0
     if (ok(r) && individualReview) {
-      const first = await call('review', reviewPrompt(n, r), { label: `review ${n}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
+      const first = await call('review', reviewPrompt(n, r, WANT_EXTRA(n) ? await testReviewExtra(n) : ''), { label: `review ${n}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...reviewOpts(n) })
       const out = await reviewLoop(first, reviewOpts(n))
       if (out) return out.exit
     }
@@ -1610,6 +2430,7 @@ async function runTask(n) {
     }
     pendingReview.delete(n)
     rec.merge = m
+    if (m && m.protected) return parkProtected(n, rec, m.protected)
     rec.mergedAt = m && m.mergedAt
     if (!m || !m.merged) {
       rec.reason = `merge failed: ${(m && m.error) || 'no result'}`
@@ -1637,8 +2458,48 @@ function buildOverhead() {
   const share = total > 0 ? (at('plan') + at('review') + at('review-wave') + at('land')) / total : null
   return { share, threshold: OVERHEAD_WARN_THRESHOLD, warned: overheadWarning(share) }
 }
+// Run start (9.1, 9.10, 16.2, 16.6): `ck worktree start` once, before the first task agent. It sweeps the claims of
+// earlier runs, installs or checks the hooks and records the baseline. A hook problem is a result warning.
+let runStart = null
+const runWarnings = []
+async function startRun() {
+  const argv = ['worktree', 'start', SPEC, ...(RUN_ID ? ['--run', RUN_ID] : []), '--json']
+  const out = await thinCk('run start', argv, { label: 'run start', phase: 'Plan', cwd: ROOT, what: `Run start step for spec ${SPEC}` })
+  runStart = out.json ? out.json : { error: ckError(out) }
+  if (out.json) {
+    for (const c of runStart.releasedClaims || []) log(`Run start released the claim on Task ${c.task}${c.reason ? ` (${c.reason})` : ''}`)
+    const h = runStart.hooks
+    const problems = (h && Array.isArray(h.problems) ? h.problems : []).map(String)
+    if (problems.length) {
+      runWarnings.push(...problems.map(x => `hooks: ${x}`))
+      log(`Run start: hook problem: ${problems.join('; ')}`)
+    }
+    for (const w of runStart.warnings || []) if (!runWarnings.includes(`run start: ${w}`)) runWarnings.push(`run start: ${w}`)
+  } else {
+    runWarnings.push(`run start failed: ${runStart.error}`)
+    log(`Run start failed: ${runStart.error}`)
+  }
+}
+
+// Run end (10.1, 10.3, 10.5): one `ck worktree audit` after the last step, on every outcome. A failed or unparseable
+// audit is incomplete, never clean.
+async function auditRun() {
+  let out = null
+  try {
+    out = await thinCk('audit', ['worktree', 'audit', SPEC, '--json'], { label: 'audit', phase: 'Report', cwd: ROOT, what: `Run-end audit for spec ${SPEC}` })
+  } catch (e) {
+    out = { code: -1, json: null, stderr: String(e && e.message) }
+  }
+  const j = out && out.json
+  if (j && typeof j === 'object' && typeof j.complete === 'boolean' && typeof j.clean === 'boolean') return j
+  const error = j && j.error ? String(j.error) : ckError(out || {})
+  log(`Run-end audit could not complete: ${trim(error, 300)}`)
+  return { schema: 'ck-audit/1', spec: SPEC, into: INTO, complete: false, clean: false, drift: [], problems: [`audit did not complete: ${trim(error, 300)}`] }
+}
+
+async function mainRun() {
 const startPlan = await requestPlan('start')
-if (!startPlan) return { halted: true, refused: false, reason: PLAN_FAILED, into: INTO, degraded, planFallbacks, overhead: buildOverhead(), directCk: directCkOut() }
+if (!startPlan) return { halted: true, refused: false, reason: PLAN_FAILED, into: INTO, degraded, planFallbacks, overhead: buildOverhead(), directCk: directCkOut(), thinAgent: thinAgentOut() }
 if (startPlan.cycles.length || startPlan.verifyCycles.length) {
   log('Refusing to launch: the plan has a cycle. Fix tasks.md (see `ck lint`; `ck relink <spec> <task> --apply` repairs a verify-order cycle when it can) and run again.')
   return {
@@ -1651,9 +2512,10 @@ if (startPlan.cycles.length || startPlan.verifyCycles.length) {
     degraded,
     planFallbacks,
     overhead: buildOverhead(),
-    directCk: directCkOut(),
+    directCk: directCkOut(), thinAgent: thinAgentOut(),
   }
 }
+await startRun()
 const initialPlan = startPlan
 const initiallyDone = startPlan.done.length
 doneAtStart = new Set(startPlan.done.map(String))
@@ -1666,27 +2528,46 @@ poked = false
 // microtask hops, so the continuation of the call that settled makes its own follow-up request (a review
 // after an implementer, a land after an approval) before free slots are counted (3.9).
 // A held start with agents still in flight stays alive too: any of them settling re-runs the start decision (NFR-6).
-while (running.size || planRun || (deferring && inFlight.length)) {
-  await signal()
-  poked = false
-  for (let i = 0; i < 10; i++) await null
+const resumedWaves = new Set()
+for (;;) {
+  while (running.size || planRun || crossOpen > 0 || (deferring && inFlight.length)) {
+    await signal()
+    poked = false
+    for (let i = 0; i < 10; i++) await null
+    schedule()
+  }
+  await landingIdle
+  for (const n of Object.keys(records)) maybeCrossTest(n, true)  // waves whose other test tasks never finished
+  await Promise.all(crossTestRuns)
+  // A cross-test fix that landed after the loop went idle releases held tasks: start them (7.4).
+  const resumed = crossTests.filter(c => c.routed && !resumedWaves.has(c.wave))
+  if (!resumed.length) break
+  for (const c of resumed) resumedWaves.add(c.wave)
+  if (planRun) await planRun
   schedule()
+  poked = false
+  if (!(running.size || planRun)) break
 }
-await landingIdle
-for (const n of Object.keys(records)) maybeCrossTest(n, true)  // waves whose other test tasks never finished
-await Promise.all(crossTestRuns)
 
 // Final full gate on the target, unless it is already known to be red.
 let finalGate = null
 if (mergedCount && !redTarget) {
   phase('Final gate')
-  finalGate = await call('gate', verifyPrompt('final'), { label: 'final gate', phase: 'Final gate', schema: VERIFY, ...ORCH })
-  if (!finalGate || !finalGate.green) {
+  const g = await attributedGate('final', mergedCount, 'final gate', 'Final gate', `Verification (final) for spec ${SPEC}`)
+  gates.push(g)
+  let fix = null
+  if (g.state === 'red') {
     log(`Final gate red, one fix attempt`)
-    const f = await fixAndRecheck('final gate', finalGate)
-    finalGate = { ...(finalGate || {}), fix: f, green: f.green }
+    fix = await fixAndRecheck('final gate', g, mergedCount, 'Final gate')
   }
-  if (!finalGate.green) redTarget = true
+  g.fix = fix
+  const green = g.green || !!(fix && fix.green)
+  finalGate = { ...g, green, fix }
+  if (g.state === 'error') {
+    finalGateError = true
+    log(`Final gate could not run (${g.error})`)
+  }
+  if (!green) redTarget = true
 }
 
 // --- report ------------------------------------------------------------------
@@ -1706,7 +2587,9 @@ const taskReport = Object.values(records).map(r => ({
   reason: r.reason,
   summary: r.result && r.result.summary,
   wrongTests: r.result && r.result.wrongTests,
-  testConflict: r.testConflict || null,
+  testConflict: r.testConflict || r.testConflictFixed || null,
+  testConflicts: testConflictsOf(r.result),
+  failures: (r.result && Array.isArray(r.result.failures) && r.result.failures) || [],
   outsideFiles: r.result && r.result.outsideFiles,
   deviations: r.result && r.result.deviations,
   fixedAfterMerge: !!r.fixes,
@@ -1735,26 +2618,12 @@ const ends = taskReport.map(t => t.mergedAt || t.finishedAt).filter(Boolean).sor
 // 11 merged while git had 19, and bench v2 listed Task 17 as merged and as "merge failed".
 // Agent results only annotate it (reasons). Without a usable git report, the agents' results
 // are used, deduplicated, and reportSource says so.
-const REPORT = {
-  type: 'object',
-  properties: {
-    head: { type: 'string' },
-    merged: { type: 'array', items: { type: 'object', properties: { task: { type: 'string' }, commit: { type: 'string' }, mergedAt: { type: 'string' } }, required: ['task'] } },
-    done: { type: 'array', items: { type: 'object', properties: { task: { type: 'string' } }, required: ['task'] } },
-    failed: { type: 'array', items: { type: 'object', properties: { task: { type: 'string' }, branch: { type: 'string' }, ahead: { type: 'number' }, claim: { type: 'string' } }, required: ['task'] } },
-    blocked: { type: 'array', items: { type: 'object', properties: { task: { type: 'string' }, on: { type: 'array', items: { type: 'string' } } }, required: ['task', 'on'] } },
-    needsInput: { type: 'array', items: { type: 'object', properties: { task: { type: 'string' } }, required: ['task'] } },
-    unstarted: { type: 'array', items: { type: 'object', properties: { task: { type: 'string' } }, required: ['task'] } },
-    error: { type: 'string', description: 'only if the command printed no JSON (or was refused): what happened' },
-  },
-  required: ['merged', 'done', 'failed', 'blocked', 'unstarted'],
-}
-const reportPrompt = () => `Report step for spec ${SPEC}: run ONE command and copy its JSON output. Nothing else: no other commands, no edits. ${GIT_NOTE}
-Command:  ck -C ${ROOT} worktree report ${SPEC} --into ${INTO} --json
-Copy "head", "merged" (task, commit, mergedAt), "done", "failed" (task, branch, ahead, claim), "blocked" (task, on), "needsInput" (task; leave it empty if the output has none) and "unstarted" exactly as printed, every entry. Put a message in error only if the command printed no JSON (say what it printed, or that it was refused).`
 phase('Report')
 let gitReport = null
-try { gitReport = await call('report', reportPrompt(), { label: 'report', phase: 'Report', schema: REPORT, ...LOW }) } catch (e) { gitReport = { error: e && e.message } }
+{
+  const out = await thinCk('report', ['-C', ROOT, 'worktree', 'report', SPEC, '--into', INTO, '--json'], { label: 'report', phase: 'Report', cwd: ROOT, what: `Report step for spec ${SPEC}` })
+  gitReport = out.json ? out.json : { error: ckError(out) }
+}
 const GIT_LISTS = ['merged', 'done', 'failed', 'blocked', 'unstarted']
 const fromGit = !!gitReport && !gitReport.error && GIT_LISTS.every(k => Array.isArray(gitReport[k]))
 const ids = list => (list || []).map(e => taskId(e && typeof e === 'object' ? e.task : e))
@@ -1765,6 +2634,7 @@ const startDone = new Set((initialPlan.done || []).map(taskId))
 const needsInputIds = new Set([...parked.keys(), ...(fromGit ? ids(gitReport.needsInput) : [])].map(taskId))
 const needsInput = [...parked.values()].map(e => ({ ...e, task: taskId(e.task) }))
 for (const t of needsInputIds) if (!needsInput.some(e => e.task === t)) needsInput.push({ task: t, file: '', kind: '', test: '', requirement: '', decision: 'see the park note (ck worktree report)', action: 'park', notification: null })
+for (const e of crossNeedsInput) needsInput.push({ ...e, task: taskId(e.task) })
 needsInput.sort((a, b) => byNum(a.task, b.task))
 const agentFailed = new Map([...failed.entries()].map(([t, r]) => [taskId(t), r]))
 let merged, failedList, notStarted, blocked = [], readyLeft = null
@@ -1820,7 +2690,10 @@ for (const e of needsInput) {
 let outcome = 'complete'
 let reason = stopReason
 const planFailed = stopReason === PLAN_FAILED
-if (redTarget) outcome = 'halted'
+if (redTarget) {
+  outcome = 'halted'
+  if (finalGateError) reason = 'final gate could not run'
+}
 else if (stopReason && !planFailed && notStarted.length) outcome = 'halted'
 else if (planFailed && (!fromGit || readyLeft.length)) outcome = 'halted'
 else if (notStarted.length || failedList.length || needsInput.length) {
@@ -1835,14 +2708,11 @@ else if (notStarted.length || failedList.length || needsInput.length) {
 if (outcome === 'blocked') log(reason)
 if (relinks.length) log(`Relinked mid-run (verify-order cycles): ${relinks.map(r => `Task ${r.task}`).join(', ')}`)
 if (DIRECT_CK) log(`Direct ck steps (no agent): ${directCk.plan} plan, ${directCk.land} land, ${directCk.relink} relink, ${(directCk.ms / 60000).toFixed(1)} min${directCk.failures ? `, ${directCk.failures} without JSON` : ''}`)
-// Issue #8: the test-track fixes the run needs, one per task blocked on a test.
-const testFixes = Object.values(records).filter(r => r && r.testConflict).map(r => ({
-  task: r.task, file: r.testConflict.file, test: r.testConflict.test || null, criterion: r.testConflict.criterion || null,
-  reason: r.testConflict.reason, fix: r.testConflict.fix || null,
-}))
+// Task 86 (4.10): every test fix this run tried, as TestFixRecords (they replace the old report-only entries).
+const testFixes = testFixRecords
 if (testFixes.length) {
-  log(`Test-track fixes (${testFixes.length}): each task below is blocked on a test that two agents found can never pass; fix the test on ${INTO} (it is a test-track change: you decide), then run /spec:implement again`)
-  for (const f of testFixes) log(`  Task ${f.task}: ${f.file}${f.test ? ` ${f.test}` : ''}${f.criterion ? ` vs ${f.criterion}` : ''}: ${trim(f.reason, 300)}${f.fix ? ` -> fix: ${trim(f.fix, 300)}` : ''}`)
+  log(`Test fixes (${testFixes.length}): ${testFixes.map(f => `${f.fix || 'ledger'} for ${f.blocked ? `Task ${f.blocked}` : 'cross-test'} ${f.outcome}`).join('; ')}`)
+  for (const f of testFixes.filter(x => x.outcome === 'to-me')) log(`  ${f.fix || 'not started'}: ${f.tests.join(', ')}: ${trim(f.reason, 300)}`)
 }
 // Deterministic-fallback report section (5.1, 6.1): degraded mark, fallback
 // count and the triggering plan attempts.
@@ -1890,6 +2760,8 @@ return {
   tasks: taskReport,
   landings,
   fullGates,
+  gates,
+  testConflicts: taskReport.flatMap(t => t.testConflicts),
   finalGate,
   crossTests,
   degraded,
@@ -1897,6 +2769,21 @@ return {
   overhead,
   relinks,
   testFixes,
-  directCk: directCkOut(),
+  // Task 93 (12.8): listed when the run added live edges; a run without any keeps the result's pinned key set.
+  ...(liveEdges.length ? { liveEdges } : {}),
+  // Task 94 (13.3): listed when the run held a task for an overlap; a run without any keeps the pinned key set.
+  ...(writeSetHolds.length ? { writeSetHolds } : {}),
+  directCk: directCkOut(), thinAgent: thinAgentOut(),
   stats: { initiallyDone, merged: merged.length, failed: failedList.length, notStarted: notStarted.length, planSteps: refills, planFailures, planFallbacks: planFallbacks.length, fixes: fixCount, landings: landings.length, bisected: landings.filter(l => l.bisected).length },
 }
+}
+
+let mainResult = null
+let mainError = null
+try { mainResult = await mainRun() } catch (e) { mainError = e }
+const audit = await auditRun()
+if (mainError) {
+  try { mainError.audit = audit } catch {}
+  throw mainError
+}
+return { ...mainResult, runStart, runWarnings, sweep: runStart && !runStart.error ? { releasedClaims: runStart.releasedClaims || [], keptClaims: runStart.keptClaims || [] } : null, audit }
