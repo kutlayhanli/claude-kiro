@@ -1683,7 +1683,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 72: Property test for when the audit runs
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 13.1, 13.2, 13.6, 13.7, 13.9
 **Description:** Implement P-35 with Hypothesis in `tests/test_arbiter_audit.py`, named `test_p35_...` (W): over `dags()`, tracks, tasks with and without Verified by, retries and escalations, and cross-test answers with and without blocking findings, the audit runs exactly once before the first attempt for impl tasks with verifying tests that no cross-test check in the run passed in full, and never for others; the workflow's `auditDue` seam is reached through the bridge. Settings `@settings(derandomize=True, max_examples=30, database=None, deadline=None)`. The file declares `PROPERTIES = {"P-35": ...}`.
@@ -1694,12 +1694,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 74 (P-35 at `auditDue`)
 
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the P-35 row
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] The tests call the workflow through the bridge, not a server
-- [ ] Tests exercise the real boundary named in the test plan (real workflow under the fake runtime, real `ck`)
-- [ ] Tests fail before the implementation exists for the right reason (no audit step)
-- [ ] No mocks of the project's own code in integration tests
+- [x] The generators cover every surface form and negative listed in the P-35 row
+- [x] Settings are deterministic (derandomized, no database)
+- [x] The tests call the workflow through the bridge, not a server
+- [x] Tests exercise the real boundary named in the test plan (real workflow under the fake runtime, real `ck`)
+- [x] Tests fail before the implementation exists for the right reason (no audit step)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (strategies), Task 71 (same test file)
 **Complexity:** Medium
