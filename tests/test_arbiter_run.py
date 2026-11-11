@@ -860,18 +860,25 @@ def test_tc63_a_landed_edit_that_adds_a_dependency_on_a_not_started_task_changes
 
     before = schedule()
     assert "3" in before["ready"], "task 3 is schedulable before the edit: " + json.dumps(before)
-    # One slot: task 1 (the longest chain) runs alone, so task 3 has not started when the ruling lands.
-    opts = {"deps": {"1": [], "2": ["1"], "3": []}, "testConflicts": {"1": {"conflict": CONFLICT}}, "rulings": {"1": [SPEC_EDIT]},
-            "arbiterEdits": {"1": {"files": {"specs/demo/tasks.md": THREE_REWIRED}}}}
+    # The in-run plans: before the landing the fake holds task 3 back behind task 1, so task 3 cannot start while the
+    # ruling is pending (6.9 frees the slot then). Once the arbiter's commit lands, the plans carry the landed wiring
+    # (`landedDeps`, as `ck plan` reading the landed tasks.md): task 3 waits on task 2. Task 1 resumes and merges, task 2
+    # never passes its gate, so under the new wiring task 3 never starts; under the old wiring it would start once task 1
+    # merged and task 2 was parked.
+    opts = {"deps": {"1": [], "2": ["1"], "3": ["1"]}, "testConflicts": {"1": {"conflict": CONFLICT, "attempts": 1}},
+            "failUntil": {"2": 99}, "rulings": {"1": [SPEC_EDIT], "2": [REQ]},
+            "arbiterEdits": {"1": {"files": {"specs/demo/tasks.md": THREE_REWIRED}}}, "landedDeps": {"1": {"3": ["2"]}}}
     out = run(bridge, project, opts, agents=roles("haiku", ["opus"]), maxConcurrent=1)
     ev = out["events"]
     assert arbiter_calls(ev) == ["arbiter task 1"], ", ".join(ev)
     assert (project.target / "specs" / "demo" / "tasks.md").read_text() == THREE_REWIRED, "the edit landed"
-    landed = ev.index("arbiter task 1")
-    first_three = ev.index(attempts(ev, "3")[0]) if attempts(ev, "3") else len(ev)
-    assert first_three > landed, "task 3 had not started when the edit landed: " + ", ".join(ev)
-    replans = [e for e in ev[landed + 1:first_three] if re.match(r"^plan \d+", e)]
-    assert replans, "the workflow planned again after the landing and before task 3 started: " + ", ".join(ev)
+    lands = [i for i, e in enumerate(ev) if e.startswith(("arbiter-land", "land arbiter")) and not e.endswith(" end")]
+    assert lands, "the arbiter's edit went through a landing step: " + ", ".join(ev)
+    land_at = lands[0]
+    replans = [e for e in ev[land_at + 1:] if re.match(r"^plan \d+", e)]
+    assert replans, "the workflow planned again after the landing: " + ", ".join(ev)
+    assert attempts(ev, "3") == [], "task 3 now waits on task 2, which never merged, so it never started: " + ", ".join(ev)
+    assert "3" not in out["result"]["merged"], json.dumps(out["result"])
     later = schedule()
     assert later != before, "the next plan differs"
     assert "3" not in later["ready"], "task 3 now waits on task 2: " + json.dumps(later)
@@ -880,7 +887,9 @@ def test_tc63_a_landed_edit_that_adds_a_dependency_on_a_not_started_task_changes
 
 def test_tc74_a_code_ruling_puts_the_ruling_in_the_retry_prompt_and_a_failing_gate_after_it_leaves_the_task_unfinished(bridge, tmp_path):  # noqa: F811
     project = arbiter_project(tmp_path)
-    opts = {**CONFLICT_OPTS, "failUntil": {"1": 99}, "rulings": {"1": [ruling("code"), REQ]}}
+    # The conflict comes once: the retry after the ruling is a plain gate failure, never passing (failUntil).
+    opts = {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT, "attempts": 1}}, "failUntil": {"1": 99},
+            "rulings": {"1": [ruling("code"), REQ]}}
     out = run(bridge, project, opts, agents=roles("haiku", []))
     ev = out["events"]
     assert arbiter_calls(ev)[0] == "arbiter task 1", ", ".join(ev)
@@ -888,7 +897,7 @@ def test_tc74_a_code_ruling_puts_the_ruling_in_the_retry_prompt_and_a_failing_ga
     assert retries, "the task was retried after the ruling: " + ", ".join(ev)
     assert "print the greeting before exiting" in out["prompts"][retries[0]], out["prompts"][retries[0]]
     assert "1" not in out["result"]["merged"], "the gate kept failing, so the task is unfinished: " + json.dumps(out["result"])
-    assert "1" not in (out["result"].get("done") or [])
+    assert needs(out), "the unfinished task is an entry for me: " + json.dumps(out["result"].get("needsInput"))
 
 
 def deadlock(issue, file="src/greet.py"):
