@@ -2240,7 +2240,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 97: Sync the vendored copies under `.claude/` with the plugin sources
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 19.2, 19.4
 **Description:** Copy the changed plugin sources into the vendored, protected copies so they are byte-identical: `.claude/workflows/spec-implement.js`, `.claude/workflows/spec-create.js`, `.claude/workflows/spec-implement-brief.md`, `.claude/workflows/without-workflow-tool.md` and `.claude/commands/spec/implement.md` (use `uv run ck vendor`), regenerate `.claude/agents/ck-*.md` with `ck agents sync` (adds `ck-runner.md`), update `.claude/ck-manifest.json`, and refresh the OpenCode vendor copies with `cd opencode && npm run sync-vendor`. These paths are protected: the landing is refused for agents and lands only through my approval (`ck worktree approve`). This is the only task that edits `.claude/`.
@@ -2258,8 +2258,8 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 65 (TC-162b for the vendored copy, TC-172)
 
 **Acceptance:**
-- [ ] Every vendored copy is byte-identical to its plugin source, and the OpenCode vendor check passes
-- [ ] `.claude/agents/ck-runner.md` carries the lean frontmatter, so the skill finds the lean type (19.2, 19.4)
+- [x] Every vendored copy is byte-identical to its plugin source, and the OpenCode vendor check passes
+- [x] `.claude/agents/ck-runner.md` carries the lean frontmatter, so the skill finds the lean type (19.2, 19.4)
 
 **Dependencies:** Task 96 (copies the skill, after the workflow tasks it depends on), Task 95 (copies spec-create.js), Task 65 (its tests are the oracle)
 **Complexity:** Low
