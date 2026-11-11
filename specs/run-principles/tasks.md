@@ -18,7 +18,7 @@ Task 91 (paid hook capture) and Task 92 (protected `.claude/` copies, through `c
 ## Task Breakdown
 
 ### Task 1: Build the Python harness for the arbiter tests
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.6, 7.1, 9.5, 9.6, 10.1
 **Description:** Build the Python side of the test infrastructure (test-plan "What must be added", items 1 and 6). Create `tests/arbiter_helpers.py`, test-owned, with project modules imported inside function bodies so every test file collects before the feature exists:
@@ -42,13 +42,13 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 36 (its identity fixture), Task 37 (its project fixture and strategies), Task 38 (its strategies), Task 42 (its record reader)
 
 **Acceptance:**
-- [ ] `arbiter_project` builds a real git repo with a real integration worktree and `exec_ck` runs the real CLI in it
-- [ ] `arbiter_caller` is the only identity knowledge in the suite and matches design.md's `is_arbiter_caller` inputs
-- [ ] `decisions_entries` is the only parser of `decisions.md`, and the interface map is the only place the Harness Contract and design names meet
-- [ ] Each strategy generates every form its test-plan row lists
-- [ ] Tests exercise the real boundary named in the test plan (real git, real `ck` subprocess)
-- [ ] Tests fail before the implementation exists for the right reason (the helpers that need `ck arbiter` report the missing command, not a broken helper)
-- [ ] No mocks of the project's own code in integration tests
+- [x] `arbiter_project` builds a real git repo with a real integration worktree and `exec_ck` runs the real CLI in it
+- [x] `arbiter_caller` is the only identity knowledge in the suite and matches design.md's `is_arbiter_caller` inputs
+- [x] `decisions_entries` is the only parser of `decisions.md`, and the interface map is the only place the Harness Contract and design names meet
+- [x] Each strategy generates every form its test-plan row lists
+- [x] Tests exercise the real boundary named in the test plan (real git, real `ck` subprocess)
+- [x] Tests fail before the implementation exists for the right reason (the helpers that need `ck arbiter` report the missing command, not a broken helper)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** None
 **Complexity:** High

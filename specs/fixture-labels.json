@@ -1,0 +1,7 @@
+{
+  "tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json": {
+    "reason": "derived from the recorded workflow-agent hook input with agent_type set to spec:arbiter; the arbiter agent does not exist yet, Task 91 replaces it with a real capture",
+    "sha256": "9d4f43eb6b50aa889a23a8ce889cd2c043f2c31b4ef983bad4e53784b9d407d7",
+    "source": "handcrafted"
+  }
+}
