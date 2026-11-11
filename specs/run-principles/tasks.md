@@ -615,7 +615,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 26: Property tests for claim decisions
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.3, 5.4, 5.5, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8
 **Description:** Implement P-10, P-18 and P-19 with Hypothesis at the seams `arbiter_policy.claim_facts` and `decide_claim` (with `claim_key`), in `tests/test_arbiter_cli.py`, named `test_p<N>_...`. P-10: when the action is `rule`, tier is risky exactly when the task is safety, the stop is a guard stop, or the claim repeats an unruled one; a ledger with a recorded ruling on the same key is `ask` with tier None; metamorphic, changing Complexity never changes the tier. P-18: a claim that returns after its applied ruling is never ruled again, a review finding covered by an applied ruling is never ruled again even when the set of blocking findings changes, changing only evidence never changes identity, changing file, test, criterion or a review finding's file or issue does, and reordering the ledger's entries does not change what `claim_facts` builds or the decision. P-19: the arbiter is called for a new claim exactly when the task has fewer than 3 rulings and fewer than 6 arbiter calls; rulings and calls on other tasks never count (`claim_facts` counts per task); a 4th claim gives `ask` with reason `task-ruling-limit`, and a claim on a task at 6 calls gives `ask` with reason `task-call-limit`, whatever the ruling count. Listing the 3 is TC-154 at `ck arbiter open`. Settings `@settings(derandomize=True, max_examples=200, database=None, deadline=None)`. Start the module-level `PROPERTIES` map with `P-10`, `P-18`, `P-19`.
@@ -626,12 +626,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 29 (P-10, P-18, P-19 at `claim_facts` and `decide_claim`)
 
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the P-10, P-18 and P-19 rows
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] The tests call the decision seam, not a server
-- [ ] Tests exercise the real boundary named in the test plan (the seam)
-- [ ] Tests fail before the implementation exists for the right reason (the seam does not exist)
-- [ ] No mocks of the project's own code in integration tests
+- [x] The generators cover every surface form and negative listed in the P-10, P-18 and P-19 rows
+- [x] Settings are deterministic (derandomized, no database)
+- [x] The tests call the decision seam, not a server
+- [x] Tests exercise the real boundary named in the test plan (the seam)
+- [x] Tests fail before the implementation exists for the right reason (the seam does not exist)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (strategies), Task 25 (same test file)
 **Complexity:** High

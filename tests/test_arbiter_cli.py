@@ -13,8 +13,9 @@ from pathlib import Path
 from typing import Optional
 
 import pytest
+from hypothesis import given, settings, strategies as st
 
-from arbiter_helpers import DEFAULT_PRINCIPLES, ArbiterProject, arbiter_project, ck_run, decisions_entries
+from arbiter_helpers import DEFAULT_PRINCIPLES, ArbiterProject, arbiter_project, ck_run, claims, decisions_entries
 from landing_bridge import bridge  # noqa: F401  (module-scoped fixture)
 
 INTO = "integrate/demo"
@@ -433,3 +434,169 @@ def test_tc154_three_rulings_on_another_task_do_not_count(tmp_path):
     assert got["action"] == "rule", got
     assert got["reason"] == "", got
     assert got["earlier"] == [] or got["earlier"] is None or all(e["ruling"] not in (1, 2, 3) for e in got["earlier"])
+
+
+# --------------------------------------------------------------------------- properties P-10, P-18, P-19
+
+PROPERTIES = {
+    "P-10": "test_p10_tier_is_risky_exactly_for_safety_guard_stop_or_unruled_repeat",
+    "P-18": "test_p18_a_claim_after_its_applied_ruling_is_never_ruled_again",
+    "P-19": "test_p19_the_arbiter_is_called_exactly_under_the_task_limits",
+}
+
+PROP = settings(derandomize=True, max_examples=200, database=None, deadline=None)
+
+
+def _claim(raw: dict):
+    from claude_kiro.arbiter_policy import Claim
+
+    tuples = ("findings",)
+    lists = ("failing", "tests", "cycle", "models_tried")
+    kw = dict(raw)
+    for k in tuples:
+        if k in kw:
+            kw[k] = tuple(tuple(x) for x in kw[k])
+    for k in lists:
+        if k in kw:
+            kw[k] = tuple(kw[k])
+    return Claim(**kw)
+
+
+def _ledger(entries: dict) -> dict:
+    return {"schema": "ck-arbiter-ledger/1", "nextWorktree": 1, "lastEntry": len(entries), "claims": entries}
+
+
+def _entry(task: str, status: str, calls: int, n: int = 1) -> dict:
+    return {"task": task, "status": status, "calls": calls, "ruling": n if status == "ruled" else None, "base": "abc1234"}
+
+
+def _decide(claim, ledger: dict, risk: str = "normal", complexity: str = "Low", read: str = "ok"):
+    from claude_kiro.arbiter_policy import TaskMeta, claim_facts, decide_claim
+
+    facts = claim_facts(claim, ledger, read, TaskMeta(risk=risk, complexity=complexity))
+    return facts, decide_claim(facts)
+
+
+@PROP
+@given(raw=claims(), risk=st.sampled_from(["safety", "normal"]), complexity=st.sampled_from(["Low", "Medium", "High"]),
+       other=st.sampled_from(["Low", "Medium", "High"]), prior=st.sampled_from(["none", "failed", "ruled"]))
+def test_p10_tier_is_risky_exactly_for_safety_guard_stop_or_unruled_repeat(raw, risk, complexity, other, prior):
+    from claude_kiro.arbiter_policy import claim_key
+
+    claim = _claim(raw)
+    key = claim_key(claim)
+    entries = {} if prior == "none" else {key: _entry(claim.task, prior, 1)}
+    ledger = _ledger(entries)
+    _, got = _decide(claim, ledger, risk, complexity)
+    _, again = _decide(claim, ledger, risk, other)
+    assert got == again, "Complexity must never change the decision"
+    if prior == "ruled":
+        assert got.action == "ask" and got.tier is None
+        return
+    assert got.action == "rule", got
+    risky = risk == "safety" or claim.trigger == "guard-stop" or prior == "failed"
+    assert got.tier == ("risky" if risky else "normal"), (raw, risk, prior, got)
+
+
+def _with(raw: dict, **over) -> dict:
+    out = dict(raw)
+    out.update(over)
+    return out
+
+
+@PROP
+@given(raw=claims(), evidence=st.text(max_size=20), text=st.text(max_size=20),
+       size=st.integers(0, 1), data=st.data())
+def test_p18_a_claim_after_its_applied_ruling_is_never_ruled_again(raw, evidence, text, size, data):
+    from claude_kiro.arbiter_policy import claim_key
+
+    claim = _claim(raw)
+    key = claim_key(claim)
+    entries = {f"{claim.task}|test:tests/test_o.py::test_o{i}": _entry(claim.task, "ruled", 1, i + 2) for i in range(size)}
+    entries[key] = _entry(claim.task, "ruled", 1, 1)
+    order = data.draw(st.permutations(list(entries)))
+    ledger = _ledger({k: entries[k] for k in order})
+    # the claim returns with different evidence and text: same identity, never ruled again
+    back = _claim(_with(raw, evidence=evidence, text=text))
+    assert claim_key(back) == key
+    facts, got = _decide(back, ledger)
+    assert got.action == "ask" and got.reason == "repeat-after-ruling" and got.tier is None, got
+    # reordering the ledger changes neither the facts nor the decision
+    base_facts, base = _decide(back, _ledger(dict(entries)))
+    assert facts == base_facts and got == base
+
+
+@PROP
+@given(raw=claims(), data=st.data())
+def test_p18_changing_evidence_never_changes_identity_but_identity_fields_do(raw, data):
+    from claude_kiro.arbiter_policy import claim_key
+
+    claim = _claim(raw)
+    key = claim_key(claim)
+    assert claim_key(_claim(_with(raw, evidence=raw.get("evidence", "") + " more", text=raw["text"] + " changed"))) == key
+    changed = []
+    if raw.get("file"):
+        changed.append(_with(raw, file=raw["file"] + "z"))
+    if raw.get("test"):
+        changed.append(_with(raw, test=raw["test"] + "z"))
+    if raw.get("criterion") and not raw.get("test"):
+        changed.append(_with(raw, criterion=raw["criterion"] + "z"))
+    if raw.get("findings"):
+        fs = [list(f) for f in raw["findings"]]
+        i = data.draw(st.integers(0, len(fs) - 1))
+        for which, suffix in ((0, "z"), (1, "z")):
+            g = [list(f) for f in fs]
+            g[i][which] = g[i][which] + suffix
+            changed.append(_with(raw, findings=g))
+    for other in changed:
+        assert claim_key(_claim(other)) != key, (raw, other)
+
+
+@PROP
+@given(file=st.text(alphabet="abcdefgh", min_size=1, max_size=6), issue=st.text(alphabet="abcdefgh ", min_size=1, max_size=12),
+       extra=st.text(alphabet="abcdefgh", min_size=1, max_size=4), task=st.integers(1, 99).map(str))
+def test_p18_a_review_finding_covered_by_a_ruling_is_not_ruled_again(file, issue, extra, task):
+    from claude_kiro.arbiter_policy import claim_key
+
+    def review(findings):
+        return _claim({"task": task, "trigger": "review-deadlock", "text": "deadlock", "findings": findings})
+
+    covered = (f"src/{file}.py", issue)
+    single = review([covered])
+    ledger = _ledger({claim_key(single): _entry(task, "ruled", 1)})
+    _, got = _decide(single, ledger)
+    assert got.action == "ask" and got.reason == "repeat-after-ruling", got
+    # the same finding with different case and spacing is the same identity
+    variant = review([(f"src/{file}.py", "  " + issue.upper().replace(" ", "  ") + " ")])
+    assert claim_key(variant) == claim_key(single)
+    # a different issue on the same file is a new claim
+    other = review([(f"src/{file}.py", issue + extra + "q")])
+    assert claim_key(other) != claim_key(single)
+    _, fresh_got = _decide(other, ledger)
+    assert fresh_got.action == "rule", fresh_got
+
+
+@PROP
+@given(n_ruled=st.integers(0, 5), n_failed=st.integers(0, 4), ruled_calls=st.lists(st.integers(1, 3), min_size=5, max_size=5),
+       failed_calls=st.lists(st.integers(1, 3), min_size=4, max_size=4), others=st.integers(0, 4),
+       other_calls=st.integers(0, 5), risk=st.sampled_from(["safety", "normal"]))
+def test_p19_the_arbiter_is_called_exactly_under_the_task_limits(n_ruled, n_failed, ruled_calls, failed_calls, others,
+                                                               other_calls, risk):
+    claim = _claim(claim_json(task="7", test="test_new"))
+    entries = {}
+    for i in range(n_ruled):
+        entries[f"7|test:{TEST_FILE}::test_r{i}"] = _entry("7", "ruled", ruled_calls[i], i + 1)
+    for i in range(n_failed):
+        entries[f"7|test:{TEST_FILE}::test_f{i}"] = _entry("7", "failed", failed_calls[i])
+    for i in range(others):  # other tasks never count
+        entries[f"8|test:{TEST_FILE}::test_o{i}"] = _entry("8", "ruled", other_calls, 20 + i)
+    facts, got = _decide(claim, _ledger(entries), risk)
+    rulings = n_ruled
+    calls = sum(ruled_calls[:n_ruled]) + sum(failed_calls[:n_failed])
+    assert (facts.task_rulings, facts.task_calls) == (rulings, calls)
+    if calls >= 6:
+        assert (got.action, got.reason, got.tier) == ("ask", "task-call-limit", None), got
+    elif rulings >= 3:
+        assert (got.action, got.reason, got.tier) == ("ask", "task-ruling-limit", None), got
+    else:
+        assert got.action == "rule" and got.reason == "" and got.tier is not None, got
