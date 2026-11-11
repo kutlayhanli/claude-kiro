@@ -1125,7 +1125,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 48: Ask for principles and justifications in /spec:plan
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.1, 1.3, 1.4, 1.5, 2.1, 2.2
 **Description:** In `plugin/skills/plan/SKILL.md`, using we/you/me framing: run `ck principles init` and tell me when it created the file; ask me directly for tie-breaking values, overrides and what may change without asking, and write them to a `## Principles` section of the PLAN.md template; ask for the reason before recording an override, and record it as `**Reason:** <text>`, the only form `principles.py` reads; ask what breaks without each In-scope item and record a `*Without it:*` note; offer to cut an item when nothing concrete breaks, removing it only if I accept; and run `ck principles check` before setting Status to Decided, with a plan that has nothing to add saying so.
@@ -1135,10 +1135,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 9 (TC-2, 4, 5, 6, 14, 15 over the shipped skill)
 
 **Acceptance:**
-- [ ] The skill runs `ck principles init` before recording decisions and tells me when it created the file
-- [ ] The template holds `## Principles` and the `*Without it:*` note
-- [ ] Setting Status to Decided is conditional on `ck principles check`
-- [ ] An override is recorded only with a reason, and an item is removed only on my acceptance
+- [x] The skill runs `ck principles init` before recording decisions and tells me when it created the file
+- [x] The template holds `## Principles` and the `*Without it:*` note
+- [x] Setting Status to Decided is conditional on `ck principles check`
+- [x] An override is recorded only with a reason, and an item is removed only on my acceptance
 
 **Dependencies:** Task 9 (its tests are the oracle)
 **Complexity:** Medium
