@@ -940,10 +940,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 40: Property tests for spec-edit refusals and refused landings
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 8.4, 8.5, 8.6, 1.7
-**Description:** Implement P-21, P-36 and P-38 with Hypothesis in `tests/test_arbiter_land.py`, named `test_p<N>_...`. P-21: `arbiter_policy.spec_text_changes` lists a change exactly when a Status field or an acceptance mark changed, over Status forms (`**Status:** Done`, `In Progress`, added spaces, a moved line) and marks (`- [x]`, `- [X]`, `* [x]`, `- [ ]`, on any criterion), with negatives (Verify, Dependencies, description, a Status word inside prose); `max_examples=200`. P-36 (G, real git, `max_examples=30`): for conflict, red gate, refused path, cycle and new blocking finding, the target HEAD is equal before and after and there is no second ruling. P-38 at `decide_spec_edit`: a changed path matching a reserved file scope (`tasks.md`, `design.md`, `test-plan.md`) is refused with the ruling's `reservedBy` absent; reservations of `code` and `test repairs` are P-3 at `route_ruling` (Task 8), and do not affect this seam. Settings otherwise `derandomize=True, database=None, deadline=None`. The file declares `PROPERTIES = {"P-21": ..., "P-36": ..., "P-38": ...}`.
+**Description:** Implement P-21, P-36 and P-38 with Hypothesis in `tests/test_arbiter_land.py`, named `test_p<N>_...`. P-21: `arbiter_policy.spec_text_changes` lists a change exactly when a Status field or an acceptance mark changed, over Status forms (`**Status:** Done`, `In Progress`, added spaces, a moved line) and marks (`- [x]`, `- [X]`, `* [x]`, `- [x]`, on any criterion), with negatives (Verify, Dependencies, description, a Status word inside prose); `max_examples=200`. P-36 (G, real git, `max_examples=30`): for conflict, red gate, refused path, cycle and new blocking finding, the target HEAD is equal before and after and there is no second ruling. P-38 at `decide_spec_edit`: a changed path matching a reserved file scope (`tasks.md`, `design.md`, `test-plan.md`) is refused with the ruling's `reservedBy` absent; reservations of `code` and `test repairs` are P-3 at `route_ruling` (Task 8), and do not affect this seam. Settings otherwise `derandomize=True, database=None, deadline=None`. The file declares `PROPERTIES = {"P-21": ..., "P-36": ..., "P-38": ...}`.
 **Files:**
 - `tests/test_arbiter_land.py` - P-21, 36, 38 and the `PROPERTIES` map
 **Verify:** `uv run pytest tests/test_arbiter_land.py -q -k "test_p21_ or test_p36_ or test_p38_"`
@@ -951,12 +951,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 41 (P-21 at `spec_text_changes`, P-38 at `decide_spec_edit`), Task 44 (P-36 through real landings)
 
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the P-21, P-36 and P-38 rows
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] The tests call the decision seam, and real git for P-36, not a server
-- [ ] Tests exercise the real boundary named in the test plan (seam, real git)
-- [ ] Tests fail before the implementation exists for the right reason (the seam and landing route do not exist)
-- [ ] No mocks of the project's own code in integration tests
+- [x] The generators cover every surface form and negative listed in the P-21, P-36 and P-38 rows
+- [x] Settings are deterministic (derandomized, no database)
+- [x] The tests call the decision seam, and real git for P-36, not a server
+- [x] Tests exercise the real boundary named in the test plan (seam, real git)
+- [x] Tests fail before the implementation exists for the right reason (the seam and landing route do not exist)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (strategies, project fixture), Task 39 (same test file)
 **Complexity:** High
