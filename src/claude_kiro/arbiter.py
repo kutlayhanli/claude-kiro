@@ -555,8 +555,13 @@ _RESULT_RANK = {"ready": 0, "ready after decisions": 1, "needs work": 2}
 
 def _result_rank(line: str) -> int:
     """How strong a `**Result:**` line is; anything unrecognized (a template placeholder) counts as weakest."""
-    value = line.split("**Result:**", 1)[-1].strip().lower()
-    return _RESULT_RANK.get(value, -1)
+    # Emphasis marks are dropped and the value is matched by its start, longest name first, so an annotated value such as
+    # "Needs work (2 blocking findings remain)", "Needs work." or "**Needs work**" keeps its rank.
+    value = re.sub(r"[*_`]", "", line.split("**Result:**", 1)[-1]).strip().lower()
+    for name in sorted(_RESULT_RANK, key=len, reverse=True):
+        if value.startswith(name):
+            return _RESULT_RANK[name]
+    return -1
 
 
 _H1 = re.compile(r"^# .*$", re.MULTILINE)
