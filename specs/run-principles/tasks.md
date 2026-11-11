@@ -1220,7 +1220,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 52: Red-team the prohibition of Story 5
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.7
 **Description:** Try to break each SHALL NOT clause of Story 5 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Target the risky-tier stop: a "needs a stronger look" status spelled by case or whitespace variants, a risky answer that asks for a stronger look and also carries an outcome, a repeat of the claim after the exhausted state, and a resume after exhaustion. Written from the requirements only, never from the implementation.
@@ -1230,12 +1230,13 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 65 (red team of 5.7 in a run)
 
 **Acceptance:**
-- [ ] 5.7's SHALL NOT clause has at least one adversarial test per listed input class that applies to it
-- [ ] Tests exercise the real boundary named in the test plan (workflow under the fake runtime with real `ck`)
-- [ ] Tests fail before the implementation exists for the right reason (no arbiter step)
-- [ ] No mocks of the project's own code in integration tests
+- [x] 5.7's SHALL NOT clause has at least one adversarial test per listed input class that applies to it
+- [x] Tests exercise the real boundary named in the test plan (workflow under the fake runtime with real `ck`)
+- [x] Tests fail before the implementation exists for the right reason (no arbiter step)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (project fixture), Task 2 (fake runtime answers)
+**Implementation notes:** Cases use `bridge.run` with real `ck` (`execCk`) over `arbiter_project`; the risky answer varies by status spelling, outcome fields, `established` values; the exhausted claim is repeated in a second and later runs (several spellings of the test id). Each fails now because no `arbiter task` call is made.
 **Complexity:** Medium
 **Risk:** safety (exercises the needs-input notification route)
 
