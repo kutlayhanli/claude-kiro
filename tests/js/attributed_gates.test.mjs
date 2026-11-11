@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { runWorkflow } from './load_workflow.mjs'
 import { project, directCk } from './fake_project.mjs'
+import { arbiterProject, repairRuling } from './arbiter_project.mjs'
 import { VirtualClock } from './virtual_clock.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -360,21 +361,31 @@ await test('TC-33a: the task prompt holds the task-scoped json gate command and 
   }
 })
 
-await test('TC-34: testConflicts reach the confirmation agent and the result; a legacy single testConflict is a list of one (3.7)', async () => {
+await test('TC-34: testConflicts reach the arbiter\'s claim and the result; a legacy single testConflict is a list of one (3.7)', async () => {
   const C1 = { file: 'tests/test_a.py', test: 'test_one', criterion: '1.1', reason: 'asserts 4 where the spec says 5', fix: 'expect 5' }
   const C2 = { file: 'tests/test_b.py', test: 'test_two', criterion: '2.2', reason: 'imports a name nothing provides', fix: 'drop the import' }
   const deps = { 1: [] }
-  const p = project({ deps, testConflictsList: { 1: [C1, C2] } })
-  const { result } = await runClaude(p, deps)
-  const confirm = p.state.events.find(l => /^task 1 retry/.test(l))
-  assert.ok(confirm, `a confirmation agent ran: ${p.state.events.join(' | ')}`)
-  const prompt = p.state.prompts[confirm]
-  for (const c of [C1, C2]) assert.ok(prompt.includes(c.file) && prompt.includes(c.reason), `confirmation prompt holds ${c.file}`)
+  // Each conflict is reported once, ruled `test_repair` by the arbiter (a fake `rulings` answer; the real `ck arbiter
+  // open`, `settle` and `record` run against a temporary git project), then fixed by the test-fixer.
+  const withArbiter = (conflicts, over) => {
+    const proj = arbiterProject()
+    const p = project({ deps, rulings: { 1: conflicts.map(c => repairRuling('1', c)) }, execCk: proj.execCk, testFix: { 'tests/test_a.py': {}, 'tests/test_b.py': {} }, ...over })
+    const seen = []
+    const agent = (prompt, opts) => { seen.push({ label: opts && opts.label, prompt }); return p.agent(prompt, opts) }
+    return { p, seen, run: () => runClaude(p, deps, { ...proj.args, arbiterAgent: 'spec:arbiter' }, { agent }) }
+  }
+  const { p, seen, run } = withArbiter([C1, C2], { testConflictsList: { 1: { conflicts: [C1, C2], attempts: 1 } } })
+  const { result } = await run()
+  const rulings = seen.filter(e => /^arbiter task 1/.test(e.label))
+  assert.equal(rulings.length, 2, `the arbiter ruled once per conflict: ${p.state.events.join(' | ')}`)
+  for (const c of [C1, C2]) assert.ok(rulings.some(e => e.prompt.includes(c.file) && e.prompt.includes(c.reason)), `an arbiter prompt holds ${c.file}`)
+  assert.ok(!p.state.events.some(l => /^task 1 retry/.test(l) && p.state.events.indexOf(l) < p.state.events.findIndex(e => /^arbiter task 1/.test(e))), 'no confirmation agent ran before the arbiter')
   assert.ok(Array.isArray(result.testConflicts), 'result.testConflicts is a list')
   for (const c of [C1, C2]) assert.ok(result.testConflicts.some(e => sameFields(e, c)), `${c.file} in the result: ${JSON.stringify(result.testConflicts)}`)
 
-  const q = project({ deps, testConflicts: { 1: { conflict: C1 } } })
-  const legacy = await runClaude(q, deps)
+  const q = withArbiter([C1], { testConflicts: { 1: { conflict: C1, attempts: 1 } } })
+  const legacy = await q.run()
+  assert.ok(q.seen.some(e => /^arbiter task 1/.test(e.label) && e.prompt.includes(C1.file)), 'the legacy conflict reached the arbiter')
   assert.ok(Array.isArray(legacy.result.testConflicts))
   assert.equal(legacy.result.testConflicts.length, 1)
   assert.ok(sameFields(legacy.result.testConflicts[0], C1), JSON.stringify(legacy.result.testConflicts))
