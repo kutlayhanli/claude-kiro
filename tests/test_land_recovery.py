@@ -121,7 +121,7 @@ def test_tc163_merge_commit_refusal_is_recovered_with_the_merge_state_cleared(tm
     merge_head = git_path(integ, "MERGE_HEAD")
     assert merge_head.exists(), "the refused merge left no MERGE_HEAD, so there is nothing to recover from"
     code, obj, err = land(root, "3")
-    assert code == 0 and obj is not None, f"landing failed ({code}): {err}"
+    assert not code and obj is not None, f"landing failed ({code}): {err}"
     assert [t["state"] for t in obj["tasks"]] == ["MERGED"], obj
     rec = recovered_of(obj)
     assert rec is not None, f"no `recovered` in the landing result: {obj}"

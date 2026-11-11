@@ -2145,7 +2145,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 93: Test the integration checkout recovery
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 14.1, 14.2, 14.3, 14.4, 14.5
 **Description:** Create `tests/test_land_recovery.py` with TC-162 to TC-168, TC-196, TC-197 and P-47 (test-plan.md). Keep TC-168 to the hook side (no `tc168_` test depends on the recovery: none runs `ck worktree merge` or `ck worktree land` after a refused merge; its tokened landing is a `ck worktree land` of a clean task into a clean checkout), since it is Task 94's whole Verify; the merge restore and the cleared record are TC-196. TC-197 makes its spec edit with `ck arbiter open` and lands it with `ck worktree land demo arbiter<k>`, and records with `ck arbiter record`. Build each case on a real repository with ck's git hooks installed and a real integration worktree, using `tests/unattended_helpers.py` (`init_repo`, `commit_all`, `hooks_repo`, `integration_worktree`). Define this file's own `protected_branch` (a branch off `integrate/demo` whose only change adds `.claude/CLAUDE.md`) in `tests/test_land_recovery.py`; do not import it from `tests/test_unattended_smoke.py`, which Task 100 edits and whose module fixtures start full runs. Make the refused merge with a real `git merge --no-verify`, so the residue is exactly what git leaves. Read the refusal record only through `protect.refusal_for`, and the landing result only through `ck worktree land --json`. P-47 drives the pure `worktrees.decide_recovery` with Hypothesis (`derandomize=True, max_examples=200, database=None, deadline=None`) and carries a `PROPERTIES` map. Import project modules inside test bodies.
@@ -2155,13 +2155,13 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 94 (TC-168's refusal record), Task 95 (the recovery in `land`, `merge`, `land_spec_edit` and `ck arbiter record`: TC-162 to TC-167, TC-196, TC-197, P-47)
 
 **Acceptance:**
-- [ ] Each refused merge is a real `git merge --no-verify` refused by the real installed hook
-- [ ] TC-166 covers no record, a record at an older head, and a record from another checkout
-- [ ] No `tc168_` test depends on the recovery itself (Task 95)
-- [ ] P-47 generates every combination its row lists
-- [ ] Tests exercise the real boundary named in the test plan (real git, real hooks, the `ck` CLI)
-- [ ] Tests fail before the implementation exists for the right reason (the landing refuses the dirty checkout; no refusal record exists; for TC-197, the arbiter landing or record does not restore the checkout, or `ck arbiter` does not exist yet)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each refused merge is a real `git merge --no-verify` refused by the real installed hook
+- [x] TC-166 covers no record, a record at an older head, and a record from another checkout
+- [x] No `tc168_` test depends on the recovery itself (Task 95)
+- [x] P-47 generates every combination its row lists
+- [x] Tests exercise the real boundary named in the test plan (real git, real hooks, the `ck` CLI)
+- [x] Tests fail before the implementation exists for the right reason (the landing refuses the dirty checkout; no refusal record exists; for TC-197, the arbiter landing or record does not restore the checkout, or `ck arbiter` does not exist yet)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** None
 **Complexity:** Medium
