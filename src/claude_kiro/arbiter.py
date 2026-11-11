@@ -210,12 +210,20 @@ def _start_worktree(root: Path, spec: str, into: str, number: int) -> Tuple[Path
     return path, branch, base
 
 
+def _discard_worktree(root: Path, path: Path, branch: str) -> None:
+    """Undo `_start_worktree` when the ledger was not written, so the next open can use the same number."""
+    wt.git(root, "worktree", "remove", "--force", str(path), check=False)
+    wt.git(root, "branch", "-D", branch, check=False)
+
+
 def open_claim(root: Path, spec: str, into: str, task: str, claim: Claim, task_meta: TaskMeta) -> Dict[str, Any]:
     """`OpenResult` for one claim (design.md). Reads both principle layers, decides, and when it rules starts the
     `arbiter<k>` worktree and records the claim in the ledger. Holds the spec's ledger lock for the whole call."""
     with ledger_lock(root, spec):
         ledger = load_ledger(ledger_path(root, spec))
-        checkout = wt.checkout_of(root, into) or root
+        checkout = wt.checkout_of(root, into)
+        if checkout is None:
+            raise ArbiterError(f"{into} is not checked out anywhere, so its principles and plan cannot be read")
         state, project_text = read_principles(checkout / PRINCIPLES_REL)
         plan_text = _plan_text(checkout, spec)
         project = parse_principles(project_text, "project") if state == "ok" else []
@@ -250,16 +258,23 @@ def open_claim(root: Path, spec: str, into: str, task: str, claim: Claim, task_m
         path, branch, base = _start_worktree(root, spec, into, number)
         rel = wt.rel_path(root, path)
         ledger["nextWorktree"] = number + 1
-        keys = [key]
+        # One call is one count: the combined entry carries the call, and a deadlock's per-finding entries are
+        # aliases that carry the same worktree and ruling but add no calls (claim_facts sums calls over the task).
+        keys = {key: 1}
         if narrowed.trigger == "review-deadlock":
-            keys += [claim_key(single) for _, single in _per_finding(narrowed)]
-        for k in keys:
+            for _, single in _per_finding(narrowed):
+                keys.setdefault(claim_key(single), 0)
+        for k, added in keys.items():
             prior = ledger["claims"].get(k, {})
             ledger["claims"][k] = {
-                "task": str(claim.task), "status": "open", "calls": int(prior.get("calls", 0)) + 1,
+                "task": str(claim.task), "status": "open", "calls": int(prior.get("calls", 0)) + added,
                 "ruling": None, "base": base, "worktree": rel, "branch": branch,
             }
-        write_ledger(ledger_path(root, spec), ledger)
+        try:
+            write_ledger(ledger_path(root, spec), ledger)
+        except BaseException:
+            _discard_worktree(root, path, branch)
+            raise
 
         result.update({"worktree": rel, "branch": branch, "number": str(number)})
         return result
