@@ -111,8 +111,64 @@ def test_an_arbiter_step_runs_its_one_ck_line_with_the_fenced_json_block_as_stdi
     assert json.loads(out["r"]["json"]["stdin"]) == {"claim": {"task": "1"}, "task": {"risk": "normal"}}
 
 
+# The thin-step prompt exactly as spec-implement.js's thinCk writes it: its shellWord and its prompt template are read
+# from the script, so the fake follows the producer, not a hand-made prompt.
+THINCK_PROMPT = r"""
+import fs from 'node:fs'
+const src = fs.readFileSync('../../plugin/workflows/spec-implement.js', 'utf8')
+const shellWord = src.match(/^const shellWord = .*$/m)[0]
+const start = src.indexOf('  const cmd = `ck ${argv.map(shellWord)')
+const end = src.indexOf('  const opts = () =>', start)
+if (start < 0 || end < 0) throw new Error('thinCk template not found in spec-implement.js')
+const body = src.slice(start, end)
+export const thinPrompt = new Function('argv', 'o', 'GIT_NOTE', 'GATE_NOTE', `${shellWord}\n${body}\nreturn prompt`)
+"""
+
+
+def thin_prompt(argv: list, stdin: str | None, cwd: str) -> str:
+    out = node(
+        THINCK_PROMPT.replace("export const", "const")
+        + f"console.log(JSON.stringify(thinPrompt({json.dumps(argv)}, {{ stdin: {json.dumps(stdin)}, cwd: {json.dumps(cwd)}, what: 'Arbiter step' }}, 'Use git as you were told.', '')))"
+    )
+    return out
+
+
+@pytest.mark.parametrize(
+    "checkout",
+    ["/tmp/demo-task-arbiter1", "/tmp/my demo/x-task-arbiter1", "/tmp/it's/x-task-arbiter1"],
+)
+def test_an_arbiter_step_reads_the_argv_and_heredoc_stdin_thinck_writes(checkout):
+    argv = ["-C", checkout, "arbiter", "open", "demo", "--task", "1", "--into", "integrate/demo", "--json"]
+    stdin = json.dumps({"claim": {"task": "1", "text": "the test's assert contradicts 1.1"}, "task": {"risk": "normal"}})
+    prompt = thin_prompt(argv, stdin, checkout)
+    assert "<<'CK_PARK'" in prompt  # the real producer's here-document shape
+    out = node(
+        "import { project, arbiterArgv, arbiterStdin } from './fake_project.mjs'\n"
+        f"const p = project({{ deps: {{ '1': [] }}, execCk: {json.dumps(ECHO_CK)} }})\n"
+        f"const prompt = {json.dumps(prompt)}\n"
+        "const r = await p.agent(prompt, { label: 'arbiter-open', agentType: 'spec:runner' })\n"
+        "console.log(JSON.stringify({ r, argv: arbiterArgv(prompt), stdin: arbiterStdin(prompt) }))"
+    )
+    assert out["argv"] == argv
+    assert out["stdin"] == stdin
+    assert out["r"]["exitCode"] == 0
+    assert out["r"]["json"]["argv"] == argv  # the real command got exactly thinCk's words
+    assert json.loads(out["r"]["json"]["stdin"]) == json.loads(stdin)
+
+
+def test_an_arbiter_step_without_stdin_reads_the_bare_thinck_line():
+    argv = ["-C", "/repo", "arbiter", "settle", "demo", "1|gate failure", "--tier", "risky", "--json"]
+    prompt = thin_prompt(argv, None, "/repo")
+    out = node(
+        "import { arbiterArgv, arbiterStdin } from './fake_project.mjs'\n"
+        f"console.log(JSON.stringify({{ argv: arbiterArgv({json.dumps(prompt)}), stdin: arbiterStdin({json.dumps(prompt)}) }}))"
+    )
+    assert out == {"argv": argv, "stdin": None}
+
+
 def test_a_failed_record_step_reports_exit_1_after_the_real_command_ran():
-    prompt = 'ck -C /repo arbiter record demo --into integrate/demo --json\n```json\n{"ruling": 1}\n```'
+    record = {"trigger": "gate-failure", "claim_key": "1|gate", "claim_text": "t", "task": "1", "tier": "normal", "outcome": "code", "reasoning": "r", "principle_id": "P1"}
+    prompt = f"ck -C /repo arbiter record demo --into integrate/demo --json\n```json\n{json.dumps(record)}\n```"
     out = node(
         "import { project } from './fake_project.mjs'\n"
         f"const p = project({{ deps: {{ '1': [] }}, arbiterStepFailures: {{ record: true }}, execCk: {json.dumps(ECHO_CK)} }})\n"
@@ -198,7 +254,10 @@ SCENARIO = {"project": {"deps": {"1": [], "2": ["1"]}}, "args": {"agents": {}}}
 def test_run_with_throwing_date_completes_because_the_script_reads_no_clock(bridge):  # noqa: F811
     plain = bridge.run(**SCENARIO, clock="virtual")
     thrown = bridge.run(**SCENARIO, clock="virtual", throwing_date=True)
-    assert thrown["result"]["merged"] == plain["result"]["merged"] if "merged" in plain["result"] else thrown["result"] == plain["result"]
+    # the run result's `merged` list (timing fields such as `overhead.share` read the clock, which throws here)
+    assert "merged" in plain["result"]
+    assert plain["result"]["merged"]
+    assert thrown["result"]["merged"] == plain["result"]["merged"]
 
 
 def test_create_with_throwing_date_completes(bridge):  # noqa: F811
@@ -226,10 +285,27 @@ def test_emit_labels_has_scenarios_for_the_new_paths():
     src = (JS / "emit_labels.mjs").read_text()
     for needle in ["arbiterAgent", "auditorAgent", "runnerAgent", "'arbiter task'", "'audit task'", "'arbiter-'", "'apply-cuts'"]:
         assert needle in src, needle
+    # agent type names, not flags (design.md "Workflow args"); a claim trigger, a due audit and the create subjects
+    for needle in ["'spec:arbiter'", "'spec:auditor'", "'spec:runner'", "verifiedBy", "failUntilRuled", "guardUntilRuled",
+                   "conflictUntilRuled", "needs_stronger_look", "'rerun'", "problems: []", "mode: 'apply-cuts'", "'review: should-exist'"]:
+        assert needle in src, needle
+    assert "arbiterAgent: true" not in src and "auditorAgent: true" not in src and "runnerAgent: true" not in src
     assert "labelCorpus.push" not in src
     proc = subprocess.run(["node", str(JS / "emit_labels.mjs")], capture_output=True, text=True, timeout=120)
     assert proc.returncode == 0, proc.stderr
-    assert json.loads(proc.stdout)
+    labels = {c["label"] for c in json.loads(proc.stdout) if c["workflow"] == "spec-implement"}
+    # the implement scenarios really run (thin steps get the CK_CALL envelope), so they reach the task, landing and report steps
+    assert {"task 1", "land 1", "report", "run start"} <= labels, sorted(labels)
+
+
+def test_emit_labels_answers_match_the_design_schemas():
+    # emit_labels imports fake_project.mjs's helpers; its answers for the new labels follow design.md's RULING, AUDIT,
+    # OpenResult and SettleResult, the same shapes fake_project.mjs uses.
+    src = (JS / "emit_labels.mjs").read_text()
+    assert "{ rulings: [] }" not in src.split("function createAgent")[0]  # a per-task ruling is one RULING
+    assert "findings: [], summary: 'clean'" not in src  # AUDIT has problems, not findings
+    for field in ["action: 'rule'", "tier: 'normal'", "planLayer:", "earlier: []", "missing: null", "route", "record:", "problems: []", "number:", "commit:"]:
+        assert field in src, field
 
 
 SUITES = [p.name for p in sorted(JS.glob("*.test.mjs")) if "spec_create" not in p.name and "spec_review_frozen" not in p.name]

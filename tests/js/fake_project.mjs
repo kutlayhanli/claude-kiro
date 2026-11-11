@@ -98,15 +98,61 @@ const parseJson = t => { try { const v = JSON.parse(t); return v && typeof v ===
 const never = () => new Promise(() => {})
 
 // --- arbiter helpers -------------------------------------------------------------------------------------------
-// The one `ck ... arbiter ...` (or `ck ... worktree land ...`) line of a thin step's prompt, as an argv.
+// Split one shell command line into words as sh does for the quoting spec-implement.js's shellWord produces: single
+// quotes (with the `'\''` escape), double quotes and backslash escapes. Stops at an unquoted `<<` (the here-document
+// thinCk adds for stdin), `#` or backtick. Returns null for an unterminated quote.
+export function shellWords(line) {
+  const words = []
+  let cur = null
+  let i = 0
+  while (i < line.length) {
+    const c = line[i]
+    if (c === ' ' || c === '\t') { if (cur !== null) { words.push(cur); cur = null } i++; continue }
+    if (line.startsWith('<<', i) || c === '`' || (cur === null && c === '#')) break
+    if (c === "'") {
+      const j = line.indexOf("'", i + 1)
+      if (j < 0) return null
+      cur = (cur ?? '') + line.slice(i + 1, j)
+      i = j + 1
+      continue
+    }
+    if (c === '"') {
+      let j = i + 1
+      let v = ''
+      while (j < line.length && line[j] !== '"') {
+        if (line[j] === '\\' && /["\\$`]/.test(line[j + 1] || '')) j++
+        v += line[j]
+        j++
+      }
+      if (j >= line.length) return null
+      cur = (cur ?? '') + v
+      i = j + 1
+      continue
+    }
+    if (c === '\\' && i + 1 < line.length) { cur = (cur ?? '') + line[i + 1]; i += 2; continue }
+    cur = (cur ?? '') + c
+    i++
+  }
+  if (cur !== null) words.push(cur)
+  return words
+}
+// The one `ck ... arbiter ...` (or `ck ... principles ...`, `ck ... worktree land ...`) line of a thin step's prompt, as
+// an argv. thinCk writes it on its own line, each word quoted by shellWord, followed by ` <<'CK_PARK'` when it has stdin.
 export function arbiterArgv(prompt) {
   // Line-anchored (optionally behind a `$ ` or list marker): prose that mentions a ck command is not the command line.
-  const m = /^[ \t$>*-]*ck ((?:-C (?:"[^"\n]*"|\S+) )?(?:arbiter|principles|worktree land)(?: |"[^"\n]*"|[^\n"`])*)/m.exec(prompt)
-  if (!m) return null
-  return [...m[1].trim().matchAll(/"([^"]*)"|(\S+)/g)].map(t => (t[1] !== undefined ? t[1] : t[2])).filter(t => t !== '')
+  for (const m of prompt.matchAll(/^[ \t$>*-]*ck[ \t]+(.*)$/gm)) {
+    const words = shellWords(m[1])
+    if (!words) continue
+    const rest = words[0] === '-C' ? words.slice(2) : words
+    if (rest[0] === 'arbiter' || rest[0] === 'principles' || (rest[0] === 'worktree' && rest[1] === 'land')) return words
+  }
+  return null
 }
-// The prompt's one fenced JSON block, as the step's stdin (null when there is none).
+// The step's stdin: the body of thinCk's `<<'CK_PARK' ... CK_PARK` here-document, else the prompt's one fenced JSON
+// block (null when there is neither).
 export function arbiterStdin(prompt) {
+  const h = /<<[ \t]*(['"]?)(\w+)\1[ \t]*\n([\s\S]*?)\n\2[ \t]*$/m.exec(prompt)
+  if (h) return h[3]
   const m = /```(?:json)?[ \t]*\n([\s\S]*?)\n```/.exec(prompt)
   return m ? m[1] : null
 }
