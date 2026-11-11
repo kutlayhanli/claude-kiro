@@ -92,7 +92,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 3: Test the arbiter's role settings
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 5.1, 5.2
 **Description:** Implement TC-35 and TC-36 in `tests/test_arbiter_agents.py`, named `test_tc<N>_...`, reusing `home`, `ck`, `roles` from `tests/test_agents.py`. TC-35: `ck agents set arbiter.model fable` and each of the four keys show in `ck agents --json`, and an invalid value gets the same message as `reviewer.model`. TC-36: with the four unset, resolved values equal `reviewer.risky_model` and `reviewer.risky_effort`, including after those change.
