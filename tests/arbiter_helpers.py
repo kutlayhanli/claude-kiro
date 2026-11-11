@@ -284,7 +284,7 @@ def claims(draw) -> dict:
         out["failing"] = draw(st.lists(_test_ids, min_size=1, max_size=4))
         out["models_tried"] = draw(st.lists(st.sampled_from(["haiku", "sonnet", "opus"]), max_size=3))
     if trigger == "lint":
-        out.update(rule=draw(st.sampled_from(["unowned-suite", "shared-suite", "late-test"])), subject=draw(_word),
+        out.update(rule=draw(st.just("unfiltered-shared-suite")), subject=draw(_word),
                    tests=draw(st.lists(st.integers(1, 120).map(str), max_size=3)))
     if trigger == "command-cycle":
         provider = draw(_word)
