@@ -99,12 +99,12 @@ def test_tc5_decided_step_follows_and_depends_on_nonempty_principles():
 def test_tc6_asks_reason_before_override_and_records_reason_line():
     text = skill_text()
     prose, template = split_fences(text)
-    assert "**Reason:** <text>" in text, "override reason must be recorded as `**Reason:** <text>`"
     para = para_with(prose, r"overrides?", r"\breason\b", r"\bask\b|AskUserQuestion", r"before")
     assert para, "the skill must ask for a reason before recording an override"
     assert re.search(r"before[^.\n]{0,80}(record|writ)", para, re.I) or re.search(
         r"(record|writ)[^.\n]{0,80}only after", para, re.I
     ), "the reason must be asked before the override is recorded: " + para
+    assert "**Reason:** <text>" in text, "the skill must record the reason as `**Reason:** <text>`"
 
 
 def test_tc14_asks_what_breaks_without_each_in_scope_item_and_template_has_note():
