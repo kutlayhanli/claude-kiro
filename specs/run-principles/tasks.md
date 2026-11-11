@@ -802,7 +802,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 34: Property tests for the arbiter's lane and caller identity
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 11.10, 11.5, 11.7
 **Description:** Implement P-22, P-23, P-24, P-25, P-39 and P-45 with Hypothesis in `tests/test_arbiter_guard.py`, named `test_p<N>_...`. P-22 (`decide_arbiter_edit`, `arbiter_block_reason`): in an arbiter worktree with no lane ticket (the ticket case is P-45), over resolved `rel` values, allowed exactly for the three canonical paths of the ruling's spec, over case variants, suffix near-misses, `specs/demo/sub/tasks.md`, another spec, requirements, PLAN, PRINCIPLES, tests, source, `.claude/`; every denial names the file and the lane. P-23 (G, `decide_arbiter_bash` through real `bash -c`, `max_examples=30`): every shell form listed over denied paths is denied, chained with `&&` and `;`, in a `cd` compound, and over command substitution in `$(...)`, backticks, `<(...)` and `>(...)`, unquoted or double-quoted. A shell write to a lane file is denied too, since the arbiter edits those with Edit or Write; reads, `git add` of lane files and `git commit -m '...'` are allowed. P-24 (`is_arbiter_caller`): any input not establishing the arbiter classifies as the unclaimed input, over env names, arguments, prompt text, tool fields and near-miss agent types. P-25: any non-arbiter caller's decisions equal an oracle restating today's `decide_edit` over `EditFacts`. P-39 (G, through the real hook with real files, `max_examples=30`): relative, absolute, `./`, `..` that re-enters or escapes, and symlinks in and out get the same decision as the resolved path. P-45 (`decide_arbiter_edit`): `requirements.md` is allowed exactly with a ticket for its own spec, not started and not in an arbiter worktree, and `PLAN.md` never. Settings `@settings(derandomize=True, max_examples=200, database=None, deadline=None)` except P-23 and P-39. The file declares `PROPERTIES = {"P-22": ..., "P-23": ..., "P-24": ..., "P-25": ..., "P-39": ..., "P-45": ...}`.
@@ -813,12 +813,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 35 (P-22, P-24, P-25, P-45 at the lane seams), Task 36 (P-23 under real `bash -c`, P-39 through the real hook)
 
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the P-22 to P-25, P-39 and P-45 rows
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] The tests call the decision seams, not a server
-- [ ] Tests exercise the real boundary named in the test plan (seams, real `bash -c` for P-23)
-- [ ] Tests fail before the implementation exists for the right reason (the seams do not exist)
-- [ ] No mocks of the project's own code in integration tests
+- [x] The generators cover every surface form and negative listed in the P-22 to P-25, P-39 and P-45 rows
+- [x] Settings are deterministic (derandomized, no database)
+- [x] The tests call the decision seams, not a server
+- [x] Tests exercise the real boundary named in the test plan (seams, real `bash -c` for P-23)
+- [x] Tests fail before the implementation exists for the right reason (the seams do not exist)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (strategies, `arbiter_caller`), Task 33 (same test file)
 **Complexity:** High
@@ -1799,7 +1799,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 77: Test the requirements prompt and the should-this-exist lens
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.3, 2.4, 4.1, 4.6, 4.7
 **Description:** Implement TC-16, TC-17, TC-26, TC-32 and TC-33 in `tests/test_arbiter_create.py`, named `test_tc<N>_...`, under the real `spec-create.js`. TC-16: in create mode the Requirements prompt tells the writer to put a `**Without it:**` line on every story, carrying the plan item's reason. TC-17: it tells the writer a story no plan item covers gets its own line. TC-26: in create and review modes `review: should-exist` runs and its prompt attacks each story's justification. TC-32: when the lens finds nothing, review.md says so. TC-33: when the lens throws, `lensesLost` is counted and the log says coverage is partial.
@@ -1809,10 +1809,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 83 (TC-16, 17, 26, 32, 33)
 
 **Acceptance:**
-- [ ] Prompt cases read the real prompts the workflow sends
-- [ ] Tests exercise the real boundary named in the test plan (real `spec-create.js`, real files)
-- [ ] Tests fail before the implementation exists for the right reason (no lens or prompt text)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Prompt cases read the real prompts the workflow sends
+- [x] Tests exercise the real boundary named in the test plan (real `spec-create.js`, real files)
+- [x] Tests fail before the implementation exists for the right reason (no lens or prompt text)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (project fixture), Task 2 (`fake_create` answers)
 **Complexity:** Medium
@@ -2023,7 +2023,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 87: Test the non-functional requirements
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.7, 7.6, 12.8, NFR Bounded arbiter cost, NFR Runtime compatibility, NFR Lint performance and safety, NFR Compatibility, NFR Determinism
 **Description:** Implement TC-127 to TC-132 in `tests/test_arbiter_nfr.py`, named `test_tc<N>_...`. TC-127: repeated claims across 3 runs make at most 6 calls on a task and 2 on a claim. TC-128: both workflows run scenarios with the arbiter, audit and create rulings under a throwing `Date` and `Math.random` (`throwingDate: true`). TC-129: with a canary module raising on import, under `no_network`, `ck lint` imports nothing and connects to nothing. TC-130: a generated 108-task spec lints in under 10 s, marked `serial`. TC-131: a spec with verifying tests, no claims and no findings runs today's labels in today's order, with `audit task <n>` and its thin `ck` step inserted before each verified impl task's first attempt, no other new label, no `arbiter` label and no `decisions.md`. TC-132: two `ck lint --json` runs on a tree with findings are byte-identical.
@@ -2033,11 +2033,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 24 (TC-129, 130, 132), Task 74 (TC-127, TC-131, and the implement half of TC-128), Task 85 (the create half of TC-128)
 
 **Acceptance:**
-- [ ] TC-127 drives real `ck` and real files across runs in one repo
-- [ ] TC-130 measures a real `ck lint` subprocess on a generated spec and is marked `serial`
-- [ ] Tests exercise the real boundary named in the test plan (workflows under the fake runtime, the real CLI)
-- [ ] Tests fail before the implementation exists for the right reason (no arbiter steps, no Story 12 keys)
-- [ ] No mocks of the project's own code in integration tests
+- [x] TC-127 drives real `ck` and real files across runs in one repo
+- [x] TC-130 measures a real `ck lint` subprocess on a generated spec and is marked `serial`
+- [x] Tests exercise the real boundary named in the test plan (workflows under the fake runtime, the real CLI)
+- [x] Tests fail before the implementation exists for the right reason (no arbiter steps, no Story 12 keys)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (project fixture, canary helpers), Task 2 (`throwingDate`, fake runtime)
 **Complexity:** High
