@@ -9,7 +9,7 @@ import { thinCkDefault } from './fake_create.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const SCRIPT = path.join(here, '../../plugin/workflows/spec-create.js')
-const args = { mode: 'review', feature: 'f', projectRoot: '/p', specDir: '/p/specs/f', date: '2026-10-30' }
+const args = { mode: 'review', feature: 'f', projectRoot: '/p', specDir: '/p/specs/f', date: '2026-10-30', arbiterAgent: 'spec:arbiter', runnerAgent: 'spec:runner', agents: { arbiter: { model: 'sonnet', effort: 'medium', risky_model: 'opus', risky_effort: 'high' } } }
 
 const PROPOSED = 'The system SHALL reject an empty name with exit code 2.'
 const finding = (id, file, fix) => ({ id, file, location: '1.1', severity: 'major', problem: 'p', evidence: 'e', fix, needsUserDecision: false })

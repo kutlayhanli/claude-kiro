@@ -167,8 +167,8 @@ PERF = "tests/test_perf.py"
 def cycle_shape(extra_shared: bool = False) -> str:
     """Task 8's Verify runs PERF unfiltered. Test task 9 verifies Task 8; test task 10 owns PERF too and verifies
     Task 13, which depends on Task 8. The verify-file rule reports (8, PERF); Story 12 sees the same problem.
-    With extra_shared, Task 8 also runs A unfiltered; A is owned by test task 11, which verifies the not-Done Task 14
-    (no dependency on Task 8), so (8, A) is a Story-12-only problem."""
+    With extra_shared, Task 8 also runs A unfiltered; A is owned by test task 12 (verifies Task 8) and by test task 11, which verifies the not-Done Task 14
+    (no dependency on Task 8), so A is shared and (8, A) is a Story-12-only problem."""
     out = block(8, "Perf core", files=["src/perf.py"], verify=f"{PYTEST} {PERF}" + (f" {A}" if extra_shared else ""))
     out += block(9, "Perf core tests", track="test", files=[PERF], verifies="Task 8")
     out += block(10, "Report tests", track="test", files=[PERF], verifies="Task 13")
@@ -176,6 +176,7 @@ def cycle_shape(extra_shared: bool = False) -> str:
     if extra_shared:
         out += block(14, "Other", files=["src/other.py"], verify=f"{PYTEST} {B}")
         out += block(11, "Other tests", track="test", files=[A, B], verifies="Task 14")
+        out += block(12, "Perf extra tests", track="test", files=[A], verifies="Task 8")
     return out
 
 
@@ -268,14 +269,15 @@ def test_1210_json_output_fed_back_is_stable(tmp_path):
 
 
 def test_1210_this_specs_own_tasks_md_reports_no_problem_twice(tmp_path):
-    """This spec's tasks.md fed back in: no (task, suite) is in verifyScope twice, or in both verifyScope and verifyCycles."""
+    """This spec's tasks.md fed back in: no (task, suite, testTask) is in verifyScope twice, and no (task, suite) is in both verifyScope and verifyCycles."""
     shutil.copytree(REPO / "specs/run-principles", tmp_path / "specs/run-principles")
     shutil.copytree(REPO / "tests", tmp_path / "tests", ignore=shutil.ignore_patterns("__pycache__", "netguard"))
     out = ck(tmp_path, "lint", "run-principles", "--json")
     data = json.loads(out.output[out.output.index("{"):])
     assert "verifyScope" in data, "lint must carry the verifyScope key"
     scope_pairs = [(str(f["task"]), f["suite"]) for f in scope(data)]
-    assert len(scope_pairs) == len(set(scope_pairs)), scope_pairs
+    triples = [(str(f["task"]), f["suite"], str(f["testTask"])) for f in scope(data)]
+    assert len(triples) == len(set(triples)), triples
     cycle_pairs = {(str(e["task"]), e["file"]) for e in data.get("verifyCycles", []) if e.get("kind") == "verify-file"}
     assert not (set(scope_pairs) & cycle_pairs), set(scope_pairs) & cycle_pairs
     for entry in data.get("notChecked", []):
