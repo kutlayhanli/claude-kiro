@@ -338,6 +338,9 @@ def settle_claim(root: Path, spec: str, key: str, raw_text: str, tier: str) -> D
             if other.get("worktree") == rel and other.get("branch") == branch and other.get("status") == "open":
                 other["status"] = status if status in ("failed", "exhausted") else "open"
         entry["status"] = status
+        if route.route == "rerun":
+            # The risky re-run is a second real call on this claim (one ruling, two calls).
+            entry["calls"] = int(entry.get("calls", 0)) + 1
         write_ledger(ledger_path(root, spec), ledger)
 
         if route.route in ("test_repair", "code", "needs_input"):
