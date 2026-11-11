@@ -466,7 +466,7 @@ def test_tc9_a_ruling_naming_a_reservation_that_needs_a_design_edit_is_a_needs_i
     out = run(bridge, project, opts, agents=roles("haiku", ["opus"]))
     ev = out["events"]
     assert arbiter_calls(ev) == ["arbiter task 1"], ", ".join(ev)
-    assert len(needs(out)) == 1, json.dumps(out["result"].get("needsInput"))
+    assert [str(e["task"]) for e in needs(out)] == ["1"], json.dumps(out["result"].get("needsInput"))
     assert [e for e in ev if e.startswith("arbiter-land")] == [], "no landing ran: " + ", ".join(ev)
     assert "interface" in json.dumps(needs(out)[0]) or "design.md" in json.dumps(needs(out)[0]), json.dumps(needs(out)[0])
 
