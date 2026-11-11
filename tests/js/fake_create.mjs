@@ -12,6 +12,10 @@ export function stub(overrides = {}) {
     // run-principles: one call per arbiter step (a ` risky` suffix re-runs at the risky tier), answering one ruling per subject
     // (none by default); `review: should-exist` finds no cut; `apply-cuts` applies none.
     if (/^arbiter (refuted|cuts|drift)( risky)?$/.test(l)) return { rulings: [] }
+    // The thin ck steps around the arbiter (run through the runner agent, answering the CK_CALL shape): a usable principles file,
+    // implementation not started, no approved cut, and the lane opened or closed.
+    if (l === 'arbiter context') return { exitCode: 0, json: { principles: [], planLayer: '', implementationStarted: false, missing: null, cut: null } }
+    if (/^arbiter lane (open|close)$/.test(l)) return { exitCode: 0, json: { ok: true } }
     if (l === 'review: should-exist') return { findings: [] }
     if (l.startsWith('apply-cuts')) return { applied: [], summary: 'no cuts applied' }
     if (l === 'review: fidelity') return { findings: [

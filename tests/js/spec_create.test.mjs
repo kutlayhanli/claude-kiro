@@ -24,6 +24,15 @@ await test('create: authoring stages, 4 lenses, refuted/decision findings routed
   assert.equal(result.files.length, 5)
 })
 
+await test('a refuted finding goes through the arbiter and the result stays Ready after decisions', async () => {
+  const s = stub()
+  const { result } = await runWorkflow(SCRIPT, { agent: s.agent, args: args('create') })
+  assert.ok(s.calls.includes('arbiter context'))
+  assert.ok(s.calls.includes('arbiter refuted'), 'the refuted R3 is a subject of the arbiter step')
+  assert.ok(!result.review.fixed.includes('R3'))
+  assert.equal(result.review.result, 'Ready after decisions')
+})
+
 await test('review mode skips authoring', async () => {
   const s = stub()
   const { result } = await runWorkflow(SCRIPT, { agent: s.agent, args: args('review') })

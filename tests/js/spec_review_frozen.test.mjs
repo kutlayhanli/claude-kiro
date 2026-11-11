@@ -23,6 +23,9 @@ function stub() {
     if (l === 'review: fidelity') return { findings: [
       finding('R1', 'requirements.md', `Reword requirement 1.1 to: ${PROPOSED}`),
       finding('R2', 'requirements.md', 'Add requirement 1.9 covering the new flag') ] }
+    if (l === 'arbiter context') return { exitCode: 0, json: { principles: [], planLayer: '', implementationStarted: true, missing: null, cut: null } }
+    if (/^arbiter lane (open|close)$/.test(l)) return { exitCode: 0, json: { ok: true } }
+    if (/^arbiter (refuted|cuts|drift)( risky)?$/.test(l)) return { rulings: [] }
     if (l.startsWith('review:')) return { findings: [] }
     if (l === 'refute: fidelity') return { verdicts: [{ id: 'R1', refuted: false, reason: 'real' }, { id: 'R2', refuted: false, reason: 'real' }] }
     if (l.startsWith('revise')) return {
