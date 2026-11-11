@@ -8,12 +8,14 @@
 //       a step-end answer gets the eta printed by the `ck progress event ... step-end --json` its prompt wrote
 //   {op:'call', name, args}                           -> {ok:true, value}   one decisions-block function (any name), called with args;
 //       a Set anywhere in a response is written as a sorted array
+//   throwingDate: true on `run` and `create`: the script gets a Date (no-argument construction and Date.now) and a
+//       Math.random that throw, as Claude Code's Workflow runtime has no clock (scripts replay for resume)
 //   {op:'run', ..., realCk:{cmd, cwd, env}}           direct ck() calls of the workflow run the real CLI subprocess; the
 //       argv lists are returned as `ckCalls` [{argv, code}]
 // Any throw -> {ok:false, error}. Durations in the project options are milliseconds (1-40).
 import readline from 'node:readline'
 import { execFile } from 'node:child_process'
-import { runWorkflow, useVirtualTime } from './load_workflow.mjs'
+import { runWorkflow, useVirtualTime, throwingGlobals } from './load_workflow.mjs'
 import { project, writtenCommands, execCkRun } from './fake_project.mjs'
 import { stub } from './fake_create.mjs'
 import { VirtualClock } from './virtual_clock.mjs'
@@ -68,7 +70,7 @@ async function handle(req) {
     const args = { ...baseArgs, ...req.args, ...(slots ? { agentSlots: slots } : {}) }
     const ckCalls = []
     const ck = req.realCk ? realCkFn(req.realCk, ckCalls, clock ? q => clock.external(q) : q => q) : undefined
-    const { result, logs, trace } = await runWorkflow(SCRIPT, { agent: p.agent, args, slots, clock, ck })
+    const { result, logs, trace } = await runWorkflow(SCRIPT, { agent: p.agent, args, slots, clock, ck, ...(req.throwingDate ? throwingGlobals() : {}) })
     return { ckCalls, result, logs, trace, prompts: p.state.prompts, opts: p.state.opts, optsList: p.state.optsList, events: p.state.events, execLog: p.state.execLog, execResults: p.state.execResults, reviewTasks: p.state.reviewTasks }
   }
   if (req.op === 'create') {
@@ -91,7 +93,7 @@ async function handle(req) {
       return eta !== undefined && answer && typeof answer === 'object' && !Array.isArray(answer) ? { ...answer, eta } : answer
     }
     const createArgs = { mode: 'create', feature: 'f', projectRoot: '/p', specDir: '/p/specs/f', date: '2026-10-04', ...req.args }
-    const { result, logs, trace } = await runWorkflow(CREATE_SCRIPT, { agent, args: createArgs, clock })
+    const { result, logs, trace } = await runWorkflow(CREATE_SCRIPT, { agent, args: createArgs, clock, ...(req.throwingDate ? throwingGlobals() : {}) })
     return { result, logs, trace, prompts: s.prompts, execLog, execResults }
   }
   throw new Error(`unknown op: ${req.op}`)

@@ -57,7 +57,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 2: Extend the JS fake runtime and bridge for rulings
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.8, 7.1, 8.1, 8.9, 13.1
 **Description:** Build the workflow side of the test infrastructure (test-plan "What must be added", items 2-5), on `integrate/run-principles`: the fake project must follow the workflow's `thinCk`, `CK_CALL` and `agentType` handling as on master. All options default to absent so existing suites behave as before.
@@ -77,15 +77,16 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 65 (the fake runtime it runs under), Task 66 (the bridge `call` op for `testRepairEntries`), Task 67 (`arbiterEdits`, the real landing), Task 74 (`auditFindings`)
 
 **Acceptance:**
-- [ ] Every existing `tests/js/*.test.mjs` suite still passes unchanged with the extended fake project (the create-side suites migrate in Task 90, which verifies them, so this Verify filters them out: `-k "not spec_create"` is a substring match, so it also drops `spec_create_provides.test.mjs`, which Task 90 runs)
-- [ ] An `arbiter-` label with no `execCk` throws, so a scenario cannot skip the real CLI
-- [ ] `arbiterEdits` commits with real git, so a landing in a scenario is a real landing
-- [ ] `throwingDate: true` makes both `Date` and `Math.random` throw when workflow code uses them
-- [ ] Tests exercise the real boundary named in the test plan (the real workflow scripts under the fake runtime)
-- [ ] Tests fail before the implementation exists for the right reason (self-checks of workflow options name the missing label, not a broken harness)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Every existing `tests/js/*.test.mjs` suite still passes unchanged with the extended fake project (the create-side suites migrate in Task 90, which verifies them, so this Verify filters them out: `-k "not spec_create"` is a substring match, so it also drops `spec_create_provides.test.mjs`, which Task 90 runs)
+- [x] An `arbiter-` label with no `execCk` throws, so a scenario cannot skip the real CLI
+- [x] `arbiterEdits` commits with real git, so a landing in a scenario is a real landing
+- [x] `throwingDate: true` makes both `Date` and `Math.random` throw when workflow code uses them
+- [x] Tests exercise the real boundary named in the test plan (the real workflow scripts under the fake runtime)
+- [x] Tests fail before the implementation exists for the right reason (self-checks of workflow options name the missing label, not a broken harness)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** None
+**Implementation notes:** `throwingGlobals` lives in `tests/js/load_workflow.mjs` (new `scriptMath` option of `runWorkflow`); the bridge `call` op already existed. `arbiter-` steps find the arbiter checkout as the prompt's path ending `-task-arbiter<k>`. `arbiter-` steps read the command line and stdin in thinCk's shape (shellWord quoting, `<<'CK_PARK'` here-document; a fenced JSON block is the fallback), checked against the template read from `spec-implement.js`. `emit_labels.mjs` answers thin steps in the CK_CALL envelope (they had stopped its implement scenarios at `plan`), and its run-principles scenarios raise each claim trigger, make the audit due through `verifiedBy`, and answer OpenResult, SettleResult (`rerun` first), RULING and AUDIT as design.md shapes them.
 **Complexity:** High
 **Risk:** safety (the harness that proves the needs-input notifications and landings on the integration branch)
 
