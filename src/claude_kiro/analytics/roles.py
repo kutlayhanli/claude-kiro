@@ -77,6 +77,7 @@ _IMPL = [
     ("arbiter_step", _ARBITER_STEP),
     ("testfix_ledger", _c(rf"testfix ledger (?P<k>{_NUM})")),
     ("testfix_prove", _c(rf"testfix prove (?P<k>{_NUM})")),
+    ("testfix_record", _c(rf"testfix record (?P<k>{_NUM})")),
 ]
 
 _CREATE_FIXED = {
@@ -184,6 +185,8 @@ def _implement(label: str) -> LabelMatch:
             return LabelMatch(role="gate", matched=True, attempt=int(g["k"]), step="testfix_ledger")
         if name == "testfix_prove":
             return LabelMatch(role="gate", matched=True, attempt=int(g["k"]), step="testfix_prove")
+        if name == "testfix_record":
+            return LabelMatch(role="gate", matched=True, attempt=int(g["k"]), step="testfix_record")
         if name == "unreproduced":
             return LabelMatch(role="gate", matched=True, step="unreproduced")
         if name in ("arbiter_task", "arbiter_step"):
