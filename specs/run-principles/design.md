@@ -108,6 +108,8 @@ ck worktree land SPEC N... --json                        # adds "recovered" (14.
 ck worktree merge SPEC N...                              # prints "restored <checkout> to <head>: discarded <paths>" first when it restored, ending "; a merge was in progress" when one was (14.2)
 ```
 
+
+`ck arbiter settle` reads both principle layers from the ledger entry's `base` commit, not from the INTO checkout, and a `rerun` route adds one to the entry's `calls` (one ruling, two calls). `ck arbiter record` (Task 42) owns moving an entry to `ruled`.
 New `ck lint --json` keys (existing keys keep their names and meaning):
 
 | Key | Shape |

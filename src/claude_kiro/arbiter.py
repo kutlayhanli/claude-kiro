@@ -25,10 +25,13 @@ from . import worktrees as wt
 from .arbiter_policy import (
     Claim,
     ClaimDecision,
+    RulingRecord,
     TaskMeta,
+    append_entry,
     claim_facts,
     claim_key,
     decide_claim,
+    next_number,
 )
 from .principles import effective_principles, parse_principles
 
@@ -278,3 +281,143 @@ def open_claim(root: Path, spec: str, into: str, task: str, claim: Claim, task_m
 
         result.update({"worktree": rel, "branch": branch, "number": str(number)})
         return result
+
+
+# --------------------------------------------------------------------------- settle (Task 38)
+
+
+def _principles_at(root: Path, base: str, spec: str) -> Any:
+    """The effective principles as they stood at the arbiter worktree's starting commit."""
+    def show(rel: Path) -> Optional[str]:
+        done = wt.git(root, "show", f"{base}:{rel.as_posix()}", check=False)
+        return done.stdout if done.returncode == 0 else None
+
+    project_text = show(PRINCIPLES_REL)
+    plan_text = show(Path("specs") / spec / "PLAN.md")
+    project = parse_principles(project_text, "project") if project_text is not None else []
+    plan = parse_principles(plan_text, "plan") if plan_text is not None else None
+    return effective_principles(project, plan)
+
+
+def _remove_worktree(root: Path, rel: Optional[str], branch: Optional[str]) -> None:
+    if rel:
+        wt.git(root, "worktree", "remove", "--force", str(root / rel), check=False)
+    if branch:
+        wt.git(root, "branch", "-D", branch, check=False)
+
+
+def settle_claim(root: Path, spec: str, key: str, raw_text: str, tier: str) -> Dict[str, Any]:
+    """`SettleResult` for the arbiter's raw answer to claim KEY: validate it, route it, update the ledger and
+    deal with the arbiter's worktree by route (design.md, `ck arbiter settle`)."""
+    if tier not in ("normal", "risky"):
+        raise ArbiterError("tier must be normal or risky")
+    from .arbiter_policy import route_ruling, validate_ruling
+
+    with ledger_lock(root, spec):
+        ledger = load_ledger(ledger_path(root, spec))
+        entry = ledger["claims"].get(key)
+        if entry is None:
+            raise ArbiterError(f"no claim {key!r} in the arbiter ledger; it was never opened")
+        base = entry.get("base")
+        if not base:
+            raise ArbiterError(f"the ledger entry for {key!r} has no starting commit")
+        effective = _principles_at(root, base, spec)
+        citable = {p.id: p for p in effective.citable}
+        try:
+            raw: Any = json.loads(raw_text)
+        except ValueError:
+            raw = raw_text
+        check = validate_ruling(raw, key, citable, "run")
+        route = route_ruling(check, tier, effective)  # type: ignore[arg-type]
+
+        rel, branch = entry.get("worktree"), entry.get("branch")
+        if not check.valid:
+            status = "failed"
+        elif route.reason == "exhausted":
+            status = "exhausted"
+        else:
+            status = entry.get("status", "open")
+        for other in ledger["claims"].values():
+            if other.get("worktree") == rel and other.get("branch") == branch and other.get("status") == "open":
+                other["status"] = status if status in ("failed", "exhausted") else "open"
+        entry["status"] = status
+        if route.route == "rerun":
+            # The risky re-run is a second real call on this claim (one ruling, two calls).
+            entry["calls"] = int(entry.get("calls", 0)) + 1
+        write_ledger(ledger_path(root, spec), ledger)
+
+        if route.route in ("test_repair", "code", "needs_input"):
+            _remove_worktree(root, rel, branch)
+        elif route.route == "rerun" and rel:
+            path = root / rel
+            wt.git(path, "reset", "--hard", base)
+            wt.git(path, "clean", "-fdq")
+
+        principle = citable.get(check.principle) if check.principle else None
+        return {
+            "route": route.route,
+            "reason": route.reason,
+            "record": route.record,
+            "principle": {"id": principle.id, "text": principle.text} if principle is not None else None,
+            "problems": list(check.problems),
+        }
+
+
+# --------------------------------------------------------------------------- the record of rulings (Task 42)
+
+
+def decisions_rel(spec: str) -> Path:
+    return Path("specs") / spec / "decisions.md"
+
+
+def ruling_record_from_json(raw: Any) -> RulingRecord:
+    """The `RulingRecord` of the stdin object. `moved` is a list of objects, `landed` a [bool, why] pair or null."""
+    if not isinstance(raw, dict):
+        raise ArbiterError("the ruling record must be a JSON object")
+    names = {f.name for f in fields(RulingRecord)}
+    kw = {k: v for k, v in raw.items() if k in names}
+    try:
+        kw["moved"] = tuple(dict(m) for m in (raw.get("moved") or []))
+        landed = raw.get("landed")
+        kw["landed"] = None if landed is None else (bool(landed[0]), str(landed[1]))
+    except (TypeError, ValueError, IndexError, KeyError):
+        raise ArbiterError("moved must be a list of objects and landed a [bool, why] pair or null")
+    try:
+        return RulingRecord(**kw)
+    except TypeError as exc:
+        raise ArbiterError(f"the ruling record is missing a field: {exc}")
+
+
+def record_ruling(root: Path, spec: str, into: str, record: RulingRecord, lock_wait: float) -> Dict[str, Any]:
+    """`{number, commit}` for one ruling (design.md, `ck arbiter record`).
+
+    Takes the landing lock on INTO with a bounded wait, so concurrent records serialize; appends the entry to
+    `specs/<spec>/decisions.md` on INTO's checkout and commits that file alone. The first ruling creates the file.
+    A lock not acquired in time, or a failed write or commit, raises and leaves the file as it was.
+    """
+    checkout = wt.checkout_of(root, into)
+    if checkout is None:
+        raise ArbiterError(f"{into} is not checked out anywhere, so decisions.md cannot be written")
+    path = checkout / decisions_rel(spec)
+    rel = decisions_rel(spec).as_posix()
+    with wt.land_lock(root, into, wait_s=lock_wait):
+        existing = path.read_text(encoding="utf-8") if path.is_file() else None
+        ledger_last = int(load_ledger(ledger_path(root, spec)).get("lastEntry", 0))
+        number = next_number(existing, ledger_last)
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        head = existing if existing is not None else f"# Rulings: {spec}\n\n"
+        text = append_entry(head, replace(record, at=record.at or stamp), number)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            path.write_text(text, encoding="utf-8")
+            wt.git(checkout, "add", "--", rel)
+            wt.git(checkout, "commit", "--only", "-m", f"arbiter: record ruling {number}", "--", rel)
+            sha = wt.git(checkout, "rev-parse", "HEAD").stdout.strip()
+        except BaseException:
+            wt.git(checkout, "reset", "-q", "--", rel, check=False)
+            if existing is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.write_text(existing, encoding="utf-8")
+            raise
+    return {"number": number, "commit": sha}

@@ -569,7 +569,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 24: Report Verify scope from ck lint and ck plan
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 12.1, 12.5, 12.8, 12.9, 12.10
 **Description:** `lint_spec` adds `verifyScope` and `notChecked`, built through `load_sim_input`, `scope_findings` and `dedupe_scope`. In `src/claude_kiro/cli/worktree.py`, `ck lint` text output prints one line per finding, naming the task and the suite; `lint` gains `--simulate --task N --json`, returning `{"task", "suites", "selected"}`; `_plan` adds `verifyScope`, `justifications` and `verifiedBy`. `ck lint` never calls the arbiter. Keep `ck lint` under 10 seconds on a 108-task spec by parsing each test file once per command. Harness Contract owner: `ck lint --json` `verifyScope` and `notChecked`, `ck lint --simulate` (the contract's `verifyScope.checked`), and `ck plan --json` `verifyScope`.
@@ -581,11 +581,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 13 (P-8 through real `ck plan`), Task 18 (TC-109 to 113, 117 to 119, 136, 145), Task 20 (P-34 through the CLI), Task 21 (red team of 12.9, 12.10 through `ck lint`), Task 87 (TC-129, 130, 132)
 
 **Acceptance:**
-- [ ] A finding makes `ck lint` exit non-zero and appears in `ck plan --json` `verifyScope`
-- [ ] Text and JSON each name the task and the suite
-- [ ] `ck lint --simulate --task N --json` returns due suites and selections for that task
-- [ ] Two runs on the same tree give byte-identical output, and lint imports no project code and opens no connection
-- [ ] A generated 108-task spec lints in under 10 seconds
+- [x] A finding makes `ck lint` exit non-zero and appears in `ck plan --json` `verifyScope`
+- [x] Text and JSON each name the task and the suite
+- [x] `ck lint --simulate --task N --json` returns due suites and selections for that task
+- [x] Two runs on the same tree give byte-identical output, and lint imports no project code and opens no connection
+- [x] A generated 108-task spec lints in under 10 seconds
 
 **Dependencies:** Task 13 (its tests are the oracle), Task 18 (its tests are the oracle), Task 20 (its tests are the oracle), Task 21 (its tests are the oracle), Task 22 (calls `scope_findings` and `load_sim_input`), Task 23 (edits the same code in `lint.py` and `cli/worktree.py`), Task 87 (its tests are the oracle)
 **Complexity:** High
@@ -852,7 +852,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 36: Enforce the arbiter's lane in the guard hook
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 9.1, 9.2, 9.3, 9.4, 9.7, 9.8, 11.7, 11.10
 **Description:** In `_hook` of `src/claude_kiro/hooks/pre_tool_guard.py`, check `is_arbiter_caller` first and send that caller only through the lane: gather `ArbiterEditFacts` (resolved path, arbiter worktree name, open lane tickets, whether any task of the spec is In Progress or Done) for Edit, Write and NotebookEdit, and `decide_arbiter_bash` for Bash. An exception on this path denies, and `guard` modes in `specs/ck.json` do not apply to it. Every other caller keeps today's path, including fail-open.
@@ -862,10 +862,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 1 (its identity fixture), Task 33 (TC-79 to 87, 101, 103, 106, 134 through the real hook), Task 34 (P-23 under real `bash -c`, P-39 through the real hook), Task 82 (red team of 11.7, 11.10 through the hook)
 
 **Acceptance:**
-- [ ] The arbiter edits the three lane files, including changes to existing text after implementation started
-- [ ] The arbiter is denied requirements.md in a run, any test, source, plan, principles or config path, and each shell form of those
-- [ ] An exception on the arbiter path denies
-- [ ] A task agent and a main session get today's decisions
+- [x] The arbiter edits the three lane files, including changes to existing text after implementation started
+- [x] The arbiter is denied requirements.md in a run, any test, source, plan, principles or config path, and each shell form of those
+- [x] An exception on the arbiter path denies
+- [x] A task agent and a main session get today's decisions
 
 **Dependencies:** Task 1 (its tests are the oracle), Task 32 (reads the lane tickets it writes), Task 33 (its tests are the oracle), Task 34 (its tests are the oracle), Task 35 (calls the lane seams), Task 82 (its tests are the oracle), Task 37 (provides `cmd:ck arbiter open`), Task 38 (provides `cmd:ck arbiter settle`), Task 42 (provides `cmd:ck arbiter record`)
 **Complexity:** High
@@ -897,7 +897,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 38: Add ck arbiter settle
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.7, 5.6, 5.7, 7.1, 7.2, 7.7
 **Description:** Add `ck arbiter settle SPEC KEY --tier normal|risky --json` (stdin: the arbiter's raw output, stdout: `SettleResult`). It calls `validate_ruling` and `route_ruling`, updates the ledger (status `exhausted` after a risky stronger-look; `failed` for nothing valid), counts a re-run and its first call as one ruling, and handles the worktree by route: it removes the worktree and branch on `test_repair`, `code` and `needs_input`, keeps them on `spec_edit` for the landing, and on `rerun` keeps them and resets the branch to the ledger's `base` so the risky re-run starts clean. Harness Contract owner: `ck arbiter route`, which is `ck arbiter settle`.
@@ -909,10 +909,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 1 (its strategies), Task 7 (TC-10), Task 25 (TC-53, TC-135, TC-150)
 
 **Acceptance:**
-- [ ] A valid ruling and each stronger-look status settle to the route `route_ruling` gives
-- [ ] An invalid ruling leaves no record flag and carries its problems
-- [ ] The ledger marks `exhausted` so later runs ask
-- [ ] The arbiter worktree is removed on `test_repair`, `code` and `needs_input`, and on `rerun` it stays with its branch reset to the starting commit
+- [x] A valid ruling and each stronger-look status settle to the route `route_ruling` gives
+- [x] An invalid ruling leaves no record flag and carries its problems
+- [x] The ledger marks `exhausted` so later runs ask
+- [x] The arbiter worktree is removed on `test_repair`, `code` and `needs_input`, and on `rerun` it stays with its branch reset to the starting commit
 
 **Dependencies:** Task 1 (its tests are the oracle), Task 7 (its tests are the oracle), Task 25 (its tests are the oracle), Task 30 (calls `validate_ruling` and `route_ruling`), Task 37 (uses the ledger and worktree)
 **Complexity:** Medium
@@ -991,7 +991,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 42: Record rulings in decisions.md
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.8, 10.9
 **Description:** In `src/claude_kiro/arbiter_policy.py`, add `RulingRecord`, `append_entry(existing, entry, number)` (output always starts with `existing`), `next_number(existing, ledger_last)` and `rulings_summary(rulings)`. Add `ck arbiter record SPEC --into BRANCH --json` (stdin: RulingRecord, stdout: `{"number", "commit"}`, option `--lock-wait`). It takes `land_lock` with a bounded wait of 120 seconds (`land_lock` gains `wait_s` for this, default 0, so concurrent records serialize instead of refusing), appends `specs/<spec>/decisions.md` in the format from design.md, and commits that file alone on the integration branch, so a landing's clean-target check still passes. The first ruling creates the file. A failed write, or a lock not acquired before the wait ends, exits non-zero and writes nothing. Harness Contract owner: `ck arbiter record`. The contract's `ck arbiter log` is not built: tests read `decisions.md` through `decisions_entries` in `tests/arbiter_helpers.py`, against the format this task writes.
@@ -1005,10 +1005,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 1 (its record reader), Task 25 (TC-88, 89, 91, 92, 93, 152), Task 28 (P-26 at `append_entry` and `ck arbiter record`)
 
 **Acceptance:**
-- [ ] One entry is appended with trigger, claim, ruling, principle, what changed and commit, and earlier bytes are unchanged
-- [ ] Numbers increase and never repeat across processes, and 16 concurrent records give 16 entries with 16 numbers
-- [ ] A ruling with no commit renders as `none`, and a failed landing renders as not landed with why
-- [ ] A spec with no rulings has no file
+- [x] One entry is appended with trigger, claim, ruling, principle, what changed and commit, and earlier bytes are unchanged
+- [x] Numbers increase and never repeat across processes, and 16 concurrent records give 16 entries with 16 numbers
+- [x] A ruling with no commit renders as `none`, and a failed landing renders as not landed with why
+- [x] A spec with no rulings has no file
 
 **Dependencies:** Task 1 (its tests are the oracle), Task 25 (its tests are the oracle), Task 28 (its tests are the oracle), Task 38 (edits `arbiter.py` and `cli/arbiter.py`), Task 41 (edits `arbiter_policy.py`)
 **Complexity:** High
@@ -1108,7 +1108,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 47: Show rulings in ck stats
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 10.8
 **Description:** In `src/claude_kiro/analytics/collect.py`, read `rulings` from the workflow result; in `src/claude_kiro/analytics/show.py`, report counts by trigger, outcome and tier through `rulings_summary`. Harness Contract owner: `ck stats show --json` `rulings: {byTrigger, byOutcome, byTier}`.
@@ -1119,8 +1119,8 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 45 (TC-95)
 
 **Acceptance:**
-- [ ] `ck stats show --json` reports the counts by trigger, outcome and tier for a run with rulings
-- [ ] A run with no rulings reports no counts
+- [x] `ck stats show --json` reports the counts by trigger, outcome and tier for a run with rulings
+- [x] A run with no rulings reports no counts
 
 **Dependencies:** Task 42 (calls `rulings_summary`), Task 45 (its tests are the oracle)
 **Complexity:** Low
