@@ -256,6 +256,8 @@ def test_tc27_a_surviving_cut_is_listed_with_story_weakness_and_counts(tmp_path)
     assert "nice to have" in cut["weakness"]
     assert cut["saves"] == CUT["saves"]
     # review.md is written by the reviser from its prompt, which holds the section: story, weakness and the counts.
+    # design.md's flowchart: "Revise: confirmed findings, review.md, sound cuts listed, never applied". So the revise prompt
+    # lists the cut for review.md's Proposed cuts section, but never carries its fix as an edit to make (TC-28, PLAN_MARK).
     revise = [s["prompt"] for s in out["sent"] if s["label"].startswith("revise")]
     assert revise, out["labels"]
     assert all(CUT["weakness"] in p and "Farewell" in p for p in revise), "the revise prompt must carry the cut for review.md's section"
@@ -288,7 +290,29 @@ def test_tc29_an_approved_cut_with_nothing_started_removes_the_story_and_lint_fi
     files = spec_files(project)
     assert story_gone(files), files
     assert ck_run(project.root, "lint", "demo", "--json").returncode == 0
-    assert not re.search(r"new (lint )?failure|dependency cycle|lint (failed|failure)", as_text(out), re.I), as_text(out)
+    assert not reports_lint_failure(as_text(out)), as_text(out)
+
+
+# A reported lint failure, not a success line that negates one ("ck lint: no new failure", "no lint failures", "without a
+# new failure"). Negated phrases are dropped first, then the failure wording is searched; the self-checks below pin both sides.
+NEGATED = re.compile(r"\b(no|not|without|zero|0|never)\b(\s+(a|an|any|new|lint|dependency))*\s+(failures?|failed|cycles?)\b", re.I)
+LINT_FAILURE = re.compile(r"new (lint )?failure|dependency cycle|lint (failed|failure)", re.I)
+
+
+def reports_lint_failure(text: str) -> bool:
+    return bool(LINT_FAILURE.search(NEGATED.sub(" ", text)))
+
+
+@pytest.mark.parametrize("text", ["ck lint: no new failure", "no new lint failure", "no lint failures", "lint passed without a new failure",
+                                  "found no dependency cycle", "0 new failures"])
+def test_tc29_lint_failure_check_ignores_negated_success_lines(text):
+    assert not reports_lint_failure(text)
+
+
+@pytest.mark.parametrize("text", ["ck lint found a new failure", "1 new lint failure: dependency cycle", "lint failed after the edit",
+                                  "Task 1 -> Task 2 -> Task 1: dependency cycle"])
+def test_tc29_lint_failure_check_still_catches_a_reported_failure(text):
+    assert reports_lint_failure(text)
 
 
 def test_tc30_a_removal_that_leaves_a_lint_failure_is_not_reported_as_applied(tmp_path):
@@ -302,6 +326,7 @@ def test_tc30_a_removal_that_leaves_a_lint_failure_is_not_reported_as_applied(tm
     assert lints and lints[-1]["code"] != 0, f"real ck lint must fail on the cycle the edit left: {lints}"
     text = as_text(out)
     assert re.search(r"cycle", text, re.I), f"the run must show the lint finding: {text}"
+    # `applied` is not a designed result key; this guards only the obvious name. The text check below is what pins the claim.
     applied = (out["result"] or {}).get("applied") if isinstance(out["result"], dict) else None
     assert not applied, f"the cut is reported as applied although lint failed: {out['result']}"
     assert not re.search(r"(?<!not )(?<!never )\bcut (was |is )?applied|(?<!not )story (was )?removed", text, re.I), text
