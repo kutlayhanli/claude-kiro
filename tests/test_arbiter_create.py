@@ -638,23 +638,38 @@ def test_tc141_unusable_principles_file_means_no_arbiter_call_findings_stand_and
     assert "ck principles init" in text and "PRINCIPLES.md" in text, "review.md's reviser and the report name the file and the command"
 
 
-def test_tc148_each_arbiter_step_starts_with_the_arbiter_agent_type_and_tier_options_by_plain_agent(tmp_path):
+def _tc148_run(tmp_path):
     project = plan_project(tmp_path)
     again = {**ruling("R3"), "status": "needs_stronger_look", "established": "part"}
     over = {**refuting("R1", "R3"), "review: should-exist": cut_lens_answer(), "arbiter refuted": {"rulings": [ruling("R1"), again]},
             "arbiter refuted risky": {"rulings": [ruling("R3")]}, "arbiter cuts": cut_ruling()}
     out = create(project, over)
     steps = [s for s in out["sent"] if re.fullmatch(r"arbiter (refuted|cuts|drift)( risky)?", s["label"])]
-    assert {s["label"] for s in steps} >= {"arbiter refuted", "arbiter refuted risky", "arbiter cuts", "arbiter drift"}, out["labels"]
+    return out, steps
+
+
+def _tc148_check_steps(steps):
     for s in steps:
         opts = s["opts"]
         assert opts.get("agentType") == "spec:arbiter", (s["label"], opts)
         want = ("opus", "high") if s["label"].endswith("risky") else ("sonnet", "medium")
         assert (opts.get("model"), opts.get("effort")) == want, (s["label"], opts)
         assert "ck progress" not in s["prompt"], f"{s['label']} must be a plain agent whose prompt holds no `ck progress` line"
+
+
+def test_tc148_each_arbiter_step_starts_with_the_arbiter_agent_type_and_tier_options_by_plain_agent(tmp_path):
+    out, steps = _tc148_run(tmp_path)
+    assert {s["label"] for s in steps} >= {"arbiter refuted", "arbiter refuted risky", "arbiter cuts"}, out["labels"]
+    _tc148_check_steps(steps)
     thin = [s for s in out["sent"] if re.search(r"^\s*ck\s.*\barbiter\b", s["prompt"], re.M)]
     assert thin, "the `ck arbiter` steps never ran as thin steps"
     assert all(s["opts"].get("agentType") == "spec:runner" for s in thin), [(s["label"], s["opts"]) for s in thin]
+
+
+def test_arbiter_drift_step_starts_with_the_arbiter_agent_type_and_tier_options_by_plain_agent(tmp_path):
+    out, steps = _tc148_run(tmp_path)
+    assert "arbiter drift" in {s["label"] for s in steps}, out["labels"]
+    _tc148_check_steps([s for s in steps if s["label"] == "arbiter drift"])
 
 
 def test_tc148_with_no_arbiter_agent_the_steps_with_subjects_are_lost_and_the_result_is_not_ready(tmp_path):
