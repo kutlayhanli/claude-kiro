@@ -281,3 +281,132 @@ def route_ruling(check: RulingCheck, tier: Tier, effective: EffectivePrinciples)
         kind = req.get("kind") if isinstance(req, dict) else None
         return RulingRoute("needs_input", "missing-requirement" if kind == "add" else "requirements", True)
     return RulingRoute(_LANES[check.outcome], "", True)
+
+
+# --------------------------------------------------------------------------- spec edits (Task 41)
+
+_TASK_HEAD = re.compile(r"^###\s+Task\s+(\d+)\b")
+_STATUS_LINE = re.compile(r"^\*\*Status:\*\*\s*(.*?)\s*$")
+_MARK_LINE = re.compile(r"^\s*[-*]\s+\[([ xX])\]")
+_LANE_FILES = ("tasks.md", "design.md", "test-plan.md")
+
+
+@dataclass(frozen=True)
+class SpecTextChanges:
+    status_changes: Tuple[str, ...]
+    mark_changes: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SpecEditFacts:
+    spec: str
+    changed: Tuple[str, ...]
+    status_changes: Tuple[str, ...]
+    mark_changes: Tuple[str, ...]
+    new_cycles: Tuple[str, ...]
+    new_blocking: Tuple[str, ...]
+    reserved: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SpecEditDecision:
+    land: bool
+    reasons: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class MovedTest:
+    task: str
+    file: str
+    test: Optional[str]
+    command: str
+
+
+def _task_fields(text: str) -> dict:
+    """task id ("header" for the file-level Status) -> (status, tuple of acceptance marks)."""
+    out: dict = {}
+    cur = "header"
+    status: dict = {}
+    marks: dict = {}
+    for line in text.splitlines():
+        m = _TASK_HEAD.match(line)
+        if m:
+            cur = m.group(1)
+            continue
+        s = _STATUS_LINE.match(line)
+        if s and cur not in status:
+            status[cur] = s.group(1)
+            continue
+        k = _MARK_LINE.match(line)
+        if k and cur != "header":
+            marks.setdefault(cur, []).append(k.group(1) != " ")
+    for key in set(status) | set(marks):
+        out[key] = (status.get(key), tuple(marks.get(key, ())))
+    return out
+
+
+def spec_text_changes(before: str, after: str) -> SpecTextChanges:
+    """Status-field and acceptance-mark changes between two tasks.md texts, by task (8.6). A removed task that
+    was not Not Started counts as a Status change."""
+    b, a = _task_fields(before), _task_fields(after)
+    statuses = []
+    marks = []
+    for key in sorted(set(b) | set(a), key=lambda k: (k != "header", int(k) if k.isdigit() else 0)):
+        bs, bm = b.get(key, (None, ()))
+        as_, am = a.get(key, (None, ()))
+        if key in b and key not in a:
+            if bs not in (None, "Not Started"):
+                statuses.append(f"Task {key}")
+        elif key in a and key not in b:
+            if as_ not in (None, "Not Started"):
+                statuses.append(f"Task {key}")
+        elif bs != as_:
+            statuses.append(f"Task {key}" if key != "header" else "header")
+        n = max(len(bm), len(am))
+        for i in range(n):
+            x = bm[i] if i < len(bm) else False
+            y = am[i] if i < len(am) else False
+            if x != y:
+                marks.append(f"Task {key} criterion {i + 1}")
+    return SpecTextChanges(tuple(statuses), tuple(marks))
+
+
+def moved_out_of_verify(before: Mapping[str, Any], after: Mapping[str, Any]) -> list:
+    """Tests in a task's selection before the edit and not after it (8.7). A selection is a sequence of
+    `(file, test_or_None, command)`; a MovedTest names each one that left."""
+    moved = []
+    for task in sorted(before, key=lambda t: (not str(t).isdigit(), int(t) if str(t).isdigit() else 0, str(t))):
+        kept = {tuple(x) for x in after.get(task, ())}
+        for file, test, command in (tuple(x) for x in before[task]):
+            if (file, test, command) not in kept:
+                moved.append(MovedTest(str(task), file, test, command))
+    return moved
+
+
+def gate_scope_of_edit(before: Mapping[str, Any], after: Mapping[str, Any], done: Any) -> list:
+    """Done tasks whose verification (Verify, Verified by, Verifies) differs between the two maps (8.4)."""
+    return sorted((t for t in done if before.get(t) != after.get(t)),
+                  key=lambda t: (not str(t).isdigit(), int(t) if str(t).isdigit() else 0, str(t)))
+
+
+def decide_spec_edit(facts: SpecEditFacts) -> SpecEditDecision:
+    """The second layer behind the guard: whether a spec edit may land (8.4-8.6, 9.1-9.3, 1.7)."""
+    reasons = []
+    allowed = {f"specs/{facts.spec}/{name}" for name in _LANE_FILES}
+    for path in facts.changed:
+        if path not in allowed:
+            reasons.append(f"{path} is outside the spec-edit lane")
+    for s in facts.status_changes:
+        reasons.append(f"Status change: {s}")
+    for m in facts.mark_changes:
+        reasons.append(f"acceptance mark change: {m}")
+    for c in facts.new_cycles:
+        reasons.append(f"new cycle: {c}")
+    for b in facts.new_blocking:
+        reasons.append(f"new blocking finding: {b}")
+    scopes = {s.strip().lower() for s in facts.reserved}
+    for path in facts.changed:
+        name = path.rsplit("/", 1)[-1]
+        if path.lower() in scopes or name.lower() in scopes:
+            reasons.append(f"{path} is reserved by the plan")
+    return SpecEditDecision(not reasons, tuple(reasons))

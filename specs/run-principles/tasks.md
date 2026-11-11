@@ -968,7 +968,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 41: Decide whether a spec edit may land
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 8.4, 8.5, 8.6, 8.7, 9.1, 9.2, 9.3, 1.7
 **Description:** In `src/claude_kiro/arbiter_policy.py`, add `SpecEditFacts`, `SpecEditDecision`, `MovedTest`, and the pure `spec_text_changes(before, after)`, `moved_out_of_verify(before, after)`, `gate_scope_of_edit(before, after, done)` and `decide_spec_edit(facts)`. `decide_spec_edit` refuses any changed path outside `specs/<spec>/tasks.md`, `design.md` and `test-plan.md`, any Status or acceptance-mark change (a removed task that was not Not Started counts as a Status change), a new cycle, a new blocking lint finding other than justifications, and any changed path matching a scope in `SpecEditFacts.reserved` (1.7), whatever the ruling reported, which sends the claim down the 8.4 path. This is the second layer behind the guard. Harness Contract owner: `arbiter.spec_edit_refusals`, which is `spec_text_changes` plus `decide_spec_edit`.
@@ -978,10 +978,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 40 (P-21 at `spec_text_changes`, P-38 at `decide_spec_edit`)
 
 **Acceptance:**
-- [ ] Any Status field or acceptance-mark change is refused; a Verify, Dependencies or description change is not
-- [ ] A changed path outside the three lane files is refused, and so is a changed lane file the plan reserves, with no `reservedBy` from the ruling
-- [ ] A new cycle or new blocking finding is refused, and an existing finding left as it was is not
-- [ ] `moved_out_of_verify` names each test moved out of a task's selection, and `gate_scope_of_edit` lists only Done tasks whose verification changed
+- [x] Any Status field or acceptance-mark change is refused; a Verify, Dependencies or description change is not
+- [x] A changed path outside the three lane files is refused, and so is a changed lane file the plan reserves, with no `reservedBy` from the ruling
+- [x] A new cycle or new blocking finding is refused, and an existing finding left as it was is not
+- [x] `moved_out_of_verify` names each test moved out of a task's selection, and `gate_scope_of_edit` lists only Done tasks whose verification changed
 
 **Dependencies:** Task 30 (extends `arbiter_policy.py`), Task 40 (its tests are the oracle)
 **Complexity:** Medium
