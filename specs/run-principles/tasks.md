@@ -2216,7 +2216,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 96: Test that bisection blames only a task whose own gate fails
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 15.1, 15.2, 15.3
 **Description:** Create `tests/test_land_bisect.py` with TC-170, TC-171, TC-172, TC-175, TC-198 and P-48 (test-plan.md). TC-170 to TC-172 and TC-175 run the real `ck worktree land --gate --json` on a real repository with a spec whose task branches each commit their own files and their own `**Status:** Done` in `tasks.md`, as real implementers do, so a gate after an earlier half has MERGED sees those tasks Done on the target; TC-171's `specs/ck.json` `verify` runs a test file no task's Verify selects, and it asserts that the gate on the last single task, which sees the spec complete, ran task-scoped. P-48 calls `worktrees.land` with an in-process gate function over real task branches, at `max_examples=30`, and carries a `PROPERTIES` map; its gate function models `gate.py`'s scope rule (full suite when called with `whole` true and the tasks Done on the target plus its group cover the spec), so it fails on a design that lets a sub-batch gate widen. Migrate `tests/test_worktree_land.py::test_red_batch_bisects_to_the_culprit`: its `len(data["gates"]) < 5` and the comment "a green left half proves the right half red without re-gating it" encode the behaviour 15.1 replaces; assert the 2n-1 bound and the right half's own gate instead, keeping its other assertions.
@@ -2227,12 +2227,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 97 (bisection without inference and `unreproduced`)
 
 **Acceptance:**
-- [ ] TC-171 reproduces the observed case: a spec-completing batch red only under the full suite, with task branches that mark themselves Done, and the last task is not RED
-- [ ] The migrated test keeps every assertion not about the gate count
-- [ ] P-48 generates every combination its row lists
-- [ ] Tests exercise the real boundary named in the test plan (real git, real `ck gate`, the `ck` CLI)
-- [ ] Tests fail before the implementation exists for the right reason (the right half is inferred red and a task is blamed by elimination)
-- [ ] No mocks of the project's own code in integration tests
+- [x] TC-171 reproduces the observed case: a spec-completing batch red only under the full suite, with task branches that mark themselves Done, and the last task is not RED
+- [x] The migrated test keeps every assertion not about the gate count
+- [x] P-48 generates every combination its row lists
+- [x] Tests exercise the real boundary named in the test plan (real git, real `ck gate`, the `ck` CLI)
+- [x] Tests fail before the implementation exists for the right reason (the right half is inferred red and a task is blamed by elimination)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** None
 **Complexity:** Medium
@@ -2244,9 +2244,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Status:** Not Started
 **Track:** impl
 **Requirements:** 15.1, 15.2, 15.3
-**Description:** In `src/claude_kiro/worktrees.py`, rewrite `land_group` inside `land` as design.md's "Bisection" shows: drop `known_red`, gate every group it merges, report RED only for a single task whose own gate failed, with that gate's tail and failures, and recurse into both halves otherwise. Only the batch gate may widen to the full suite: `GateFn` gains a keyword `whole: bool = True`, `land` calls every gate below the batch gate with `whole=False`, `_gate_fn` in `src/claude_kiro/cli/worktree.py` passes it to `run_gate` as `escalate_complete`, and `run_gate` in `src/claude_kiro/gate.py` gains `escalate_complete: bool = True`, which when false takes `spec_complete` as false (design.md, "Gate scope below the batch"; 15.1, 15.2). After `land_group(batch)`, when the batch gate was red and no task is RED, add `unreproduced: {tasks, tail, failures}` from the batch gate to the result; the tasks whose own gates passed stay MERGED (15.3). A batch in which only one task merges is gated with `whole=False` too, so a lone task is never gated with the full suite at landing (D25, TC-198).
+**Description:** In `src/claude_kiro/worktrees.py`, rewrite `land_group` inside `land` as design.md's "Bisection" shows: drop `known_red`, gate every group it merges, report RED only for a single task whose own gate failed, with that gate's tail and failures, and recurse into both halves otherwise. Each `gates` entry gains `checkTail` and `failures`, that gate's failing output and failure entries (`""` and `[]` when green), so a RED task's `checkTail` and `failures` equal those of its own gate entry (design.md, `ck worktree land --json` keys; 15.2). Only the batch gate may widen to the full suite: `GateFn` gains a keyword `whole: bool = True`, `land` calls every gate below the batch gate with `whole=False`, `_gate_fn` in `src/claude_kiro/cli/worktree.py` passes it to `run_gate` as `escalate_complete`, and `run_gate` in `src/claude_kiro/gate.py` gains `escalate_complete: bool = True`, which when false takes `spec_complete` as false (design.md, "Gate scope below the batch"; 15.1, 15.2). After `land_group(batch)`, when the batch gate was red and no task is RED, add `unreproduced: {tasks, tail, failures}` from the batch gate to the result; the tasks whose own gates passed stay MERGED (15.3). A batch in which only one task merges is gated with `whole=False` too, so a lone task is never gated with the full suite at landing (D25, TC-198).
 **Files:**
-- `src/claude_kiro/worktrees.py` - `land_group`, `GateFn`'s `whole`, and the `unreproduced` key
+- `src/claude_kiro/worktrees.py` - `land_group`, `GateFn`'s `whole`, the `unreproduced` key, and `checkTail` and `failures` on `gates` entries
 - `src/claude_kiro/gate.py` - `run_gate(..., escalate_complete=True)`
 - `src/claude_kiro/cli/worktree.py` - `_gate_fn` passes `whole` as `escalate_complete`
 **Verify:** `uv run pytest tests/test_land_bisect.py -q` `uv run pytest tests/test_worktree_land.py -q`
