@@ -1405,7 +1405,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 60: Test test-repair rulings and rulings that end with me
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.4, 8.8, 8.9, 8.10, 8.13, 8.14, 8.15, 8.16
 **Description:** Implement TC-71, TC-72, TC-73, TC-76, TC-77, TC-78, TC-199 and TC-205 in `tests/test_arbiter_run.py`, named `test_tc<N>_...`. The test-fixer is built, so the test-repair cases drive the real fixer route in `spec-implement.js` through fake_project's existing `testFix` and `priorFixes` options, which answer the `testfix ledger <k>` and `testfix prove <k>` steps (the real `ck testfix check` and `prove` run in Task 100's `tc177_run` smoke). TC-71: a test-repair ruling the fixer cannot take (`priorFixes` lists the test, then `ledgerFail`): one needs-input entry of kind `test-fix` carries `ruling` (the number) and `testRepair` with the exact change and why, no `testfix <k> (Task n)` label runs, and the test file is byte-identical. TC-72: a test-repair ruling leads to `testfix ledger <k>`, then `testfix <k> (Task n)`, whose prompt's conflict entry has `fix` = the ruling's `testRepair.change`, `reason` = its `why` and `ruling` deep-equal to the settled ruling; then the proof, the fix's land and a task retry that spends no retry budget; the shipped script has one `handOffTestRepair(` call site, and `testRepairEntries` through the bridge's `call` op gives that entry. TC-73: a test-repair ruling on a conflict runs no confirmation label, and the step after the ruling's record is `testfix ledger <k>`. TC-199: the same conflict reported again after its ruled fix landed gives one `test-fix` entry with `ruling`, `testRepair` and the new report as `evidence`, and no second arbiter or `testfix <k>` label. TC-205: a test-repair ruling the fixer answers `test-correct` (fake_project `testFix` verdict `test-correct` with a `finding`) gives one `test-fix` entry carrying `ruling`, `testRepair` and the fixer's `finding`, no task retry label after the fixer, and no second `arbiter task <n>` label (D27). TC-76: a requirements ruling makes an entry with the recommendation and requirements.md stays byte-identical. TC-77: a missing-requirement finding makes an entry with wording and reason; the task and dependents wait and independents continue. TC-78: a ruling's entry is in `needsInput`, not `failed`, does not halt on failure, and notifies through a real local `notify_command` when set.
@@ -1415,12 +1415,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 66 (TC-71 to 73, 76 to 78, 199, 205)
 
 **Acceptance:**
-- [ ] Byte-identity checks read the real files before and after
-- [ ] TC-72 drives the shipped fixer route (`testfix ledger <k>`, `testfix <k> (Task n)`, `testfix prove <k>`) through fake_project's `testFix`; no case sets a `testFixerAvailable` arg (there is none)
-- [ ] TC-78 runs a real `notify_command` and asserts it fired
-- [ ] Tests exercise the real boundary named in the test plan (workflow, real files, real notify command)
-- [ ] Tests fail before the implementation exists for the right reason (no ruling routes)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Byte-identity checks read the real files before and after
+- [x] TC-72 drives the shipped fixer route (`testfix ledger <k>`, `testfix <k> (Task n)`, `testfix prove <k>`) through fake_project's `testFix`; no case sets a `testFixerAvailable` arg (there is none)
+- [x] TC-78 runs a real `notify_command` and asserts it fired
+- [x] Tests exercise the real boundary named in the test plan (workflow, real files, real notify command)
+- [x] Tests fail before the implementation exists for the right reason (no ruling routes)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 59 (same test file)
 **Complexity:** High
