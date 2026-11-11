@@ -523,7 +523,8 @@ def critical_path(tasks: Dict[str, SpecTask], only_open: bool = True) -> List[st
         best[num] = longest + [num]
         return best[num]
 
-    paths = [chain(n, frozenset({n})) for n in open_tasks]
+    # Sorted, so a tie between equally long chains picks the same one in every process (set order varies by run).
+    paths = [chain(n, frozenset({n})) for n in sorted(open_tasks)]
     return max(paths, key=len, default=[])
 
 
@@ -711,7 +712,19 @@ def _principles_warnings(spec_dir: Path) -> List[Dict[str, str]]:
     }]
 
 
+def _scope_entry(finding) -> Dict[str, str]:
+    return {"kind": finding.kind, "task": finding.task, "suite": finding.suite,
+            "testTask": finding.testTask, "message": finding.message}
+
+
+def _not_checked_entry(num: str, command: str, reason: str) -> Dict[str, str]:
+    return {"task": num, "command": command, "reason": reason,
+            "message": f"Task {num}'s Verify `{command}` is not checked ({reason}); lint does not simulate its selection"}
+
+
 def lint_spec(spec_dir: Path, project_dir: Path) -> Dict:
+    from claude_kiro.lint_scope import dedupe_scope, load_sim_input, scope_findings
+
     tasks = {t.num: t for t in parse_tasks(spec_dir / "tasks.md")}
     cycles = dependency_cycles(tasks)
     config = load_config(project_dir)
@@ -726,4 +739,53 @@ def lint_spec(spec_dir: Path, project_dir: Path) -> Dict:
     result.update(_graph_findings(spec_dir, project_dir, tasks, config))
     result["justifications"] = _justification_list(spec_dir)
     result["warnings"] = _principles_warnings(spec_dir)
+    # Verify scope (12.1 to 12.10): a problem verifyCycles already reports is not reported twice (12.10).
+    scope = scope_findings(load_sim_input(spec_dir / "tasks.md", project_dir, config))
+    scope, _ = dedupe_scope(scope, {"verifyCycles": result["verifyCycles"]})
+    # A Verify whose file a verify-order cycle already names is reported there, not as not checked.
+    reported = {(str(e.get("task")), str(e.get(k))) for e in result["verifyCycles"] for k in ("file", "module") if e.get(k)}
+    unchecked = [
+        (num, command, reason)
+        for num, command, reason in scope.not_checked
+        if not any(num == task and path in command for task, path in reported)
+    ]
+    result["verifyScope"] = [_scope_entry(f) for f in scope.findings]
+    result["notChecked"] = [_not_checked_entry(*entry) for entry in unchecked]
     return result
+
+
+def simulate_gate(spec_dir: Path, project_dir: Path, num: str) -> Dict:
+    """`ck lint --simulate --task N`: the suites due at N's gate and the tests they select (12.1, 12.2).
+
+    Tasks the gate treats as Done (`done_at_gate`) count as Done here. A test task's own selection is its Verify
+    runs; an impl task's gate runs its own Verify and the Verify of each test task that verifies it and is due.
+    """
+    from claude_kiro.lint_scope import _norm, _norm_runs, _selection, done_at_gate, load_sim_input, suite_due
+
+    sim = load_sim_input(spec_dir / "tasks.md", project_dir, load_config(project_dir))
+    tasks = sim.tasks
+    task = tasks.get(num)
+    if task is None or task.done:
+        return {"task": num, "suites": [], "selected": []}
+    assumed = done_at_gate(tasks, num)
+    if task.track == "test":
+        due = [task] if suite_due(task, tasks, assumed) else []
+    else:
+        due = [tasks[n] for n in task.verified_by if n in tasks and suite_due(tasks[n], tasks, assumed)]
+    suites = sorted(
+        ({"file": path, "testTask": t.num} for t in due for path in dict.fromkeys(_norm(f) for f in t.files)),
+        key=lambda s: (_num_key(s["testTask"]), s["file"]),
+    )
+    ran = [sim.runs.get(num, {})] + [sim.runs.get(t.num, {}) for t in due]
+    selected = []
+    for path in sorted({p for runs in ran for p in runs}):
+        names: set = set()
+        for runs in ran:
+            names |= _selection(_norm_runs(runs), path, sim.tests.get(path, ()))
+        if names:
+            selected.append({"file": path, "tests": sorted(names)})
+    return {"task": num, "suites": suites, "selected": selected}
+
+
+def _num_key(num: str) -> Tuple[int, int, str]:
+    return (0, int(num), num) if num.isdigit() else (1, 0, num)
