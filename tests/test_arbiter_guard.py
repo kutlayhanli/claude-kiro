@@ -750,3 +750,27 @@ def test_p39_a_path_form_never_changes_the_lanes_decision(lane_world, data):
     except ValueError:
         rel = None
     assert (not denied(first)) == (rel in CANONICAL), (form, rel)
+
+
+# ------------------------------------------------------------------ shell bypass forms (review round 1)
+
+BYPASS_COMMANDS = [
+    "git -c core.fsmonitor='rm -rf tests' status",
+    "git -c diff.external=x diff",
+    "git --config-env=core.fsmonitor=X status",
+    "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0='rm -rf tests' git status",
+    "GIT_EXTERNAL_DIFF='rm -rf tests' git diff",
+    "env -S 'rm -rf tests'",
+    "env GIT_EXTERNAL_DIFF=x git diff",
+    "sudo ls",
+    "true #'\necho `rm -rf tests`\ntrue #'",
+    "cd /other/checkout && git commit -m x",
+]
+
+
+@pytest.mark.parametrize("command", BYPASS_COMMANDS)
+def test_arbiter_bash_denies_bypass_forms_and_names_the_offender(command):
+    decide = ah.seam("guard_policy.decide_arbiter_bash")
+    decision = decide(command, "/w/demo-task-arbiter1")
+    assert decision.block, command
+    assert decision.paths, command

@@ -722,6 +722,8 @@ def _has_substitution(command: str) -> bool:
             continue
         if c == "`" or command.startswith("$(", i):
             return True
+        if c == "#" and not in_double and (i == 0 or command[i - 1] in " \t\n;&|()"):
+            return True  # a comment can hide quotes from this scan; deny rather than model it
         if command.startswith("<(", i) or command.startswith(">(", i):
             return True
         i += 1
@@ -733,33 +735,72 @@ def _in_arbiter_worktree(cwd: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
+def _unsafe_segment(words: Sequence[str]) -> Optional[str]:
+    """The offending word when a segment sets env, wraps the program, changes directory or
+    configures git inline; such forms can run a command inside a read-only one."""
+    rest = list(words)
+    while rest and rest[0] in _PREFIX_WORDS:
+        rest.pop(0)
+    if not rest:
+        return None
+    first = rest[0]
+    if _ASSIGN.match(first) or first in _OPT_WRAPPERS or first == "cd":
+        return first
+    if first == "git":
+        i = 1
+        while i < len(rest):
+            w = rest[i]
+            if w == "-C":
+                i += 2
+            elif w == "-c" or w.startswith("--config-env") or w.startswith("--exec-path"):
+                return w
+            elif w.startswith("-"):
+                i += 1
+            else:
+                break
+    return None
+
+
 def decide_arbiter_bash(command: str, cwd: str) -> GuardDecision:
-    deny = GuardDecision(True, "deny", (), ("shell command outside the arbiter's lane",), "arbiter_lane")
-    if not isinstance(command, str) or _has_substitution(command):
-        return deny
+    reasons = ("shell command outside the arbiter's lane",)
+
+    def deny(offender: str) -> GuardDecision:
+        return GuardDecision(True, "deny", (offender,), reasons, "arbiter_lane")
+
+    if not isinstance(command, str):
+        return deny("")
+    if _has_substitution(command):
+        return deny(command)
     segments = _scan(command)
     spec = _in_arbiter_worktree(cwd)
     for seg in segments:
         if seg.paren:
             continue
+        bad = _unsafe_segment(seg.words)
+        if bad is not None:
+            return deny(bad)
         if _segment_read_only(seg):
             continue
-        if seg.writes or seg.tee or spec is None:
-            return deny
+        if seg.writes or seg.tee:
+            return deny(seg.writes[0] if seg.writes else "tee")
         words = _strip_prefix(seg.words)
-        if not words or words[0] != "git" or len(words) < 2:
-            return deny
+        offender = words[0] if words else ""
+        if spec is None or not words or words[0] != "git" or len(words) < 2:
+            return deny(offender)
         sub, rest = words[1], words[2:]
         if sub == "add":
             lane = {f"specs/{spec}/{n}" for n in _LANE_FILES}
             ops = [r for r in rest if r != "--"]
-            if not ops or any(_rel_to(cwd, o) not in lane for o in ops):
-                return deny
+            if not ops:
+                return deny("git add")
+            for o in ops:
+                if _rel_to(cwd, o) not in lane:
+                    return deny(o)
         elif sub == "commit":
             if len(rest) != 2 or rest[0] != "-m":
-                return deny
+                return deny("git commit")
         else:
-            return deny
+            return deny(f"git {sub}")
     return GuardDecision(False)
 
 
