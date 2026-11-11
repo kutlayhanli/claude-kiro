@@ -33,7 +33,8 @@ await test('a refuted finding goes through the arbiter and its ruling is reporte
     'ck arbiter review refuted': subjects => ({ results: subjects.map(x => ({ id: String(x.id), action: 'spec_edit', reason: '', stronger: false, ruling: x.id === 'R3' ? 7 : null })), lost: false }),
   })
   const { result } = await runWorkflow(SCRIPT, { agent: s.agent, args: args('create') })
-  assert.ok(s.calls.includes('arbiter context'))
+  // The context step is a thin ck call, matched by its command line: design.md pins no label for it.
+  assert.ok(Object.values(s.prompts).some(p => /\bck\b[^\n]*\barbiter context\b/.test(p)), 'the arbiter context step ran')
   assert.ok(s.calls.includes('arbiter refuted'), 'the refuted R3 is a subject of the arbiter step')
   assert.ok(!result.review.fixed.includes('R3'))
   assert.equal(result.review.refutedCount, 1)
