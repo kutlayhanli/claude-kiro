@@ -100,7 +100,8 @@ const never = () => new Promise(() => {})
 // --- arbiter helpers -------------------------------------------------------------------------------------------
 // The one `ck ... arbiter ...` (or `ck ... worktree land ...`) line of a thin step's prompt, as an argv.
 export function arbiterArgv(prompt) {
-  const m = /\bck ((?:-C \S+ )?(?:arbiter|principles|worktree land)(?: |"[^"\n]*"|[^\n"`])*)/.exec(prompt)
+  // Line-anchored (optionally behind a `$ ` or list marker): prose that mentions a ck command is not the command line.
+  const m = /^[ \t$>*-]*ck ((?:-C (?:"[^"\n]*"|\S+) )?(?:arbiter|principles|worktree land)(?: |"[^"\n]*"|[^\n"`])*)/m.exec(prompt)
   if (!m) return null
   return [...m[1].trim().matchAll(/"([^"]*)"|(\S+)/g)].map(t => (t[1] !== undefined ? t[1] : t[2])).filter(t => t !== '')
 }
@@ -426,8 +427,8 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
       const res = state.execResults[before] ?? { code: 0, stdout: '', stderr: '' }
       state.arbiterSteps.push({ label: l, argv, code: res.code })
       const step = l.slice('arbiter-'.length)
-      if (arbiterStepFailures[step] || arbiterStepFailures[l]) return { exitCode: 1, json: { error: `${step} failed (injected)` }, stdout: '' }
-      return { exitCode: res.code, json: json && typeof json === 'object' ? json : null, stdout: res.stdout, stderr: res.stderr }
+      if (arbiterStepFailures[step] || arbiterStepFailures[l]) return { exitCode: 1, json: { error: `${step} failed (injected)` }, error: `${step} failed (injected)`, stdout: '' }
+      return { exitCode: res.code, json: json && typeof json === 'object' ? json : null, ...(res.code !== 0 ? { error: res.stderr || `ck exited ${res.code}` } : {}), stdout: res.stdout, stderr: res.stderr }
     }
     if (l.startsWith('review')) {
       const covered = reviewTasksOf(l, prompt)
@@ -483,7 +484,7 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
       return audit ?? { schema: 'ck-audit/1', spec: 'demo', into: 'integrate/demo', head: 'abc1234', complete: true, clean: true, drift: [], hooks: { installed: true, active: true, intact: true, chainedTo: null, problems: [] }, fixtures: { drift: [], newLocks: [], lockTampered: false, handcrafted: [] }, problems: [] }
     }
     if (l.startsWith('testfix ledger ')) {
-      if (ledgerFail) return { error: 'cannot read the test-fix ledger', __exitCode: 1 }
+      if (ledgerFail) return THIN_LABEL.test(l) && isCkCall(opts) ? { error: 'cannot read the test-fix ledger', __exitCode: 1 } : { exitCode: 1, json: { error: 'cannot read the test-fix ledger' }, error: 'cannot read the test-fix ledger' }
       // `ck testfix check SPEC --test NODE ...`: a node is already fixed when its file part is in priorFixes.
       const nodes = [...String(prompt).matchAll(/--test[ =](\S+)/g)].map(m => m[1].replace(/^["']|["']$/g, ''))
       const fixed = n => Object.keys(priorFixes).find(f => priorFixes[f] && n.split('::')[0] === f)

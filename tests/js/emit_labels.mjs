@@ -71,6 +71,9 @@ function fake({ deps, failUntil = {}, reviews = {}, conflictRounds = {}, redLand
     }
     if (l.startsWith('cross-test')) return { verdict: 'approve', findings: [], summary: 'consistent' }
     if (l === 'report') return { head: 'f00d', merged: [...done].map(n => ({ task: n, commit: `m${n}`, mergedAt: '2026-10-04T11:00:00Z' })), done: [], failed: [], blocked: [], unstarted: [] }
+    if (l.startsWith('arbiter task')) return { rulings: [] }
+    if (l.startsWith('audit task')) return { findings: [], summary: 'clean' }
+    if (l.startsWith('arbiter-')) return { exitCode: 0, json: {}, error: null }
     if (l.startsWith('fix')) return { green: true }
     if (l.startsWith('re-check')) return { green: recheckLeft-- <= 0 }
     if (l.startsWith('full gate')) return { green: !fullRed }
@@ -90,12 +93,17 @@ const scenarios = [
   { deps: { 1: [], 2: [], 3: [] }, mergeBatch: 3, fullGateEvery: 0 },
   // a merged wave of 4 non-risky tasks reviewed together in one review-wave agent
   { deps: { 1: [], 2: [], 3: [], 4: [] }, mergeBatch: 4, fullGateEvery: 0 },
+  // run-principles: the arbiter and the auditor, so `arbiter task <n>`, `audit task <n>` and the `arbiter-` thin steps
+  // come from the real script once it emits them (a claim from a guard stop or test conflict, a due audit)
+  { deps: { 1: [], 2: ['1'] }, arbiterAgent: true, auditorAgent: true, failUntil: { 1: 1 }, reviews: { 2: ['changes', 'approve'] } },
 ]
 
-for (const { tracks, fullGateEvery, mergeBatch, ...knobs } of scenarios) {
+for (const { tracks, fullGateEvery, mergeBatch, arbiterAgent, auditorAgent, ...knobs } of scenarios) {
   const args = {
     ...baseArgs,
-    agents: AGENTS,
+    agents: arbiterAgent ? { ...AGENTS, arbiter: { model: 'opus', effort: 'high' }, auditor: { model: 'sonnet', effort: 'high' } } : AGENTS,
+    ...(arbiterAgent ? { arbiterAgent: true } : {}),
+    ...(auditorAgent ? { auditorAgent: true } : {}),
     tracks: tracks || {},
     wave: Object.fromEntries(Object.keys(knobs.deps).map(n => [n, 1])),
     maxRetries: 1,
@@ -113,6 +121,8 @@ async function createAgent(prompt, opts) {
   if (l === 'review: fidelity') return { findings: [{ id: 'R1', file: 'requirements.md', location: '1', severity: 'major', problem: 'p', evidence: 'e', fix: 'f', needsUserDecision: false }] }
   if (l === 'refute: fidelity') return { verdicts: [{ id: 'R1', refuted: false, reason: 'real' }] }
   if (l.startsWith('review:')) return { findings: [] }
+  if (/^arbiter (refuted|cuts|drift)/.test(l)) return { rulings: [] }
+  if (l === 'apply-cuts') return { applied: [], summary: 'none' }
   if (l.startsWith('revise')) return { fixed: ['R1'], notFixed: [], escalated: [], result: 'Ready', schedule: 'Ready at start: Task 1' }
   if (l === 'snapshot spec before revision') return { copied: ['requirements.md'] }
   if (l.startsWith('consistency check')) return { contradictions: [] }
@@ -120,14 +130,7 @@ async function createAgent(prompt, opts) {
   throw new Error('unexpected ' + l)
 }
 await runWorkflow(CREATE, { agent: createAgent, args: createArgs })
-
-// run-principles: the labels of the arbiter and the auditor (design.md). The scripts that emit them are built by later
-// tasks, so the corpus lists them from here, as the label grammar of the roles table (analytics/roles.py) must cover them.
-for (const label of ['arbiter task 1', 'arbiter task 1 risky', 'audit task 1', 'arbiter-open', 'arbiter-settle', 'arbiter-record', 'arbiter-land']) {
-  labelCorpus.push({ workflow: 'spec-implement', label, phase: null })
-}
-for (const label of ['arbiter refuted', 'arbiter refuted risky', 'arbiter cuts', 'arbiter cuts risky', 'arbiter drift', 'arbiter drift risky', 'apply-cuts', 'review: should-exist']) {
-  labelCorpus.push({ workflow: 'spec-create', label, phase: null })
-}
+// run-principles: refuted findings and should-exist cuts reach `arbiter refuted|cuts|drift` and `apply-cuts`
+await runWorkflow(CREATE, { agent: createAgent, args: { ...createArgs, arbiterAgent: true, runnerAgent: true } })
 
 process.stdout.write(JSON.stringify(labelCorpus, null, 1) + '\n')
