@@ -105,6 +105,9 @@ def _plan(project_dir: Path, spec: str, exclude: set) -> dict:
     return {
         **plan,
         **lint,
+        # plan_waves' warnings (strings) keep their key; lint's principles warnings travel as lintWarnings.
+        "warnings": plan["warnings"],
+        "lintWarnings": lint["warnings"],
         # Routing inputs for /spec:implement: "safety" tasks start on a stronger model
         # and get the risky reviewer; complexity feeds implementer.complexity_routing.
         "risk": task_risk({t.num: t for t in tasks}, load_config(project_dir))["risk"],
@@ -214,10 +217,15 @@ def lint(spec: str, as_json: bool, contracts: bool, fidelity: bool, tasks, base,
     if fidelity:
         _lint_fidelity(spec, as_json, tasks)
         return
+    from ..lint_scope import lint_verdict
+
     result = _plan(Path.cwd(), spec, set())
     if as_json:
-        click.echo(json.dumps({k: result[k] for k in ("cycles", "verifyCycles", "reasonless", "criticalPath", "waves", "riskUntagged",
-                                                      "commandEdges", "unknownCommands", "untaggedTests", "noWriteSet", "graphProblems")}, indent=2))
+        payload = {k: result[k] for k in ("cycles", "verifyCycles", "reasonless", "criticalPath", "waves", "riskUntagged",
+                                          "commandEdges", "unknownCommands", "untaggedTests", "noWriteSet", "graphProblems",
+                                          "justifications")}
+        payload["warnings"] = result["lintWarnings"]
+        click.echo(json.dumps(payload, indent=2))
     else:
         click.echo(f"Plan lint for {result['spec']}:")
         if result["cycles"]:
@@ -266,11 +274,16 @@ def lint(spec: str, as_json: bool, contracts: bool, fidelity: bool, tasks, base,
             click.echo(f"  ⚠ {item['message']}")
         for item in result["graphProblems"]:
             click.echo(f"  ⚠ {item['source']}: {item['problem']}")
+        # The requirements' justifications fail lint (3.1); the plan's principles warn only (3.7).
+        for item in result["justifications"]:
+            click.echo(f"  ✗ {item['message']}")
+        for item in result["lintWarnings"]:
+            click.echo(f"  ⚠ {item['message']}")
         path = result["criticalPath"]
         if path:
             click.echo(f"  ℹ critical path ({len(path)} of {len(result['remaining'])} open tasks): {' -> '.join(path)}")
             click.echo(f"  ℹ ready now: {', '.join(result['ready']) or 'none'}")
-    if result["cycles"] or result["verifyCycles"]:
+    if lint_verdict(result).exit_nonzero:
         sys.exit(1)
 
 
