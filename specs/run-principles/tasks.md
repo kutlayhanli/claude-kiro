@@ -140,7 +140,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 5: Add the arbiter role to the agents settings
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 5.1, 5.2
 **Description:** In `src/claude_kiro/agents.py`, add an `arbiter` role to `DEFAULTS` and `ROLE_KEYS` with the four keys `model`, `effort`, `risky_model`, `risky_effort`. Allow `inherit` for `arbiter.risky_model` in `_coerce`. In `resolve`, fill each unset `arbiter.*` value from `reviewer.risky_model` or `reviewer.risky_effort` and name that source in the resolved output, so `ck agents --json` shows where the value came from. An invalid value must get the same error as other roles.
@@ -150,9 +150,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 3 (TC-35, TC-36), Task 4 (P-9 at `agents.resolve`)
 
 **Acceptance:**
-- [ ] `ck agents set arbiter.model`, `arbiter.effort`, `arbiter.risky_model` and `arbiter.risky_effort` store a value, and `ck agents --json` shows it
-- [ ] An invalid value is rejected with the same message as for `reviewer.model`
-- [ ] Each unset value resolves to the matching `reviewer.risky_model` or `reviewer.risky_effort`, and changes when those change
+- [x] `ck agents set arbiter.model`, `arbiter.effort`, `arbiter.risky_model` and `arbiter.risky_effort` store a value, and `ck agents --json` shows it
+- [x] An invalid value is rejected with the same message as for `reviewer.model`
+- [x] Each unset value resolves to the matching `reviewer.risky_model` or `reviewer.risky_effort`, and changes when those change
 
 **Dependencies:** Task 3 (its tests are the oracle), Task 4 (its tests are the oracle)
 **Complexity:** Low
