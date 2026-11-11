@@ -4,13 +4,12 @@ Every case runs the real `plugin/workflows/spec-implement.js` under the fake run
 `exec_ck` on a real git repo (`arbiter_project`). The assertions are on the workflow's actual label sequence, its
 prompts, the `ck` commands it ran and its result, never on mocks of project code.
 
-Known limit of the harness (not of the tests): the fake `arbiter task <n>` agent has no duration, and the virtual
-clock does not advance while a real `ck` subprocess runs, so "a slow arbiter" (TC-51) is modelled by a long-running
-independent task: the arbiter flow settles before it finishes, and what is asserted is that the blocked task keeps its
-dependents waiting while the independent task finishes and merges.
+TC-51 and TC-201 wrap the fake agent in a small node runner: TC-51 makes the `arbiter task 1` call sleep on the
+virtual clock, so the ruling really is pending while the independent tasks run.
 """
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -31,10 +30,10 @@ CONFLICT_B = {"file": "tests/test_other.py", "test": "test_other_printed", "crit
 CMD = "greet new"
 
 
-def roles(model="haiku", escalate=(), reviewer=None):
+def roles(model="haiku", escalate=(), reviewer=None, risky_model=None):
     base = {"model": model, "effort": "medium", "escalate": list(escalate)}
     return {
-        "implementer": dict(base),
+        "implementer": {**base, **({"risky_model": risky_model} if risky_model else {})},
         "test_writer": dict(base),
         "fixer": dict(base),
         "reviewer": reviewer or {"model": "haiku", "effort": "medium", "enabled": False, "rounds": 1},
@@ -135,7 +134,9 @@ def test_tc43_a_guard_stop_goes_to_the_arbiter_with_no_guard_label(bridge, tmp_p
 def test_tc44_blocking_findings_after_the_rounds_on_an_individually_reviewed_task_go_to_the_arbiter(bridge, tmp_path):  # noqa: F811
     project = arbiter_project(tmp_path)
     opts = {"deps": {"1": []}, "risk": {"1": "safety"}, "reviews": {"1": ["changes"] * 6}, "rulings": {"1": [REQ]}}
-    out = run(bridge, project, opts, agents=roles("haiku", ["opus"], REVIEW_ON))
+    # A safety task starts at implementer.risky_model; starting on haiku with [opus] above it leaves a rung, so today's
+    # reviewLoop emits `task 1 revise 2 (opus)` here and the negative assertion below can fail.
+    out = run(bridge, project, opts, agents=roles("haiku", ["opus"], REVIEW_ON, risky_model="haiku"))
     ev = out["events"]
     assert [e for e in ev if re.search(r"revise \d+ \(", e)] == [], "no escalated revision: " + ", ".join(ev)
     assert arbiter_calls(ev) == ["arbiter task 1"], ", ".join(ev)
@@ -209,26 +210,52 @@ def test_tc50_the_arbiter_prompt_holds_the_claim_both_layers_and_the_spec_paths(
                    "a test states what the requirement says", "ship the change in small steps",
                    "specs/demo/requirements.md", "specs/demo/design.md", "specs/demo/test-plan.md", "specs/demo/tasks.md"):
         assert needle in prompt, f"the arbiter prompt lacks {needle!r}:\n{prompt}"
+    assert "haiku" in prompt, "the models tried are named:\n" + prompt
     assert re.search(r"\b[Tt]ask:? 1\b|task 1\b", prompt)
     other = arbiter_project(tmp_path / "gate")
     failures = [{"node": "tests/test_greet.py::test_tc1_greeting", "file": "tests/test_greet.py", "kind": "assertion", "message": "assert 'hi' == 'hello'", "truncated": False, "command": "pytest"}]
     got = run(bridge, other, {"deps": {"1": []}, "failUntil": {"1": 99}, "taskFailures": {"1": failures}, "rulings": {"1": [REQ]}}, agents=roles("haiku", ["opus"]))
     gp = got["prompts"]["arbiter task 1"]
-    for needle in ("tests/test_greet.py::test_tc1_greeting", "assert 'hi' == 'hello'", "haiku", "opus", "gate"):
+    for needle in ("tests/test_greet.py::test_tc1_greeting", "assert 'hi' == 'hello'", "haiku", "opus", "gate-failure"):
         assert needle in gp, f"the gate-failure prompt lacks {needle!r}:\n{gp}"
 
 
 # --------------------------------------------------------------------------- TC-51, TC-52
 
 
-def test_tc51_a_task_awaiting_the_arbiter_holds_its_dependents_while_an_independent_task_finishes(bridge, tmp_path):  # noqa: F811
+TC51_JS = """
+import { runWorkflow } from './load_workflow.mjs'
+import { project } from './fake_project.mjs'
+import { VirtualClock } from './virtual_clock.mjs'
+import { SCRIPT } from './load_decisions.mjs'
+const req = JSON.parse(process.env.REQ)
+const clock = new VirtualClock()
+const p = project({ ...req.project, sleep: clock.sleep, external: q => clock.external(q), execCk: req.execCk })
+// A slow arbiter: the ruling on task 1 stays pending for 200 virtual ms before the fake answers it.
+const agent = async (prompt, opts) => {
+  if (opts.label === 'arbiter task 1') await clock.sleep(200)
+  return p.agent(prompt, opts)
+}
+const { result } = await runWorkflow(SCRIPT, { agent, args: req.args, clock })
+console.log(JSON.stringify({ result, events: p.state.events, prompts: p.state.prompts, execLog: p.state.execLog }))
+"""
+
+
+def test_tc51_a_task_awaiting_the_arbiter_holds_its_dependents_while_independent_tasks_run(tmp_path):
     project = arbiter_project(tmp_path)
-    opts = {"deps": {"1": [], "2": ["1"], "3": []}, "testConflicts": {"1": {"conflict": CONFLICT}}, "rulings": {"1": [REQ]}, "durations": {"1": 5, "3": 50}}
-    out = run(bridge, project, opts, agents=roles("haiku", []), maxConcurrent=2)
+    deps = {"1": [], "2": ["1"], "3": [], "4": []}
+    request = {
+        "project": {"deps": deps, "testConflicts": {"1": {"conflict": CONFLICT}}, "rulings": {"1": [REQ]}, "durations": {"1": 5, "3": 50, "4": 10}},
+        "execCk": project.exec_ck, "args": run_args(project, agents=roles("haiku", []), maxConcurrent=2),
+    }
+    out = run_node(TC51_JS, request)
     ev = out["events"]
     assert arbiter_calls(ev) == ["arbiter task 1"], ", ".join(ev)
+    ruling_at = ev.index("arbiter task 1")
+    assert "task 3 end" in ev[:ruling_at], "independent task 3 finished while the ruling was pending: " + ", ".join(ev)
     assert "3" in out["result"]["merged"], out["result"]["merged"]
-    assert attempts(ev, "2") == [], "task 1's dependent has not started when independent task 3 finished: " + ", ".join(ev)
+    assert attempts(ev, "4") and ev.index(attempts(ev, "4")[0]) < ruling_at, "the slot was released first: task 4 started while the ruling was pending: " + ", ".join(ev)
+    assert [e for e in attempts(ev, "2")] == [], "task 1's dependent never started: " + ", ".join(ev)
     assert "2" not in out["result"]["merged"]
 
 
@@ -290,6 +317,7 @@ const p = project({ ...req.project, sleep: clock.sleep, external: q => clock.ext
 const agent = async (prompt, opts) => {
   if (/^task 1 retry/.test(opts.label) && p.state.events.includes('testfix 1 (Task 1)')) {
     p.state.events.push(opts.label); p.state.prompts[opts.label] = prompt; p.state.opts[opts.label] = opts
+    p.state.events.push(`${opts.label} end`)
     return { task: '1', status: 'blocked', gatePassed: false, summary: 'guard stop', commits: '', blocker: 'guard stop',
       guardStop: { file: 'tests/test_guarded.py', kind: 'test', test: 'tests/test_guarded.py::test_x', requirement: '1.1' } }
   }
@@ -301,8 +329,6 @@ console.log(JSON.stringify({ result, events: p.state.events, prompts: p.state.pr
 
 
 def run_node(script, request):
-    import os
-
     env = {**os.environ, "REQ": json.dumps(request)}
     proc = subprocess.run(["node", "--input-type=module", "-e", script], cwd=JS, capture_output=True, text=True, timeout=300, env=env)
     assert proc.returncode == 0, proc.stderr
@@ -391,7 +417,9 @@ def test_tc206_two_conflicts_in_one_attempt_are_each_ruled_and_the_fix_still_rea
     assert len(retries) == 1, "the task retries once: " + ", ".join(gev)
     at = gev.index(retries[0])
     assert len([e for e in gev[:at] if e.startswith("arbiter task 1") and not e.endswith(" end")]) == 2, "after both claims: " + ", ".join(gev)
-    assert len([e for e in gev[:at] if e == "arbiter-record"]) >= 2 or "record" in " ".join(gev[:at]), "both claims were recorded before the retry: " + ", ".join(gev)
+    assert len([e for e in gev[:at] if re.match(r"^arbiter[- ]record", e)]) >= 2, "both claims were recorded before the retry: " + ", ".join(gev)
+    recorded = [a for a in got["execLog"] if "arbiter" in map(str, a) and "record" in map(str, a)]
+    assert len(recorded) >= 2, "two `ck ... arbiter record` commands ran:\n" + argv_text(got)
     prompt = got["prompts"][retries[0]]
     assert "print the greeting before exiting" in prompt, "the retry carries the code ruling's text"
     assert re.search(r"were fixed and landed on", prompt), "the retry carries afterFixNote"

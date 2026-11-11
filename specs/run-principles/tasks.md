@@ -1301,7 +1301,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - [x] Tests fail before the implementation exists for the right reason (no arbiter label; today's ladder runs)
 - [x] No mocks of the project's own code in integration tests
 
-**Implementation notes:** `tests/test_arbiter_run.py` drives the shipped script through `bridge.run` with real `ck` (`exec_ck`). TC-201 uses a small node runner (the fake's `guardStops` would also stop the first attempt, so the runner makes only the retry after a landed fix guard-stop). TC-51 models a slow arbiter with a long independent task, because the fake arbiter agent has no duration and the virtual clock stands still during real `ck` calls.
+**Implementation notes:** `tests/test_arbiter_run.py` drives the shipped script through `bridge.run` with real `ck` (`exec_ck`). TC-201 uses a small node runner (the fake's `guardStops` would also stop the first attempt, so the runner makes only the retry after a landed fix guard-stop). TC-51 uses a node runner that wraps the fake agent so `arbiter task 1` sleeps 200 virtual ms before answering: independent tasks 3 and 4 (task 4 needs the slot task 1 released) run and task 3 ends while the ruling is pending, and dependent task 2 never starts.
 
 **Dependencies:** Task 1 (`arbiter_project`, strategies), Task 2 (fake runtime)
 **Complexity:** High
