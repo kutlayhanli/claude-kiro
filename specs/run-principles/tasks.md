@@ -828,7 +828,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 35: Add the arbiter's lane to the guard policy
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.8, 11.5, 11.7, 11.10
 **Description:** In `src/claude_kiro/hooks/_shared/guard_policy.py`, add `ArbiterEditFacts`, `is_arbiter_caller`, `decide_arbiter_edit`, `decide_arbiter_bash` and `arbiter_block_reason`. `is_arbiter_caller` is true only when `agent_id` is a non-empty string and `agent_type` is exactly `spec:arbiter` or `ck-arbiter`; environment, arguments and prompt text are not inputs. `decide_arbiter_edit` allows only the paths listed in design.md: in a `<spec>-task-arbiter<k>` worktree, that spec's `tasks.md`, `design.md` and `test-plan.md`; with a lane ticket in a non-arbiter checkout, those three and `requirements.md` only while implementation has not started. `decide_arbiter_bash` first denies any command holding `$(`, a backtick, `<(` or `>(` outside single quotes (an unterminated quote is denied too), then allows read-only commands, `git add` of lane files and `git commit -m` in an arbiter worktree, and denies any `git -c`, `--amend` or `--no-verify`. The arbiter's commit message is a plain `-m '...'`. `classify_caller`, `Caller` and every existing decision stay unchanged. Harness Contract owner: `guard_policy.arbiter_may_edit`, which is `decide_arbiter_edit`. The contract's `Caller` value `arbiter` is replaced by `is_arbiter_caller`, so `Caller` stays as it is.
@@ -838,11 +838,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 34 (P-22, P-24, P-25, P-45 at the lane seams)
 
 **Acceptance:**
-- [ ] Any `$` outside single quotes is denied (parameter expansion as well as `$(`), so `git diff ${X}--output=tests/t.py`, `rg ${X}--pre=rm`, `file ${X}-C` and `git commit -m x${IFS}--amend` are all blocked (review of the 2026-11-11 run)
-- [ ] Only the three canonical paths of the ruling's spec are allowed in a run, and every denial names the file and the lane
-- [ ] `requirements.md` is allowed only under a lane ticket with implementation not started, and PLAN.md never
-- [ ] A claim by environment, argument or prompt text, a near-miss type, or a missing agent id is not the arbiter
-- [ ] Every non-arbiter decision is unchanged
+- [x] Any `$` outside single quotes is denied (parameter expansion as well as `$(`), so `git diff ${X}--output=tests/t.py`, `rg ${X}--pre=rm`, `file ${X}-C` and `git commit -m x${IFS}--amend` are all blocked (review of the 2026-11-11 run)
+- [x] Only the three canonical paths of the ruling's spec are allowed in a run, and every denial names the file and the lane
+- [x] `requirements.md` is allowed only under a lane ticket with implementation not started, and PLAN.md never
+- [x] A claim by environment, argument or prompt text, a near-miss type, or a missing agent id is not the arbiter
+- [x] Every non-arbiter decision is unchanged
 
 **Dependencies:** Task 34 (its tests are the oracle)
 **Complexity:** High
