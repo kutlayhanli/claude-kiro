@@ -2298,7 +2298,6 @@ async function arbiterNeedsInput(n, rec, r, claim, { reason, text, ruling = null
 async function arbitrate(n, rec, r, claim) {
   const toMe = async (reason, text, more = {}) => ({ exit: await arbiterNeedsInput(n, rec, r, claim, { reason, text, ...more }) })
   if (!ARBITER_AGENT) return await toMe('no-arbiter', 'no arbiter agent type was given to the run (arbiterAgent), so the arbiter cannot be called.')
-  releaseSlot(n)   // the task waits for a ruling without holding a slot: independent tasks continue, its dependents wait (6.9)
   const phase = phaseOf(n)
   const meta = { risk: taskRisk(n), complexity: String(COMPLEXITY[n] || '') }
   const opened = await thinCk('arbiter-open', ['-C', ROOT, 'arbiter', 'open', SPEC, '--task', String(n), '--into', INTO, '--json'], { stdin: JSON.stringify({ claim, task: meta }), label: `arbiter-open ${n}`, phase, cwd: ROOT, what: `Arbiter step for Task ${n} of spec ${SPEC}: open the claim` })
@@ -2320,9 +2319,11 @@ async function arbitrate(n, rec, r, claim) {
     const rerun = pass > 0
     let answer = null
     let threw = null
-    try {
-      answer = await call('arbiter', rulingPrompt(n, claim, open, tier, first), { label: `arbiter task ${n}${rerun ? ' risky' : ''}`, phase, schema: RULING, agentType: ARBITER_AGENT, ...arbiterOpts(tier) })
-    } catch (e) { threw = e }
+    // The ruling runs without the task's slot: independent tasks continue and its dependents wait (6.9). The slot is
+    // released once the arbiter's call is in flight, so the arbiter is the step right after the stop.
+    const pending = call('arbiter', rulingPrompt(n, claim, open, tier, first), { label: `arbiter task ${n}${rerun ? ' risky' : ''}`, phase, schema: RULING, agentType: ARBITER_AGENT, ...arbiterOpts(tier) })
+    releaseSlot(n)
+    try { answer = await pending } catch (e) { threw = e }
     // A thrown or empty call is settled as `null` (invalid) so ck marks the claim failed and removes the worktree; it is never a ruling.
     const empty = threw !== null || answer === null || answer === undefined
     const settled = await thinCk('arbiter-settle', ['-C', ROOT, 'arbiter', 'settle', SPEC, open.key, '--tier', tier, '--json'], { stdin: empty ? 'null' : JSON.stringify(answer), label: `arbiter-settle ${n}${rerun ? ' risky' : ''}`, phase, cwd: ROOT, what: `Arbiter step for Task ${n} of spec ${SPEC}: settle the ruling` })

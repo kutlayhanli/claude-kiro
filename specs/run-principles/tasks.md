@@ -1534,17 +1534,19 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 2 (the fake runtime it runs under), Task 50 (the guard-ladder routing these tests encode is replaced there), Task 52 (red team of 5.7 in a run), Task 55 (TC-42, 43, 49 to 52, 203, 204), Task 56 (TC-7, 9, 11), Task 57 (TC-37 to 41, 157), Task 58 (TC-54), Task 62 (P-14, P-16), Task 63 (P-11)
 
 **Acceptance:**
-- [ ] A test conflict is followed by the arbiter, with no retry, escalation or confirmation label
-- [ ] A guard stop reaches the arbiter, and no `guard <k>` label runs, from every former `climbGuard` call site
-- [ ] A live wait never calls the arbiter; a command cycle reaches it as a `command-cycle` claim with no retry spent and no live edge recorded; a live conflict reaches it as a test conflict
-- [ ] The test-fix post-fix code is still in `runTask` for Task 66 to move
-- [ ] Busy or failed worktrees never call the arbiter
-- [ ] Every failure form of the arbiter call gives a needs-input entry and no fallback runs
-- [ ] Dependents wait and independent tasks continue while a ruling is pending
+- [x] A test conflict is followed by the arbiter, with no retry, escalation or confirmation label
+- [x] A guard stop reaches the arbiter, and no `guard <k>` label runs, from every former `climbGuard` call site
+- [x] A live wait never calls the arbiter; a command cycle reaches it as a `command-cycle` claim with no retry spent and no live edge recorded; a live conflict reaches it as a test conflict
+- [x] The test-fix post-fix code is still in `runTask` for Task 66 to move
+- [x] Busy or failed worktrees never call the arbiter
+- [x] Every failure form of the arbiter call gives a needs-input entry and no fallback runs
+- [x] Dependents wait and independent tasks continue while a ruling is pending
 
 **Dependencies:** Task 2 (its tests are the oracle), Task 6 (runs the `spec:arbiter` agent), Task 38 (calls `ck arbiter open` and `settle`), Task 50 (its tests are the oracle), Task 52 (its tests are the oracle), Task 55 (its tests are the oracle), Task 56 (its tests are the oracle), Task 57 (its tests are the oracle), Task 58 (its tests are the oracle), Task 62 (its tests are the oracle), Task 63 (its tests are the oracle), Task 43 (provides `cmd:ck arbiter context`)
 **Complexity:** High
 **Risk:** safety (parks tasks and can notify me through the needs-input route)
+**Implementation notes:** `plugin/workflows/spec-implement.js` gains `ARBITER_AGENT`, `arbiterOpts(tier)`, the `RULING` schema, and in the decisions block `claimTrigger`, `openResultOf` and `settleResultOf`; `UNBLOCKER_KINDS` has `'arbiter'`. `arbitrate(n, rec, r, claim)` runs `arbiter-open`, the `arbiter task <n>` agent (the slot is released once that call is in flight, so the arbiter is the step right after the stop), `arbiter-settle`, one `arbiter task <n> risky` re-run, and returns `{ exit: rec }` or `{ route, ruling, claim, key, number }`. `runTask` loops `ladder()` (retries and escalation only), the live-edge wait, then `claimTrigger`; its claims go to `arbitrate` in order; test repairs are gathered and go through the preserved post-fix code (`testFixFor`, `parkTestFix`, `budgetBase`, `afterFixNote`, the `ladder()` re-run and the "still reports" park); a `code` ruling or a landed spec edit resumes the task (`arbiterK`, subtracted by `retryNo()`). `revised()` sends a guard stop to the arbiter and re-runs the same revision. `confirmConflictPrompt`, `climbGuard`, `needInput` and `guardLadder` are gone.
+**Deviations:** (1) `ruledKeys`: a claim this run already ruled on that comes back is discarded and goes to me without a call, because `ck arbiter record` does not yet move a ledger entry to `ruled` (P-11). (2) A `spec_edit` ruling is landed with one `ck worktree land SPEC arbiter<k>` call under `withLandingLock` inside `arbitrate`; Task 67 moves it into the merge queue and records it (Task 44 is not built yet). (3) The test-fixer receives conflict entries built inline from the `test_repair` rulings; Task 66 replaces that with `testRepairEntries` and `handOffTestRepair`.
 
 ---
 
