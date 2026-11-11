@@ -453,7 +453,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 19: Test a launch blocked by Verify-scope findings
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 12.5, 12.6, 12.7, 12.11, 8.9
 **Description:** Implement TC-114, TC-115, TC-116, TC-143, TC-144 and TC-209 in `tests/test_verify_scope_lint.py`, named `test_tc<N>_...`, through the real workflow with real `ck plan` and real lint. TC-114: a plan with `verifyScope` refuses launch and no task agent runs. TC-115: the launch block sends one `lint` claim per distinct problem to the arbiter, and a wiring edit lands under Stories 7, 8 and 10 (real git). TC-116: after a fix lint re-runs; a remaining finding keeps the launch blocked and is shown with the proposed fix. TC-143: one task's unfiltered shared suite selects the tests of two test tasks not yet Done; one claim lists both test tasks, one landed fix (a filter on that Verify) clears both findings, and no needs-input entry appears; a finding the fix cleared on another task gets no ruling. TC-144: a finding first appears after a test task merges; it goes to the arbiter as a `lint` claim before the task it names starts, the task is held until it settles, and a later plan does not rule on it again. TC-209: a launch `lint` claim ruled `test_repair` goes to the test-fixer (fake_project `testFix`), and once the fix lands the workflow re-plans and launches when no finding remains (D33).
@@ -463,10 +463,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 70 (TC-114 to 116, 143, 144, 209)
 
 **Acceptance:**
-- [ ] TC-115 lands a real commit from the fake arbiter (`arbiterEdits`) and re-reads real lint
-- [ ] Tests exercise the real boundary named in the test plan (workflow, real git, real lint)
-- [ ] Tests fail before the implementation exists for the right reason (no launch handling for `verifyScope`)
-- [ ] No mocks of the project's own code in integration tests
+- [x] TC-115 lands a real commit from the fake arbiter (`arbiterEdits`) and re-reads real lint
+- [x] Tests exercise the real boundary named in the test plan (workflow, real git, real lint)
+- [x] Tests fail before the implementation exists for the right reason (no launch handling for `verifyScope`)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 2 (fake runtime, `arbiterEdits`), Task 18 (same test file)
 **Complexity:** High
