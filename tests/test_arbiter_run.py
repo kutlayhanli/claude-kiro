@@ -1182,3 +1182,91 @@ def test_tc78_a_rulings_entry_is_needs_input_not_failed_does_not_halt_and_notifi
     assert sent.returncode == 0, sent.stdout + sent.stderr
     assert out_file.exists(), "the real notify command ran: " + sent.stdout
     assert json.loads(sent.stdout).get("notification") == "sent", sent.stdout
+
+
+# --------------------------------------------------------------------------- TC-34, TC-90, TC-94, TC-96, TC-155 (the record and the report of rulings)
+
+STATUS_EDIT = REWIRED.replace("### Task 2: Greeting\n**Status:** Not Started", "### Task 2: Greeting\n**Status:** Done")
+
+
+def result_text(out):
+    return json.dumps(out["result"]) + "\n" + "\n".join(map(str, out.get("logs") or []))
+
+
+def test_tc34_a_serves_no_requirement_finding_lands_the_task_and_is_a_proposed_cut_in_the_result(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    opts = {"deps": {"1": []}, "reviews": {"1": [{"verdict": "changes", "finding": "serves-no-requirement"}]}}
+    out = run(bridge, project, opts, agents=roles("haiku", [], REVIEW_ON))
+    ev = out["events"]
+    assert "1" in out["result"]["merged"], "the finding alone does not block the landing: " + json.dumps(out["result"])
+    assert attempts(ev) == ["task 1"], "no revision of the code: " + ", ".join(ev)
+    assert [e for e in ev if "revise" in e] == [], "the code stays as it is: " + ", ".join(ev)
+    cuts = out["result"].get("proposedCuts")
+    assert isinstance(cuts, list) and len(cuts) == 1, "proposedCuts names the finding: " + json.dumps(out["result"])
+    assert str(cuts[0].get("task")) == "1", json.dumps(cuts)
+    assert cuts[0].get("file") == "specs/demo/tasks.md" and "serves no requirement" in cuts[0].get("issue", ""), json.dumps(cuts)
+
+
+def test_tc90_a_ruling_whose_edit_did_not_land_records_that_and_why(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    opts = {**CONFLICT_OPTS, "rulings": {"1": [SPEC_EDIT]}, "arbiterEdits": {"1": {"files": {"specs/demo/tasks.md": STATUS_EDIT}}}}
+    out = run(bridge, project, opts, agents=roles("haiku", ["opus"]))
+    ev = out["events"]
+    assert arbiter_calls(ev) == ["arbiter task 1"], ", ".join(ev)
+    assert (project.target / "specs" / "demo" / "tasks.md").read_text() != STATUS_EDIT, "a Status change never lands"
+    entries = decisions_entries(project, "target") or decisions_entries(project, "branch")
+    assert len(entries) == 1, "the ruling is recorded even though its edit did not land: " + str(entries)
+    landed = entries[0].get("Landed", "")
+    assert landed.startswith("no:") and len(landed) > len("no:") + 3, "the entry says it did not land and why: " + str(entries[0])
+    assert len(needs(out)) == 1, json.dumps(out["result"].get("needsInput"))
+    assert "1" not in out["result"]["merged"], json.dumps(out["result"])
+
+
+def test_tc94_the_report_lists_only_this_runs_rulings_not_an_earlier_runs(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    first = run(bridge, project, one_claim("alpha", [code_ruling("alpha")]), agents=roles("haiku", []))
+    assert len(first["result"].get("rulings") or []) == 1, "the first run reports its own ruling: " + json.dumps(first["result"])
+    second = run(bridge, project, one_claim("beta", [code_ruling("beta")]), agents=roles("haiku", []))
+    on_disk = decisions_entries(project)
+    assert len(on_disk) == 2, "both runs' rulings are in decisions.md: " + str(on_disk)
+    listed = second["result"].get("rulings")
+    assert isinstance(listed, list) and len(listed) == 1, "only this run's ruling is listed: " + json.dumps(second["result"])
+    assert listed[0].get("number") == on_disk[1]["number"], "this run's ruling, not the earlier one: " + json.dumps(listed)
+    assert listed[0].get("number") != on_disk[0]["number"], json.dumps(listed)
+
+
+def test_tc96_with_the_spec_folder_read_only_the_report_says_the_entry_was_not_written_and_the_claim_is_a_needs_input_entry(bridge, tmp_path):  # noqa: F811
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.fail("a read-only folder cannot be tested as root: run the suite as a normal user")
+    project = arbiter_project(tmp_path)
+    folders = [project.root / "specs" / "demo", project.target / "specs" / "demo"]
+    modes = [f.stat().st_mode & 0o777 for f in folders]
+    for folder in folders:
+        folder.chmod(0o555)
+    try:
+        out = run(bridge, project, {**CONFLICT_OPTS, "rulings": {"1": [ruling("code")]}}, agents=roles("haiku", []))
+    finally:
+        for folder, mode in zip(folders, modes):
+            folder.chmod(mode)
+    assert arbiter_calls(out["events"]) == ["arbiter task 1"], ", ".join(out["events"])
+    assert not (project.target / "specs" / "demo" / "decisions.md").exists(), "nothing was written"
+    assert re.search(r"not written", result_text(out), re.I), "the report says the entry was not written: " + result_text(out)
+    entries = needs(out)
+    assert len(entries) == 1, "the claim goes to me: " + json.dumps(out["result"].get("needsInput"))
+    assert "1" not in out["result"]["merged"], "the run did not continue as if it were recorded: " + json.dumps(out["result"])
+
+
+def test_tc155_a_spec_edit_that_landed_whose_record_then_fails_does_not_resume_the_task_and_the_entry_says_the_edit_landed(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    opts = {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT, "attempts": 1}}, "rulings": {"1": [SPEC_EDIT]},
+            "arbiterEdits": {"1": {"files": {"specs/demo/tasks.md": REWIRED}}}, "arbiterStepFailures": {"record": True}}
+    out = run(bridge, project, opts, agents=roles("haiku", ["opus"]))
+    ev = out["events"]
+    assert arbiter_calls(ev) == ["arbiter task 1"], ", ".join(ev)
+    assert (project.target / "specs" / "demo" / "tasks.md").read_text() == REWIRED, "the edit really landed"
+    assert attempts(after(ev, "arbiter task 1")) == [], "the task does not resume: " + ", ".join(ev)
+    entries = needs(out)
+    assert len(entries) == 1, json.dumps(out["result"].get("needsInput"))
+    text = json.dumps(entries[0]).lower()
+    assert "landed" in text and "not landed" not in text and "did not land" not in text, "the entry says the edit landed: " + text
+    assert "1" not in out["result"]["merged"], json.dumps(out["result"])

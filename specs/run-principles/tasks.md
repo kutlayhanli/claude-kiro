@@ -1429,7 +1429,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 61: Test the run's record and report of rulings
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 4.8, 10.3, 10.7, 10.9
 **Description:** Implement TC-34, TC-90, TC-94, TC-96 and TC-155 in `tests/test_arbiter_run.py`, named `test_tc<N>_...`. TC-34: a reviewer's serves-no-requirement finding: the task lands, the code stays, and `proposedCuts` in the result names it. TC-90: a ruling whose edit did not land records that and why. TC-94: with rulings from an earlier run, the report lists only this run's. TC-96: with `specs/demo` made read-only, the report says the entry was not written and a needs-input entry appears. TC-155: a spec edit lands and its record then fails (`arbiterStepFailures: {record: true}`): the task does not resume, and a needs-input entry says the edit landed.
@@ -1439,10 +1439,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 66 (TC-94, TC-96), Task 67 (TC-90, TC-155), Task 69 (TC-34)
 
 **Acceptance:**
-- [ ] TC-34 uses a real landing; TC-96 really removes write permission and restores it after
-- [ ] Tests exercise the real boundary named in the test plan (workflow, real files, real landing)
-- [ ] Tests fail before the implementation exists for the right reason (no record or `proposedCuts`)
-- [ ] No mocks of the project's own code in integration tests
+- [x] TC-34 uses a real landing; TC-96 really removes write permission and restores it after
+- [x] Tests exercise the real boundary named in the test plan (workflow, real files, real landing)
+- [x] Tests fail before the implementation exists for the right reason (no record or `proposedCuts`)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 60 (same test file)
 **Complexity:** Medium
