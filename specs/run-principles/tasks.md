@@ -1821,7 +1821,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 78: Test proposed cuts in /spec:create
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 4.2, 4.3, 4.4, 4.5
 **Description:** Implement TC-27 to TC-31 in `tests/test_arbiter_create.py`, named `test_tc<N>_...`. TC-27: a surviving cut appears in review.md and in the result's `review.proposedCuts` with the story, the weakness and criteria, tasks and test-case counts. TC-28: no revise prompt lists it and the result says it was not applied. TC-29: an approved cut with every task Not Started: when `apply-cuts` runs and the fake agent really removes the story from all four documents, real `ck lint` reports no new failure. TC-30: when the removal leaves a new lint failure, the run does not report the cut as applied and shows the finding. TC-31: with a started task, no `apply-cuts` runs and the message says requirements are frozen and the change is mine.
