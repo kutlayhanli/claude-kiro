@@ -1267,7 +1267,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 54: Red-team the prohibitions of Story 8
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 8.2, 8.4, 8.5, 8.6, 8.12
 **Description:** Try to break each SHALL NOT clause of Story 8 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. For 8.2: a ruling on the last attempt and on an escalated attempt. For 8.4 and 8.5: a branch that conflicts only after the target moves, an edit introducing a cycle by a task-number change. For 8.6: a Status change hidden in a renamed or reordered block, a removed task that was started, a mark flipped by whitespace or `X` case. For 8.12: a settled finding raised again in other words on the same file. Written from the requirements only, never from the implementation.
@@ -1277,10 +1277,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 69 (red team of 8.2, 8.4 to 8.6, 8.12; the first task with landing, resume and re-review together)
 
 **Acceptance:**
-- [ ] Each SHALL NOT clause has at least one adversarial test per listed input class that applies to it
-- [ ] Tests exercise the real boundary named in the test plan (real git, real workflow, real files)
-- [ ] Tests fail before the implementation exists for the right reason (no spec-edit landing)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each SHALL NOT clause has at least one adversarial test per listed input class that applies to it
+- [x] Tests exercise the real boundary named in the test plan (real git, real workflow, real files)
+- [x] Tests fail before the implementation exists for the right reason (no spec-edit landing)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (project fixture), Task 2 (fake runtime, `arbiterEdits`)
 **Complexity:** High
