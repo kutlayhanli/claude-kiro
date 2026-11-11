@@ -702,7 +702,8 @@ def decide_arbiter_edit(facts: ArbiterEditFacts) -> GuardDecision:
 
 
 def _has_substitution(command: str) -> bool:
-    """True for a `$`, a backtick, `<(` or `>(` outside single quotes, a heredoc, a brace expansion, or an unterminated quote."""
+    """True for a `$`, a backtick, `<(` or `>(` outside single quotes, a heredoc, a brace expansion,
+    an unquoted control character, a comment, or an unterminated quote."""
     i, n = 0, len(command)
     in_double = False
     while i < n:
@@ -722,7 +723,11 @@ def _has_substitution(command: str) -> bool:
             continue
         if c == "`" or c == "$":
             return True  # any `$` (parameter expansion, `$(`, ANSI-C `$'`) can hide an option or a command
-        if c == "#" and not in_double and (i == 0 or command[i - 1] in " \t\n;&|()"):
+        if not in_double and c not in "\t\n" and (ord(c) < 32 or ord(c) == 127):
+            # The word scan splits on `\r`, bash does not: an unquoted control character makes
+            # the two disagree on where words and comments start. Deny rather than model it.
+            return True
+        if c == "#" and not in_double and (i == 0 or command[i - 1] in " \t\r\n;&|()<>"):
             return True  # a comment can hide quotes from this scan; deny rather than model it
         if command.startswith("<(", i) or command.startswith(">(", i):
             return True

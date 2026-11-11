@@ -800,6 +800,9 @@ BYPASS_COMMANDS = [
     "cat <<EOF\n'$(rm -rf tests)'\nEOF",
     "git diff {--output=tests/t.py,HEAD}",
     "rg {--pre=rm,x} . tests/t.py",
+    # review round 4: `\r` is a word char to bash, not a separator
+    "echo \r#'\necho ';touch X;'\necho '",
+    "echo >#'\necho ';touch X;'\necho '",
 ]
 
 
