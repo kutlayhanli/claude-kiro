@@ -1874,7 +1874,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 80: Property tests for rulings during /spec:create
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 4.3, 11.1, 11.2, 11.4, 11.6, 11.9, 11.12, 4.4, 4.5, 11.11
 **Description:** Implement P-28, P-29, P-30, P-42 and P-46 with Hypothesis in `tests/test_arbiter_create.py`, named `test_p<N>_...`, (W except P-42). P-28: any mix of findings, refutations and verdicts across lenses: every refuted finding gets exactly one ruling, confirmed plus refuted equals all findings. P-29: no proposed cut and no plan-changing ruling reaches a revise prompt, and normal fixes still do. P-30: each cut gets one ruling; for any `arbiter_failures()` on any subset, a failed one is unchanged and the result is not Ready; shown cuts equal the soundly reasoned ones. P-42 at `arbiter_policy.decide_cut`, over all approved and started pairs, with `max_examples=200`. P-46: with no refuted findings and no cuts, alone or mixed with confirmed findings, in create and review modes, no `arbiter refuted` or `arbiter cuts` label runs and neither step is in `review.arbiter.ran` or `lost`. Settings `@settings(derandomize=True, max_examples=30, database=None, deadline=None)`. The file declares `PROPERTIES = {"P-28": ..., "P-29": ..., "P-30": ..., "P-42": ..., "P-46": ...}`.
