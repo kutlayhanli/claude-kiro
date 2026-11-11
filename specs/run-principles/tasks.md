@@ -1337,7 +1337,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 57: Test the arbiter's tier choice in a run
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.3, 5.4, 5.5, 5.6, 5.7
 **Description:** Implement TC-37 to TC-41 and TC-157 in `tests/test_arbiter_run.py`, named `test_tc<N>_...`. TC-37: a safety task, a guard stop and a repeat claim each start at the risky model; a plain conflict on a normal task starts at the normal model. TC-38: when an earlier arbiter call on the same claim failed, the claim returning runs at the risky tier, across a resume. TC-39: a High Complexity task with no other signal gets the normal tier. TC-40: "needs a stronger look" at the normal tier runs `arbiter task 1 risky` once and its prompt holds the first reasoning. TC-41: "needs a stronger look" at the risky tier means no further call and the entry holds what was established. TC-157: a task matching `risk_paths` with no Risk tag starts at the risky tier (5.3, through `ck plan`'s `risk` map), and a High and a Low Complexity task with no other signal get the same tier.
@@ -1347,10 +1347,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 65 (TC-37 to 41, 157)
 
 **Acceptance:**
-- [ ] Each case asserts the model and effort the fake runtime actually received on the agent call
-- [ ] Tests exercise the real boundary named in the test plan (workflow, agent options, real `ck`)
-- [ ] Tests fail before the implementation exists for the right reason (no arbiter step)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each case asserts the model and effort the fake runtime actually received on the agent call
+- [x] Tests exercise the real boundary named in the test plan (workflow, agent options, real `ck`)
+- [x] Tests fail before the implementation exists for the right reason (no arbiter step)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 56 (same test file)
 **Complexity:** Medium
