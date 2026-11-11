@@ -1084,7 +1084,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 46: Teach the analytics roles about the arbiter and auditor
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 10.8
 **Description:** In `src/claude_kiro/analytics/roles.py`, add `spec:arbiter`, `ck-arbiter`, `spec:auditor` and `ck-auditor` to `SPEC_AGENT_TYPES` and the type-to-role map, and add the label forms `arbiter task <n>`, `arbiter task <n> risky`, `arbiter <step>` and `audit task <n>` to the label grammar. These carry the word `task` because master already uses a bare `audit` label (the run-end audit).
@@ -1094,9 +1094,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 45 (TC-137, the role map)
 
 **Acceptance:**
-- [ ] The four agent types are in `SPEC_AGENT_TYPES` and map to a role
-- [ ] Each new label form parses to a real role through `parse_label`
-- [ ] Every existing label still parses to the role it had
+- [x] The four agent types are in `SPEC_AGENT_TYPES` and map to a role
+- [x] Each new label form parses to a real role through `parse_label`
+- [x] Every existing label still parses to the role it had
 
 **Dependencies:** Task 45 (its tests are the oracle)
 **Complexity:** Low
