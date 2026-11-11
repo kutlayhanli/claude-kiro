@@ -392,7 +392,8 @@ def test_tc138_an_arbiter_landing_waits_for_the_task_landing_that_holds_the_lock
     fifo = tmp_path / "gate-fifo"
     os.mkfifo(fifo)
     hold = f"sh -c 'touch {holding}; read line < {fifo}'"
-    p = arbiter_project(tmp_path, tasks=tasks_text(v1=hold))
+    p = arbiter_project(tmp_path, tasks=tasks_text(v1=hold).replace("- [ ] prints it", "- [x] prints it"))
+    commit_target(p, GREET, GREET_TESTS, "add the tests")  # so the task landing's gate passes
     made = ck_run(p.root, "worktree", "create", "demo", "1", "--base", INTO)
     assert made.returncode == 0, made.stdout + made.stderr
     task_wt = p.root / ".ck" / "worktrees" / "demo-task-1"
