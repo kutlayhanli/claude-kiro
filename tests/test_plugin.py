@@ -177,7 +177,7 @@ def test_dogfood_copies_in_this_repo_match_the_plugin_source():
 def test_generated_agent_types_take_their_prompts_from_the_plugin_agents(tmp_path, monkeypatch):
     monkeypatch.setenv("CK_CONFIG_HOME", str(tmp_path / "none"))
     files = ag.agent_type_files(ag.resolve(tmp_path)["roles"])
-    assert sorted(files) == sorted(f"ck-{n}.md" for n in AGENTS)
+    assert sorted(files) == sorted(f"ck-{n}.md" for n in [*AGENTS, "runner"])
     for name in AGENTS:
         body = (PLUGIN / "agents" / f"{name}.md").read_text().split("---", 2)[2].strip()
         assert body in files[f"ck-{name}.md"]

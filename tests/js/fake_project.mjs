@@ -79,6 +79,21 @@ function chainLengths(deps, done) {
   return out
 }
 
+
+// A call is a thin ck call when it carries the CK_CALL schema (an object with an exitCode property) or an agentType.
+export const isCkCall = opts => !!opts && (!!opts.agentType || !!(opts.schema && opts.schema.properties && opts.schema.properties.exitCode))
+export const THIN_LABEL = /^(plan \d+|land |report$|park \d+|relink \d+|full gate @|re-check |final gate$|gate$|run start$|audit$|testfix ledger |testfix prove )/
+const GATE_LABEL = /^(full gate @|re-check |final gate$|gate$)/
+// today's {green} answer as a ck-gate/1 object
+export function gateJson(green, spec = 'demo') {
+  const failure = { node: 'tests/test_x.py::test_tc1_x', tcId: 'TC-1', tasks: ['1'], attributedBy: 'tc', file: 'tests/test_x.py', kind: 'assertion', message: 'assert 0 == 1', truncated: false, command: 'pytest', status: 'regression', excusedBy: [], rerun: 'failed', class: null, check: null, missingCommand: null }
+  return { schema: 'ck-gate/1', spec, tasks: [], ok: green, attribute: true, checks: [], failures: green ? [] : [failure], summary: { regressions: green ? 0 : 1, excused: 0, flaky: 0, unattributed: 0 }, warnings: [], durationS: 0 }
+}
+// A raw {code, stdout} gateAnswers entry versus a json one.
+const isRawGate = e => e && typeof e === 'object' && 'code' in e && 'stdout' in e && Object.keys(e).length <= 3
+const parseJson = t => { try { const v = JSON.parse(t); return v && typeof v === 'object' ? v : null } catch { return null } }
+const never = () => new Promise(() => {})
+
 // Options beyond the scenario knobs:
 //   planDurations: {k: ms}                 plan call k takes that long
 //   planSeq: [{ready?, deps?, done?, remaining?, cycles?, verifyCycles?, error?}, ...]
@@ -101,7 +116,30 @@ function chainLengths(deps, done) {
 //                                          not mechanical); a fixable+applied answer drops N's verify cycle from
 //                                          later plans, as the relinked tasks.md would
 //   worktree: {n: {state, detail}}         the first task agent of n returns that worktree outcome (default CREATED)
-export function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [], gitReport = null, conflictRounds = {}, planDurations = {}, externalDone = null, planFail = [], worktree = {}, guardStops = {}, guardStopIn = {}, parkOutcome = null, relinkOutcome = null, testConflicts = {}, execCk = null, etaAnswer = null, sleep = realSleep, external = p => p, planSeq = null, badReady = null, risk = null }) {
+//   -- unattended-correctness additions (all optional, additive) --
+//   gateAnswers: [json | {code, stdout} | 'throw' | 'hang']   consumed in order by the gate calls: a direct `ck gate`
+//                                          argv, or (with an envelope) the thin labels `full gate @k`, `re-check k`,
+//                                          `final gate`. 'throw' makes the call throw, 'hang' never settles. An entry
+//                                          may be a ck-gate/1 or ck-gate-compact/1 object. Exhausted: today's {green}
+//                                          answer turned into a ck-gate/1 object.
+//   taskFailures: {n: Failure[] | Failure[][]}  the `failures` of task n's non-passing attempts: one list for every attempt, or one list per attempt (attempt k gets the k-th; the last repeats)
+//   testConflictsList: {n: TestConflict[] | {conflicts, attempts}}   task n's first attempts return status blocked
+//                                          with that `testConflicts` list
+//   testFix: {file: {verdict: 'fixed'|'test-correct'|'cannot-fix', proof, scope, review, finding}}
+//                                          answers `testfix <k> (Task n)` (the k-th file), `testfix review <k>`,
+//                                          `testfix prove <k>` and `ck testfix prove`
+//   priorFixes: {file: truthy}             `ck testfix check ... --test NODE` answers {allowed, alreadyFixed: [{node, at, fix}]}
+//   crossTest: answer | [answers]          replaces the cross-test reviewer's answer (a list: one per call, the last repeats)
+//   fidelity: json                         answer of `ck lint --fidelity`
+//   fixtureStatus: json                    answer of `ck fixtures status`
+//   owns / overlaps / testVerifies / provides: merged into every plan answer (harness convenience: owns is not in the design's plan additions; missingCommand on the graph answer is likewise a convenience, the design carries it on the gate Failure)
+//   missingCommand: {command, providers}   carried by the `ck graph` answer
+//   audit: json | 'throw'                  answer of `audit` / `ck worktree audit`
+//   runStart: json                         answer of `run start` / `ck worktree start`
+// Thin labels: `plan <k>`, `land ...`, `report`, `park <n>`, `relink <n>`, `full gate @k`, `re-check k`, `final gate`,
+// `run start`, `audit`, `testfix ledger <k>`, `testfix prove <k>`. Whenever the call carries `schema: CK_CALL` or an
+// `agentType`, the answer is wrapped in {exitCode, json}; otherwise it is today's answer unchanged.
+export function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [], gitReport = null, conflictRounds = {}, planDurations = {}, externalDone = null, planFail = [], worktree = {}, guardStops = {}, guardStopIn = {}, parkOutcome = null, relinkOutcome = null, testConflicts = {}, execCk = null, etaAnswer = null, sleep = realSleep, external = p => p, planSeq = null, badReady = null, risk = null, gateAnswers = [], taskFailures = {}, testConflictsList = {}, testFix = {}, priorFixes = {}, crossTest = null, fidelity = null, fixtureStatus = null, owns = null, overlaps = null, testVerifies = null, provides = null, missingCommand = null, audit = null, runStart = null }) {
   let rechecksLeftRed = recheckRed
   let planCalls = 0  // plan agent invocations so far: call k consumes planSeq[k-1]
   // RED landings left per task: checkRed tasks are red on their first landing, redLands sets a count.
@@ -117,7 +155,7 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
     if (m) return m[1].split(/[,\s]+/).filter(Boolean)
     return []
   }
-  const state = { execResults: [], deps: { ...deps }, done: new Set(done), merged: new Set(), events: [], prompts: {}, opts: {}, reviewCount: {}, reviewTasks: {}, relinked: new Set(), relinks: [], attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0, landings: [], parks: [], revises: {}, resolved: new Set(), conflictsHit: {}, execLog: [] }
+  const state = { execResults: [], deps: { ...deps }, done: new Set(done), merged: new Set(), events: [], prompts: {}, opts: {}, optsList: [], reviewCount: {}, reviewTasks: {}, relinked: new Set(), relinks: [], attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0, landings: [], parks: [], revises: {}, resolved: new Set(), conflictsHit: {}, execLog: [] }
   let clock = Date.parse('2026-10-04T10:00:00Z')
   const stamp = () => new Date((clock += 60000)).toISOString().replace('.000', '')
   const ready = exclude => {
@@ -165,7 +203,7 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
     }
     return last && typeof last === 'object' ? last.eta : null
   }
-  const agent = async (prompt, opts) => {
+  const rawAgent = async (prompt, opts) => {
     const l = opts.label
     // Land prompts get no claim (their landing events are recorded from the result below), but a command they
     // write out is still run as written.
@@ -173,6 +211,7 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
     state.events.push(l)
     state.prompts[l] = prompt
     state.opts[l] = opts
+    state.optsList.push({ label: l, opts })  // every call in order: `opts` keeps only the last call of a label
     if (l.startsWith('plan')) {
       state.plans++
       const k = Number((l.match(/^plan (\d+)/) || [])[1])
@@ -197,6 +236,7 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
         cycles,
         verifyCycles: state.plans === 1 && !verifyCyclesFromStart ? [] : verifyCycles.filter(v => !state.relinked.has(v.task)),
         risk: { ...(risk ?? {}) },
+        ...(owns ? { owns } : {}), ...(overlaps ? { overlaps } : {}), ...(testVerifies ? { testVerifies } : {}), ...(provides ? { provides } : {}),
         startedAt,
       }
       // Canned answers for the deterministic-plan harness: consumed in invocation order, each entry
@@ -242,8 +282,18 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
       if (tc && !isRevise && state.attempts[n] <= (tc.attempts ?? Infinity)) {
         return { task: n, status: 'blocked', gatePassed: false, summary: 'a test can never pass', commits: 'abc123', blocker: 'test conflict', testConflict: tc.conflict, startedAt, finishedAt: stamp(), ...wtField }
       }
+      const tcl = testConflictsList[n]
+      if (tcl && !isRevise) {
+        const list = Array.isArray(tcl) ? tcl : tcl.conflicts
+        if (state.attempts[n] <= (Array.isArray(tcl) ? Infinity : tcl.attempts ?? Infinity)) {
+          return { task: n, status: 'blocked', gatePassed: false, summary: 'tests can never pass', commits: 'abc123', blocker: 'test conflict', testConflicts: list, startedAt, finishedAt: stamp(), ...wtField }
+        }
+      }
       const pass = state.attempts[n] > (failUntil[n] || 0)
-      return { task: n, status: pass ? 'done' : 'in_progress', gatePassed: pass, summary: `attempt ${state.attempts[n]}`, commits: 'abc123', startedAt, finishedAt: stamp(), ...wtField }
+      // taskFailures[n] is one list for every attempt, or a list per attempt (attempt k gets the k-th; the last repeats).
+      const served = taskFailures[n]
+      const failures = served && Array.isArray(served[0]) ? served[Math.min(state.attempts[n], served.length) - 1] : served
+      return { task: n, status: pass ? 'done' : 'in_progress', gatePassed: pass, summary: `attempt ${state.attempts[n]}`, commits: 'abc123', startedAt, finishedAt: stamp(), ...(!pass && failures ? { failures } : {}), ...wtField }
     }
     if (l.startsWith('land ')) {
       // `ck worktree land`: precheck (conflicts, pairwise deferral), one gate, bisect a red batch.
@@ -324,6 +374,10 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
         : (spec.findings || [])
       return { verdict, findings, summary: typeof spec === 'string' ? verdict : (spec.summary || verdict), startedAt, finishedAt: stamp() }
     }
+    if (l.startsWith('cross-test') && crossTest) {
+      state.crossCalls = (state.crossCalls || 0) + 1
+      return Array.isArray(crossTest) ? crossTest[Math.min(state.crossCalls, crossTest.length) - 1] : crossTest
+    }
     if (l.startsWith('cross-test')) return { verdict: 'changes', findings: [{ severity: 'blocking', file: 'tests/test_b.py', issue: 'reads "state" where tests/test_a.py and design.md say "status"' }], summary: 'one drift' }
     if (l === 'report') {
       // `ck worktree report`: merge commits on the target plus tasks.md there, never agent claims.
@@ -344,9 +398,80 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
     if (l.startsWith('re-check')) return { green: rechecksLeftRed-- <= 0 }
     if (l.startsWith('full gate')) return { green: !fullRed }
     if (l === 'final gate') return { green: true }
+    if (l === 'run start') return runStart ?? { integration: { branch: 'integrate/demo', state: 'ok' }, hooks: { installed: true, active: true, intact: true, chainedTo: null, problems: [] }, baseline: { commit: 'abc1234', files: 0 }, releasedClaims: [], keptClaims: [], warnings: [] }
+    if (l === 'audit') {
+      if (audit === 'throw') throw new Error('audit failed')
+      return audit ?? { schema: 'ck-audit/1', spec: 'demo', into: 'integrate/demo', head: 'abc1234', complete: true, clean: true, drift: [], hooks: { installed: true, active: true, intact: true, chainedTo: null, problems: [] }, fixtures: { drift: [], newLocks: [], lockTampered: false, handcrafted: [] }, problems: [] }
+    }
+    if (l.startsWith('testfix ledger ')) {
+      // `ck testfix check SPEC --test NODE ...`: a node is already fixed when its file part is in priorFixes.
+      const nodes = [...String(prompt).matchAll(/--test[ =](\S+)/g)].map(m => m[1].replace(/^["']|["']$/g, ''))
+      const fixed = n => Object.keys(priorFixes).find(f => priorFixes[f] && n.split('::')[0] === f)
+      const alreadyFixed = nodes.filter(fixed).map(node => ({ node, at: 'abc1234', fix: fixed(node) }))
+      return { allowed: nodes.filter(n => !fixed(n)), alreadyFixed }
+    }
+    if (l.startsWith('testfix prove ')) {
+      const file = fileOfArgs(prompt, testFix) ?? Object.keys(testFix)[0]
+      const t = (file && testFix[file]) || {}
+      // design.md Data Models: ScopeDecision and ProofVerdict; `against` is "blocked:<task>" or "integration" (4.11).
+      const blocked = String(prompt).match(/--blocked[ =](\S+)/)
+      const against = blocked ? `blocked:${blocked[1].replace(/^["']|["']$/g, '')}` : 'integration'
+      const nodes = [...String(prompt).matchAll(/--test[ =](\S+)/g)].map(m => m[1].replace(/^["']|["']$/g, ''))
+      const outcomes = (nodes.length ? nodes : file ? [file] : []).map(node => ({ node, passed: true, cls: null }))
+      const scope = { in_scope: true, outside: [], requirements_edited: false, spec_docs_edited: [], reason: 'in scope', ...(t.scope || {}) }
+      const proof = scope.in_scope === false ? null : { proved: true, against, outcomes, reason: 'the test fails on the blocked branch or integration and passes on the fix', ...(t.proof || {}) }
+      return { scope, proof, changedTests: nodes, against: proof ? proof.against : against }
+    }
+    if (l.startsWith('testfix review ')) {
+      const file = testFileOf(l)
+      return (file && testFix[file] && testFix[file].review) || { verdict: 'approve', findings: [], summary: 'approve' }
+    }
+    if (l.startsWith('testfix ')) {
+      const file = testFileOf(l)
+      const t = (file && testFix[file]) || {}
+      return { verdict: t.verdict ?? 'fixed', changedTests: [{ file: file ?? 'tests/test_x.py', test: 'test_x' }], commits: 'fix123', finding: t.finding ?? null, summary: `testfix ${file ?? ''}` }
+    }
     throw new Error('unexpected agent ' + l)
   }
-  return { agent, state }
+  // The k-th file of testFix for labels `testfix <k> (Task n)` and `testfix review <k>`.
+  const testFileOf = label => { const m = label.match(/^testfix (?:review )?(\d+)/); return m ? Object.keys(testFix)[Number(m[1]) - 1] ?? null : null }
+  const fileOfArgs = (text, table) => Object.keys(table).find(f => String(text).includes(f)) ?? null
+  // gateAnswers, consumed in order. Returns undefined when exhausted.
+  let gateIx = 0
+  state.gateCalls = []
+  const nextGate = () => { const e = gateIx < gateAnswers.length ? gateAnswers[gateIx] : undefined; gateIx++; return e }
+  // Today's agent, plus the CK_CALL envelope for thin labels (and the new thin labels' answers).
+  const agent = (prompt, opts) => {
+    const l = opts.label
+    // Calls that need no envelope go straight to today's agent, adding no microtask hop (the real-timer suites
+    // order their agents by timing).
+    if (!(THIN_LABEL.test(l) && isCkCall(opts))) return rawAgent(prompt, opts)
+    return thinAgent(prompt, opts)
+  }
+  const thinAgent = async (prompt, opts) => {
+    const l = opts.label
+    if (GATE_LABEL.test(l)) {
+      let today
+      if (l !== 'gate') today = await rawAgent(prompt, opts)
+      else { state.events.push(l); state.prompts[l] = prompt; state.opts[l] = opts; today = { green: true } }
+      const e = nextGate()
+      state.gateCalls.push({ label: l, answer: e === undefined ? 'default' : e })
+      if (e === 'throw') throw new Error('gate agent failed')
+      if (e === 'hang') return never()
+      if (e === undefined) return { exitCode: today.green ? 0 : 1, json: gateJson(today.green) }
+      if (isRawGate(e)) return { exitCode: e.code, json: parseJson(e.stdout), stdout: e.stdout }
+      return { exitCode: e.ok === false ? 1 : 0, json: e }
+    }
+    const out = await rawAgent(prompt, opts)
+    // audit: exit 0 clean, 3 incomplete, 1 drift or hook problems (design.md ck-audit/1).
+    if (l === 'audit' && out && typeof out === 'object') return { exitCode: out.complete === false ? 3 : out.clean === false ? 1 : 0, json: out }
+    return { exitCode: 0, json: out }
+  }
+  const thinCall = async (label, argv) => {
+    const out = await agent(`ck ${argv.join(' ')}`, { label, schema: { type: 'object', properties: { exitCode: {}, json: {} } } })
+    return { code: out.exitCode, stdout: out.stdout ?? JSON.stringify(out.json), stderr: '', json: out.json }
+  }
+  return { agent, state, thinCall, nextGate, extras: { fidelity, fixtureStatus, missingCommand } }
 }
 
 // The OpenCode runner's `ck` global over a fake project: plan, land and relink commands are answered
@@ -355,6 +480,8 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
 export function directCk(p) {
   const calls = []
   let plans = 0
+  let ledgers = 0
+  let proves = 0
   const fn = async argv => {
     calls.push(argv)
     const rest = argv[0] === '-C' ? argv.slice(2) : argv
@@ -362,9 +489,22 @@ export function directCk(p) {
     if (rest[0] === 'plan') label = `plan ${++plans}`
     else if (rest[0] === 'worktree' && rest[1] === 'land') label = `land ${rest.slice(3, rest.indexOf('--into')).join(' ')}`
     else if (rest[0] === 'relink') label = `relink ${rest[2]}`
-    if (!label) return { code: 2, stdout: '', stderr: `unknown ck command: ${argv.join(' ')}`, json: null }
-    const json = await p.agent(`ck ${argv.join(' ')}`, { label })
-    return { code: 0, stdout: JSON.stringify(json), stderr: '', json }
+    if (label) {
+      const json = await p.agent(`ck ${argv.join(' ')}`, { label })
+      return { code: 0, stdout: JSON.stringify(json), stderr: '', json }
+    }
+    // The unattended-correctness commands, answered in the CK_CALL envelope.
+    const ok = (json, code = 0) => ({ code, stdout: JSON.stringify(json), stderr: '', json })
+    if (rest[0] === 'gate') return p.thinCall('gate', rest)
+    if (rest[0] === 'worktree' && rest[1] === 'start') return p.thinCall('run start', rest)
+    if (rest[0] === 'worktree' && rest[1] === 'audit') return p.thinCall('audit', rest)
+    if (rest[0] === 'testfix' && rest[1] === 'check') return p.thinCall(`testfix ledger ${++ledgers}`, rest)
+    if (rest[0] === 'testfix' && rest[1] === 'prove') return p.thinCall(`testfix prove ${++proves}`, rest)
+    if (rest[0] === 'testfix' && rest[1] === 'record') return ok({ recorded: true })
+    if (rest[0] === 'fixtures' && rest[1] === 'status') return ok(p.extras.fixtureStatus ?? { locked: [], drift: [], unlabeled: [], configError: null })
+    if (rest[0] === 'lint' && rest.includes('--fidelity')) return ok(p.extras.fidelity ?? { checked: [], mismatches: [], unparsed: [], unmatched: [] })
+    if (rest[0] === 'graph') return ok({ spec: rest[1] ?? null, nodes: [], edges: [], problems: [], ...(p.extras.missingCommand ? { missingCommand: p.extras.missingCommand } : {}) })
+    return { code: 2, stdout: '', stderr: `unknown ck command: ${argv.join(' ')}`, json: null }
   }
   return { fn, calls }
 }

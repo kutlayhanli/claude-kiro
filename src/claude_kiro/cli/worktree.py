@@ -69,12 +69,14 @@ def waves(spec: str, as_json: bool):
 
 
 def _plan(project_dir: Path, spec: str, exclude: set) -> dict:
+    from ..graph import build_graph, write_set_overlaps
     from ..hooks._shared.spec_parser import parse_tasks
     from ..lint import lint_spec, task_risk
     from ..waves import plan_waves
 
     spec_dir = _spec_dir(project_dir, spec)
     lint = lint_spec(spec_dir, project_dir)
+    graph = build_graph(project_dir, spec_dir)
     tasks = parse_tasks(spec_dir / "tasks.md")
     if lint["cycles"]:
         plan = {
@@ -113,7 +115,24 @@ def _plan(project_dir: Path, spec: str, exclude: set) -> dict:
         "remaining": [n for n in plan["deps"] if n not in done],
         # Absolute directory of this spec's task worktrees (spec-implement's worktreeDir arg).
         "worktreeDir": _worktree_dir(project_dir, spec_dir.name),
+        # The spec graph (11.6): the same graph lint reads, so every consumer sees one mapping (plan never writes).
+        "overlaps": write_set_overlaps({t.num: t.files for t in tasks}),
+        "testVerifies": {path[len("file:"):]: [n[len("task:"):] for n in nums] for path, nums in graph.test_verifies.items()},
+        "provides": _provides_by_command(graph),
     }
+
+
+def _provides_by_command(graph) -> dict:
+    """{command: the tasks that provide it}, from the graph's provides edges."""
+    out: dict = {}
+    for e in graph.edges:
+        if e.kind == "provides" and e.src.startswith("task:") and e.dst.startswith("cmd:"):
+            out.setdefault(e.dst[len("cmd:"):], set()).add(e.src[len("task:"):])
+    return {cmd: sorted(nums, key=lambda n: (not n.isdigit(), int(n) if n.isdigit() else 0, n)) for cmd, nums in sorted(out.items())}
+
+
+# The keys `ck plan --compact` prints: what the scheduler reads.
+COMPACT_KEYS = ("done", "remaining", "deps", "ready", "cycles", "verifyCycles", "overlaps", "testVerifies", "provides")
 
 
 def _worktree_dir(project_dir: Path, spec: str):
@@ -147,10 +166,14 @@ def _chain_lengths(deps: dict, done: set) -> dict:
 @click.option("--json", "as_json", is_flag=True, hidden=True)  # output is always JSON; accepted because the docs and workflow pass it
 @click.option("--progress-run", default=None, help="Run key whose progress file records --failed tasks")
 @click.option("--failed", default="", help="Comma-separated tasks that failed (recorded once each in the progress file)")
-def plan(spec: str, exclude: str, as_json: bool, progress_run, failed: str):
+@click.option("--compact", is_flag=True, help="Print only the scheduler keys (done, remaining, deps, ready, cycles, verifyCycles, overlaps, testVerifies, provides)")
+def plan(spec: str, exclude: str, as_json: bool, progress_run, failed: str, compact: bool):
     """Machine-readable plan for SPEC (JSON): deps, done, ready-to-start tasks (longest remaining chain first), lint results, and display waves."""
     excluded = {x.strip() for x in exclude.split(",") if x.strip()}
-    click.echo(json.dumps(_plan(Path.cwd(), spec, excluded), indent=2))
+    result = _plan(Path.cwd(), spec, excluded)
+    if compact:
+        result = {k: result[k] for k in COMPACT_KEYS}
+    click.echo(json.dumps(result, indent=2))
     ids = [x.strip() for x in failed.split(",") if x.strip()]
     if progress_run and ids:
         _record_failed(_spec_name(spec), progress_run, ids)
@@ -175,10 +198,11 @@ def _record_failed(spec: str, key: str, ids) -> None:
 @click.argument("spec")
 @click.option("--json", "as_json", is_flag=True)
 @click.option("--contracts", is_flag=True, help="Instead: flag keys and status values the spec's test files use that design.md never names")
-@click.option("--task", "tasks", multiple=True, help="With --contracts: only these test tasks' files (repeatable)")
+@click.option("--fidelity", is_flag=True, help="Instead: check test-track tasks' test values against their test-plan rows and design models")
+@click.option("--task", "tasks", multiple=True, help="With --contracts or --fidelity: only these test tasks (repeatable)")
 @click.option("--base", help="With --contracts: check the test files changed since this git ref instead")
 @click.option("--strict", is_flag=True, help="With --contracts: exit 1 when anything is flagged (default: warn)")
-def lint(spec: str, as_json: bool, contracts: bool, tasks, base, strict: bool):
+def lint(spec: str, as_json: bool, contracts: bool, fidelity: bool, tasks, base, strict: bool):
     """Check SPEC's task plan: dependency cycles, verify-order cycles, reasonless dependencies, untagged risk-path tasks, critical path.
 
     Exits 1 if there is a cycle (the plan can't be executed as written).
@@ -187,9 +211,13 @@ def lint(spec: str, as_json: bool, contracts: bool, tasks, base, strict: bool):
     if contracts:
         _lint_contracts(spec, as_json, tasks, base, strict)
         return
+    if fidelity:
+        _lint_fidelity(spec, as_json, tasks)
+        return
     result = _plan(Path.cwd(), spec, set())
     if as_json:
-        click.echo(json.dumps({k: result[k] for k in ("cycles", "verifyCycles", "reasonless", "criticalPath", "waves", "riskUntagged")}, indent=2))
+        click.echo(json.dumps({k: result[k] for k in ("cycles", "verifyCycles", "reasonless", "criticalPath", "waves", "riskUntagged",
+                                                      "commandEdges", "unknownCommands", "untaggedTests", "noWriteSet", "graphProblems")}, indent=2))
     else:
         click.echo(f"Plan lint for {result['spec']}:")
         if result["cycles"]:
@@ -225,11 +253,53 @@ def lint(spec: str, as_json: bool, contracts: bool, tasks, base, strict: bool):
             click.echo(f"  ⚠ Task {item['task']} touches risk path {item['file']} but has no **Risk:** safety (matches {item['pattern']} in risk_paths)")
         if result["riskUntagged"]:
             click.echo("      It is routed as safety anyway. Add \"**Risk:** safety (one-line reason)\" so the spec says so.")
+        # The spec graph's findings are warnings, never fatal (12.1, 12.3, 13.4).
+        for item in result["commandEdges"]:
+            click.echo(f"  ⚠ {item['message']}")
+        if result["commandEdges"]:
+            click.echo(f"      `ck relink {spec} --commands --apply` adds the missing edges.")
+        for item in result["unknownCommands"]:
+            click.echo(f"  ⚠ {item['message']}")
+        for item in result["untaggedTests"]:
+            click.echo(f"  ⚠ {item['message']}")
+        for item in result["noWriteSet"]:
+            click.echo(f"  ⚠ {item['message']}")
+        for item in result["graphProblems"]:
+            click.echo(f"  ⚠ {item['source']}: {item['problem']}")
         path = result["criticalPath"]
         if path:
             click.echo(f"  ℹ critical path ({len(path)} of {len(result['remaining'])} open tasks): {' -> '.join(path)}")
             click.echo(f"  ℹ ready now: {', '.join(result['ready']) or 'none'}")
     if result["cycles"] or result["verifyCycles"]:
+        sys.exit(1)
+
+
+def _lint_fidelity(spec: str, as_json: bool, tasks) -> None:
+    """`ck lint --fidelity`: the row-fidelity lists of the given test tasks (default: every test-track task). Reads only; exits 1 on mismatches."""
+    from dataclasses import asdict
+
+    from ..fidelity import check_task
+    from ..hooks._shared.spec_parser import parse_tasks
+
+    project_dir = Path.cwd()
+    spec_dir = _spec_dir(project_dir, spec)
+    nums = list(tasks) or [t.num for t in parse_tasks(spec_dir / "tasks.md") if t.track == "test"]
+    found = [check_task(project_dir, spec_dir, num) for num in nums]
+    result = {
+        "checked": [asdict(v) for r in found for v in r.checked],
+        "mismatches": [dict(m) for r in found for m in r.mismatches],
+        "unparsed": [dict(u) for r in found for u in r.unparsed],
+        "unmatched": [u for r in found for u in r.unmatched],
+    }
+    if as_json:
+        click.echo(json.dumps(result, indent=2))
+    else:
+        click.echo(f"Row fidelity for {spec_dir.name}: {len(result['checked'])} checked, {len(result['mismatches'])} mismatched, "
+                   f"{len(result['unparsed'])} unparsed, {len(result['unmatched'])} unmatched")
+        for m in result["mismatches"]:
+            want = m.get("allowed", m.get("expected"))
+            click.echo(f"  ✗ {m['test']} line {m['line']}: {m['value']} (expected {want})")
+    if result["mismatches"]:
         sys.exit(1)
 
 
@@ -335,15 +405,122 @@ def create_cmd(spec, tasks, base, do_install, reuse_dirty, as_json):
 @worktree.command("integration")
 @click.argument("spec")
 @click.option("--base", help="Branch to create from (default: the main checkout's branch)")
-def integration_cmd(spec, base):
-    """Create the integrate/<SPEC> worktree that task merges can go into instead of main."""
+@click.option("--json", "as_json", is_flag=True)
+def integration_cmd(spec, base, as_json):
+    """Create the integrate/<SPEC> worktree that task merges can go into instead of main.
+
+    Also installs (or repairs) ck's git hooks, which refuse unapproved protected changes to integrate/*;
+    the outcome reports them as `hooks` and names why when they could not be installed.
+    """
     root = _root()
     try:
         outcome = wt.create_integration(root, _spec_name(spec), base=base)
     except wt.WorktreeError as e:
         click.echo(f"❌ {e}")
         sys.exit(3)
+    if as_json:
+        click.echo(json.dumps(outcome.as_dict(), indent=2))
+    else:
+        click.echo(outcome.line())
+
+
+@worktree.command("start")
+@click.argument("spec")
+@click.option("--base", help="Branch to create the integration branch from (default: the main checkout's branch)")
+@click.option("--run", "run_key", default=None, help="Progress run key of the starting run (its own claims are kept)")
+@click.option("--json", "as_json", is_flag=True)
+def start_cmd(spec, base, run_key, as_json):
+    """Run start: integration worktree, hooks, protected baseline, and the sweep of dead runs' claims.
+
+    Exit 0 even when the hooks could not be installed (see `hooks.problems`); exit 3 when the
+    integration worktree cannot be created.
+    """
+    from .. import protect
+
+    root = _root()
+    name = _spec_name(spec)
+    try:
+        outcome = wt.create_integration(root, name, base=base)
+    except (wt.WorktreeError, OSError) as e:
+        click.echo(f"❌ {e}")
+        sys.exit(3)
+    if outcome.state in ("ERROR", "BUSY", "CONFLICT", "MISSING"):
+        click.echo(outcome.line())
+        sys.exit(3)
+    warnings = []
+    hooks = outcome.hooks or {}
+    for problem in hooks.get("problems", []) or []:
+        warnings.append(f"hooks: {problem}")
+    ref = f"refs/heads/{outcome.branch}"
+    baseline = {"commit": "", "files": {}}
+    try:
+        state = protect.read_approved_state(root, name, ref)
+        if state is not None:
+            baseline = {"commit": state.commit, "files": dict(state.files)}
+        else:
+            tip = wt.git(root, "rev-parse", ref).stdout.strip()
+            baseline = {"commit": tip, "files": protect.protected_files_at(root, tip)}
+    except (OSError, ValueError, wt.WorktreeError) as e:
+        warnings.append(f"baseline unavailable: {e}")
+    try:
+        claims = wt.release_for_run_start(root, name, run_key, dict(os.environ))
+    except (OSError, wt.WorktreeError) as e:
+        warnings.append(f"claim sweep failed: {e}")
+        claims = wt.RunStartClaims()
+    for k in claims.kept:
+        if k.get("error"):
+            warnings.append(f"task {k['task']}: could not release the claim: {k['error']}")
+    doc = {
+        "schema": "ck-run-start/1",
+        "integration": outcome.as_dict(),
+        "hooks": hooks,
+        "baseline": baseline,
+        "releasedClaims": claims.released,
+        "keptClaims": claims.kept,
+        "warnings": warnings,
+    }
+    if as_json:
+        click.echo(json.dumps(doc, indent=2))
+        return
     click.echo(outcome.line())
+    for r in claims.released:
+        click.echo(f"released claim on task {r['task']} (run {r['run'] or 'none'})")
+    for k in claims.kept:
+        click.echo(f"kept claim on task {k['task']} (run {k['run'] or 'none'})")
+    for w in warnings:
+        click.echo(f"warning: {w}")
+
+
+@worktree.command("audit")
+@click.argument("spec")
+@click.option("--into", default=None, help="Integration branch to audit (default: integrate/SPEC)")
+@click.option("--json", "as_json", is_flag=True)
+def audit_cmd(spec, into, as_json):
+    """Run-end audit: protected files vs the approved state, ck's hooks, recorded-fixture lock.
+
+    Exit 0 when clean, 1 on drift or hook problems, 3 when incomplete (approved state missing or unreadable).
+    """
+    from .. import protect
+
+    root = _root()
+    name = _spec_name(spec)
+    branch = into or wt.integration_branch(name)
+    try:
+        report = protect.audit(root, name, branch)
+    except (OSError, ValueError, wt.WorktreeError) as e:
+        click.echo(f"❌ {e}")
+        sys.exit(3)
+    doc = {"schema": "ck-audit/1", "spec": name, "into": branch, "head": report.head,
+           "complete": report.complete, "clean": report.clean, "drift": [dict(d) for d in report.drift],
+           "hooks": protect.hook_status_json(report.hooks), "fixtures": dict(report.fixtures),
+           "problems": list(report.problems)}
+    if as_json:
+        click.echo(json.dumps(doc, indent=2))
+    else:
+        click.echo("audit clean" if report.clean else "audit NOT clean")
+        for p in report.problems:
+            click.echo(f"  {p}")
+    sys.exit(0 if report.clean else (1 if report.complete else 3))
 
 
 @worktree.command("claim")
@@ -364,7 +541,7 @@ def claim_cmd(spec, task, owner, takeover, progress_run, progress_event, progres
     """
     root = _root()
     owner = owner or f"ck task agent on {socket.gethostname()}"
-    outcome = wt.claim(root, _spec_name(spec), task, owner, takeover=takeover)
+    outcome = wt.claim(root, _spec_name(spec), task, owner, takeover=takeover, run=progress_run)
     if outcome.state == "CLAIMED" and progress_run and progress_event:
         _record_progress(_spec_name(spec), progress_run,
                          [(progress_event, {"task": task, "model": progress_model, "attempt": attempt})])
@@ -398,26 +575,55 @@ def merge_cmd(spec, tasks, into, keep, as_json):
     except wt.WorktreeError as e:
         click.echo(f"❌ {e}")
         sys.exit(3)
-    _emit(outcomes, as_json, bad_states=("CONFLICT", "ERROR", "BUSY"))
+    _emit(outcomes, as_json, bad_states=("CONFLICT", "ERROR", "BUSY", "PROTECTED"))
 
 
-def _gate_fn(spec: str):
-    """Run the task gate in-process in the target checkout: (green, failing part of the report)."""
+def _testfix_changed(target: Path, num: str) -> list:
+    """The files the landed test fix `num` changed: its merge commit on the target against its first parent."""
+    import subprocess
+
+    def run(*args):
+        return subprocess.run(["git", "-C", str(target), *args], capture_output=True, text=True)
+
+    found = run("log", "--first-parent", "-1", "--format=%H", f"--grep=(task {num})", "HEAD").stdout.strip()
+    if not found:
+        return []
+    return [f for f in run("diff", "--name-only", "--no-renames", f"{found}^1", found).stdout.splitlines() if f]
+
+
+def _gate_fn(spec: str, scopes: dict = None):
+    """Run the task gate in-process in the target checkout: (green, failing part of the report, failure entries).
+
+    A `testfix<k>` landing is not a task: it gates the test tasks that own a file the fix changes
+    (`testfix.gate_scope`, 4.4), recorded in `scopes` for the land JSON's `gateTasks`; an empty scope is RED.
+    """
     from ..gate import run_gate
 
     def gate(target: Path, nums):
         spec_dir = next((r / spec for r in spec_roots(target) if (r / spec / "tasks.md").exists()), None)
         if spec_dir is None:
-            return False, f"no tasks.md for {spec} in {target}"
-        result = run_gate(target, spec_dir, list(nums))
+            return False, f"no tasks.md for {spec} in {target}", []
+        tasks = [n for n in nums if not str(n).startswith("testfix")]
+        for num in (n for n in nums if str(n).startswith("testfix")):
+            from ..graph import build_graph
+            from ..testfix import gate_scope
+
+            scope = gate_scope(build_graph(target, spec_dir), _testfix_changed(target, num), [])
+            if scopes is not None:
+                scopes[num] = scope
+            if not scope:
+                return False, f"✗ test fix {num} changes no file a test task owns", []
+            tasks.extend(scope)
+        result = run_gate(target, spec_dir, list(dict.fromkeys(tasks)))
         if result.ok:
-            return True, ""
+            return True, "", []
         lines = []
         for check in result.checks:
             if not check.ok:
                 lines.append(f"✗ {check.name}")
                 lines.extend(f"    {line}" for line in check.detail.rstrip().splitlines())
-        return False, "\n".join(lines[-80:])
+        # The same ck-gate/1 entries `ck gate --json` prints, never truncated.
+        return False, "\n".join(lines[-80:]), result.to_json()["failures"]
 
     return gate
 
@@ -459,7 +665,7 @@ def _priority(target: Path, spec: str) -> dict:
 @worktree.command("land")
 @click.argument("spec")
 @click.argument("tasks", nargs=-1, required=True)
-@click.option("--into", help="Target branch (default: the main checkout's branch)")
+@click.option("--into", help="Target branch (default: integrate/SPEC if it is checked out, else the main checkout's branch)")
 @click.option("--gate", "do_gate", is_flag=True, help="Gate the batch (ck gate --task for every landed task) and bisect a red batch")
 @click.option("--install", "do_install", is_flag=True, help="Refresh dependencies in the target (specs/ck.json \"install\", or detected) before each gate")
 @click.option("--release", "release_claims", is_flag=True, help="Release claims left on the task worktrees (their agents have finished)")
@@ -485,15 +691,18 @@ def land_cmd(spec, tasks, into, do_gate, do_install, release_claims, keep, progr
     """
     root = _root()
     name = _spec_name(spec)
+    scopes: dict = {}
     try:
-        target_branch = into or wt.current_branch(root)
+        integ = wt.integration_branch(name)
+        use_integ = wt.branch_exists(root, integ) and wt.checkout_of(root, integ) is not None
+        target_branch = into or (integ if use_integ else wt.current_branch(root))
         target = wt.checkout_of(root, target_branch)
         result = wt.land(
             root,
             name,
             list(tasks),
             into=target_branch,
-            gate=_gate_fn(name) if do_gate else None,
+            gate=_gate_fn(name, scopes) if do_gate else None,
             install=install_command(load_config(target or root), target or root) if do_install else None,
             keep=keep,
             release_claims=release_claims,
@@ -505,6 +714,9 @@ def land_cmd(spec, tasks, into, do_gate, do_install, release_claims, keep, progr
         else:
             click.echo(f"❌ {e}")
         sys.exit(3)
+    for item in result["tasks"]:
+        if str(item["task"]) in scopes:
+            item["gateTasks"] = list(scopes[str(item["task"])])
     if progress_run:
         result = _record_landing(name, progress_run, result)
     if as_json:
@@ -522,6 +734,73 @@ def land_cmd(spec, tasks, into, do_gate, do_install, release_claims, keep, progr
         sys.exit(2)
     if "RED" in states:
         sys.exit(1)
+
+
+@worktree.command("approve")
+@click.argument("spec")
+@click.argument("task")
+@click.option("--into", help="Target branch (default: integrate/SPEC if it exists, else the main checkout's branch)")
+def approve_cmd(spec, task, into):
+    """Approve landing TASK's protected files (needs a real terminal; only I can type the code).
+
+    \b
+    Prints the protected files the task changes and a random 6-character code. Type the code to
+    land the task with those files; anything else, or a stdin/stdout that is not a terminal,
+    refuses with exit 2 and changes nothing. There is no --json and no code on the command line.
+    """
+    import secrets
+    from .. import protect
+
+    stdin_tty, stdout_tty = sys.stdin.isatty(), sys.stdout.isatty()
+    if not (stdin_tty and stdout_tty):
+        click.echo("❌ refused: approval needs a real terminal on stdin and stdout")
+        sys.exit(2)
+    root = _root()
+    name = _spec_name(spec)
+    scopes: dict = {}
+    try:
+        integ = wt.integration_branch(name)
+        target_branch = into or (integ if wt.branch_exists(root, integ) else wt.current_branch(root))
+        target = wt.checkout_of(root, target_branch)
+        if target is None:
+            raise wt.WorktreeError(f"branch {target_branch} is not checked out anywhere")
+        base = wt.git(target, "rev-parse", "HEAD").stdout.strip()
+        branch = wt.task_branch(name, task)
+        if not wt.branch_exists(root, branch):
+            raise wt.WorktreeError(f"no branch {branch}")
+        files = wt.protected_changes(root, base, branch, wt.land_allow_paths(target))
+        if target_branch.startswith("integrate/") and protect.read_approved_state(root, name, f"refs/heads/{target_branch}") is None:
+            raise wt.WorktreeError(f"the approved state for {target_branch} is missing or unreadable; nothing can be recorded")
+        tip = wt.git(root, "rev-parse", branch).stdout.strip()
+    except (wt.WorktreeError, OSError) as e:
+        click.echo(f"❌ refused: {e}")
+        sys.exit(2)
+    if not files:
+        click.echo(f"❌ refused: task {task} changes no protected files that need approval")
+        sys.exit(2)
+    code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(6))
+    click.echo(f"Task {task} of {name} changes protected files:")
+    for f in files:
+        click.echo(f"  {f}")
+    click.echo(f"To approve landing them (branch tip {tip[:10]}) on {target_branch}, type the code {code}:")
+    typed = sys.stdin.readline()
+    if not protect.approval_decision(stdin_tty, stdout_tty, typed, code):
+        click.echo("❌ refused: the code did not match; nothing landed")
+        sys.exit(2)
+    try:
+        if wt.git(root, "rev-parse", branch).stdout.strip() != tip:
+            click.echo(f"❌ refused: {branch} changed after the prompt (was {tip[:10]}); nothing landed")
+            sys.exit(2)
+        # keep: the task branch stays as the record of exactly what I approved.
+        result = wt.land(root, name, [task], into=target_branch, approved={task: files}, keep=True)
+    except (wt.WorktreeError, OSError) as e:
+        click.echo(f"❌ {e}")
+        sys.exit(3)
+    for item in result["tasks"]:
+        click.echo(wt.Landed(**item).line())
+    states = {t["state"] for t in result["tasks"]}
+    if states != {"MERGED"}:
+        sys.exit(3)
 
 
 @worktree.command("status")
@@ -673,19 +952,68 @@ def resolve_cmd(spec, task, as_json):
         click.echo(f"resolved {name} task {task}: {path}")
 
 
+def _relink_commands(project: Path, spec: str, do_apply: bool, commit: bool, as_json: bool) -> None:
+    """`ck relink SPEC --commands`: add the **Dependencies:** edges a test task's commands need (12.2). Cyclic edges are
+    refused and reported; a second run changes nothing. Exit 1 when an edge was refused or the commit failed."""
+    import subprocess
+
+    from .. import relink as rl
+    from ..graph import build_graph
+    from ..hooks._shared.spec_parser import parse_tasks_text
+
+    spec_dir = _spec_dir(project, spec)
+    tasks_md = spec_dir / "tasks.md"
+    try:
+        raw = tasks_md.read_bytes()  # bytes, so CRLF endings and everything else outside the edges stay as they are
+    except OSError as e:
+        click.echo(f"❌ cannot read {tasks_md}: {e}")
+        sys.exit(2)
+    text = raw.decode("utf-8")
+    tasks = {t.num: t for t in parse_tasks_text(text)}
+    r = rl.plan_command_relink(build_graph(project, spec_dir), tasks)
+    new_text = rl.apply_command_relink(text, r)
+    out = {**r.to_dict(), "applied": False}
+    if do_apply and r.adds:
+        tasks_md.write_bytes(new_text.encode("utf-8"))
+        out["applied"] = True
+        if commit:
+            rel = os.path.relpath(tasks_md, project)
+            msg = f"relink: add command dependency edges ({spec_dir.name})"
+            res = subprocess.run(["git", "-C", str(project), "commit", "-q", "-m", msg, "--", rel], capture_output=True, text=True)
+            out["committed"] = res.returncode == 0
+            if res.returncode != 0:
+                out["commitError"] = (res.stderr or res.stdout).strip()[-400:]
+    if as_json:
+        click.echo(json.dumps(out, indent=2))
+    else:
+        if not r.adds and not r.refused:
+            click.echo("no command edges are missing: nothing to relink")
+        for a in out["adds"]:
+            click.echo(f"  Task {a['task']} depends on Task {a['dependsOn']} (provides `{a['command']}`)")
+        for item in r.refused:
+            click.echo(f"  refused: {item['message']}")
+        if r.adds:
+            click.echo("  written to tasks.md" + (" and committed" if out.get("committed") else "") if out["applied"]
+                       else "  (dry run: add --apply to write it)")
+    sys.exit(1 if r.refused or out.get("commitError") else 0)
+
+
 @click.command()
 @click.argument("spec")
-@click.argument("task")
+@click.argument("task", required=False)
+@click.option("--commands", is_flag=True, help="Instead: add the dependency edges that test commands need (a test invokes a command another task provides). TASK is not needed")
 @click.option("--apply", "do_apply", is_flag=True, help="Write the relinked tasks.md (default: show the edits only)")
 @click.option("--commit", is_flag=True, help="With --apply: commit tasks.md on the current branch")
 @click.option("--json", "as_json", is_flag=True, help="Machine-readable result")
-def relink(spec: str, task: str, do_apply: bool, commit: bool, as_json: bool):
+def relink(spec: str, task, do_apply: bool, commit: bool, as_json: bool, commands: bool):
     """Break TASK's verify-order cycle in SPEC's tasks.md, the way `ck lint` suggests.
 
     TASK becomes a foundation task: the test task whose tests need a later task verifies that later
     task instead, and TASK's Verify commands that run those tests are dropped. Refused (exit 1) when
     nothing would verify TASK afterwards, or when the relinked plan still has a cycle at TASK.
     Exit 0 when relinked (or, without --apply, when a relink is possible).
+
+    With --commands (no TASK), adds the **Dependencies:** edges that test commands need instead.
     """
     import subprocess
 
@@ -694,6 +1022,11 @@ def relink(spec: str, task: str, do_apply: bool, commit: bool, as_json: bool):
     from ..hooks._shared.spec_parser import parse_tasks_text
 
     project = Path.cwd()
+    if commands:
+        _relink_commands(project, spec, do_apply, commit, as_json)
+        return
+    if task is None:
+        raise click.UsageError("TASK is required unless --commands is given")
     tasks_md = _spec_dir(project, spec) / "tasks.md"
     try:
         text = tasks_md.read_text(encoding="utf-8")

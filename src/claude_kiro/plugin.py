@@ -36,9 +36,14 @@ AGENT_ROLES = {
     "fixer": "fixer",
     "resolver": "resolver",
     "reviewer": "reviewer",
+    "runner": None,  # the lean thin ck agent: fixed frontmatter, no role settings
 }
 
 # Vendored copy in a project -> source file in the plugin.
+# The lean thin-call agent: vendored like the other files so `ck doctor` reports it missing (TC-162b). Its content
+# is the generated agent type, identical to what `ck agents sync` writes (the runner has no role settings).
+RUNNER_AGENT = ".claude/agents/ck-runner.md"
+
 VENDOR_MAP: List[Tuple[str, str]] = [
     *[(f".claude/commands/spec/{name}.md", f"skills/{name}/SKILL.md") for name in SKILLS],
     (".claude/output-styles/spec-driven.md", "output-styles/spec-driven.md"),
@@ -46,6 +51,7 @@ VENDOR_MAP: List[Tuple[str, str]] = [
     (IMPLEMENT_WORKFLOW, "workflows/spec-implement.js"),
     (IMPLEMENT_BRIEF, "resources/spec-implement-brief.md"),
     (NO_WORKFLOW_GUIDE, "resources/without-workflow-tool.md"),
+    (RUNNER_AGENT, "agents/runner.md"),
 ]
 
 # Every path a ck version ever copied into a project (0.8 and earlier, plus
@@ -98,6 +104,11 @@ def vendor_files() -> Dict[str, str]:
     """Project path -> content of every vendored file. Scripts are copied verbatim."""
     files = {}
     for target, source in VENDOR_MAP:
+        if target == RUNNER_AGENT:
+            from collections import defaultdict
+            from claude_kiro import agents
+            files[target] = agents.agent_type_files(defaultdict(dict))["ck-runner.md"]
+            continue
         text = read(source)
         files[target] = vendored(text) if source.endswith(".md") else text
     return files

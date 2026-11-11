@@ -527,3 +527,68 @@ test("ck --version output may carry a build suffix", async (t) => {
   assert.equal(result.ok, true);
   assert.match(findCheck(result, "ck").detail, /0\.11\.10/);
 });
+
+const SEVEN_ROLES = [
+  "implementer",
+  "test_writer",
+  "reviewer",
+  "reviewer_risky",
+  "fixer",
+  "orchestrator",
+  "resolver",
+] as const;
+
+test("tc133_checkRoles_lists_the_seven_roles_with_model_and_source", async (t) => {
+  const fixture = createFixture();
+  t.after(fixture.cleanup);
+  const fake = fakeExec();
+  const config = {
+    ...defaultConfig(),
+    roles: { implementer: "opencode/claude-opus-5-5#high", reviewer: "opencode/claude-haiku-5-5" },
+  } as unknown as PreflightOptions["config"];
+
+  const result = await runPreflight(optionsFor(fixture, fake.exec, { config }));
+
+  const roles = findCheck(result, "roles");
+  assert.equal(roles.ok, true, roles.detail);
+  for (const role of SEVEN_ROLES) {
+    assert.match(roles.detail, new RegExp(`\\b${role}\\b`), `${role} is listed in: ${roles.detail}`);
+  }
+  const lineOf = (role: string) => roles.detail.split("\n").find((line) => new RegExp(`\\b${role}\\b`).test(line)) ?? "";
+  // Mapped roles show the roles-map model (with its variant) and the source `roles`.
+  assert.match(lineOf("implementer"), /opencode\/claude-opus-5-5#high/);
+  assert.match(lineOf("implementer"), /\broles\b/);
+  assert.match(lineOf("reviewer"), /opencode\/claude-haiku-5-5/);
+  assert.match(lineOf("reviewer"), /\broles\b/);
+  // Unmapped roles fall back to the alias map (or inherit) and say so.
+  for (const role of ["test_writer", "reviewer_risky", "fixer", "orchestrator", "resolver"]) {
+    assert.match(lineOf(role), /\b(alias|inherit)\b/, `${role}: ${lineOf(role)}`);
+    assert.doesNotMatch(lineOf(role), /\broles\b/, `${role}: ${lineOf(role)}`);
+  }
+});
+
+test("tc133_formatPreflight_prints_the_role_lines_even_when_everything_passes", async (t) => {
+  const fixture = createFixture();
+  t.after(fixture.cleanup);
+  const config = {
+    ...defaultConfig(),
+    roles: { fixer: "opencode/claude-opus-5-5#max" },
+  } as unknown as PreflightOptions["config"];
+
+  const result = await runPreflight(optionsFor(fixture, fakeExec().exec, { config }));
+  const text = formatPreflight(result);
+
+  for (const role of SEVEN_ROLES) assert.match(text, new RegExp(`\\b${role}\\b`), text);
+  assert.match(text, /fixer.*opencode\/claude-opus-5-5#max.*\broles\b/);
+});
+
+test("tc133_doctor_listRoles_prints_all_seven_roles_with_no_roles_mapped", async (t) => {
+  const fixture = createFixture();
+  t.after(fixture.cleanup);
+  const result = await runPreflight(optionsFor(fixture, fakeExec().exec));
+  const text = formatPreflight(result, { listRoles: true });
+
+  for (const role of SEVEN_ROLES) assert.match(text, new RegExp(`\\b${role}\\b`), text);
+  assert.match(text, /\balias\b/, text);
+  assert.doesNotMatch(text, /\(source: roles\)/, text);
+});

@@ -1,0 +1,8 @@
+exit: 0
+Verification gate for demo (Task 1): PASS
+✓ Task 1 acceptance criteria
+✓ Task 1 test files exist and contain tests
+⚠ Task 1 tests may still fail
+    they verify tasks that are not Done yet; they must pass when those are
+✓ Test collection succeeds (`python -m pytest --collect-only -q`)
+✓ No existing tests deleted or weakened

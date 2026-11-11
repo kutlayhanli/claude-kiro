@@ -15,7 +15,7 @@ from typing import Optional
 
 import click
 
-from .. import plugin, xdist
+from .. import harnesses, plugin, xdist
 from ..config import initial_config, load_config
 from ..paths import CONFIG_FILE, LEGACY_SPECS_DIR, SPECS_DIR, spec_roots
 from .agents import agents
@@ -27,6 +27,10 @@ from .bench import bench, cost, pricing
 from .stats import stats
 from .eta import eta, eta_backtest, eta_defaults, progress_group, status_line
 from .worktree import lint, plan, relink, waves, worktree
+from .graph import graph
+from .fixtures import fixtures
+from .testfix import testfix
+from .githooks import git_hook
 from .runner import HOOK_SETTINGS, configured_hooks, execute_hook, install_hook_settings
 
 
@@ -700,32 +704,42 @@ def _setup_diff(loader) -> None:
 
 @cli.command()
 @click.option("--unattended", is_flag=True, help="Check this machine for unattended `ck run`s: sandbox tools, credentials, risky allow rules")
-@click.option("--harness", type=click.Choice(["claude", "opencode"]), default="claude", show_default=True, help="Check the Claude Code or OpenCode setup")
+@click.option("--harness", cls=harnesses.HarnessOption, default="claude", show_default=True,
+              base_help="Check the setup of a registered harness: claude (Claude Code), opencode (OpenCode)")
 def doctor(unattended: bool, harness: str):
     """Check Claude Kiro setup health.
 
     Reports how the project gets the spec commands (the plugin, or vendored
     copies), whether the plugin is installed on this machine, and checks
     files, hooks, the version stamp and verify commands.
-    With --harness opencode: the OpenCode plugin's node/ck/vendor/model/agent/
+    With the opencode harness: the OpenCode plugin's node/ck/vendor/model/agent/
     hook/git preflight, without starting a server.
     With --unattended: what an unattended `ck run` is exposed to here, with
     recommendations (always exits 0).
     """
-    if harness == "opencode":
-        from .doctor_opencode import doctor_opencode
-
-        raise SystemExit(doctor_opencode())
-
-    import shutil
-    from .. import manifest
-
+    try:
+        h = harnesses.select(harness)
+    except harnesses.HarnessError as e:
+        click.echo(f"❌ {e}")
+        sys.exit(2)
     project_dir = Path.cwd()
-    if unattended:
+    reason = h.available()
+    if reason:
+        click.echo(f"❌ {harness} harness unavailable: {reason}")
+        sys.exit(1)
+    if unattended and harness == "claude":
         from .run import doctor_unattended
 
         doctor_unattended(project_dir)
         return
+    raise SystemExit(h.doctor(project_dir))
+
+
+def doctor_claude(project_dir: Path) -> int:
+    """The Claude Code setup check behind `ck doctor` (the `claude` harness). Issues are printed; always 0."""
+    import shutil
+    from .. import manifest
+
     claude_dir = project_dir / ".claude"
     issues = []
     warnings = []
@@ -746,7 +760,7 @@ def doctor(unattended: bool, harness: str):
     if not claude_dir.exists():
         issues.append(".claude directory not found - run 'ck init'")
         _report_doctor_results(issues, warnings)
-        return
+        return 0
 
     stamp = manifest.read(project_dir)
     mode = plugin.mode(project_dir)
@@ -881,6 +895,7 @@ def doctor(unattended: bool, harness: str):
         pass
 
     _report_doctor_results(issues, warnings)
+    return 0
 
 
 @cli.command()
@@ -1104,7 +1119,11 @@ def upgrade(dry_run: bool, no_migrate: bool, allow_downgrade: bool, to_vendor: b
 @click.argument("spec")
 @click.option("--task", "-t", "tasks", multiple=True, help="Task number to verify (repeatable). Default: every Done task.")
 @click.option("--no-reuse", is_flag=True, help="With --task: run the commands even if this exact tree already passed them")
-def gate(spec: str, tasks: tuple, no_reuse: bool):
+@click.option("--json", "as_json", is_flag=True, help="Print only the ck-gate/1 JSON object (with a failures list); same exit codes")
+@click.option("--attribute", is_flag=True, help="Run every Verify command the spec has, attribute each failure to its tasks, rerun regression candidates once")
+@click.option("--install", "do_install", is_flag=True, help="Run the install command first; a failure is a red check")
+@click.option("--compact", is_flag=True, help="With --json: print ck-gate-compact/1 and write the full ck-gate/1 object to a report file")
+def gate(spec: str, tasks: tuple, no_reuse: bool, as_json: bool, attribute: bool, do_install: bool, compact: bool):
     """Run the verification gate for SPEC (a name in specs/ or a path).
 
     Checks acceptance boxes, runs the verify commands from specs/ck.json and the
@@ -1115,7 +1134,8 @@ def gate(spec: str, tasks: tuple, no_reuse: bool):
     earlier --task gate, or the done-verify hook when the task was marked Done)
     reuses that pass instead of running them again; the other checks still run.
     """
-    from ..gate import run_gate
+    from ..gate import run_gate, write_report
+    from ..config import install_command, load_config
 
     project_dir = Path.cwd()
     candidate = Path(spec)
@@ -1131,8 +1151,20 @@ def gate(spec: str, tasks: tuple, no_reuse: bool):
     from ..worktrees import heartbeat
 
     heartbeat(project_dir)  # a gate run in a claimed task worktree keeps the claim fresh
+    install = install_command(load_config(project_dir), project_dir) if do_install else None
     result = run_gate(project_dir, candidate, [t.removeprefix("Task ").strip() for t in tasks] or None,
-                      reuse=bool(tasks) and not no_reuse)
+                      reuse=bool(tasks) and not no_reuse, attribute=attribute, install=install)
+    if as_json:
+        report = write_report(result, project_dir) if (attribute or compact) else None
+        if compact and report is not None:
+            payload = result.to_compact(str(report))
+        else:
+            # A failed write already warned (write_report); with --compact the full object is printed instead.
+            payload = result.to_json()
+            if attribute:
+                payload["report"] = str(report) if report is not None else None
+        click.echo(json.dumps(payload, ensure_ascii=False))
+        sys.exit(0 if result.ok else 1)
     if not result.tasks and not result.checks:
         click.echo("ℹ️  No Done tasks to verify. Pass --task N to verify a specific task.")
         return
@@ -1166,9 +1198,13 @@ def _report_doctor_results(issues: list, warnings: list):
 # Add hook subcommand group
 cli.add_command(hook)
 cli.add_command(worktree)
+cli.add_command(git_hook)
 cli.add_command(waves)
 cli.add_command(plan)
 cli.add_command(lint)
+cli.add_command(fixtures)
+cli.add_command(testfix)
+cli.add_command(graph)
 cli.add_command(relink)
 cli.add_command(agents)
 cli.add_command(handoff)

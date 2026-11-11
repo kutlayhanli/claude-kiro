@@ -26,10 +26,13 @@ import time
 from dataclasses import asdict, dataclass, field
 from fnmatch import fnmatchcase
 from pathlib import Path
-from typing import Callable, Dict, Iterator, List, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 from claude_kiro.config import load_config
 from claude_kiro.paths import LEGACY_WORKTREES_DIR, WORKTREES_DIR
+
+if TYPE_CHECKING:
+    from claude_kiro.progress import Liveness
 
 
 class WorktreeError(Exception):
@@ -43,6 +46,8 @@ class Outcome:
     detail: str = ""
     path: str = ""
     branch: str = ""
+    run: Optional[str] = None  # progress run recorded by the claim (status only)
+    hooks: Optional[Dict] = None  # HookStatus of the integration worktree's hooks (create_integration only)
 
     def line(self) -> str:
         parts = [self.state, self.task]
@@ -55,14 +60,98 @@ class Outcome:
         return " ".join(parts)
 
     def as_dict(self) -> Dict[str, str]:
-        return asdict(self)
+        out = asdict(self)
+        if out.get("run") is None:
+            out.pop("run", None)
+        if out.get("hooks") is None:
+            out.pop("hooks", None)
+        return out
 
 
-def git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
-    proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+def git(cwd: Path, *args: str, check: bool = True, env: Optional[Mapping[str, str]] = None) -> subprocess.CompletedProcess:
+    proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, env=dict(env) if env else None)
     if check and proc.returncode != 0:
         raise WorktreeError(f"git {' '.join(args)}: {(proc.stderr or proc.stdout).strip()}")
     return proc
+
+
+def _commit_shape(root: Path, commit: str) -> Tuple[str, List[str]]:
+    """(tree, parents) of `commit`, which may name an annotated tag (`git show` would print the tag header first)."""
+    tree, _, parents = git(root, "log", "-1", "--format=%T%n%P", commit).stdout.strip().partition("\n")
+    return tree.strip(), parents.split()
+
+
+def _tree_protected(root: Path, old: str, tree: str) -> List[str]:
+    """Protected paths (unquoted) that differ between commit `old` and tree `tree`."""
+    from claude_kiro import protect
+
+    out = subprocess.run(["git", "-C", str(root), "diff", "--name-only", "--no-renames", "-z", old, tree],
+                         capture_output=True).stdout
+    names = [n.decode("utf-8", "replace") for n in out.split(b"\0") if n]
+    return [n for n in names if protect.is_protected(n)]
+
+
+def _token_env(root: Path, into: str, old: str, tree: str, parents: List[str], reason: str,
+               files: Sequence[str] = ()) -> Optional[Dict[str, str]]:
+    """A process environment carrying a fresh one-shot landing token for this exact update of `integrate/*`
+    (the hooks let an update through only with it, 9.7); None for any other branch or when none can be issued."""
+    from claude_kiro import protect
+
+    if not into.startswith("integrate/"):
+        return None
+    try:
+        rec = protect.issue_token(root, f"refs/heads/{into}", old, tree, parents, reason, files)
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return {**os.environ, "CK_LANDING_TOKEN": rec.id}
+
+
+def _git_merge(root: Path, target: Path, into: str, branch: str, message: str) -> subprocess.CompletedProcess:
+    """`git merge --no-ff` of `branch` in `target`, with a landing token when `into` is an integrate/* branch."""
+    env = None
+    if into.startswith("integrate/"):
+        old = git(target, "rev-parse", "HEAD").stdout.strip()
+        ok, tree, _ = merge_tree(root, old, branch)
+        if ok and tree:
+            other = git(root, "rev-parse", branch).stdout.strip()
+            env = _token_env(root, into, old, tree, [old, other], f"land {branch} into {into} ({other[:12]})",
+                             _tree_protected(root, old, tree))
+    extra = {"env": env} if env else {}
+    return git(target, "merge", "--no-ff", "-m", message, branch, check=False, **extra)
+
+
+def _git_reset(root: Path, target: Path, into: str, commit: str) -> None:
+    """`git reset --hard` of `target` to `commit`, with a landing token when `into` is an integrate/* branch.
+
+    Raises WorktreeError when git refuses: land() must not carry on over commits it failed to take back."""
+    env = None
+    if into.startswith("integrate/"):
+        old = git(target, "rev-parse", "HEAD").stdout.strip()
+        tree, parents = _commit_shape(root, commit)
+        env = _token_env(root, into, old, tree, parents, f"reset {into} to {commit[:12]}",
+                         _tree_protected(root, old, tree))
+    extra = {"env": env} if env else {}
+    git(target, "reset", "--hard", "-q", commit, **extra)
+
+
+def _ensure_hooks(root: Path, worktree: Path, notes: Optional[List[Dict]] = None, managed_only: bool = False) -> None:
+    """`protect.ensure_hooks`; a re-install or a problem is appended to `notes` (never raises)."""
+    from claude_kiro import protect
+
+    try:
+        if managed_only and not protect.hooks_managed(root):
+            return
+        before = protect.hook_status(root, worktree)
+        if before.installed and before.active and before.intact:
+            return
+        status = protect.ensure_hooks(root, worktree)
+        if notes is not None:
+            notes.append({**protect.hook_status_json(status),
+                          "reinstalled": bool(status.installed and status.active and status.intact)})
+    except Exception as exc:  # noqa: BLE001 - hooks never turn a landing into a crash
+        if notes is not None:
+            notes.append({"installed": False, "active": False, "intact": False, "chainedTo": None,
+                          "problems": [str(exc)]})
 
 
 def _cleanup_merged(root: Path, target: Path, path: Path, branch: str) -> str:
@@ -211,10 +300,33 @@ def dirty_files(path: Path, tracked_only: bool = False) -> List[str]:
     return [line for line in lines if not _is_generated_status_line(line)]
 
 
+def _unquote_c(text: str) -> str:
+    """Undo git's C-style quoting of porcelain values (non-ASCII bytes become octal escapes inside quotes)."""
+    if len(text) < 2 or not (text.startswith('"') and text.endswith('"')):
+        return text
+    body, out, i = text[1:-1], bytearray(), 0
+    simple = {"n": 10, "t": 9, "r": 13, "a": 7, "b": 8, "f": 12, "v": 11, "\\": 92, '"': 34}
+    while i < len(body):
+        ch = body[i]
+        if ch != "\\" or i + 1 >= len(body):
+            out += ch.encode("utf-8")
+            i += 1
+        elif body[i + 1] in "01234567":
+            j = i + 1
+            while j < len(body) and j < i + 4 and body[j] in "01234567":
+                j += 1
+            out.append(int(body[i + 1:j], 8) & 255)
+            i = j
+        else:
+            out.append(simple.get(body[i + 1], ord(body[i + 1])))
+            i += 2
+    return out.decode("utf-8", "replace")
+
+
 def lock_reason(root: Path, path: Path) -> Optional[str]:
     info = worktree_table(root).get(str(path.resolve()))
     if info and "locked" in info:
-        return info["locked"] if info["locked"] != "yes" else "locked"
+        return _unquote_c(info["locked"]) if info["locked"] != "yes" else "locked"
     return None
 
 
@@ -242,12 +354,86 @@ def claim_age(path: Path) -> float:
 
 def stale_claim(root: Path, path: Path) -> Optional[str]:
     """The lock reason when the claim on `path` is stale (no activity for
-    claim_stale_minutes from specs/ck.json), else None."""
+    claim_stale_minutes from specs/ck.json), else None. A claim whose recorded
+    run is still running is never stale, however old it is (16.3)."""
+    from claude_kiro import progress
+
     reason = lock_reason(root, path)
     if not reason:
         return None
+    run = claim_info(reason).run
+    if run and progress.run_liveness(run, None, progress.clock_now()) == "running":
+        return None
     minutes = load_config(root).get("claim_stale_minutes", CLAIM_STALE_MINUTES)
     return reason if claim_age(path) > float(minutes) * 60 else None
+
+
+@dataclass(frozen=True)
+class ClaimInfo:
+    owner: str
+    token: Optional[str]
+    at: Optional[str]
+    run: Optional[str]  # progress run key; None for older claims and hand-made locks
+
+
+_CLAIM_SUFFIX = re.compile(r"^(?P<owner>.*) \(claim (?P<token>\S+) at (?P<at>\S+)(?: run (?P<run>.*))?\)$", re.DOTALL)
+
+
+def claim_info(reason: Optional[str]) -> ClaimInfo:
+    """Parse a lock reason: only the trailing `(claim TOKEN at TIME[ run KEY])` ck wrote counts, never owner text."""
+    text = reason or ""
+    m = _CLAIM_SUFFIX.match(text)
+    if not m:
+        return ClaimInfo(text, None, None, None)
+    return ClaimInfo(m.group("owner"), m.group("token"), m.group("at"), m.group("run") or None)
+
+
+def claim_release_decision(claim: ClaimInfo, starting_run: Optional[str], liveness: Optional["Liveness"], age_s: float,
+                           stale_minutes: float = CLAIM_STALE_MINUTES) -> str:
+    """"own" (the starting run's claim), "keep" or "release" (16.2-16.5, 16.7)."""
+    if claim.run is not None:
+        if starting_run is not None and claim.run == starting_run:
+            return "own"
+        return "keep" if liveness == "running" else "release"
+    return "release" if age_s > float(stale_minutes) * 60 else "keep"
+
+
+@dataclass
+class RunStartClaims:
+    # `run` is None for a claim with no run ID (16.4). A kept entry whose release was attempted and failed carries
+    # `error` (git's message), so a caller can tell "live run, kept on purpose" from "unlock failed".
+    released: List[Dict[str, Optional[str]]] = field(default_factory=list)  # {task, run, reason}
+    kept: List[Dict[str, Optional[str]]] = field(default_factory=list)      # {task, run[, error]}
+
+
+def release_for_run_start(root: Path, spec: str, run: Optional[str], env: Optional[Mapping[str, str]] = None,
+                          now: Optional[datetime.datetime] = None) -> RunStartClaims:
+    """Unlock the claims of runs that are over (commits stay); keep live runs' and the starting run's own."""
+    from claude_kiro import progress
+
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    minutes = float(load_config(root).get("claim_stale_minutes", CLAIM_STALE_MINUTES))
+    out = RunStartClaims()
+    prefix = f"{spec}-task-"
+    paths = [p for d in dict.fromkeys((configured_dir(root), root / LEGACY_WORKTREES_DIR)) for p in d.glob(f"{prefix}*") if p.is_dir()]
+    for path in sorted(paths, key=lambda p: p.name):
+        num = path.name[len(prefix):]
+        reason = lock_reason(root, path)
+        if not reason:
+            continue
+        info = claim_info(reason)
+        liveness = progress.run_liveness(info.run, env, now) if info.run and info.run != run else None
+        decision = claim_release_decision(info, run, liveness, claim_age(path), minutes)
+        if decision == "release":
+            try:
+                git(root, "worktree", "unlock", str(path))
+            except WorktreeError as exc:
+                out.kept.append({"task": num, "run": info.run, "error": str(exc) or "git worktree unlock failed"})
+                continue
+            out.released.append({"task": num, "run": info.run, "reason": reason})
+        else:
+            out.kept.append({"task": num, "run": info.run})
+    return out
 
 
 def heartbeat(path: Path) -> None:
@@ -319,41 +505,116 @@ def create(
             if proc.returncode != 0:
                 tail = "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-10:])
                 outcome = Outcome(num, "ERROR", f"install failed: `{install}`\n{tail}", rel, branch)
+            notes: List[Dict] = []
+            _ensure_hooks(root, path, notes, managed_only=True)
+            if notes and outcome.state in ("CREATED", "EXISTS"):
+                outcome.detail += _hook_detail(notes)
         outcomes.append(outcome)
     return outcomes
 
 
+def _hook_detail(notes: List[Dict]) -> str:
+    if not notes:
+        return ""
+    last = notes[-1]
+    if last.get("problems") and not last.get("reinstalled"):
+        return f"; git hooks not installed: {'; '.join(last['problems'])}"
+    return "; git hooks reinstalled" + (f" (chained to {last['chainedTo']})" if last.get("chainedTo") else "")
+
+
+def _record_baseline(root: Path, spec: str, branch: str) -> None:
+    """The approved protected state of an integration branch that has none: what its tip carries (10.4); best effort.
+
+    Only when no state file exists: one that fails to verify is left alone for the audit to report as incomplete
+    (10.5), since resealing it would launder whatever damaged it."""
+    from claude_kiro import protect
+
+    ref = f"refs/heads/{branch}"
+    try:
+        if protect.approved_state_file(root, spec) is not None:
+            return
+        tip = git(root, "rev-parse", ref).stdout.strip()
+        protect.record_approved_state(root, spec, ref, tip, protect.protected_files_at(root, tip), {"by": "baseline"})
+    except (OSError, ValueError, subprocess.CalledProcessError, WorktreeError):
+        pass
+
+
 def create_integration(root: Path, spec: str, base: Optional[str] = None) -> Outcome:
-    """Worktree on integrate/<spec> that task merges go into instead of the base branch."""
+    """Worktree on integrate/<spec> that task merges go into instead of the base branch.
+
+    The git hooks are installed (or repaired) first, so the creation of the ref already needs its token (9.1).
+    """
     base = base or current_branch(root)
     path, branch = integration_path(root, spec), integration_branch(spec)
     rel = rel_path(root, path)
+    notes: List[Dict] = []
+    _ensure_hooks(root, path if path.exists() else root, notes)
+    from claude_kiro import protect
+
+    ref = f"refs/heads/{branch}"
+    state_file = protect.approved_state_file(root, spec)  # by spec: a ref lost from refs.json still has its state
+    approved = protect.read_approved_state(root, spec, ref) if state_file is not None else None
+    unverified = state_file is not None and approved is None
+    recover = (f"delete {state_file} in your own terminal and run `ck worktree integration {spec} --base {base}` again")
+
+    def status() -> Dict:
+        st = protect.hook_status(root, path if path.exists() else root)
+        out = protect.hook_status_json(st)
+        out["problems"] = list(dict.fromkeys([*(notes[-1]["problems"] if notes else []), *st.problems]))
+        return out
+
+    def detail(text: str) -> str:
+        note = (f"; the approved protected state {state_file} cannot be verified and was left as it is, so the audit "
+                "will report incomplete" if unverified else "")
+        return text + _hook_detail(notes) + note
+
     if path.exists():
-        return Outcome("integration", "EXISTS", "reused", rel, branch)
+        _record_baseline(root, spec, branch)
+        return Outcome("integration", "EXISTS", detail("reused"), rel, branch, hooks=status())
     path.parent.mkdir(parents=True, exist_ok=True)
     if branch_exists(root, branch):
         git(root, "worktree", "add", str(path), branch)
+        _record_baseline(root, spec, branch)
     else:
-        git(root, "worktree", "add", "-b", branch, str(path), base)
-    return Outcome("integration", "CREATED", f"from {base}", rel, branch)
+        if unverified:
+            raise WorktreeError(
+                f"refused: creating {ref}: the approved protected state {state_file} cannot be verified, and ck will "
+                f"not reseal it from {base}. To accept {base} as the new approved state, review its protected files, "
+                f"then {recover}.")
+        tree, parents = _commit_shape(root, base)
+        base_files = protect.protected_files_at(root, base)
+        if approved is not None and dict(approved.files) != base_files:
+            # 9.12: the approved state exists and the base differs from it; never reseal it from the base
+            drift = sorted(k for k in {*base_files, *approved.files} if base_files.get(k) != approved.files.get(k))
+            raise WorktreeError(
+                f"refused: creating {ref} from {base} carries protected files that differ from the approved state: "
+                f"{', '.join(drift)}. `ck worktree approve SPEC TASK` lands a task into an existing integrate branch, "
+                f"so it cannot re-create this one. To accept {base} as the new approved state, review those files, "
+                f"then {recover}.")
+        env = _token_env(root, branch, protect.ZEROS, tree, parents, f"create {branch} from {base}",
+                         sorted(base_files))
+        git(root, "worktree", "add", "-b", branch, str(path), base, **({"env": env} if env else {}))
+        _record_baseline(root, spec, branch)
+    return Outcome("integration", "CREATED", detail(f"from {base}"), rel, branch, hooks=status())
 
 
-def claim(root: Path, spec: str, num: str, owner: str, takeover: bool = False) -> Outcome:
+def claim(root: Path, spec: str, num: str, owner: str, takeover: bool = False, run: Optional[str] = None) -> Outcome:
     path, branch = task_path(root, spec, num), task_branch(spec, num)
     rel = rel_path(root, path)
     if not path.exists():
         return Outcome(num, "MISSING", "no worktree; run `ck worktree create` first", rel, branch)
     reason = lock_reason(root, path)
     stale = stale_claim(root, path) if reason else None
-    if reason and not takeover and not stale:
+    own = bool(reason and run and claim_info(reason).run == run)  # the same run's claim is its own (16.7)
+    if reason and not takeover and not stale and not own:
         return Outcome(num, "BUSY", f"claimed: {reason}", rel, branch)
     if reason:
         git(root, "worktree", "unlock", str(path))
-    owner = f"{owner} (claim {secrets.token_hex(4)} at {_now()})"
+    owner = f"{owner} (claim {secrets.token_hex(4)} at {_now()}{f' run {run}' if run else ''})"
     git(root, "worktree", "lock", "--reason", owner, str(path))
     if unpark(root, spec, num):  # a fresh attempt clears the park note; the decision note stays
         _record_unpark(root, spec, num)
-    took = f" (took over stale claim: {stale})" if stale else " (took over)" if reason else ""
+    took = f" (took over stale claim: {stale})" if stale else " (took over)" if reason and not own else ""
     return Outcome(num, "CLAIMED", owner + took, rel, branch)
 
 
@@ -492,6 +753,111 @@ def release(root: Path, spec: str, num: str) -> Outcome:
     return Outcome(num, "RELEASED", "", rel, branch)
 
 
+def _record_landed(root: Path, spec: str, into: str, landed: Dict[str, List[str]], approved: Dict[str, List[str]]) -> None:
+    """Record in the approved protected state only the protected paths the landed tasks changed (10.4).
+
+    Never the whole protected state: a bypass write elsewhere must not be laundered. `landed` maps task -> its
+    protected paths; those listed in `approved[task]` are recorded `by: "approval"`, the rest `by: "allow-list"`.
+    Best effort: a state that cannot be written is left for the audit to report."""
+    from claude_kiro import protect
+
+    if not into.startswith("integrate/") or not landed:
+        return
+    ref = f"refs/heads/{into}"
+    try:
+        tip = git(root, "rev-parse", ref).stdout.strip()
+        at_tip = protect.protected_files_at(root, tip)
+        if protect.read_approved_state(root, spec, ref) is None:
+            return  # never reseal a state that is absent or fails to verify: the audit reports it incomplete
+        for n in sorted(landed):
+            for by in ("allow-list", "approval"):
+                paths = sorted(f for f in landed[n] if (f in approved.get(n, ())) == (by == "approval"))
+                if paths:
+                    protect.record_approved_state(root, spec, ref, tip, {f: at_tip.get(f) for f in paths},
+                                                  {"by": by, "task": n, "files": paths})
+    except (OSError, ValueError, subprocess.CalledProcessError, WorktreeError):
+        pass
+
+
+def _merge_commit_of(root: Path, base: str, tip: str, branch: str) -> Optional[str]:
+    """The first-parent merge commit on `tip` (after `base`) whose second parent is the tip of `branch`."""
+    try:
+        want = git(root, "rev-parse", f"refs/heads/{branch}").stdout.strip()
+        lines = git(root, "rev-list", "--first-parent", "--parents", f"{base}..{tip}").stdout.splitlines()
+    except (subprocess.CalledProcessError, WorktreeError):
+        return None
+    for line in lines:
+        ids = line.split()
+        if len(ids) >= 3 and ids[2] == want:
+            return ids[0]
+    return None
+
+
+def _record_fixtures(root: Path, target: Path, spec: str, base: str, merged: List[str],
+                     results: Dict[str, "Landed"]) -> Optional[str]:
+    """Lock recorded fixtures of the tasks that merged (15.1, 15.2); returns a config error text or None.
+
+    Per merged task, in landing order: new files get a lock entry (task, time); changed or deleted locked files
+    are `fixtureDrift` unless their label is handcrafted with a reason covering the new content, which updates
+    the entry's hash and records the reason. Landing is never refused by drift. No globs: nothing is written."""
+    from claude_kiro import fixtures
+
+    if not merged:
+        return None
+    config = load_config(target)
+    try:
+        globs = fixtures.fixture_globs(dict(config))
+    except fixtures.ConfigError as exc:
+        return str(exc)
+    if not globs:
+        return None
+    entries, tampered = fixtures.read_lock(root, spec)
+    labels = fixtures.read_labels(target, config)
+    changed = False
+    tip_ref = git(target, "rev-parse", "HEAD").stdout.strip()
+    for num in merged:
+        branch = task_branch(spec, num)
+        diff = git(root, "diff", "--name-status", "--no-renames", "-z", f"{base}...{branch}").stdout
+        paths: Dict[str, str] = {}
+        parts = diff.split("\0")
+        for i in range(0, len(parts) - 1, 2):
+            if parts[i + 1]:
+                paths[parts[i + 1]] = parts[i].strip()
+        recorded = fixtures.recorded_files(config, sorted(paths))
+        changes: Dict[str, Optional[str]] = {}
+        source = _merge_commit_of(root, base, tip_ref, branch) or branch
+        for path in recorded:
+            if paths[path].startswith("D"):
+                changes[path] = None
+                continue
+            proc = subprocess.run(["git", "-C", str(root), "show", f"{source}:{path}"], capture_output=True)
+            if proc.returncode != 0:
+                raise WorktreeError(f"cannot read recorded fixture {path} of task {num} at {source}")
+            changes[path] = fixtures.sha256_text(proc.stdout)
+        if not changes:
+            continue
+        report = fixtures.lock_decision(entries, changes, labels, tampered=tampered)
+        # A deletion has no content to seal, so one that lock_decision accepts as handcrafted is still reported.
+        accepted = [h_ for h_ in report.handcrafted if changes[h_["file"]] is not None]
+        deleted = [{"file": h_["file"], "change": "deleted"} for h_ in report.handcrafted if changes[h_["file"]] is None]
+        results[num].fixtureDrift = [{"file": d["file"], "task": num, "change": d["change"]}
+                                     for d in sorted([*report.drift, *deleted], key=lambda d: d["file"])]
+        if tampered:
+            continue  # never reseal a lock that does not verify: the audit reports it
+        at = _now()
+        for path in report.new_locks:
+            entries[path] = fixtures.LockEntry(sha256=str(changes[path]), task=num, locked_at=at)
+            changed = True
+        for h_ in accepted:
+            old = entries[h_["file"]]
+            entries[h_["file"]] = fixtures.LockEntry(sha256=str(changes[h_["file"]]), task=old.task,
+                                                     locked_at=old.locked_at, handcrafted=h_["reason"])
+            changed = True
+    if changed:
+        fixtures.write_lock(root, spec, entries)
+    return None
+
+
 def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, keep: bool = False) -> List[Outcome]:
     """Merge task branches into `into` one at a time (--no-ff); stop at the first conflict.
 
@@ -507,6 +873,7 @@ def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, ke
         raise WorktreeError(f"{target} has uncommitted changes to tracked files; refusing to merge into {into}")
 
     outcomes = []
+    allow = land_allow_paths(target)
     for num in nums:
         path, branch = task_path(root, spec, num), task_branch(spec, num)
         rel = rel_path(root, path)
@@ -517,6 +884,12 @@ def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, ke
         if ahead == 0:
             outcomes.append(Outcome(num, "SKIP", f"no commits ahead of {into}", rel, branch))
             continue
+        touched = protected_changes(root, into, branch, allow)
+        landing_paths = protected_changes(root, into, branch)
+        if touched:
+            outcomes.append(Outcome(num, "PROTECTED", f"changes protected files not covered by land.allow_paths: "
+                                    f"{', '.join(touched)}; not merged, a human must review and approve it", rel, branch))
+            break
         if path.exists():
             reason = lock_reason(root, path)
             if reason and stale_claim(root, path):
@@ -527,7 +900,7 @@ def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, ke
             if dirty_files(path):
                 outcomes.append(Outcome(num, "ERROR", "task worktree has uncommitted changes", rel, branch))
                 continue
-        proc = git(target, "merge", "--no-ff", "-m", f"Merge {branch} (task {num})", branch, check=False)
+        proc = _git_merge(root, target, into, branch, f"Merge {branch} (task {num})")
         if proc.returncode != 0:
             conflicted = git(target, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split()
             git(target, "merge", "--abort", check=False)
@@ -542,6 +915,7 @@ def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, ke
                 )
             )
             break
+        _record_landed(root, spec, into, {num: landing_paths}, {})
         note = "" if keep else _cleanup_merged(root, target, path, branch)
         outcomes.append(Outcome(num, "MERGED", f"{ahead} commit(s) into {into}{note}", rel, branch))
     return outcomes
@@ -557,6 +931,8 @@ class Landed:
     checkGreen: Optional[bool] = None
     checkTail: str = ""
     mergedAt: str = ""
+    failures: List[Dict] = field(default_factory=list)  # the gate's failure entries (ck-gate/1), RED only
+    fixtureDrift: List[Dict] = field(default_factory=list)  # [{file, task, change}] recorded fixtures changed (15.2)
 
     def line(self) -> str:
         text = f"{self.state} {self.task} ({self.branch})"
@@ -569,8 +945,8 @@ class Landed:
         return text
 
 
-# gate(target checkout, task numbers) -> (green, failing output)
-GateFn = Callable[[Path, List[str]], Tuple[bool, str]]
+# gate(target checkout, task numbers) -> (green, failing output, failure entries)
+GateFn = Callable[[Path, List[str]], Tuple[bool, str, List[Dict]]]
 
 
 def _now() -> str:
@@ -644,9 +1020,9 @@ def _glob(path: str, pattern: str) -> bool:
 
 def protected_changes(root: Path, base: str, branch: str, allow: Optional[List[str]] = None) -> List[str]:
     """Files the branch changes since it forked from `base` that match PROTECTED_PATHS and no `allow` glob."""
-    out = git(root, "diff", "--name-only", "--no-renames", f"{base}...{branch}", check=False).stdout.split("\n")
+    out = git(root, "diff", "--name-only", "--no-renames", "-z", f"{base}...{branch}", check=False).stdout.split("\0")
     allow = [a for a in (allow or []) if isinstance(a, str) and a]
-    return [f for f in (line.strip() for line in out) if f
+    return [f for f in out if f
             and any(_glob(f, p) for p in PROTECTED_PATHS) and not any(_glob(f, a) for a in allow)]
 
 
@@ -696,6 +1072,7 @@ def land(
     keep: bool = False,
     release_claims: bool = False,
     priority: Optional[Dict[str, int]] = None,
+    approved: Optional[Dict[str, List[str]]] = None,
 ) -> Dict:
     """Land a batch of task branches on `into` with one gate, bisecting a red batch.
 
@@ -713,7 +1090,11 @@ def land(
 
     Only the target checkout is ever reset, and only to the commit recorded before this
     batch. Merged tasks' worktrees and branches are removed unless `keep`.
+
+    `approved` (task -> protected files; only `ck worktree approve` passes it) lets exactly those files through
+    for those tasks; they are recorded in the approved state as `by: "approval"`.
     """
+    approved = {k: list(v) for k, v in (approved or {}).items()}
     into = into or current_branch(root)
     target = checkout_of(root, into)
     if target is None:
@@ -726,6 +1107,8 @@ def land(
 
     with land_lock(root, into):
         started = _now()
+        hook_notes: List[Dict] = []
+        _ensure_hooks(root, target, hook_notes)
         base = git(target, "rev-parse", "HEAD").stdout.strip()
         results: Dict[str, Landed] = {}
         candidates: List[str] = []
@@ -754,6 +1137,7 @@ def land(
         allow = land_allow_paths(target)
         for num in list(candidates):
             touched = protected_changes(root, base, task_branch(spec, num), allow)
+            touched = [f for f in touched if f not in approved.get(num, ())]
             if touched:
                 candidates.remove(num)
                 results[num] = Landed(
@@ -810,6 +1194,7 @@ def land(
             ).stdout.strip()
             batch.append(num)
 
+        landed_paths = {n: protected_changes(root, base, task_branch(spec, n)) for n in batch}
         gates: List[Dict] = []
 
         def head() -> str:
@@ -819,7 +1204,7 @@ def land(
             merged = []
             for num in group:
                 branch = task_branch(spec, num)
-                proc = git(target, "merge", "--no-ff", "-m", f"Merge {branch} (task {num})", branch, check=False)
+                proc = _git_merge(root, target, into, branch, f"Merge {branch} (task {num})")
                 if proc.returncode != 0:
                     files = git(target, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split()
                     git(target, "merge", "--abort", check=False)
@@ -828,26 +1213,28 @@ def land(
                 merged.append(num)
             return merged
 
-        def check(group: List[str]) -> Tuple[bool, str]:
+        def check(group: List[str]) -> Tuple[bool, str, List[Dict]]:
             t0 = datetime.datetime.now()
-            ok, tail = True, ""
+            ok, tail, failures = True, "", []
             if install:
                 proc = subprocess.run(install, shell=True, cwd=target, capture_output=True, text=True)
                 if proc.returncode != 0:
                     out = "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-20:])
                     ok, tail = False, f"install step failed: `{install}`\n{out}"
+                _ensure_hooks(root, target, hook_notes)  # an install step may move core.hooksPath (husky prepare)
             if ok:
-                ok, tail = gate(target, group)
+                ok, tail, failures = gate(target, group)
             gates.append({"tasks": list(group), "green": ok, "seconds": int((datetime.datetime.now() - t0).total_seconds())})
-            return ok, tail
+            return ok, tail, failures
 
         def mark_merged(group: List[str], green: Optional[bool]) -> None:
             at = _now()
             for num in group:
                 results[num] = Landed(num, "MERGED", f"into {into}", task_branch(spec, num), [], green, "", at)
 
-        def land_group(group: List[str], known_red: bool = False, red_tail: str = "") -> bool:
+        def land_group(group: List[str], known_red: bool = False, red_tail: str = "", red_failures: Optional[List[Dict]] = None) -> bool:
             """Land `group` on the current target head; True if all of it landed green."""
+            red_failures = red_failures or []
             if not known_red:
                 start = head()
                 merged = merge_all(group)
@@ -856,24 +1243,35 @@ def land(
                 if gate is None:
                     mark_merged(merged, None)
                     return len(merged) == len(group)
-                ok, tail = check(merged)
+                ok, tail, failures = check(merged)
                 if ok:
                     mark_merged(merged, True)
                     return len(merged) == len(group)
-                git(target, "reset", "--hard", "-q", start)
-                group, red_tail = merged, tail
+                _git_reset(root, target, into, start)
+                group, red_tail, red_failures = merged, tail, failures
             if len(group) == 1:
                 num = group[0]
-                results[num] = Landed(num, "RED", f"the gate on {into} fails with this task; it was not landed", task_branch(spec, num), [], False, red_tail)
+                results[num] = Landed(num, "RED", f"the gate on {into} fails with this task; it was not landed", task_branch(spec, num), [], False, red_tail, failures=red_failures)
                 return False
             half = len(group) // 2
             left_green = land_group(group[:half])
             # A green left half on the same base proves the right half red: skip re-gating it whole.
-            land_group(group[half:], known_red=left_green, red_tail=red_tail)
+            land_group(group[half:], known_red=left_green, red_tail=red_tail, red_failures=red_failures)
             return False
 
         if batch:
             land_group(batch)
+
+        _record_landed(
+            root, spec, into,
+            {n: landed_paths[n] for n, o in results.items() if o.state == "MERGED" and n in landed_paths}, approved)
+
+        fixture_error: Optional[str] = None
+        try:
+            fixture_error = _record_fixtures(
+                root, target, spec, base, [n for n in order if n in results and results[n].state == "MERGED"], results)
+        except (OSError, ValueError, subprocess.CalledProcessError, WorktreeError) as exc:
+            fixture_error = f"fixture lock not recorded: {exc}"
 
         if not keep:
             for num, outcome in results.items():
@@ -890,6 +1288,8 @@ def land(
             "tasks": [asdict(results[n]) for n in order if n in results],
             "gates": gates,
             "bisected": len(gates) > 1,
+            **({"hooks": hook_notes[-1]} if hook_notes else {}),
+            **({"fixtureError": fixture_error} if fixture_error else {}),
         }
 
 
@@ -912,7 +1312,8 @@ def status(root: Path, spec: str) -> List[Outcome]:
         if branch_exists(root, branch):
             ahead = git(root, "rev-list", "--count", f"{base}..{branch}").stdout.strip()
             bits.append(f"{ahead} ahead of {base}")
-        outcomes.append(Outcome(num, "BUSY" if reason else "EXISTS", ", ".join(bits), rel_path(root, path), branch))
+        outcomes.append(Outcome(num, "BUSY" if reason else "EXISTS", ", ".join(bits), rel_path(root, path), branch,
+                                run=(claim_info(reason).run or None) if reason else None))
     return outcomes
 
 

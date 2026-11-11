@@ -202,11 +202,12 @@ test("the real spec-implement workflow compiles and reaches its first agent", as
       root: "/tmp/opencode/runner-fixture",
       into: "main",
       targetDir: "/tmp/opencode/runner-fixture",
-      deps: {},
-      remaining: [],
-      wave: {},
-      titles: {},
-      tracks: {},
+      // One real task: on the OpenCode runner plan, gate and report are direct ck calls, so only a task needs an agent.
+      deps: { "1": [] },
+      remaining: ["1"],
+      wave: { "1": 1 },
+      titles: { "1": "t" },
+      tracks: { "1": "impl" },
       risk: {},
       complexity: {},
     },
@@ -331,6 +332,55 @@ test("the real spec-implement workflow plans through ck directly, with no plan a
     assert.ok(!labels.some((l) => l.startsWith("plan")), `no plan agent: ${labels.join(", ")}`);
     const result = outcome.result as { directCk: { plan: number } };
     assert.ok(result.directCk.plan >= 1, JSON.stringify(result.directCk));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("tc164_runner_calls_the_attributed_gate_directly", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ck-runner-shim-"));
+  try {
+    const shimLog = join(dir, "shim.jsonl");
+    const source = readFileSync(join(import.meta.dirname, "..", "..", "plugin", "workflows", "spec-implement.js"), "utf8");
+    const labels: string[] = [];
+    const outcome = await runWorkflow(
+      source,
+      {
+        spec: "fixture",
+        root: dir,
+        into: "main",
+        targetDir: dir,
+        deps: { "1": [] },
+        remaining: ["1"],
+        wave: {},
+        titles: { "1": "one" },
+        tracks: {},
+        risk: {},
+        complexity: {},
+      },
+      (_prompt, opts) => {
+        labels.push(String(opts.label));
+        const props = ((opts.schema ?? {}) as { properties?: Record<string, unknown> }).properties ?? {};
+        if ("status" in props) {
+          return { task: "1", status: "done", gatePassed: true, summary: "done", commits: "abc1234" };
+        }
+        if ("green" in props) return { green: true };
+        return { ok: true };
+      },
+      { CK_BIN: join(import.meta.dirname, "fixtures", "ck-shim.mjs"), CK_SHIM_LOG: shimLog },
+    );
+    assert.equal(outcome.error, undefined, JSON.stringify(outcome.error));
+
+    const calls = readFileSync(shimLog, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { argv: string[] });
+    assert.ok(calls.some((call) => call.argv.includes("land")), "the run landed through the shim");
+    const gate = calls.find((call) => call.argv.includes("gate"));
+    assert.ok(gate, `a direct ck gate call: ${calls.map((call) => call.argv.join(" ")).join(" | ")}`);
+    assert.ok(gate.argv.includes("--attribute"), gate.argv.join(" "));
+    assert.ok(gate.argv.includes("--json"), gate.argv.join(" "));
+    assert.ok(!labels.some((label) => /gate/.test(label)), `no gate agent: ${labels.join(", ")}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

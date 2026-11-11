@@ -21,23 +21,57 @@ commands to pass once every task they verify is Done.
 Used by `ck gate` and by the done-verify hook when a task is marked Done.
 """
 
+import ast
+import json
 import os
+import re
+import shlex
 import subprocess
 import sys
+import tempfile
 import time
-from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from claude_kiro import properties as props
 from claude_kiro import verified
 from claude_kiro import xdist
-from claude_kiro.config import collect_command, load_config
+from claude_kiro import fidelity
+from claude_kiro.attribution import (
+    Attribution,
+    AttributionIndex,
+    GateVerdict,
+    attribute_failure,
+    failure_key,
+    gate_verdict,
+    rerun_command,
+    rerun_plan,
+    tc_of_node,
+    _launcher,
+)
+from claude_kiro.config import ConfigError, collect_command, install_command, load_config, test_track_validate
+from claude_kiro.failures import (
+    Failure,
+    ProjectContext,
+    TestResult,
+    classify_not_built,
+    failing_files,
+    parse_short_summary,
+    read_collected,
+    read_report,
+    right_reason_verdict,
+)
+from claude_kiro.graph import _plan_rows, build_graph
 from claude_kiro.hooks._shared import git_utils
 from claude_kiro.hooks._shared.spec_parser import SpecTask, parse_tasks
 from claude_kiro.hooks._shared.test_heuristics import is_test_path, measure, weakening
 
 OUTPUT_TAIL = 40  # lines of failing command output to include in the report
+PLUGIN_DIR = Path(__file__).parent / "resources" / "pytest_plugin"  # ck_pytest_report.py, loaded with -p
+PLUGIN_NAME = "ck_pytest_report"
 
 
 @dataclass
@@ -46,6 +80,15 @@ class Check:
     ok: bool
     detail: str = ""
     warning: bool = False  # passed, but worth telling me about
+    command: bool = False  # a Verify command's run: under --attribute its failures decide, not this check
+
+
+@dataclass
+class CommandRun:
+    check: Check
+    failures: List[Failure] = field(default_factory=list)
+    collected: List[str] = field(default_factory=list)  # node IDs the plugin recorded under CK_GATE_COLLECT
+    returncode: Optional[int] = None  # the process exit code (None: timed out)
 
 
 @dataclass
@@ -53,10 +96,106 @@ class GateResult:
     spec_dir: Path
     tasks: List[str]
     checks: List[Check] = field(default_factory=list)
+    failures: List[Failure] = field(default_factory=list)  # one per failing node or file, never truncated (3.3)
+    attributions: List[Attribution] = field(default_factory=list)  # parallel to `failures` when attributed
+    command_providers: Dict[str, List[str]] = field(default_factory=dict)  # known command -> providing tasks
+    attribute: bool = False
+    verdict: Optional[GateVerdict] = None  # set by an attributed gate; its red/green replaces the check list
+    reruns: Dict[str, str] = field(default_factory=dict)  # failure key -> passed | failed | unavailable
+    warnings: List[str] = field(default_factory=list)
+    duration_s: float = 0.0
+    # id(failure) -> extra entry keys ("class"/"check" for right-reason and validate entries)
+    marks: Dict[int, Dict[str, Any]] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
+        if self.verdict is not None:
+            return not self.verdict.red
         return all(c.ok for c in self.checks)
+
+    def _missing_command(self, failure: Failure) -> Optional[Dict[str, Any]]:
+        command = failure.missing_command
+        if not command or command not in self.command_providers:
+            return None
+        return {"command": command, "providers": list(self.command_providers[command])}
+
+    def _failed_checks(self) -> List[Check]:
+        """The failed checks; under --attribute a Verify command's run is not one (its failures carry the verdict)."""
+        return [c for c in self.checks if not c.ok and not (self.verdict is not None and c.command)]
+
+    def to_json(self) -> Dict[str, Any]:
+        """The `ck-gate/1` object (`ck gate --json`). Failure entries are never truncated or dropped."""
+        entries = []
+        for i, failure in enumerate(self.failures):
+            attr = self.attributions[i] if i < len(self.attributions) else None
+            entry = failure.as_json(
+                tc_id=attr.tc_id if attr else None,
+                tasks=attr.tasks if attr else (),
+                attributed_by=attr.by if attr else None,
+            )
+            entry["missingCommand"] = self._missing_command(failure)
+            entry.update(self.marks.get(id(failure), {}))
+            if self.verdict is not None:
+                key = failure_key(failure)
+                entry["status"] = self.verdict.statuses.get(key)
+                entry["excusedBy"] = list(attr.excused_by) if attr else []
+                if attr is not None and attr.candidate:
+                    entry["rerun"] = self.reruns.get(key, "unavailable")
+                if attr is not None and attr.hint:
+                    entry["hint"] = attr.hint
+            entries.append(entry)
+        summary: Dict[str, Any] = {
+            "checks": len(self.checks),
+            "failedChecks": len(self._failed_checks()),
+            "failures": len(entries),
+        }
+        if self.verdict is not None:
+            summary.update(self.verdict.counts)
+        return {
+            "schema": "ck-gate/1",
+            "spec": self.spec_dir.name,
+            "tasks": list(self.tasks),
+            "ok": self.ok,
+            "attribute": self.attribute,
+            "checks": [{"name": c.name, "ok": c.ok, "detail": c.detail, "warning": c.warning} for c in self.checks],
+            "failures": entries,
+            "summary": summary,
+            "warnings": list(self.warnings),
+            "durationS": round(self.duration_s, 3),
+        }
+
+    def to_compact(self, report: Optional[str]) -> Dict[str, Any]:
+        """The `ck-gate-compact/1` object (`ck gate --json --compact`): the verdict in full, the rest by count.
+
+        `report` is the path of the full `ck-gate/1` object written next to it (2.12).
+        """
+        full = self.to_json()
+        failures = full["failures"]
+
+        def with_status(status: str) -> List[Dict[str, Any]]:
+            return [f for f in failures if f.get("status") == status]
+
+        excused: Dict[str, int] = {}
+        for entry in with_status("excused"):
+            for num in entry.get("excusedBy") or []:
+                excused[num] = excused.get(num, 0) + 1
+        return {
+            "schema": "ck-gate-compact/1",
+            "spec": full["spec"],
+            "tasks": full["tasks"],
+            "ok": full["ok"],
+            "attribute": full["attribute"],
+            "failedChecks": [{"name": c.name, "ok": c.ok, "detail": c.detail, "warning": c.warning}
+                             for c in self._failed_checks()],
+            "regressions": with_status("regression"),
+            "unattributed": with_status("unattributed"),
+            "flaky": with_status("flaky"),
+            "excusedByTask": {k: excused[k] for k in sorted(excused, key=int)},
+            "summary": full["summary"],
+            "warnings": full["warnings"],
+            "report": report,
+            "durationS": full["durationS"],
+        }
 
     def report(self) -> str:
         label = ", ".join(f"Task {n}" for n in self.tasks) or "spec"
@@ -71,24 +210,516 @@ class GateResult:
         return "\n".join(lines)
 
 
-def _run(command: str, project_dir: Path, timeout: int, env: Optional[Dict[str, str]] = None) -> Check:
+def _direct_pytest(command: str) -> bool:
+    """True when the command is one pytest invocation (possibly behind uv or env): the only kind that gets the plugin.
+
+    Wrappers such as tox, make or shell scripts are not direct: they get nothing injected, and their failures come
+    from the output (pytest's short summary, else the failing file names).
+    """
+    try:
+        segments = xdist._segments(xdist._tokens(command))
+    except ValueError:
+        return False
+    return len(segments) == 1 and xdist._segment_pytest(segments[0]) is not None
+
+
+def _known_files(project_dir: Path) -> List[str]:
+    return git_utils.project_files(project_dir) or []
+
+
+def _run_command(command: str, project_dir: Path, timeout: int, env: Optional[Dict[str, str]],
+                 report_dir: Path, collect: bool = False, only: Optional[Sequence[str]] = None) -> CommandRun:
+    """Run one verify command and parse its failures. The command text is never rewritten.
+
+    For a direct pytest invocation the child environment (only) gets the plugin: CK_GATE_REPORT names a fresh
+    report file in `report_dir`, CK_GATE_ROOT is the gate's checkout, PYTHONPATH finds the plugin and
+    PYTEST_ADDOPTS loads it. The plugin removes these for nested runs (TC-191). With `collect`, CK_GATE_COLLECT
+    also makes the plugin record every node the run selected (`CommandRun.collected`).
+    """
+    name = f"`{command}`"
+    run_env = dict(os.environ if env is None else env)
+    report: Optional[Path] = None
+    if _direct_pytest(command):
+        report = report_dir / f"run-{os.getpid()}-{time.monotonic_ns()}.jsonl"
+        run_env["CK_GATE_REPORT"] = str(report)
+        run_env["CK_GATE_ROOT"] = str(project_dir)
+        run_env["PYTHONPATH"] = os.pathsep.join(p for p in (str(PLUGIN_DIR), run_env.get("PYTHONPATH", "")) if p)
+        run_env["PYTEST_ADDOPTS"] = " ".join(p for p in (f"-p {PLUGIN_NAME}", run_env.get("PYTEST_ADDOPTS", "")) if p)
+        if collect:
+            run_env["CK_GATE_COLLECT"] = "1"
+        if only:
+            selection = report_dir / f"only-{os.getpid()}-{time.monotonic_ns()}.txt"
+            selection.write_text("".join(f"{node}\n" for node in only), encoding="utf-8")
+            run_env["CK_GATE_ONLY"] = str(selection)
     try:
         proc = subprocess.run(
             command,
             shell=True,
             cwd=project_dir,
-            env=env,
+            env=run_env,
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",  # a command that prints binary must not crash the gate
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
-        return Check(f"`{command}`", False, f"timed out after {timeout}s")
+        timeout_failure = Failure(
+            node=None, file=None, kind="timeout", message=f"timed out after {timeout}s", truncated=False,
+            command=command, exc_type=None, phase=None, crash_path=None, crash_line=None, detail="",
+            missing_command=None,
+        )
+        return CommandRun(Check(name, False, f"timed out after {timeout}s", command=True), [timeout_failure])
+    collected = read_collected(report) if report is not None and collect else []
     if proc.returncode == 0:
-        return Check(f"`{command}`", True)
-    output = (proc.stdout + proc.stderr).strip().splitlines()
-    tail = "\n".join(output[-OUTPUT_TAIL:])
-    return Check(f"`{command}`", False, f"exit {proc.returncode}\n{tail}")
+        return CommandRun(Check(name, True, command=True), [], collected, 0)
+    output = proc.stdout + proc.stderr
+    tail = "\n".join(output.strip().splitlines()[-OUTPUT_TAIL:])
+    found: List[Failure] = read_report(report, command) if report is not None else []
+    if not found:
+        found = parse_short_summary(output, command)
+    if not found:
+        found = failing_files(output, _known_files(project_dir), command)
+    return CommandRun(Check(name, False, f"exit {proc.returncode}\n{tail}", command=True), found, collected,
+                      proc.returncode)
+
+
+_DURATION = re.compile(r"^(.*\b(?:passed|failed|errors?|skipped|deselected|xfailed|xpassed|warnings?|no tests ran))"
+                       r" in \d+(?:\.\d+)?s(?: \(\d+:\d\d:\d\d\))?(\s*=*)$")
+
+
+def _untimed(detail: str) -> str:
+    """The pytest summary line's wall time (`2 failed in 0.12s`) dropped, so two runs report the same text."""
+    return "\n".join(_DURATION.sub(r"\1\2", line) for line in detail.split("\n"))
+
+
+def _node_arg(node: str) -> Optional[str]:
+    """`node` itself when pytest accepts it as an argument, else None.
+
+    pytest cuts an argument at its first "[" and refuses one whose path part holds it
+    (`odd dir [1]/test_x.py::test_y`), so such a node is selected through the plugin's CK_GATE_ONLY instead.
+    """
+    base, bracket, _rest = node.partition("[")
+    return node if not bracket or "::" in base else None
+
+
+def _safe_dir(node: str) -> str:
+    path = node.split("::", 1)[0]
+    parts = path.split("/")[:-1]
+    while parts and "[" in "/".join(parts):
+        parts.pop()
+    return "/".join(parts) or "."
+
+
+def _rerun_chunks(prefix: str, nodes: Sequence[str]) -> List[Tuple[str, Optional[List[str]]]]:
+    """`rerun_command` lines for `nodes`, each with the node set the plugin must keep (None: the arguments suffice).
+
+    A node pytest cannot take as an argument is reached through its nearest directory without "[", and the
+    chunk then runs with CK_GATE_ONLY naming exactly its nodes, so nothing else in that directory runs.
+    """
+    args: Dict[str, List[str]] = {}
+    for node in nodes:
+        args.setdefault(_node_arg(node) or _safe_dir(node), []).append(node)
+    out: List[Tuple[str, Optional[List[str]]]] = []
+    base_len = len(shlex.split(rerun_command(prefix, ["x"])[0])) - 1
+    for chunk in rerun_command(prefix, list(args)):
+        chosen = [n for arg in shlex.split(chunk)[base_len:] for n in args.get(arg, [])]
+        odd = any(_node_arg(n) is None for n in chosen)
+        out.append((chunk, chosen if odd else None))
+    return out
+
+
+def _attribute(result: GateResult, project_dir: Path, spec_dir: Path, tasks: Dict[str, SpecTask]) -> None:
+    """Fill each failure's TC id and attributed tasks from the spec graph, and the known commands' providers.
+
+    Without `--attribute` no status is given: that is the attributed gate's job (Task 20).
+    """
+    if not result.failures:
+        return
+    try:
+        graph = build_graph(project_dir, spec_dir)
+        plan_path = spec_dir / "test-plan.md"
+        plan_text = plan_path.read_text(encoding="utf-8", errors="replace") if plan_path.is_file() else ""
+        known = [f"TC-{tc}" for tc, _rest, _desc in _plan_rows(plan_text)]  # a TC the test plan does not name is unknown
+        index = AttributionIndex.from_graph(graph, tasks, known_tcs=known)
+    except Exception as exc:  # attribution is best effort; the failure list itself stays complete
+        result.warnings.append(f"attribution unavailable: {exc}")
+        result.attributions = [Attribution(None, (), "none", True, (), ())] * len(result.failures)
+        return
+    providers: Dict[str, List[str]] = {}
+    known = {n.label for n in graph.nodes if n.kind == "command"}
+    for edge in graph.edges:
+        if edge.kind == "provides" and edge.dst.startswith("cmd:"):
+            providers.setdefault(edge.dst[len("cmd:"):], []).append(edge.src[len("task:"):])
+    result.command_providers = {cmd: sorted(providers.get(cmd, []), key=int) for cmd in known}
+    done = {n for n, t in tasks.items() if t.done}
+    gated = list(result.tasks)
+    attributions = [attribute_failure(f, index, done, gated) for f in result.failures]
+    result.attributions = attributions
+    for attr in attributions:
+        for warning in attr.warnings:
+            if warning not in result.warnings:
+                result.warnings.append(warning)
+
+
+def _failure_target(failure: Failure) -> str:
+    return failure.node or failure.file or ""
+
+
+def _command_failure(run: CommandRun, command: str, known: set) -> List[Failure]:
+    """A failed command that named no failure still gets an entry: it must not pass silently.
+
+    A project test file the command names (`node --test tests/js/calc.test.mjs`) is a file-level entry, so the
+    file's test task takes it; otherwise the entry is command-level and the command's own tasks take it.
+    """
+    if run.check.ok or run.failures:
+        return run.failures
+    detail = run.check.detail.splitlines()[0] if run.check.detail else "failed"
+    try:
+        named = [token for token in shlex.split(command) if token in known]
+    except ValueError:
+        named = []
+    if named:
+        return [Failure(node=None, file=path, kind="error", message=detail, truncated=False, command=command,
+                        exc_type=None, phase=None, crash_path=None, crash_line=None, detail=run.check.detail,
+                        missing_command=None) for path in dict.fromkeys(named)]
+    return [Failure(node=None, file=None, kind="error", message=detail, truncated=False, command=command,
+                    exc_type=None, phase=None, crash_path=None, crash_line=None, detail=run.check.detail,
+                    missing_command=None)]
+
+
+def _selects_nothing(run: CommandRun) -> bool:
+    """A pytest Verify that selected no tests (exit 5), or named a path that does not exist (exit 4 with pytest's own
+    message). Other usage errors, such as a bad option, stay failures."""
+    if run.returncode == 5:
+        return True
+    return run.returncode == 4 and "file or directory not found" in run.check.detail.lower()
+
+
+def _run_attributed(result: GateResult, project_dir: Path, config: Dict[str, Any], tasks: Dict[str, SpecTask],
+                    collect: Optional[str], timeout: int, env: Dict[str, str], report_dir: Path) -> None:
+    """Every Verify command the spec has, with node-ID coverage (`--attribute`, 1.1, TC-193).
+
+    Order: the collection check, then the full suites (`verify_always`, `verify`) with CK_GATE_COLLECT, which
+    records every node they ran. Then each distinct task pytest Verify is collected with `--collect-only`, in
+    parallel, under its own launcher prefix; a Verify whose nodes all ran is skipped, otherwise only the nodes
+    no earlier run covered are run, so no node runs twice. Other runners' Verify commands always run.
+    """
+    keys = {failure_key(f) for f in result.failures}
+    known = set(_known_files(project_dir))
+
+    def record(run: CommandRun, command: str) -> None:
+        run.check.detail = _untimed(run.check.detail)  # repeated runs give the same report (1.10)
+        result.checks.append(run.check)
+        # Sorted by key: parallel workers report in arrival order, and the output must not depend on it (1.10).
+        for failure in sorted(_command_failure(run, command, known), key=failure_key):
+            if failure_key(failure) not in keys:
+                keys.add(failure_key(failure))
+                result.failures.append(failure)
+
+    if collect:
+        run = _run_command(collect, project_dir, timeout, env, report_dir)
+        run.check.name = f"Test collection succeeds (`{collect}`)"
+        if not run.check.ok:
+            run.check.detail += "\n(a test file that cannot be imported breaks the suite for every task; import project modules inside test bodies)"
+        record(run, collect)
+
+    suites = list(dict.fromkeys(list(config.get("verify_always") or []) + list(config.get("verify") or [])))
+    covered: set = set()
+    for command in suites:
+        run = _run_command(command, project_dir, timeout, env, report_dir, collect=True)
+        covered.update(run.collected)
+        record(run, command)
+
+    task_commands = list(dict.fromkeys(
+        c for t in tasks.values() for c in t.verify if c not in suites and c != collect
+    ))
+    pytest_commands = [c for c in task_commands if _direct_pytest(c)]
+    for command in task_commands:
+        if command not in pytest_commands:
+            record(_run_command(command, project_dir, timeout, env, report_dir), command)
+
+    def probe(command: str) -> Tuple[str, CommandRun]:
+        # The Verify as written (its paths, -k, -m, --ignore) plus --collect-only: only the nodes it selects.
+        return command, _run_command(f"{command} --collect-only -q", project_dir, timeout, env,
+                                     report_dir, collect=True)
+
+    with ThreadPoolExecutor(max_workers=os.cpu_count() or 1) as pool:
+        probes = list(pool.map(probe, pytest_commands))
+    for command, found in probes:
+        if _selects_nothing(found):
+            # Nothing ran, so there is nothing to attribute: a warning here, and a plain task gate still fails on it.
+            result.warnings.append(f"`{command}` selects no tests under --attribute: not run (a plain task gate fails on it)")
+            continue
+        if not found.check.ok and found.failures:
+            # A collection error stops pytest before any test runs, so the Verify would fail the same way: its
+            # errors are recorded once (the same keys as the collection check) and it is not run again.
+            found.failures = [replace(f, command=command) for f in found.failures]
+            record(found, command)
+            continue
+        if not found.check.ok or not found.collected:
+            run = _run_command(command, project_dir, timeout, env, report_dir, collect=True)  # as written
+            covered.update(run.collected)
+            record(run, command)
+            continue
+        nodes = [n for n in dict.fromkeys(found.collected) if n not in covered]
+        if not nodes:
+            continue  # every node this Verify names already ran under another suite or command
+        prefix = _launcher(command)
+        for chunk, only in _rerun_chunks(prefix, nodes):
+            run = _run_command(chunk, project_dir, timeout, env, report_dir, collect=True, only=only)
+            run.check.name = f"`{command}`: the nodes no other run covered"
+            run.failures = [replace(f, command=command) for f in run.failures]  # a failure names its Verify
+            covered.update(run.collected)
+            record(run, command)
+        covered.update(nodes)
+
+
+def _decide(result: GateResult, project_dir: Path, timeout: int, env: Dict[str, str], report_dir: Path) -> None:
+    """Rerun each regression candidate once, batched per launcher prefix, and set the gate's verdict (1.2, 1.3)."""
+    pairs = list(zip(result.failures, result.attributions))
+    by_key = {failure_key(f): f for f, _ in pairs}
+    keys = [item.key for item in rerun_plan(pairs)]
+    direct: Dict[str, List[str]] = {}
+    whole: Dict[str, List[str]] = {}
+    for key in keys:
+        failure = by_key[key]
+        # Only a node is rerun by its ID; a file- or command-level failure reruns its Verify as written, so the
+        # Verify's own -k/-m/paths decide what runs (a launcher-only rerun would run the whole file and pass).
+        if _direct_pytest(failure.command) and failure.node:
+            direct.setdefault(_launcher(failure.command), []).append(key)
+        else:
+            whole.setdefault(failure.command, []).append(key)
+
+    status: Dict[str, str] = {}
+    for prefix, group in direct.items():
+        targets = list(dict.fromkeys(_failure_target(by_key[k]) for k in group))
+        failing: set = set()
+        unavailable = False
+        for chunk, only in _rerun_chunks(prefix, targets):
+            run = _run_command(chunk, project_dir, timeout, env, report_dir, only=only)
+            if run.check.ok:
+                continue
+            if run.returncode == 1 and run.failures:  # 2-5: interrupted, internal, usage error, nothing ran
+                failing.update(failure_key(f) for f in run.failures)
+            else:
+                unavailable = True
+        for key in group:
+            status[key] = "failed" if key in failing else "unavailable" if unavailable else "passed"
+    for command, group in whole.items():
+        run = _run_command(command, project_dir, timeout, env, report_dir)
+        for key in group:
+            status[key] = "passed" if run.check.ok else "failed"
+
+    passed = {key: value == "passed" for key, value in status.items()}
+    other_ok = all(c.ok for c in result.checks if not c.command)
+    result.verdict = gate_verdict(pairs, passed, other_ok)
+    result.reruns = dict(sorted(status.items()))
+
+
+REPORT_KEEP = 50
+
+
+def _git_common_dir(project_dir: Path) -> Optional[Path]:
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(project_dir), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return Path(out.stdout.strip()) if out.returncode == 0 and out.stdout.strip() else None
+
+
+def write_report(result: GateResult, project_dir: Path) -> Optional[Path]:
+    """The full `ck-gate/1` object under `<git-common-dir>/ck/<spec>/gate-reports/`, keeping the last 50 (2.8, 2.12).
+
+    Returns the path, or None when it cannot be written (the warning says why).
+    """
+    common = _git_common_dir(project_dir)
+    if common is None:
+        result.warnings.append("gate report not written: not a git repository")
+        return None
+    folder = common / "ck" / result.spec_dir.name / "gate-reports"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    path = folder / f"{stamp}-{os.getpid()}.json"
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(result.to_json(), ensure_ascii=False), encoding="utf-8")
+        reports = sorted(folder.glob("*.json"), key=lambda p: p.name)
+        for old in reports[:-REPORT_KEEP]:
+            old.unlink(missing_ok=True)
+    except OSError as exc:
+        result.warnings.append(f"gate report not written: {exc}")
+        return None
+    return path
+
+
+def _project_context(project_dir: Path, graph, config: Dict[str, Any], task: SpecTask) -> ProjectContext:
+    """What the right-reason classifier needs: project modules (src layout aware), owned paths, programs, and
+    this task's test files and fixtures with the source text of its test files (5.7)."""
+    modules = set()
+    for rel in _known_files(project_dir):
+        if is_test_path(rel, config):
+            continue
+        parts = rel.split("/")
+        if parts[0] == "src" and len(parts) >= 3:
+            modules.add(parts[1])
+        elif parts[0] == "src" and len(parts) == 2 and rel.endswith(".py"):
+            modules.add(parts[1][:-3])
+        elif len(parts) == 1 and rel.endswith(".py"):
+            modules.add(rel[:-3])
+        elif len(parts) == 2 and parts[1] == "__init__.py":
+            modules.add(parts[0])
+    owned = {e.dst[len("file:"):] for e in graph.edges if e.kind == "owns"}
+    mine = {e.dst[len("file:"):] for e in graph.edges if e.kind == "owns" and e.src == f"task:{task.num}"}
+    test_paths = {p for p in mine if not any(c in p for c in "*?[") and (is_test_path(p, config) or "fixtures" in p)}
+    sources = {}
+    for rel in sorted(test_paths):
+        path = project_dir / rel
+        if is_test_path(rel, config) and path.is_file():
+            sources[rel] = path.read_text(errors="replace")
+    return ProjectContext(
+        project_modules=frozenset(modules),
+        owned_paths=frozenset(owned),
+        programs=frozenset(graph.programs),
+        test_paths=frozenset(test_paths),
+        test_sources=sources,
+    )
+
+
+def _right_reason(result: GateResult, project_dir: Path, spec_dir: Path, config: Dict[str, Any], task: SpecTask,
+                  commands: List[str], timeout: int, env: Dict[str, str], report_dir: Path) -> None:
+    """A test-track task whose verified tasks are not all Done: its Verify runs now, and each failure must fail
+    for the right reason (Story 5). Bad failures fail the check; unclear ones and passing tests only warn."""
+    name = f"Task {task.num} tests fail for the right reason"
+    try:
+        graph = build_graph(project_dir, spec_dir)
+    except Exception as exc:  # fail closed: the classifier cannot run without the graph
+        result.checks.append(Check(name, False, f"the spec graph could not be built: {exc}"))
+        return
+    known = set(_known_files(project_dir))
+    results: Dict[str, TestResult] = {}
+    for command in commands:
+        run = _run_command(command, project_dir, timeout, env, report_dir, collect=True)
+        failures = _command_failure(run, command, known)
+        failed = set()
+        for failure in failures:
+            node = failure.node or failure.file or failure_key(failure)
+            failed.add(node)
+            results.setdefault(node, TestResult(node, False, failure))
+        for node in run.collected:
+            if node not in failed:
+                results.setdefault(node, TestResult(node, True, None))
+    # Built after the run: the test sources are read as the run left them (5.7).
+    ctx = _project_context(project_dir, graph, config, task)
+    # The collection check already failed this task's test file (an import error at collection): the same failure
+    # is classified here, so it is not left unmarked.
+    for failure in result.failures:
+        node = failure.node or failure.file or failure_key(failure)
+        if failure.file in ctx.test_paths and node not in results:
+            results[node] = TestResult(node, False, failure)
+    if not results:
+        result.checks.append(Check(name, True, "no test ran under this task's Verify", warning=True))
+        return
+
+    by_key = {failure_key(f): f for f in result.failures}
+    for r in results.values():
+        if r.passed or r.failure is None:
+            continue
+        key = failure_key(r.failure)
+        target = by_key.get(key)  # an entry already in the list (e.g. the collection check's) is the one marked
+        if target is None:
+            target = r.failure
+            by_key[key] = target
+            result.failures.append(target)
+        result.marks[id(target)] = {"class": classify_not_built(r.failure, ctx), "check": "right-reason"}
+
+    verdict = right_reason_verdict(list(results.values()), all_verified_done=False, ctx=ctx)
+    lines = [f"wrong reason (blocks): {_failure_target(f)}: {f.message}" for f in verdict.blocking]
+    lines += [f"unclear (not blocking): {_failure_target(f)}: {f.message}" for f in verdict.unclear]
+    lines += [f"already passing: {node}" for node in verdict.already_passing]
+    result.checks.append(Check(
+        name,
+        not verdict.blocking,
+        "\n".join(lines),
+        warning=bool(verdict.unclear or verdict.already_passing),
+    ))
+
+
+def _test_node(trees: Dict[str, ast.AST], test: str, line: int) -> str:
+    """The pytest node id of test function `test` in the task's test files: the one whose body holds `line`."""
+    found = []
+    for rel, tree in trees.items():
+        for n in ast.walk(tree):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == test:
+                found.append((rel, n))
+    for rel, n in found:
+        if n.lineno <= line <= (n.end_lineno or n.lineno):
+            return f"{rel}::{test}"
+    return f"{found[0][0]}::{test}" if found else test
+
+
+def _row_fidelity(result: GateResult, project_dir: Path, spec_dir: Path, config: Dict[str, Any], task: SpecTask) -> None:
+    """Row-fidelity (Story 8) on a test-track gate: each mismatch of the task's tests against its test-plan rows
+    fails the check and adds one failure entry marked `row-fidelity`. Unparsed and unmatched items are left to the
+    reviewer. Reads only: the test plan, design and tests are never written (8.6)."""
+    name = f"Task {task.num} tests match their test-plan rows"
+    try:
+        found = fidelity.check_task(project_dir, spec_dir, task.num)
+    except Exception as exc:  # fail closed: the check cannot run without the spec graph
+        result.checks.append(Check(name, False, f"the row-fidelity check could not run: {exc}"))
+        return
+    trees: Dict[str, ast.AST] = {}
+    for rel in (f for f in task.files if is_test_path(f, config)):
+        try:
+            trees[rel] = ast.parse((project_dir / rel).read_text(encoding="utf-8"))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+    lines = []
+    for m in found.mismatches:
+        test = str(m.get("test", ""))
+        line = int(m.get("line", 0) or 0)
+        node = _test_node(trees, test, line)
+        tc = tc_of_node(test)
+        if "allowed" in m:
+            want = f"one of {', '.join(str(a) for a in m['allowed'])}"
+        else:
+            want = str(m.get("expected"))
+        msg = (f"{node} ({tc or 'no TC id'}, line {line}): value {m.get('value')} does not match the test plan, "
+               f"expected {want}")
+        result.failures.append(Failure(
+            node=node, file=node.split("::")[0] if "::" in node else None, kind="assertion", message=msg[:500],
+            truncated=len(msg) > 500, command="", exc_type=None, phase=None, crash_path=None, crash_line=None,
+            detail=msg, missing_command=None,
+        ))
+        result.marks[id(result.failures[-1])] = {"check": "row-fidelity"}
+        lines.append(msg)
+    result.checks.append(Check(name, not lines, "\n".join(lines)))
+
+
+def _validate(result: GateResult, project_dir: Path, commands: List[str], timeout: int, env: Dict[str, str],
+              report_dir: Path) -> None:
+    """The project's test-track validation commands, run in the gate's checkout (Story 6, 6.1-6.4)."""
+    for command in commands:
+        run = _run_command(command, project_dir, timeout, env, report_dir)
+        check = run.check
+        check.name = f"`{command}` (test_track.validate)"
+        result.checks.append(check)
+        if check.ok:
+            continue
+        if run.returncode is None and run.failures:  # timed out: _run_command already built the timeout entry
+            entries = list(run.failures)
+        else:
+            detail = check.detail.splitlines()[0] if check.detail else "failed"
+            entries = [Failure(node=None, file=None, kind="error", message=detail, truncated=False, command=command,
+                               exc_type=None, phase=None, crash_path=None, crash_line=None, detail=check.detail,
+                               missing_command=None)]
+        existing = {failure_key(f) for f in result.failures}
+        for failure in entries:
+            result.marks[id(failure)] = {"check": "validate"}
+            if failure_key(failure) not in existing:
+                existing.add(failure_key(failure))
+                result.failures.append(failure)
 
 
 def _acceptance(task: SpecTask) -> Check:
@@ -289,6 +920,8 @@ def run_gate(
     config: Optional[Dict[str, Any]] = None,
     reuse: bool = False,
     stamp_by: str = "ck gate",
+    attribute: bool = False,
+    install: Optional[str] = None,
 ) -> GateResult:
     """Verify the given tasks (default: every Done task in the spec).
 
@@ -301,10 +934,14 @@ def run_gate(
     command gets PYTEST_XDIST_AUTO_NUM_WORKERS = cores // gates running unless it is already set
     (see xdist.py). Commands are never rewritten.
     """
+    started = time.monotonic()
     registry = xdist.registry_dir(os.environ)
     errors: List[str] = []
-    with xdist.gate_slot(registry, errors) as slot:
-        return _run_gate(project_dir, spec_dir, task_nums, config, reuse, stamp_by, registry if slot else None, errors)
+    with tempfile.TemporaryDirectory(prefix="ck-gate-") as report_dir, xdist.gate_slot(registry, errors) as slot:
+        result = _run_gate(project_dir, spec_dir, task_nums, config, reuse and not attribute, stamp_by,
+                           registry if slot else None, errors, Path(report_dir), attribute, install)
+    result.duration_s = time.monotonic() - started
+    return result
 
 
 def _run_gate(
@@ -316,6 +953,9 @@ def _run_gate(
     stamp_by: str,
     registry: Optional[Path],
     errors: List[str],
+    report_dir: Path,
+    attribute: bool = False,
+    install: Optional[str] = None,
 ) -> GateResult:
     config = config or load_config(project_dir)
     tasks = {t.num: t for t in parse_tasks(spec_dir / "tasks.md")}
@@ -324,12 +964,31 @@ def _run_gate(
     else:
         selected = [tasks[n] for n in task_nums if n in tasks]
 
-    result = GateResult(spec_dir, [t.num for t in selected])
+    result = GateResult(spec_dir, [t.num for t in selected], attribute=attribute)
     missing = [n for n in (task_nums or []) if n not in tasks]
     if missing:
         result.checks.append(Check("Tasks exist", False, f"not found in tasks.md: {', '.join(missing)}"))
-    if not selected:
+    if not selected and not attribute:  # an attributed gate runs every Verify, even with no Done task (1.1)
         return result
+    timeout = int(config.get("verify_timeout", 540))
+    if install:  # --install: the dependency step runs first; a failure is a red check (2.x)
+        try:
+            proc = subprocess.run(install, shell=True, cwd=project_dir, capture_output=True, encoding="utf-8",
+                                  errors="replace", timeout=timeout)
+            tail = "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-OUTPUT_TAIL:])
+            result.checks.append(Check("install", proc.returncode == 0,
+                                       "" if proc.returncode == 0 else f"`{install}` exit {proc.returncode}\n{tail}"))
+        except subprocess.TimeoutExpired:
+            result.checks.append(Check("install", False, f"`{install}` timed out after {timeout}s"))
+        try:  # an install step may move core.hooksPath (husky): put ck's hooks back
+            from claude_kiro import protect
+
+            if protect.hooks_managed(project_dir):
+                hook_status = protect.ensure_hooks(project_dir, project_dir)
+                if hook_status.problems:
+                    result.checks.append(Check("hooks", True, "; ".join(hook_status.problems), warning=True))
+        except Exception:  # noqa: BLE001 - never a gate failure
+            pass
 
     commands: List[str] = []
     impl_selected = [t for t in selected if t.track != "test"]
@@ -345,6 +1004,19 @@ def _run_gate(
     has_test_track = any(t.track == "test" for t in tasks.values())
     spec_complete = all(n in assumed_done for n in tasks)
     green_only = str(config.get("verify_mode", "auto")).lower() == "auto" and has_test_track and not spec_complete
+
+    # A test-track gate reads the project's validation command first; an invalid value is a Config check and no
+    # test command runs at all (6.5).
+    test_gate = any(t.track == "test" for t in selected)
+    validate_cmds: List[str] = []
+    config_error: Optional[ConfigError] = None
+    if test_gate:
+        try:
+            validate_cmds = test_track_validate(config)
+        except ConfigError as err:
+            config_error = err
+            result.checks.append(Check("Config", False, str(err)))
+    rr_tasks: List[SpecTask] = []  # test tasks whose Verify is not due: checked for the right reason (5.1)
 
     commands.extend(config.get("verify_always", []))
     # A task gate (--task) checks that task: its own Verify and its verifying
@@ -388,10 +1060,17 @@ def _run_gate(
     for task in selected:
         result.checks.append(_acceptance(task))
         if task.track == "test":
-            result.checks.append(_test_files_present(task, project_dir, config))
+            present = _test_files_present(task, project_dir, config)
+            if attribute and not present.ok:
+                # Under --attribute the red/green comes from the attributed failures plus the
+                # non-command checks design names (acceptance boxes, tamper, properties); a listed
+                # test file that is absent is reported, not a red check.
+                present = Check(present.name, True, present.detail, warning=True)
+            result.checks.append(present)
             if suite_due(task):
                 commands.extend(task.verify)
             elif task.verify:
+                rr_tasks.append(task)
                 result.checks.append(
                     Check(
                         f"Task {task.num} tests may still fail",
@@ -440,15 +1119,24 @@ def _run_gate(
     timeout = int(config.get("verify_timeout", 540))
     # A pass of the full suite on a clean tree is stamped for safe-merge to reuse.
     full_suite = list(config.get("verify") or [])
-    clean = verified.clean_tree(project_dir) if full_suite and all(c in commands for c in full_suite) else None
+    clean = (
+        verified.clean_tree(project_dir) if full_suite and all(c in commands for c in full_suite) and not attribute
+        else None
+    )
     started = time.monotonic()
     collect = collect_command(config)
     to_run = ([collect] if collect else []) + [c for c in dict.fromkeys(commands) if c != collect]  # dedupe, keep order
     # A task gate's pass is stamped by the working tree it checked, so the next task gate on the
     # same tree (the agent's own `ck gate --task` right after the done-verify hook's) can skip the run.
-    task_tree = verified.worktree_tree(project_dir) if task_scoped and to_run else None
+    # An attributed gate runs its own selection and never stamps or reuses a pass.
+    task_tree = verified.worktree_tree(project_dir) if task_scoped and to_run and not attribute else None
     reused = verified.lookup_stamp(project_dir, task_tree, [to_run], scope="task") if reuse and task_tree else None
-    if reused:
+    if config_error is not None:
+        pass  # an invalid test_track.validate: no test command runs (6.5)
+    elif attribute:
+        env = xdist.verify_env(os.environ, registry)
+        _run_attributed(result, project_dir, config, tasks, collect, timeout, env, report_dir)
+    elif reused:
         result.checks.append(
             Check(
                 f"Checks reused: this tree passed the same {len(to_run)} command(s)",
@@ -476,16 +1164,38 @@ def _run_gate(
 
         if registry is None:
             note_unusable(errors[0] if errors else "could not register this gate")
+        failure_keys: set = set()
         for command in to_run:
             if registry is not None and xdist.running_gates(registry) is None:
                 note_unusable("could not read it")
                 registry = None
-            check = _run(command, project_dir, timeout, xdist.verify_env(os.environ, registry))
+            run = _run_command(command, project_dir, timeout, xdist.verify_env(os.environ, registry), report_dir)
+            check = run.check
             if command == collect:
                 check.name = f"Test collection succeeds (`{collect}`)"
                 if not check.ok:
                     check.detail += "\n(a test file that cannot be imported breaks the suite for every task; import project modules inside test bodies)"
             result.checks.append(check)
+            for failure in run.failures:  # one entry per failing node, however many commands ran it
+                if failure_key(failure) not in failure_keys:
+                    failure_keys.add(failure_key(failure))
+                    result.failures.append(failure)
+
+    if config_error is None:
+        env = xdist.verify_env(os.environ, registry)
+        # Right-reason judges a test-track task being gated (`--task N`, 5.1). A whole-spec gate only excuses the
+        # suites that are not due, as it always has (1.11). Under --attribute the attributed failures decide instead.
+        if task_nums is not None and not attribute:
+            for task in rr_tasks:
+                _right_reason(result, project_dir, spec_dir, config, task, task.verify, timeout, env, report_dir)
+        if test_gate:  # the validator runs on test-track gates only, never on impl-track gates (6.6)
+            _validate(result, project_dir, validate_cmds, timeout, env, report_dir)
+    # row-fidelity runs when a test-track task is gated (`--task N`, 8.1, 8.2); it reads only (8.6). A whole-spec
+    # gate selects the Done test tasks too, but gates none of them: its report stays as it was (1.11).
+    if task_nums is not None:
+        for task in selected:
+            if task.track == "test":
+                _row_fidelity(result, project_dir, spec_dir, config, task)
 
     result.checks.extend(
         _properties_checks(project_dir, spec_dir, tasks, selected, task_nums is None, assumed_done, config)
@@ -497,4 +1207,7 @@ def _run_gate(
         verified.write_stamp(project_dir, clean, full_suite, "ck gate", int(time.monotonic() - started))
     if task_tree and not reused and result.ok and verified.worktree_tree(project_dir) == task_tree:
         verified.write_stamp(project_dir, task_tree, to_run, stamp_by, int(time.monotonic() - started), scope="task")
+    _attribute(result, project_dir, spec_dir, tasks)
+    if attribute:
+        _decide(result, project_dir, timeout, xdist.verify_env(os.environ, registry), report_dir)
     return result

@@ -107,10 +107,12 @@ How the PLAN.md decisions shape it:
     decides (5.1-5.5); all Done keeps today's "must pass" (5.6). Test-track gates also run the
     `test_track.validate` command (Story 6), the row-fidelity check (Story 8) and the fixture-label check feeding
     the reviewer (15.6).
-- `src/claude_kiro/config.py` - `DEFAULT_CONFIG` gains `"test_track": {"validate": None}` and
+- `src/claude_kiro/config.py` - `DEFAULT_CONFIG` gains `"test_track": {}` (the `validate` key is absent by default, never merged in as null) and
   `"fixtures": {"recorded": [], "labels": "specs/fixture-labels.json"}`; new validators `test_track_validate(config)
   -> List[str]` and `fixture_globs(config) -> List[str]`, both raising `ConfigError` (new) that names the key
-  (6.5, 15.8). `load_config` stays tolerant; only these readers raise.
+  (6.5, 15.8). `load_config` stays tolerant; only these readers raise. A reader treats an absent key as "not
+  declared" (returns []), and a key present with any other non-string, non-list-of-strings value, explicit `null`
+  included, as a config error.
 - `src/claude_kiro/worktrees.py` - claims, merge, land (Stories 9, 10, 15, 16).
   - `claim(..., run=None)`: the lock reason becomes `"{owner} (claim {token} at {time} run {key})"` when a run key
     is given (16.1). New `claim_info(reason) -> ClaimInfo` parses old and new formats.
@@ -119,20 +121,21 @@ How the PLAN.md decisions shape it:
   - `merge()` gains the protected check (`protected_changes` against `land_allow_paths(target)`), state
     `PROTECTED` with the files (9.6), and runs its `git merge` with a landing token in the environment (9.7).
   - `land()` issues a landing token for each `git merge` and `git reset` it runs on an `integrate/*` target
-    (9.7), records the approved protected state after the batch (10.4), records new recorded-fixture locks and
+    (9.7), records, after the batch, only the protected paths the landed tasks changed as approved (10.4; the rest of the state is never re-recorded at head), records new recorded-fixture locks and
     reports fixture drift per task (`Landed.fixtureDrift`), and, through `GateFn`, carries `failures` on RED
     entries (`Landed.failures`).
   - New keyword `land(..., approved: Optional[Dict[str, List[str]]] = None)`: task -> protected files I approved,
     used only by `ck worktree approve` (9.8).
   - `create_integration` calls `protect.ensure_hooks` (install only where the git metadata is writable,
-    otherwise report the hook state; 9.1, 9.10) and records the baseline protected state on creation and on
-    reuse; its `Outcome.detail` names a hook problem. It creates the `integrate/*` ref with a landing token, as
+    otherwise report the hook state; 9.1, 9.10) and records the baseline protected state only when no approved
+    state exists for the ref (never on reuse, which would launder bypass writes; 10.1); its `Outcome.detail` names a hook problem.
+    `ck worktree integration SPEC [--base] [--json]` prints `{..., hooks: HookStatus}` (`installed`, `problems`). It creates the `integrate/*` ref with a landing token, as
     every ck-made `integrate/*` update (9.7, 9.12).
   - After every install step ck runs (`create --install`, land's install, `gate --install`) and at the start of
     each `land()`, ck calls `protect.ensure_hooks`: when `core.hooksPath` no longer points at ck's directory (a
     husky `prepare` script resets it to `.husky/_`), the new value becomes the chain target, the hooks are
-    reinstalled where the metadata is writable and the change is logged; otherwise the land result carries a
-    `hooks` warning (9.1, 9.9, 9.10).
+    reinstalled where the metadata is writable, the change is logged and the land result's `hooks` entry reports
+    the re-install; otherwise that entry carries a warning (9.1, 9.9, 9.10).
   - `GateFn` becomes `Callable[[Path, List[str]], Tuple[bool, str, List[dict]]]`.
 - `src/claude_kiro/cli/run.py` - `ck run` runs unsandboxed before it launches the harness, so it calls
   `protect.install_hooks(project)` first (9.1, 9.11): `core.hooksPath` lives in the repository config, which is
@@ -278,7 +281,9 @@ ck gate SPEC [--task N ...] [--no-reuse] [--json [--compact]] [--attribute] [--i
   task's pytest Verify is collected with `--collect-only -q` under its own launcher prefix (distinct commands
   collected once per gate, up to `os.cpu_count()` at a time). A Verify whose collected nodes all ran in `verify`
   is covered and skipped; otherwise only its nodes that did not run are run, as node-ID arguments after its
-  launcher prefix (`rerun_command`'s form), so no node runs twice. A Verify that fails to collect runs whole.
+  launcher prefix (`rerun_command`'s form), so no node runs twice. A Verify that fails to collect runs whole; one
+  that selects no tests (pytest exit 5) or names a path that does not exist (exit 4, "file or directory not found")
+  has nothing to attribute, so it is not run and is listed in `warnings`. A plain task gate still fails on it.
   Other runners' Verify commands always run. Failures are attributed (1.1-1.8),
   regression candidates are rerun once (2.4), and the gate is red iff `regressions + unattributed > 0` or a
   non-command check fails (acceptance boxes, tamper, properties as today). Excused failures never make it red
@@ -312,7 +317,7 @@ ck worktree land SPEC TASKS... --json                            # tasks[].failu
 - `audit` prints `ck-audit/1` (Data Models); exit 0 when `clean`, 1 when drift or hook problems, 3 when
   incomplete.
 - `approve` refuses (exit 2, no change) unless stdin and stdout are a TTY and I type the 6-character code it
-  prints; then it lands the task with `land(..., approved={task: files})` and prints the landing line. It never
+  prints; then it lands the task with `land(..., approved={task: files}, keep=True)` (the task branch and worktree stay, as the record of what I approved) and prints the landing line. It never
   takes `--json` or a code on the command line.
 
 ### `ck graph` (Story 11)
@@ -423,8 +428,8 @@ gather inputs and act on the output; they never re-implement the rule.
 
 | Seam | Module (owner) | Input -> output | Decides |
 |---|---|---|---|
-| `classify_kind(exc_type, phase, message, timed_out)` | `failures.py` | `str, str, str, bool -> Kind` | 3.2: the five kinds; unknown -> `error` |
-| `truncate_message(text, limit=500)` | `failures.py` | `str, int -> (str, bool)` | 3.5, NFR message limit; never drops |
+| `classify_kind(exc_type, phase, message, timed_out)` | `failures.py` | `str, str, str, bool -> Kind` | 3.2: the five kinds; unknown -> `error`; `timed_out` wins, then phase `collect` maps `ImportError`/`ModuleNotFoundError` to `import` and anything else to `collection` |
+| `truncate_message(text, limit=500)` | `failures.py` | `str, int -> (str, bool)` | 3.5, NFR message limit; never drops. The kept prefix is non-empty and cut on a grapheme boundary (not before a combining mark or ZWJ/VS16, not after a ZWJ, not inside CRLF or a regional-indicator pair); a marker may follow. When no boundary exists in 1..limit, a hard cut at `limit` is the fallback |
 | `missing_command(text, programs)` | `failures.py` | `str, Sequence[str] -> Optional[str]` | 12.5: unknown subcommand / unrecognized arguments / invalid choice -> the command path |
 | `classify_not_built(failure, ctx)` | `failures.py` | `Failure, ProjectContext -> "not-built" \| "bad" \| "unclear"` | 5.2-5.4, 5.7 |
 | `assert_reaches_project(test_source, line, ctx)` | `failures.py` | `str, int, ProjectContext -> Optional[bool]` | 5.7: does the failing assert's expression reach project code (None: cannot parse) |
@@ -432,13 +437,14 @@ gather inputs and act on the output; they never re-implement the rule.
 | `tc_of_node(node_id)` | `attribution.py` | `str -> Optional[str]` | 1.1: `tcNNN_` -> `TC-N` |
 | `param_owned_file(node_id, file_owner)` | `attribution.py` | `str, Mapping[str, str] -> Optional[str]` | 1.5 hint only: a wrapper node whose parameter ID names an owned file (never attributes or excuses) |
 | `attribute_failure(failure, index, done, gated)` | `attribution.py` | `Failure, AttributionIndex, FrozenSet[str], FrozenSet[str] -> Attribution` | 1.1-1.8: tasks, by-what, candidate or excused |
-| `rerun_plan(attributions)` | `attribution.py` | `List[Attribution] -> List[RerunItem]` | 2.4, 2.5, NFR: each candidate once, excused never |
-| `gate_verdict(attributions, reruns, other_checks_ok)` | `attribution.py` | `-> GateVerdict` | 2.4, 2.6, 2.8, 3.4: regression / flaky / excused / unattributed, red or green |
+| `rerun_plan(pairs)` | `attribution.py` | `List[Tuple[Failure, Attribution]] -> List[RerunItem]` (`RerunItem.key` is the failure's node, or `collect:<file>` for a file-level failure) | 2.4, 2.5, NFR: each candidate once, excused never |
+| `gate_verdict(pairs, reruns, other_checks_ok)` | `attribution.py` | `List[Tuple[Failure, Attribution]], Mapping[str, bool], bool -> GateVerdict` (`reruns` maps each failure key, as above, to whether its rerun passed; `GateVerdict.statuses` is keyed the same way) | 2.4, 2.6, 2.8, 3.4: regression / flaky / excused / unattributed, red or green |
 | `ref_update_decision(update, protected_changed, allow, token, approved)` | `protect.py` | `RefUpdate, List[str], List[str], Optional[TokenCheck], Optional[Mapping[str, str]] -> RefDecision` | 9.2-9.4, 9.12 |
 | `token_matches(token, update, used, mac_ok)` | `protect.py` | `TokenRecord, RefUpdate, bool, bool -> bool` | 9.3: one-shot, this ref, this target |
 | `merge_commit_decision(head_ref, changed, allow, token_present)` | `protect.py` | `-> RefDecision` | 9.5 |
 | `approval_decision(stdin_tty, stdout_tty, typed, expected)` | `protect.py` | `bool, bool, str, str -> bool` | 9.8 |
-| `audit_decision(approved, current, allow, hooks, fixtures)` | `protect.py` | `Optional[ApprovedState], Dict[str,str], List[str], HookStatus, FixtureReport -> AuditReport` | 10.1-10.5, 15.5 |
+| `audit_decision(approved, current, allow, hooks, fixtures)` | `protect.py` | `Optional[ApprovedState], Dict[str,str], List[str], HookStatus, Mapping[str, object] (a FixtureReport as dict) -> AuditReport` | 10.1-10.5, 15.5 |
+| `refuse_paths(ref, changed, allow)` | `protect.py` | `str, Sequence[str], Sequence[str] -> List[str]` | 9.2: the protected-filter part of `ref_update_decision`; accepts git-quoted names (unquoted before comparing) |
 | `claim_release_decision(claim, starting_run, liveness, age_s, stale_minutes)` | `worktrees.py` | `ClaimInfo, Optional[str], Optional[Liveness], float, float -> "release" \| "keep" \| "own"` | 16.2-16.5, 16.7 |
 | `missing_command_edges(graph)` | `graph.py` | `SpecGraph -> List[MissingEdge]` | 12.1, 12.2 |
 | `unknown_commands(graph, source_words)` | `graph.py` | `SpecGraph, FrozenSet[str] -> List[UnknownCommand]` | 12.3 |
@@ -457,7 +463,7 @@ gather inputs and act on the output; they never re-implement the rule.
 | `failuresForPrompt(failures, limit = 50)` | workflow decisions block | `-> {shown, more: {file: count}, total}` | 3.8 |
 | `testFixPlan({conflicts, alreadyFixed})` | workflow decisions block | `-> {groups: [{file, conflicts}], toMe: [...]}` | 4.8, 4.9 |
 | `heldByCrossTest({findings, testVerifies})` | workflow decisions block | `-> Set<task>` | 7.4 |
-| `gateOutcome(call)` | workflow decisions block | `CkCallResult -> {state: 'green'\|'red'\|'error', green, regressions, excusedByTask, flaky, report, reason}` (reads `ck-gate/1` or `ck-gate-compact/1`) | 2.6, 2.8, 2.9, 2.12, 19.5 |
+| `gateOutcome(call)` | workflow decisions block | `CkCallResult -> {state: 'green'\|'red'\|'error', green, regressions, excusedByTask, flaky, report, reason}` (reads `ck-gate/1` or `ck-gate-compact/1`; a green needs `ok:true` and exit code 0, so `code` is cross-checked against `ok`) | 2.6, 2.8, 2.9, 2.12, 19.5 |
 | `thinAgentMode({runnerAgent, unavailable, direct})` | workflow decisions block | `-> {mode: 'direct'\|'lean'\|'default', warning}` | 19.1, 19.4, 19.6 |
 | `resolveRoleRef(role, roles)` / `validateRoleRef(value)` | `opencode/src/models.ts` | `-> RoleRef \| null` / `-> string \| null` (error) | 14.1-14.4, 14.6 |
 
@@ -500,6 +506,8 @@ class Attribution:
 class AttributionIndex:          # built from SpecGraph once per gate
     tc_tasks: Mapping[str, Tuple[str, ...]]        # TC id -> impl tasks (1.1): its "Verify -k" verifies edges;
                                                    # only when it has none, its "Verifies" (test-task coverage) edges
+    task_selectors: Mapping[str, Tuple[str, ...]]  # impl task -> its last `-k` expression per Verify command
+    selected_tc_coverage: Mapping[str, Tuple[str, ...]]  # TC attributed through "Verify -k" -> its "Verifies" tasks
     file_owner: Mapping[str, str]                  # test file -> owning test task
     test_task_verifies: Mapping[str, Tuple[str, ...]]  # test task -> impl tasks it verifies
     command_owner: Mapping[str, Tuple[str, ...]]   # Verify command -> tasks that list it (1.7 fallback)
@@ -551,16 +559,22 @@ class ProjectContext:            # classify_not_built inputs, gathered by the ga
 no name imported from the project's own code; every other test-body `AssertionError` is unclear, passes, and is
 reported:
 
-1. `NotImplementedError` anywhere in the chain -> not-built.
+1. `NotImplementedError` anywhere in the chain -> not-built. "Anywhere" means an exception line of a traceback
+   (`NotImplementedError: x` at the start of a line, also in a chained traceback); a message that only quotes the
+   name mid-line (`AssertionError: NotImplementedError: ...`) is not a chain.
 2. `ModuleNotFoundError` / `ImportError` / `cannot import name` / `AttributeError: module 'x' has no attribute 'y'`
    naming a module in `project_modules` or a path in `owned_paths` -> not-built. Naming a third-party module ->
-   unclear.
+   unclear. Naming a test helper module (a path in `test_paths`, such as `tests/helpers.py`) -> bad: a broken
+   helper is a test-side wrong reason.
 3. `missing_command(detail, programs)` returns a command, or the detail holds click's `No such command`,
-   argparse's `invalid choice` / `unrecognized arguments` for one of `programs` (including inside an assertion
-   on a CLI exit code) -> not-built.
+   argparse's `invalid choice` / `unrecognized arguments` for one of `programs` -> not-built. An
+   `AssertionError` (a CLI exit code checked with `assert`) counts only when the text carries the program's usage
+   banner (`usage:`): the banner stops an assertion's own message that quotes a CLI error from passing as the
+   CLI's output (anti-spoof; such a message falls through to rule 5).
 4. Schema/validation errors while loading data (`ValidationError`, `JSONDecodeError`, `yaml.YAMLError`,
    `UnicodeDecodeError`, `FileNotFoundError` for a path in `test_paths`), any error in phase `setup`, an
-   `AssertionError` whose `crash_path` is a test helper, conftest or fixture file other than the test file itself,
+   `AssertionError` whose `crash_path` is a test helper, conftest or fixture file other than the test file itself (a
+   path in `test_paths`, a conftest, or a `tests/` or `fixtures/` file that is not in `owned_paths` and not under `src/`),
    and `SyntaxError` / `NameError` in the test file -> bad.
 5. An `AssertionError` whose `crash_path` is the test file (5.7): `assert_reaches_project(test_sources[file],
    crash_line, ctx)` parses the test file with `ast`, finds the `assert` statement at `crash_line` and its
@@ -572,7 +586,13 @@ reported:
    the same way, and reaches project code when its body does; a call to a name imported from any other module
    of the repository (a test helper such as `tests/helpers.py`) reaches project code, because the parse cannot
    see what it runs (5.7: "no call into project code"). Builtins, literals, the standard library (`json`, `pathlib`, `open`, `csv`, `datetime`, ...)
-   and third-party data readers do not count. `False` (only literals or file-loaded data, for example
+   and third-party data readers installed outside the repository (`packaging`, `pytest`) do not count. Four
+   exceptions reach project code, since they run a program or project code: `subprocess`, `runpy`, `importlib`,
+   `pty`, `multiprocessing` and `os.system` / `os.popen` / `os.exec*` / `os.spawn*` (the CLI run through a
+   standard-library module); the builtins `__import__`, `eval`, `exec` and `compile`. A name that nothing in its
+   scope binds and that is not a builtin (for example one a `from X import *` supplies, or a global the parse
+   cannot see) reaches project code, so an ambiguity stays unclear, never bad. A `lambda`'s own parameters are
+   values, not fixtures. `False` (only literals or file-loaded data, for example
    `prices = json.load(open("tests/fixtures/prices.json")); assert prices["AAPL"] == 4.15`) -> bad. `True` (for
    example `assert rate_floor(prices) == 0.04`, where a stub may return a wrong value) or `None` (the source or
    line cannot be parsed) -> unclear.
@@ -618,10 +638,18 @@ How edges are filled (the API delegated by PLAN):
   test task T, every TC found in T's test files (`def test_tcNNN_`, `test('tcNNN_ ...')`) or in test-plan rows
   whose Test file column names one of T's files, to each task in `T.verifies`. Each edge keeps its origin in
   `source` (`"Verify -k"` or `"Verifies"`). Attribution (1.1) uses a TC's `"Verify -k"` edges; it falls back to
-  its `"Verifies"` edges only when the TC has no `"Verify -k"` edge, so the two are never unioned.
+  its `"Verifies"` edges only when the TC has no `"Verify -k"` edge, so the two are never unioned. For a failing
+  node it keeps only the selecting tasks whose last `-k` expression can accept that node's id (`-k "tc3_ and tc4_"`
+  names TC-3 but never runs a test carrying only `tc3_`, so it must not excuse one, 1.2); when none can, the TC's
+  `"Verifies"` edges, else file attribution with a warning. The edges themselves stay TC-level. A tc node exists
+  only for a TC some test file or test-plan row defines. A TC that only a Verify `-k` names keeps its verifies
+  edge with no tc node: a dangling verifies source, which consumers must accept (the freshness rule of 11.7
+  requires the node to vanish once no test defines the TC).
 - **provides:** `**Provides:**` wins (11.3). Otherwise inferred: a design.md table row with a backticked command
   path whose row names a file the task owns; else a backticked command path, starting with a known program, in
   the task's title or description. Ambiguity (two tasks inferred) keeps both edges and adds a GraphProblem.
+  Group commands (`mtr thesis`) follow the same rule: a `cmd:` node exists only when some task provides it or a
+  test invokes it; a table row alone, with no owning task, adds no node.
 - **invokes:** scan of each test file (Python AST string constants and list/tuple literals; regex for JS) for a
   sequence of words that starts with a known program (`["mtr", "thesis", "new"]`, `"mtr thesis new --x"`), or a
   `CliRunner().invoke(..., ["thesis", "new"])`-style list matching a known command path without the program. The
@@ -629,7 +657,10 @@ How edges are filled (the API delegated by PLAN):
   `cmd:` node with no provider (12.3).
 - **imports:** `lint._imports` / `_module_candidates`, unchanged.
 - **Freshness (11.7):** built on demand from files on every call; the only memo is in-process, keyed by each
-  input's `(path, size, mtime_ns)`. No on-disk cache.
+  input's `(path, size, mtime_ns, st_ctime_ns, st_ino)`. `os.utime` can restore size and mtime_ns but not
+  `st_ctime_ns` or `st_ino` (an atomic replace changes the inode), so a same-size, same-mtime rewrite within one
+  second still misses the memo. If a build cannot rely on these (a filesystem with coarse ctime), hash the
+  content instead of trusting stat. No on-disk cache.
 - **Malformed sources (11.8):** a task block that fails to parse, a test file with a syntax error, or an
   unreadable design.md adds a `GraphProblem` and the rest is built.
 - `unknown_commands` treats a path as existing when every word of it appears as a string literal in a non-test
@@ -678,8 +709,8 @@ class HookStatus:
 class ApprovedState:         # <common>/ck/<spec>/protected.json, sealed with a mac
     ref: str
     commit: str
-    files: Mapping[str, str]                 # protected path -> blob oid at `commit`
-    approvals: Tuple[Mapping[str, object], ...]  # {at, task, files, by: "allow-list"|"approval"|"baseline", commit}
+    files: Mapping[str, str]                 # protected path -> approved blob oid; land() re-records only the paths its landed tasks changed, so this is not the whole tree at `commit`
+    approvals: Tuple[Mapping[str, object], ...]  # {at, task, files, by: "allow-list"|"approval"|"baseline", commit}; one record per task and class
     # The hook finds the approved state of a ref through <common>/ck/refs.json (ref -> spec), written with it.
     # The state outlives a deleted ref, so a re-created ref is checked against it (9.12).
 
@@ -752,6 +783,7 @@ class RunStartClaims:
 `claim_release_decision`: `run == starting_run` -> own (16.7); `run` set and liveness `running` -> keep (16.3);
 `run` set and liveness `finished` / `stale` / `missing` / None -> release (16.2, 16.5); `run` None -> release iff
 `age_s > stale_minutes * 60` else keep (16.4).
+`stale_minutes` is the `claim_stale_minutes` key of specs/ck.json. `claim()` treats a lock whose `ClaimInfo.run` equals `--progress-run` as the caller's own claim (16.7), so a same-run reclaim succeeds without `--takeover`.
 
 ### Python (`fixtures.py`, `testfix.py`, `fidelity.py`)
 
@@ -814,6 +846,11 @@ class ProofVerdict:
 
 Ledger = Mapping[str, Mapping[str, str]]   # <common>/ck/<spec>/testfix-ledger.json: node -> {fix, at, outcome}
 
+# Node canonicalisation (4.8): `fix_allowed`, `ck testfix check` and `ck testfix record` key the ledger by a
+# canonical node, so a re-spelled id names the same entry: strip surrounding whitespace, turn `\` into `/`,
+# normalise the path part (collapse `//`, resolve `.` and `..`, drop a leading `./`), drop a trailing `[param]`
+# id, and compare case-insensitively (the ledger is a refusal list: a false match only sends a node to me).
+
 @dataclass(frozen=True)
 class TestValue:            # fidelity
     test: str
@@ -832,11 +869,18 @@ class FidelityResult:
 ```
 
 `check_values` rules: an enum value compared with or fed as field `f` where design models define `f`'s allowed
-set and the value is outside it -> mismatch; a threshold-like number (a comparison operand, or a name containing
+set and the value is outside it -> mismatch (membership is exact; a string in another case counts as the member
+only when the test's row states that member, so `"buy"` matches a row saying BUY and `"Buy"` under a row naming no
+side does not); a threshold-like number (a comparison operand, or a name containing
 `threshold`, `min`, `max`, `limit`, `cutoff`) when the row states exactly one threshold and the test's
 threshold-like numbers do not include it (percent and fraction forms both accepted) -> mismatch; an ISO date fed
-by the test when the row lists dates and the date is not among them -> mismatch. A row with several thresholds, a
-value with no name, or a non-Python test -> unparsed. It never writes a file (8.6).
+by the test when the row lists dates and the date is not among them -> mismatch. A comparison's literal is checked whatever it is compared with (`score() >= 4.50` under a row
+stating 4.50 is checked, `score() >= 4.15` is a mismatch); the other operands are its subject, not values. A row
+with several thresholds; a runtime expression asserted or fed as a threshold-like name (`quote.min_price >= f(y)`,
+`fee_threshold = base * 1.1`), or compared with no literal beside it when it is computed from a number, enum or date
+(`score() == base * 1.1`; `score()` and `obj.get("x")` state no value and are not items); an enum or date with no
+name (a positional argument, `make() == Side.BUY`); or a non-Python test -> unparsed. Test files are read as UTF-8
+with an optional BOM, and an escaped `\|` stays inside its test-plan cell. It never writes a file (8.6).
 
 ### JSON: `ck-gate/1`
 
@@ -925,6 +969,10 @@ const CK_CALL = { type: 'object', properties: {
 //                  source: 'conflict'|'cross-test'|'missing-command',
 //                  tests: [node], outcome: 'landed'|'to-me'|'test-correct', proof: ProofVerdict|null,
 //                  scope: ScopeDecision|null, review: { verdict, findings }|null, reason }
+//   The workflow does not trust `in_scope` alone (4.5): a ScopeDecision with a non-empty `outside` or
+//   `spec_docs_edited`, or with `requirements_edited` true, is out of scope whatever `in_scope` says.
+//   A review counts as approved only for verdict 'approve' with no finding of severity 'blocking' (4.6):
+//   an approve verdict that lists a blocking finding, or any other or missing verdict, is rejected.
 // LiveEdge: { task, dependsOn, command, at }
 // TESTFIX schema (test-fixer agent):
 //   { verdict: 'fixed'|'test-correct'|'cannot-fix', changedTests: [{file, test}], commits: string,
@@ -939,7 +987,7 @@ fixed this run), `gates` (GateRun[]), `thin` (`thinAgentMode` result).
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `test_track.validate` | string or list of strings | null | command(s) run on every test-track gate (Story 6) |
+| `test_track.validate` | string or list of strings | absent (an explicit `null` is a config error) | command(s) run on every test-track gate (Story 6) |
 | `fixtures.recorded` | list of glob strings | [] | recorded-fixture globs to hash-lock (Story 15) |
 | `fixtures.labels` | string | `specs/fixture-labels.json` | the label file (captured / handcrafted) |
 | `agents.reviewer.cross_test` | bool | **true** (was false) | blocking cross-test check (7.1, 7.3) |
@@ -1072,6 +1120,8 @@ Entries for the criteria that state an error, refusal or fallback.
   start` exits 0 and reports it; the workflow logs it, keeps it in `runStart`, and the audit reports hooks inactive.
 - **10.5** Approved state missing, unreadable or its mac fails: `AuditReport.complete = false`, `clean = false`,
   problem "approved state unreadable: <reason>"; exit 3.
+  A validly sealed record whose `ref` is not the audited `into` branch counts as missing (same result), so
+  another spec's or ref's record, or `--into` a branch with no record of its own, is never clean.
 - **11.8** Malformed source: a `GraphProblem` naming the source and problem; the rest is built; `ck lint` prints
   it as a warning.
 - **12.6** Missing command with no provider: `liveEdgeDecision` returns `conflict` with the tests that invoke it
@@ -1103,11 +1153,20 @@ Entries for the criteria that state an error, refusal or fallback.
 
 ### Security
 
-- **What the hooks stop and what they don't.** The `reference-transaction` hook runs on every ref update, so
-  `git merge --no-verify`, `git update-ref` and `git reset` into `integrate/*` are all checked. An agent with a
+- **What the hooks stop and what they don't.** The `reference-transaction` hook runs on every ref update git makes
+  through a ref transaction, so `git merge --no-verify`, `git update-ref` and `git reset` into `integrate/*` are all
+  checked. Two plain git commands are outside it (seen on git 2.43): `git symbolic-ref`, and the new name of
+  `git branch -m` / `-c`, where the hook sees only the delete of the old name. After a delete, either can re-create
+  an `integrate/*` ref with protected changes and no token, against 9.2 and 9.12. The hook cannot close this; the
+  run-end audit reports the result as drift against the sealed approved state. An agent with a
   shell can still remove the hooks, reset `core.hooksPath`, or read ck's key and forge a token; these are
   deliberate circumventions, not plain git, and the run-end audit reports them (hooks inactive or altered, drift
   against the sealed approved state). PLAN D6 accepts that boundary.
+- **The approved state is only as safe as its directory.** `<common>/ck/<spec>/` stays writable in the sandbox. ck
+  never reseals a `protected.json` that exists and fails to verify (the audit stays incomplete; a create is refused
+  and names the manual step), but it does record a baseline when the file is absent (10.4). So deleting the file
+  and running `ck worktree integration` resets the baseline, and the audit does not see that. It is also the manual
+  recovery the refusal names, for me, from my own terminal. PLAN D6 accepts it as a deliberate circumvention.
 - **Approval needs me.** `approval_decision` requires a TTY on stdin and stdout and the typed code. An agent's
   Bash tool has no TTY; a pseudo-terminal wrapper could fake one, which is again a deliberate circumvention the
   audit sees (an approval record with no matching park note is listed).
@@ -1272,7 +1331,7 @@ Entries for the criteria that state an error, refusal or fallback.
 | 11.4 | invokes scan |
 | 11.5 | `ck graph --json`, sorted |
 | 11.6 | `AttributionIndex` built from the graph; lint/relink/plan read the same graph |
-| 11.7 | on-demand build, in-process memo keyed by size/mtime |
+| 11.7 | on-demand build, in-process memo keyed by size/mtime/ctime/inode |
 | 11.8 | `GraphProblem` |
 | 12.1 | `missing_command_edges`; `lint_spec.commandEdges` |
 | 12.2 | `ck relink --commands`, `plan_command_relink` |
