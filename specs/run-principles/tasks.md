@@ -1947,7 +1947,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 83: Require justifications in drafts and add the should-exist lens
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 2.3, 2.4, 4.1, 4.2, 4.6, 4.7
 **Description:** In `plugin/workflows/spec-create.js`, add a `**Without it:**` line to the requirements template: every story carries the reason from its plan item, and a story with no plan item gets its own. Add a `should-exist` entry to `LENSES`, which attacks each story's justification and proposes cuts in the `Cut` shape (story, title, weakness, saves counts). A lens that fails is counted in `lensesLost` like the others. The refute loop skips `should-exist`: its cuts go to the arbiter directly (Task 84). The Revise prompt tells the reviser to say so in review.md when the lens found nothing to cut. Harness Contract owner: the `review: should-exist` label.
