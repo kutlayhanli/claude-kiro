@@ -43,10 +43,14 @@ def diverge(integ: Path) -> None:
     h.commit_all(integ, "extra work on integration")
 
 
-def refused_merge(tmp_path: Path, ff: bool) -> Dict[str, Any]:
-    """The repo, a refused raw `git merge --no-verify` of a protected branch into the integration checkout."""
+def refused_merge(tmp_path: Path, ff: bool, prepare: Any = None) -> Dict[str, Any]:
+    """The repo, a refused raw `git merge --no-verify` of a protected branch into the integration checkout.
+
+    `prepare(root, integ)` runs while the checkout is still clean, before the protected branch is made."""
     root = h.hooks_repo(tmp_path)
     integ = h.integration_worktree(root)
+    if prepare:
+        prepare(root, integ)
     branch = protected_branch(root)
     if not ff:
         diverge(integ)
@@ -168,8 +172,8 @@ def test_tc165_a_dirty_main_checkout_still_refuses_a_merge(tmp_path):
 NO_RECORD = "no refused ref update is recorded at this head"
 
 
-def hand_edit_with_open_merge(root: Path, integ: Path) -> Tuple[str, str]:
-    """A hand edit to a tracked file and a merge in progress made without any refusal (`--no-commit`)."""
+def side_branch(root: Path) -> Tuple[str, str]:
+    """A side branch off integrate/demo with one commit; returns its name and a tracked file to hand edit."""
     h.git(root, "branch", "feat/demo-side", "integrate/demo")
     side = root.parent / "side-wt"
     h.git(root, "worktree", "add", "-q", str(side), "feat/demo-side")
@@ -180,7 +184,7 @@ def hand_edit_with_open_merge(root: Path, integ: Path) -> Tuple[str, str]:
 
 
 def open_merge_and_edit(root: Path, integ: Path) -> None:
-    side, edited = hand_edit_with_open_merge(root, integ)
+    side, edited = side_branch(root)
     out = h.raw(integ, "merge", "--no-ff", "--no-commit", side)
     assert out.returncode == 0, out.stdout + out.stderr
     assert git_path(integ, "MERGE_HEAD").exists()
@@ -304,12 +308,17 @@ CLAIM = {"task": "3", "trigger": "test-conflict", "text": "the test contradicts 
          "file": "tests/test_a.py", "test": "test_a", "criterion": "1.1"}
 
 
-def spec_edit_through_arbiter(root: Path, integ: Path) -> str:
-    """`ck arbiter open` and `settle` for a spec-edit ruling, then a commit on the arbiter branch. Returns `arbiter<k>`."""
+def bring_principles(root: Path, integ: Path) -> None:
+    """Commit the principles file on main and merge it into the (clean) integration checkout."""
     code, obj, err = h.ck_json(root, "principles", "init", "--commit", "--json")
     assert code == 0, f"ck principles init failed ({code}): {err}"
-    # the principles file is on the main branch; bring it to integration through an ordinary landing-free merge
     h.git(integ, "merge", "-q", "--no-edit", "main")
+
+
+def spec_edit_through_arbiter(root: Path, integ: Path) -> Tuple[str, Dict[str, Any]]:
+    """`ck arbiter open` and `settle` for a spec-edit ruling, then a commit on the arbiter branch.
+
+    Returns `arbiter<k>` and the opened claim."""
     code, opened, err = h.ck_json(root, "arbiter", "open", "demo", "--task", "3", "--into", "integrate/demo", "--json",
                                   input=json.dumps({"claim": CLAIM, "task": {"risk": "normal", "complexity": "Low"}}))
     assert code == 0 and opened is not None, f"ck arbiter open failed ({code}): {err}"
@@ -323,14 +332,14 @@ def spec_edit_through_arbiter(root: Path, integ: Path) -> str:
     worktree = worktree if worktree.is_absolute() else root / worktree
     (worktree / "specs" / "demo" / "design.md").write_text("# Design\n\nA clarified note.\n")
     h.commit_all(worktree, "spec edit")
-    return opened["number"]
+    return opened["number"], opened
 
 
 def test_tc197_spec_edit_landing_and_arbiter_record_restore_the_checkout(tmp_path):
-    s = refused_merge(tmp_path, ff=True)
+    s = refused_merge(tmp_path, ff=True, prepare=bring_principles)
     root, integ, branch = s["root"], s["integ"], s["branch"]
-    # the checkout is dirty from the refused merge before the arbiter opens
-    number = spec_edit_through_arbiter(root, integ)
+    # the checkout is dirty from the refused merge; integrate/demo has not moved since the refusal
+    number, opened = spec_edit_through_arbiter(root, integ)
     assert any(PROTECTED in line for line in status(integ)), "the refused merge left the checkout clean"
     code, obj, err = land(root, number, into="integrate/demo", gate=True)
     assert code == 0 and obj is not None, f"the arbiter landing failed ({code}): {err} {obj}"
@@ -341,9 +350,10 @@ def test_tc197_spec_edit_landing_and_arbiter_record_restore_the_checkout(tmp_pat
 
     out = h.raw(integ, "merge", "--no-verify", "--no-edit", branch)
     assert out.returncode != 0, "the second raw merge was not refused"
-    record = {"trigger": "test-conflict", "claim_key": "3|test-conflict|tests/test_a.py", "claim_text": CLAIM["text"],
+    record = {"trigger": "test-conflict", "claim_key": opened["key"], "claim_text": CLAIM["text"],
               "task": "3", "tier": "normal", "outcome": "spec_edit", "reasoning": "the spec is unclear",
-              "principle_id": "P1", "principle_text": "text", "plan_layer": "absent", "changed": "design.md note",
+              "principle_id": opened["principles"][0]["id"],
+              "principle_text": opened["principles"][0].get("text", ""), "plan_layer": "absent", "changed": "design.md note",
               "moved": [], "commit": None, "landed": None}
     code, rec_out, err = h.ck_json(root, "arbiter", "record", "demo", "--into", "integrate/demo", "--json",
                                    input=json.dumps(record))
@@ -377,6 +387,8 @@ def test_p47_recovery_only_for_a_managed_checkout_with_a_matching_refusal():
         checkout = "/elsewhere/checkout" if kind == "other-checkout" else target
         return Refusal(ref=ref, head=rhead, checkout=checkout, at="2026-11-11T00:00:00Z")
 
+    seen = set()
+
     @settings(derandomize=True, max_examples=200, database=None, deadline=None)
     @given(managed=st.booleans(), dirty=st.booleans(), merging=st.booleans(),
            kind=st.sampled_from(["absent", "other-ref", "other-head", "other-checkout", "matching"]))
@@ -384,6 +396,7 @@ def test_p47_recovery_only_for_a_managed_checkout_with_a_matching_refusal():
         facts = RecoveryFacts(into=into, target=target, managed=managed,
                               dirty=("src/a.py",) if dirty else (), merge_in_progress=merging,
                               head=head, refusal=make(kind))
+        seen.add((managed, dirty, merging, kind))
         verdict, reason = decide_recovery(facts)
         if not dirty and not merging:
             assert verdict == "clean", (facts, verdict)
@@ -394,3 +407,4 @@ def test_p47_recovery_only_for_a_managed_checkout_with_a_matching_refusal():
             assert reason, "a refusal carries a reason"
 
     check()
+    assert len(seen) == 40, f"P-47 reached {len(seen)} of its 40 combinations"
