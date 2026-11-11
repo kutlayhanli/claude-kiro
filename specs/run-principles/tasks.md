@@ -1383,7 +1383,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 59: Test how spec-edit, code and review rulings are applied
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 8.2, 8.3, 8.11, 8.12, 7.3, 7.4, 7.5, 6.3, 8.9
 **Description:** Implement TC-62, TC-63, TC-74, TC-75, TC-146 and TC-210 in `tests/test_arbiter_run.py`, named `test_tc<N>_...`. TC-62: after a spec edit lands the task resumes and `attempts` and escalations are as before the ruling. TC-63: a landed edit that adds a dependency on a not-started task changes the next plan's schedule (real `ck plan`). TC-74: a code ruling: the retry prompt holds the ruling text and a failing gate after it leaves the task unfinished. TC-75: the re-review prompt holds the ruling and the settled finding raised again does not block. TC-146: after a ruling on a review deadlock, a different blocking finding on the same file gets its own ruling, and the same finding raised again unsettled makes no call and is an entry with the ruling; a deadlock mixing a ruled finding and a new one sends the ruled finding to me with its ruling and only the new one to the arbiter. TC-210: a review deadlock ruled `test_repair` goes to the test-fixer (fake_project `testFix`), and once the fix lands the task is reviewed again, the re-review prompt carrying the ruling, with no revision or attempt spent (D33).
@@ -1393,10 +1393,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 66 (TC-74), Task 67 (TC-62, TC-63), Task 69 (TC-75, TC-146, TC-210)
 
 **Acceptance:**
-- [ ] TC-62 and TC-63 use a real landing of the fake arbiter's real commit (`arbiterEdits`) and real `ck plan`
-- [ ] Tests exercise the real boundary named in the test plan (workflow, real git, real `ck`)
-- [ ] Tests fail before the implementation exists for the right reason (no spec-edit landing or resume)
-- [ ] No mocks of the project's own code in integration tests
+- [x] TC-62 and TC-63 use a real landing of the fake arbiter's real commit (`arbiterEdits`) and real `ck plan`
+- [x] Tests exercise the real boundary named in the test plan (workflow, real git, real `ck`)
+- [x] Tests fail before the implementation exists for the right reason (no spec-edit landing or resume)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 58 (same test file)
 **Complexity:** High
