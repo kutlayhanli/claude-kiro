@@ -852,7 +852,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 36: Enforce the arbiter's lane in the guard hook
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 9.1, 9.2, 9.3, 9.4, 9.7, 9.8, 11.7, 11.10
 **Description:** In `_hook` of `src/claude_kiro/hooks/pre_tool_guard.py`, check `is_arbiter_caller` first and send that caller only through the lane: gather `ArbiterEditFacts` (resolved path, arbiter worktree name, open lane tickets, whether any task of the spec is In Progress or Done) for Edit, Write and NotebookEdit, and `decide_arbiter_bash` for Bash. An exception on this path denies, and `guard` modes in `specs/ck.json` do not apply to it. Every other caller keeps today's path, including fail-open.
