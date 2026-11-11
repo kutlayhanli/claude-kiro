@@ -973,3 +973,212 @@ def test_tc210_a_review_deadlock_ruled_test_repair_goes_to_the_fixer_and_the_tas
     prompt = out["prompts"][rereviews[0]]
     assert "change-tc210-text" in prompt, "the re-review prompt carries the ruling:\n" + prompt
     assert out["result"]["merged"] == ["1"], json.dumps(out["result"])
+
+
+# --------------------------------------------------------------------------- TC-71 to TC-78, TC-199, TC-205 (test repairs and rulings that end with me)
+
+TEST_REPAIR = ruling("test_repair")["testRepair"]
+TEST_FIX = {CONFLICT["file"]: {"verdict": "fixed"}}
+CONFLICT_NODE = f"{CONFLICT['file']}::{CONFLICT['test']}"
+
+
+def steps(ev):
+    return [e for e in ev if not e.endswith(" end")]
+
+
+def fix_labels(ev):
+    return [e for e in steps(ev) if re.match(r"^testfix \d+ \(Task", e)]
+
+
+def retry_labels(ev):
+    return [e for e in steps(ev) if re.match(r"^task 1 retry", e)]
+
+
+def seed_test_file(project):
+    """The real test file the conflict names, in the main checkout and the integration checkout."""
+    paths = []
+    for base in (project.root, project.target):
+        path = base / CONFLICT["file"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"def test_greeting_printed():\n    assert round(1.0, 2) == 1.0\n")
+        paths.append(path)
+    return paths
+
+
+def read_all(paths):
+    return [p.read_bytes() for p in paths]
+
+
+def entry_fields(entry, what):
+    assert entry.get("kind") == "test-fix", f"{what}: kind test-fix, got {entry.get('kind')!r}: " + json.dumps(entry)
+    assert isinstance(entry.get("ruling"), int) and entry["ruling"] >= 1, f"{what}: `ruling` is the number: " + json.dumps(entry)
+    assert entry.get("testRepair", {}).get("change") == TEST_REPAIR["change"], f"{what}: the exact change: " + json.dumps(entry)
+    assert entry["testRepair"].get("why") == TEST_REPAIR["why"], f"{what}: the why: " + json.dumps(entry)
+
+
+@pytest.mark.parametrize("how", ["prior-fix", "ledger-fail"])
+def test_tc71_a_test_repair_ruling_the_fixer_cannot_take_is_one_test_fix_entry_with_the_exact_change_and_the_test_untouched(bridge, tmp_path, how):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    paths = seed_test_file(project)
+    before = read_all(paths)
+    opts = {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT, "attempts": 1}}, "rulings": {"1": [ruling("test_repair"), REQ]}, "testFix": TEST_FIX}
+    opts["priorFixes" if how == "prior-fix" else "ledgerFail"] = {CONFLICT["file"]: True} if how == "prior-fix" else True
+    out = run(bridge, project, opts, agents=roles("haiku", []))
+    ev = out["events"]
+    assert arbiter_calls(ev) == ["arbiter task 1"], ", ".join(ev)
+    assert "testfix ledger 1" in ev, "the ledger was asked: " + ", ".join(ev)
+    assert fix_labels(ev) == [], "no fixer ran: " + ", ".join(ev)
+    entries = needs(out)
+    assert len(entries) == 1, json.dumps(out["result"].get("needsInput"))
+    entry_fields(entries[0], how)
+    assert entries[0]["ruling"] == decisions_entries(project)[0]["number"], "the number the record gave: " + json.dumps(entries[0])
+    assert read_all(paths) == before, "the test file is byte-identical"
+    assert "1" not in out["result"]["merged"]
+
+
+def conflict_entries_of(prompt):
+    lines = [line for line in prompt.splitlines() if line.startswith("[{")]
+    assert len(lines) == 1, "the fixer prompt carries one JSON list of conflict entries:\n" + prompt
+    return json.loads(lines[0])
+
+
+def test_tc72_a_test_repair_ruling_runs_ledger_fixer_proof_land_and_a_retry_that_spends_nothing(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    opts = {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT, "attempts": 1}}, "rulings": {"1": [ruling("test_repair"), REQ]}, "testFix": TEST_FIX}
+    out = run(bridge, project, opts, agents=roles("haiku", ["opus"]))
+    ev = out["events"]
+    order = ["testfix ledger 1", "testfix 1 (Task 1)", "testfix prove 1", "land testfix1"]
+    for label in order:
+        assert label in ev, f"{label!r} ran: " + ", ".join(ev)
+    assert [ev.index(x) for x in order] == sorted(ev.index(x) for x in order), "ledger, fixer, proof, land in order: " + ", ".join(ev)
+    assert arbiter_calls(ev) == ["arbiter task 1"], "no second ruling: " + ", ".join(ev)
+    entries = conflict_entries_of(out["prompts"]["testfix 1 (Task 1)"])
+    assert len(entries) == 1, entries
+    entry = entries[0]
+    assert entry["fix"] == TEST_REPAIR["change"] and entry["reason"] == TEST_REPAIR["why"], entry
+    settled = entry["ruling"]
+    assert isinstance(settled, dict), "the settled ruling object, attached: " + json.dumps(entry)
+    assert settled.get("outcome") == "test_repair" and settled.get("testRepair") == TEST_REPAIR, json.dumps(settled)
+    assert settled.get("reasoning") == ruling("test_repair")["reasoning"] and settled.get("principle") == PRINCIPLE, json.dumps(settled)
+    retries = retry_labels(ev)
+    assert len(retries) == 1 and ev.index(retries[0]) > ev.index("land testfix1"), "one retry after the landed fix: " + ", ".join(ev)
+    assert "(" not in retries[0], "the retry is no escalation: " + retries[0]
+    assert len(attempts(ev)) == 2, "the first attempt and one retry: " + ", ".join(ev)
+    assert "were fixed and landed on" in out["prompts"][retries[0]], out["prompts"][retries[0]]
+    assert out["result"]["merged"] == ["1"] and not needs(out), json.dumps(out["result"])
+    source = "\n".join(line for line in SCRIPT.read_text().splitlines() if not line.lstrip().startswith("//"))
+    sites = re.findall(r"(?<!function )handOffTestRepair\(", source)
+    assert len(sites) == 1, f"handOffTestRepair has one call site, found {len(sites)}"
+    claim = {"key": "1|test:" + CONFLICT_NODE, "task": "1", "trigger": "test-conflict", "file": CONFLICT["file"], "test": CONFLICT["test"], "criterion": "1.1"}
+    got = bridge.call("testRepairEntries", [{"claim": claim, "ruling": {**settled, "number": 7}}])
+    assert got == [{"file": CONFLICT["file"], "test": CONFLICT["test"], "criterion": "1.1", "reason": TEST_REPAIR["why"],
+                    "fix": TEST_REPAIR["change"], "ruling": {**settled, "number": 7}}], got
+
+
+def test_tc73_a_test_repair_ruling_runs_no_confirmation_and_the_fixer_starts_right_after_the_record(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    opts = {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT, "attempts": 1}}, "rulings": {"1": [ruling("test_repair")]}, "testFix": TEST_FIX}
+    out = run(bridge, project, opts, agents=roles("haiku", ["opus"]))
+    ev = steps(out["events"])
+    between = ev[ev.index("task 1") + 1 : ev.index("arbiter task 1")]
+    assert all(e.startswith("arbiter-") for e in between), "only the arbiter's own thin steps sit between the report and the arbiter: " + ", ".join(ev)
+    assert not [e for e in between if re.match(r"^task 1 ", e)], "no confirmation, retry or escalation before the arbiter: " + ", ".join(ev)
+    records = [i for i, e in enumerate(ev) if e.startswith("arbiter-record")]
+    assert records, "the ruling was recorded: " + ", ".join(ev)
+    assert ev[records[0] + 1] == "testfix ledger 1", "the fixer's ledger follows the record: " + ", ".join(ev)
+    assert not [e for e in ev[: ev.index("testfix ledger 1")] if re.match(r"^task 1 retry", e)], "no confirmation attempt: " + ", ".join(ev)
+
+
+def test_tc199_the_same_conflict_reported_again_after_its_ruled_fix_landed_is_one_entry_and_no_second_ruling_or_fixer(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    opts = {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT}}, "rulings": {"1": [ruling("test_repair"), REQ]}, "testFix": TEST_FIX}
+    out = run(bridge, project, opts, agents=roles("haiku", ["opus"]))
+    ev = out["events"]
+    assert "land testfix1" in ev, "the ruled fix landed: " + ", ".join(ev)
+    assert arbiter_calls(ev) == ["arbiter task 1"], "no second arbiter label: " + ", ".join(ev)
+    assert len(fix_labels(ev)) == 1, "no second testfix label: " + ", ".join(ev)
+    entries = needs(out)
+    assert len(entries) == 1, json.dumps(out["result"].get("needsInput"))
+    entry_fields(entries[0], "after the landed fix")
+    assert CONFLICT["reason"] in json.dumps(entries[0].get("evidence")), "the new report is the evidence: " + json.dumps(entries[0])
+    assert "1" not in out["result"]["merged"]
+
+
+def test_tc205_a_test_repair_ruling_the_fixer_finds_correct_is_one_entry_with_the_finding_and_no_retry_or_second_ruling(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    finding = {"file": CONFLICT["file"], "test": CONFLICT["test"], "issue": "finding-tc205-the-code-prints-too-little"}
+    opts = {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT, "attempts": 1}}, "rulings": {"1": [ruling("test_repair"), REQ]},
+            "testFix": {CONFLICT["file"]: {"verdict": "test-correct", "finding": finding}}}
+    out = run(bridge, project, opts, agents=roles("haiku", ["opus"]))
+    ev = out["events"]
+    assert len(fix_labels(ev)) == 1, "the fixer ran: " + ", ".join(ev)
+    assert arbiter_calls(ev) == ["arbiter task 1"], "no second arbiter label: " + ", ".join(ev)
+    assert retry_labels(ev) == [], "no task retry after the fixer: " + ", ".join(ev)
+    entries = needs(out)
+    assert len(entries) == 1, json.dumps(out["result"].get("needsInput"))
+    entry_fields(entries[0], "test-correct")
+    assert entries[0].get("finding", {}).get("issue") == finding["issue"], "the fixer's finding: " + json.dumps(entries[0])
+    assert "1" not in out["result"]["merged"]
+
+
+def test_tc76_a_requirements_ruling_is_an_entry_with_the_recommendation_and_requirements_md_is_byte_identical(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    paths = [project.spec_dir / "requirements.md", project.target / "specs" / "demo" / "requirements.md"]
+    before = read_all(paths)
+    out = run(bridge, project, {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT}}, "rulings": {"1": [REQ]}}, agents=roles("haiku", []))
+    entries = needs(out)
+    assert len(entries) == 1, json.dumps(out["result"].get("needsInput"))
+    text = json.dumps(entries[0])
+    assert REQ["requirement"]["wording"] in text and REQ["requirement"]["reason"] in text, "the recommendation: " + text
+    assert entries[0].get("kind") == "requirements", text
+    assert read_all(paths) == before, "requirements.md is byte-identical"
+    assert "1" not in out["result"]["merged"]
+
+
+def test_tc77_a_missing_requirement_is_an_entry_with_wording_and_reason_the_task_and_dependents_wait_and_independents_continue(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    paths = [project.spec_dir / "requirements.md", project.target / "specs" / "demo" / "requirements.md"]
+    before = read_all(paths)
+    missing_req = ruling("requirements", requirement={"kind": "add", "wording": "wording-tc77-the-greeting-ends-with-a-newline", "reason": "reason-tc77-nothing-says-so"})
+    opts = {"deps": {"1": [], "2": ["1"], "3": []}, "testConflicts": {"1": {"conflict": CONFLICT}}, "rulings": {"1": [missing_req]}}
+    out = run(bridge, project, opts, agents=roles("haiku", []))
+    ev = out["events"]
+    entries = needs(out)
+    assert len(entries) == 1, json.dumps(out["result"].get("needsInput"))
+    text = json.dumps(entries[0])
+    assert "wording-tc77-the-greeting-ends-with-a-newline" in text and "reason-tc77-nothing-says-so" in text, text
+    assert entries[0].get("kind") == "missing-requirement", text
+    assert attempts(ev, "2") == [], "the dependent waits: " + ", ".join(ev)
+    assert "2" not in out["result"]["merged"] and "1" not in out["result"]["merged"], json.dumps(out["result"])
+    assert "3" in out["result"]["merged"], "the independent task continued: " + json.dumps(out["result"])
+    assert read_all(paths) == before
+
+
+def park_note(prompt):
+    m = re.search(r"<<'CK_PARK'\n(.*)\nCK_PARK", prompt, re.S)
+    assert m, "the park step's prompt carries the note:\n" + prompt
+    return m.group(1)
+
+
+def test_tc78_a_rulings_entry_is_needs_input_not_failed_does_not_halt_and_notifies_through_the_real_notify_command(bridge, tmp_path):  # noqa: F811
+    from guard_helpers import notify_script, set_notify
+
+    out_file = tmp_path / "notified.json"
+    done = set_notify(notify_script(tmp_path / "bin", "ok", out_file))
+    assert done.returncode == 0, done.stdout + done.stderr
+    project = arbiter_project(tmp_path / "proj")
+    opts = {"deps": {"1": [], "3": [], "4": ["3"]}, "testConflicts": {"1": {"conflict": CONFLICT}}, "rulings": {"1": [REQ]}}
+    out = run(bridge, project, opts, agents=roles("haiku", []), onFailure="halt")
+    result = out["result"]
+    assert arbiter_calls(out["events"]) == ["arbiter task 1"], ", ".join(out["events"])
+    assert len(needs(out)) == 1, json.dumps(result.get("needsInput"))
+    assert REQ["requirement"]["wording"] in json.dumps(needs(out)[0]), "the entry is the ruling's: " + json.dumps(needs(out)[0])
+    assert "1" not in [str(f.get("task")) for f in (result.get("failed") or [])], "not a failure: " + json.dumps(result.get("failed"))
+    assert not result.get("halted") and result.get("outcome") != "halted", "no halt on failure: " + json.dumps(result)
+    assert "3" in result["merged"] and "4" in result["merged"], "the independent task and its dependent went on: " + json.dumps(result)
+    assert "park 1" in out["prompts"], "the entry was parked: " + ", ".join(out["events"])
+    # The park step is the one that notifies: run the workflow's own park command, with its note, through the real ck.
+    sent = project.ck("worktree", "park", "demo", "1", "--json", stdin=park_note(out["prompts"]["park 1"]))
+    assert sent.returncode == 0, sent.stdout + sent.stderr
+    assert out_file.exists(), "the real notify command ran: " + sent.stdout
+    assert json.loads(sent.stdout).get("notification") == "sent", sent.stdout
