@@ -688,3 +688,171 @@ def test_tc158_a_lost_drift_step_sets_needs_work_in_review_md_and_in_the_result(
     assert re.search(r"\*\*Result:\*\*\s*Needs work", text), text
     assert review_of(out)["result"] == "Needs work"
     assert "drift" in arbiter_of(out)["lost"]
+
+
+# --- run-principles properties for rulings during /spec:create (P-28, P-29, P-30, P-42, P-46) ---------------------------
+# Each example runs the real spec-create.js under node over a real git project, with the thin `ck arbiter ...` steps run
+# through the real CLI (no server). P-42 calls the decision seam `arbiter_policy.decide_cut` directly.
+
+import itertools  # noqa: E402
+
+from hypothesis import HealthCheck, given, settings, strategies as st  # noqa: E402
+from arbiter_helpers import arbiter_failures  # noqa: E402
+
+PROPERTIES = {
+    "P-28": "test_p28_every_refuted_finding_gets_exactly_one_ruling_and_none_is_lost",
+    "P-29": "test_p29_no_cut_and_no_plan_changing_ruling_reaches_a_revise_prompt_but_normal_fixes_do",
+    "P-30": "test_p30_each_cut_gets_one_ruling_a_failed_one_is_unchanged_and_the_result_is_not_ready",
+    "P-42": "test_p42_decide_cut_applies_only_when_approved_and_nothing_has_started",
+    "P-46": "test_p46_with_no_refuted_finding_and_no_cut_no_arbiter_step_runs",
+}
+
+PROP = settings(max_examples=30, derandomize=True, database=None, deadline=None,
+                suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow])
+_EXAMPLE = itertools.count()
+
+
+def fresh(tmp_path):
+    return tmp_path / f"ex{next(_EXAMPLE)}"
+
+
+def lens_findings(prefix: str, n: int) -> list:
+    return [finding(f"{prefix}{i + 1}") for i in range(n)]
+
+
+@st.composite
+def finding_mixes(draw):
+    """Two lenses, each with 0-3 findings; each finding refuted or not; each refuted one ruled either way."""
+    lenses = {}
+    for key, prefix in (("fidelity", "R"), ("implementability", "T")):
+        n = draw(st.integers(0, 3))
+        lenses[key] = [(f"{prefix}{i + 1}", draw(st.booleans()), draw(st.sampled_from(["finding stands", "refutation stands"]))) for i in range(n)]
+    return lenses
+
+
+def mix_overrides(mix: dict) -> dict:
+    over = {"revise spec + write review.md": {"fixed": [], "notFixed": [], "escalated": [], "result": "Ready", "schedule": "s"}}
+    for key, items in mix.items():
+        over[f"review: {key}"] = {"findings": [finding(i) for i, _, _ in items]}
+        if items:
+            over[f"refute: {key}"] = {"verdicts": [{"id": i, "refuted": r, "reason": f"reason {i}"} for i, r, _ in items]}
+    return over
+
+
+@PROP
+@given(mix=finding_mixes())
+def test_p28_every_refuted_finding_gets_exactly_one_ruling_and_none_is_lost(tmp_path, mix):
+    project = plan_project(fresh(tmp_path))
+    items = [x for v in mix.values() for x in v]
+    refuted = [(i, v) for i, r, v in items if r]
+    over = mix_overrides(mix)
+    over["arbiter refuted"] = {"rulings": [ruling(i, verdict=v) for i, v in refuted]}
+    out = create(project, over)
+    if not refuted:
+        assert arbiter_calls(out, "refuted") == [], out["labels"]
+    else:
+        assert len(arbiter_calls(out, "refuted")) == 1, out["labels"]
+        prompt = sent_for(out, "arbiter refuted")[0]["prompt"]
+        assert all(i in prompt for i, _ in refuted), "the step carries every refuted finding"
+        arb = arbiter_of(out)
+        assert len(arb["rulings"]) == len(refuted) and len(set(arb["rulings"])) == len(refuted), arb
+        assert len(entries_of(project)) == len(refuted)
+    # Conservation: confirmed plus refuted is every finding; each reaches the revise prompt as a fix or a listed refutation.
+    prompts = revise_prompts(out)
+    assert prompts, out["labels"]
+    for p in prompts:
+        assert all(f"problem {i}" in p for i, _, _ in items), "a finding was dropped"
+
+
+def cut_finding(i: int, fix: str) -> dict:
+    n = i + 2
+    return {**cut_lens_answer()["findings"][0], "id": f"C{i + 1}", "story": str(n), "title": f"Cut {n}", "fix": fix,
+            "weakness": f"WEAK-{i + 1} nothing breaks without it"}
+
+
+def cut_rulings(verdicts: dict) -> dict:
+    return {"rulings": [{**cut_ruling()["rulings"][0], "claim": cid, "id": cid, "verdict": v} for cid, v in verdicts.items()]}
+
+
+def cuts_project(tmp_path, plan=None):
+    kw = {} if plan is None else {"plan": plan}
+    project = arbiter_project(tmp_path, tasks=TASKS, requirements=REQ, **kw)
+    (project.spec_dir / "design.md").write_text(DESIGN)
+    (project.spec_dir / "test-plan.md").write_text(TEST_PLAN)
+    (project.spec_dir / "review.md").write_text(REVIEW_MD)
+    return project
+
+
+@PROP
+@given(verdicts=st.lists(st.sampled_from(["sound", "unsound"]), min_size=1, max_size=3), drift=st.booleans(),
+       fixes=st.integers(0, 3))
+def test_p29_no_cut_and_no_plan_changing_ruling_reaches_a_revise_prompt_but_normal_fixes_do(tmp_path, verdicts, drift, fixes):
+    plan = f"# Plan: Demo\n\n## Decisions\n\n- {DECIDED}\n"
+    project = cuts_project(fresh(tmp_path), plan=plan)
+    ids = [f"C{i + 1}" for i in range(len(verdicts))]
+    over = {**refuting(ids=tuple(f"R{i + 1}" for i in range(fixes))),
+            "review: should-exist": {"findings": [cut_finding(i, f"CUTFIX-{i + 1}") for i in range(len(ids))]},
+            "arbiter cuts": cut_rulings(dict(zip(ids, verdicts))), "arbiter cuts risky": cut_rulings(dict(zip(ids, verdicts)))}
+    wording = "retries are capped at WORDING-5"
+    if drift:
+        over["arbiter drift"] = {"rulings": [drift_requirement(wording)]}
+    out = create(project, over)
+    prompts = revise_prompts(out)
+    assert prompts, out["labels"]
+    for p in prompts:
+        assert not any(f"CUTFIX-{i + 1}" in p for i in range(len(ids))), "a proposed cut reaches a revise prompt as a fix"
+        assert "WORDING-5" not in p, "a plan-changing ruling reaches a revise prompt"
+        assert all(f"fix R{i + 1}" in p for i in range(fixes)), "a normal fix is missing"
+    assert not any(label.startswith("apply-cuts") for label in out["labels"])
+
+
+@PROP
+@given(verdicts=st.lists(st.sampled_from(["sound", "unsound"]), min_size=1, max_size=3), failed=st.data(), form=arbiter_failures())
+def test_p30_each_cut_gets_one_ruling_a_failed_one_is_unchanged_and_the_result_is_not_ready(tmp_path, verdicts, failed, form):
+    project = cuts_project(fresh(tmp_path))
+    ids = [f"C{i + 1}" for i in range(len(verdicts))]
+    bad = failed.draw(st.sets(st.sampled_from(ids)))
+    whole = form == "throw"
+    if whole:
+        bad = set(ids)
+        answer = {"__throw": True}
+    else:
+        answer = {"rulings": [(form if cid in bad else cut_rulings({cid: v})["rulings"][0]) for cid, v in zip(ids, verdicts)]}
+    over = {"review: should-exist": {"findings": [cut_finding(i, f"CUTFIX-{i + 1}") for i in range(len(ids))]},
+            "arbiter cuts": answer, "arbiter cuts risky": answer}
+    out = create(project, over)
+    assert len(arbiter_calls(out, "cuts")) >= 1, out["labels"]
+    review = review_of(out)
+    arb = arbiter_of(out)
+    shown = [str(c["id"]) for c in (review.get("proposedCuts") or [])]
+    ok = {cid: v for cid, v in zip(ids, verdicts) if cid not in bad}
+    assert len(arb["rulings"]) == len(ok), f"one ruling per cut that got one, none for a failed one: {arb}"
+    assert {c for c in shown if c in ok} == {c for c, v in ok.items() if v == "sound"}, f"shown cuts differ from the soundly reasoned: {shown}"
+    for cid in bad:
+        cut = next((c for c in (review.get("proposedCuts") or []) if str(c["id"]) == cid), None)
+        assert cut is None or not cut.get("ruling"), f"a failed cut changed: {cut}"
+    if bad:
+        assert review["result"] != "Ready", review["result"]
+    assert not any(label.startswith("apply-cuts") for label in out["labels"])
+
+
+@settings(max_examples=200, derandomize=True, database=None, deadline=None)
+@given(approved=st.booleans(), started=st.booleans())
+def test_p42_decide_cut_applies_only_when_approved_and_nothing_has_started(approved, started):
+    from claude_kiro.arbiter_policy import decide_cut
+
+    expected = ("frozen" if started else "apply") if approved else "hold"
+    assert decide_cut(approved, started) == expected, (approved, started)
+
+
+@PROP
+@given(mode=st.sampled_from(["create", "review"]), confirmed=st.integers(0, 3))
+def test_p46_with_no_refuted_finding_and_no_cut_no_arbiter_step_runs(tmp_path, mode, confirmed):
+    project = plan_project(fresh(tmp_path))
+    over = {**refuting(ids=tuple(f"R{i + 1}" for i in range(confirmed))), "review: should-exist": {"findings": []}}
+    out = create(project, over, args={"mode": mode})
+    assert arbiter_calls(out, "refuted") == [] and arbiter_calls(out, "cuts") == [], out["labels"]
+    assert not review_calls(out, "refuted") and not review_calls(out, "cuts"), out["ckCalls"]
+    arb = arbiter_of(out)
+    assert "refuted" not in arb["ran"] and "cuts" not in arb["ran"], arb
+    assert "refuted" not in arb["lost"] and "cuts" not in arb["lost"], arb
