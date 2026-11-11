@@ -713,7 +713,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 30: Validate rulings and route them to a lane
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.7, 1.8, 5.6, 5.7, 7.1, 7.2, 7.7, 8.1, 8.8, 8.11, 8.13, 8.14
 **Description:** In `src/claude_kiro/arbiter_policy.py`, add `RulingCheck`, `RulingRoute`, `validate_ruling(raw, key, citable, mode)` and `route_ruling(check, tier, effective)`. A ruling is valid only with exactly one known outcome, or status `needs_stronger_look`, plus the claim, reasoning and a principle id that is citable. `route_ruling` returns `spec_edit`, `test_repair`, `code`, `needs_input` or `rerun`: `rerun` for a stronger look at the normal tier (counted as one ruling), `needs_input` with reason `exhausted` at the risky tier, `reserved` when the plan layer reserves `code` or `test repairs` and the outcome is that one, or when the ruling itself names a reservation in `reservedBy` (a reserved file the ruling does not report is refused at `decide_spec_edit`, Task 41), `requirements` for that outcome, `missing-requirement` for a found gap, and `invalid-ruling` with `record: false` for anything malformed. A plan's claimed grant over requirements is not an input. Harness Contract owner: `arbiter.validate_ruling` and `arbiter.route_ruling`, in `arbiter_policy`.
@@ -723,10 +723,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 8 (P-2, P-3 at `route_ruling`), Task 27 (P-17, P-37 at `validate_ruling` and `route_ruling`)
 
 **Acceptance:**
-- [ ] Each invalid form (no principle, uncited principle, unknown or several outcomes, malformed) is invalid with a named problem and `record: false`
-- [ ] Each outcome goes to exactly one lane
-- [ ] A stronger-look answer reruns once at the normal tier and goes to `needs_input` at the risky tier
-- [ ] A reservation only moves a ruling toward `needs_input`, and a requirements ruling is never a spec edit
+- [x] Each invalid form (no principle, uncited principle, unknown or several outcomes, malformed) is invalid with a named problem and `record: false`
+- [x] Each outcome goes to exactly one lane
+- [x] A stronger-look answer reruns once at the normal tier and goes to `needs_input` at the risky tier
+- [x] A reservation only moves a ruling toward `needs_input`, and a requirements ruling is never a spec edit
 
 **Dependencies:** Task 8 (its tests are the oracle), Task 11 (reads `EffectivePrinciples`), Task 27 (its tests are the oracle), Task 29 (extends `arbiter_policy.py`)
 **Complexity:** Medium
