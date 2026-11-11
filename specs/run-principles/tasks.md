@@ -173,9 +173,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** none (Task 88 extends `tests/test_plugin.py` once this task has landed)
 
 **Acceptance:**
-- [ ] Both agent files exist, and the auditor's tool list has no write or shell tool
-- [ ] `AGENT_ROLES` holds both, with `auditor` following the `reviewer` role
-- [ ] The arbiter prompt requires one outcome, the claim key and a cited principle id, and limits edits to the three lane files
+- [x] Both agent files exist, and the auditor's tool list has no write or shell tool
+- [x] `AGENT_ROLES` holds both, with `auditor` following the `reviewer` role
+- [x] The arbiter prompt requires one outcome, the claim key and a cited principle id, and limits edits to the three lane files
 
 **Dependencies:** Task 5 (`agent_type_files` reads the arbiter role)
 **Complexity:** Medium
