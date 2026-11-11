@@ -108,11 +108,13 @@ def test_129_unresolvable_selection_is_not_checked_and_does_not_block(tmp_path, 
 def test_129_unchecked_task_does_not_hide_findings_of_other_tasks(tmp_path, verify):
     """Not checked is per task: Task 3 stays checked, and an unchecked Task 1 leaves lint's text and exit alone."""
     files(tmp_path)
-    write_spec(tmp_path, shape(x_verify=verify))
+    write_spec(tmp_path, shape(x_verify=verify) + block(5, "Other", files=["src/c.py"], verify=f"{PYTEST} {A}"))
     code, data = lint(tmp_path)
     assert unchecked(data, "3") == []
+    assert unchecked(data, "1") and unchecked(data, "5") == []
+    assert [(f["task"], f["suite"]) for f in scope(data)] == [("5", A)], data
     text = ck(tmp_path, "lint", "sim")
-    assert text.exit_code == 0, text.output
+    assert text.exit_code == 1, text.output
 
 
 @pytest.mark.parametrize("verify", [pytest.param(f'{PYTEST} "{A}"', id="double-quoted"), pytest.param(f"{PYTEST} '{A}'", id="single-quoted"), pytest.param(f"{PYTEST} -x {A}", id="flag-first"), pytest.param(f"python -m pytest -q {A}", id="python-m")])
@@ -162,11 +164,16 @@ PERF = "tests/test_perf.py"
 
 def cycle_shape(extra_shared: bool = False) -> str:
     """Task 8's Verify runs PERF unfiltered. Test task 9 verifies Task 8; test task 10 owns PERF too and verifies
-    Task 13, which depends on Task 8. The verify-file rule reports (8, PERF); Story 12 sees the same problem."""
+    Task 13, which depends on Task 8. The verify-file rule reports (8, PERF); Story 12 sees the same problem.
+    With extra_shared, Task 8 also runs A unfiltered; A is owned by test task 11, which verifies the not-Done Task 14
+    (no dependency on Task 8), so (8, A) is a Story-12-only problem."""
     out = block(8, "Perf core", files=["src/perf.py"], verify=f"{PYTEST} {PERF}" + (f" {A}" if extra_shared else ""))
-    out += block(9, "Perf core tests", track="test", files=[PERF] + ([A] if extra_shared else []), verifies="Task 8")
-    out += block(10, "Report tests", track="test", files=[PERF] + ([A] if extra_shared else []), verifies="Task 13")
+    out += block(9, "Perf core tests", track="test", files=[PERF], verifies="Task 8")
+    out += block(10, "Report tests", track="test", files=[PERF], verifies="Task 13")
     out += block(13, "Report", files=["src/report.py"], deps="Task 8 (uses perf)")
+    if extra_shared:
+        out += block(14, "Other", files=["src/other.py"], verify=f"{PYTEST} {B}")
+        out += block(11, "Other tests", track="test", files=[A, B], verifies="Task 14")
     return out
 
 
@@ -208,18 +215,22 @@ def test_1210_text_output_names_the_problem_once(tmp_path):
 
 
 def test_1210_dedupe_is_per_problem_not_per_task(tmp_path):
-    """Task 8 also selects A, which is shared and reported by Story 12 alone: it must still be reported."""
+    """Task 8 has two problems: (8, PERF) is a verify-file cycle, (8, A) is a shared suite only Story 12 reports.
+    Deduping the first must not drop the second."""
     perf_files(tmp_path)
     write_spec(tmp_path, cycle_shape(extra_shared=True))
     code, data = lint(tmp_path)
-    assert pairs(data).count(("8", PERF)) == 1
-    assert ("8", A) in pairs(data) or ("8", A) in [(str(e["task"]), e["file"]) for e in data["verifyCycles"]]
-    assert pairs(data).count(("8", A)) == 1
+    cycle_pairs = [(str(e["task"]), e["file"]) for e in data["verifyCycles"] if e.get("kind") == "verify-file"]
+    scope_pairs = [(str(f["task"]), f["suite"]) for f in scope(data)]
+    assert cycle_pairs.count(("8", PERF)) == 1, data
+    assert ("8", PERF) not in scope_pairs, data
+    assert scope_pairs.count(("8", A)) == 1, data
+    assert ("8", A) not in cycle_pairs, data
     assert code == 1
 
 
-def test_1210_dependency_cycle_task_is_not_also_a_scope_finding(tmp_path):
-    """The same shared-suite shape under a dependency cycle: `cycles` reports it, Story 12 adds no second line."""
+def test_1210_dependency_cycle_is_reported_once(tmp_path):
+    """The same shape under a dependency cycle: `cycles` reports the cycle once (the scope finding is a different problem)."""
     files(tmp_path)
     blocks = block(1, "Core", files=["src/a.py"], deps="Task 3", verify=f"{PYTEST} {A}")
     blocks += block(2, "Core tests", track="test", files=[A], verifies="Task 1")
@@ -227,9 +238,8 @@ def test_1210_dependency_cycle_task_is_not_also_a_scope_finding(tmp_path):
     blocks += block(4, "Extra tests", track="test", files=[A, B], verifies="Task 3")
     write_spec(tmp_path, blocks)
     code, data = lint(tmp_path)
-    assert data["cycles"], data
+    assert len(data["cycles"]) == 1, data
     assert code == 1
-    assert [f for f in scope(data) if f["task"] in {"1", "3"}] == []
 
 
 def test_1210_each_task_and_suite_occurs_once_in_verify_scope(tmp_path):
