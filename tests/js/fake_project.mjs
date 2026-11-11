@@ -196,6 +196,9 @@ async function arbiterWrite(prompt, files, state, n) {
 //                                          not mechanical); a fixable+applied answer drops N's verify cycle from
 //                                          later plans, as the relinked tasks.md would
 //   worktree: {n: {state, detail}}         the first task agent of n returns that worktree outcome (default CREATED)
+//   unreproduced: {batch: [n...]}          the landing holding all of `batch` answers every task MERGED, a red batch
+//                                          gate with green halves, and an `unreproduced` key (once)
+//   landRecovered: {paths, mergeInProgress, head}   every landing answer carries it as `recovered`
 //   -- unattended-correctness additions (all optional, additive) --
 //   gateAnswers: [json | {code, stdout} | 'throw' | 'hang']   consumed in order by the gate calls: a direct `ck gate`
 //                                          argv, or (with an envelope) the thin labels `full gate @k`, `re-check k`,
@@ -232,7 +235,7 @@ async function arbiterWrite(prompt, files, state, n) {
 //   reviews entries may carry {finding: 'serves-no-requirement'}: each finding then has noRequirement: true
 // Labels starting `arbiter-` run the one `ck ... arbiter ...` (or `ck ... worktree land ...`) line of their prompt, with
 // the prompt's one fenced JSON block as stdin, through execCkRun, and return {exitCode, json}; without execCk they throw.
-export function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [], gitReport = null, conflictRounds = {}, planDurations = {}, externalDone = null, planFail = [], worktree = {}, guardStops = {}, guardStopIn = {}, parkOutcome = null, relinkOutcome = null, testConflicts = {}, execCk = null, etaAnswer = null, sleep = realSleep, external = p => p, planSeq = null, badReady = null, risk = null, gateAnswers = [], taskFailures = {}, testConflictsList = {}, testFix = {}, priorFixes = {}, crossTest = null, fidelity = null, fixtureStatus = null, owns = null, overlaps = null, testVerifies = null, provides = null, missingCommand = null, audit = null, runStart = null, rulings = {}, auditFindings = {}, arbiterEdits = {}, arbiterStepFailures = {}, ledgerFail = false }) {
+export function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [], gitReport = null, conflictRounds = {}, planDurations = {}, externalDone = null, planFail = [], worktree = {}, guardStops = {}, guardStopIn = {}, parkOutcome = null, relinkOutcome = null, testConflicts = {}, execCk = null, etaAnswer = null, sleep = realSleep, external = p => p, planSeq = null, badReady = null, risk = null, gateAnswers = [], taskFailures = {}, testConflictsList = {}, testFix = {}, priorFixes = {}, crossTest = null, fidelity = null, fixtureStatus = null, owns = null, overlaps = null, testVerifies = null, provides = null, missingCommand = null, audit = null, runStart = null, rulings = {}, auditFindings = {}, arbiterEdits = {}, arbiterStepFailures = {}, ledgerFail = false, unreproduced = null, landRecovered = null }) {
   let rechecksLeftRed = recheckRed
   let planCalls = 0  // plan agent invocations so far: call k consumes planSeq[k-1]
   // RED landings left per task: checkRed tasks are red on their first landing, redLands sets a count.
@@ -416,6 +419,15 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
         else { state.done.add(n); state.merged.add(n); out.push({ task: n, state: 'MERGED', checkGreen: true, mergedAt: stamp() }) }
       }
       const answer = { tasks: out, gates, bisected: gates.length > 1, startedAt, finishedAt: stamp() }
+      if (landRecovered) answer.recovered = landRecovered
+      // unreproduced: {batch: [n...]}: the landing that holds every task of `batch` is red as a batch only (its halves
+      // are green), every task is MERGED, and the answer carries an `unreproduced` key (once).
+      if (unreproduced && !state.unreproducedDone && unreproduced.batch.every(n => landing.includes(n)) && !red.length) {
+        state.unreproducedDone = true
+        answer.gates = [{ tasks: landing, green: false }, ...landing.map(n => ({ tasks: [n], green: true }))]
+        answer.bisected = true
+        answer.unreproduced = { tasks: landing, tail: 'red as a batch', failures: [] }
+      }
       if (execCk) {
         const eta = await recordLanding(prompt, tasks, out)
         if (etaAnswer === 'null') answer.eta = null

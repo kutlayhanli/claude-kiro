@@ -2267,7 +2267,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 98: Test the run's route for an unreproduced landing
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 14.2, 15.3
 **Description:** Add the fake-project landing option `unreproduced: {batch: [n...]}` to `tests/js/fake_project.mjs` (additive, absent by default), which answers that landing with every task MERGED and an `unreproduced` key, and emit the label `full gate @<n> (unreproduced landing)` from `tests/js/emit_labels.mjs`. Create `tests/test_land_unreproduced_workflow.py` with TC-173: the real `spec-implement.js` under the fake runtime through the bridge, with the attributed gate run by the real `ck gate --attribute` (`exec_ck`), red in one case and green in the other. It also checks that a landing answer carrying `recovered` keeps it on the landing entry.
@@ -2279,11 +2279,13 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 99 (the run's route)
 
 **Acceptance:**
-- [ ] Existing `tests/js/*.test.mjs` suites still pass with the option absent
-- [ ] TC-173 covers a red and a green attributed gate
-- [ ] Tests exercise the real boundary named in the test plan (the real workflow under the fake runtime, real `ck`)
-- [ ] Tests fail before the implementation exists for the right reason (the run logs "no culprit (flaky?)" and runs no full gate)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Existing `tests/js/*.test.mjs` suites still pass with the option absent
+- [x] TC-173 covers a red and a green attributed gate
+- [x] Tests exercise the real boundary named in the test plan (the real workflow under the fake runtime, real `ck`)
+- [x] Tests fail before the implementation exists for the right reason (the run logs "no culprit (flaky?)" and runs no full gate)
+- [x] No mocks of the project's own code in integration tests
+
+**Notes:** Also added a `landRecovered` option to `tests/js/fake_project.mjs` (a landing answer carrying `recovered`) for the keep-`recovered` check. Tests use one task, so the label is `full gate @1 (unreproduced landing)`; real `ck gate --attribute --json` output over a real project is fed as the gate answers.
 
 **Dependencies:** Task 2 (edits the same fake runtime files)
 **Complexity:** Medium
