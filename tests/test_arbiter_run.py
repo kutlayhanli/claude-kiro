@@ -1069,7 +1069,7 @@ def test_tc72_a_test_repair_ruling_runs_ledger_fixer_proof_land_and_a_retry_that
     source = "\n".join(line for line in SCRIPT.read_text().splitlines() if not line.lstrip().startswith("//"))
     sites = re.findall(r"(?<!function )handOffTestRepair\(", source)
     assert len(sites) == 1, f"handOffTestRepair has one call site, found {len(sites)}"
-    claim = {"key": "1|test:" + CONFLICT_NODE, "task": "1", "kind": "test-conflict", "file": CONFLICT["file"], "test": CONFLICT["test"], "criterion": "1.1"}
+    claim = {"key": "1|test:" + CONFLICT_NODE, "task": "1", "trigger": "test-conflict", "file": CONFLICT["file"], "test": CONFLICT["test"], "criterion": "1.1"}
     got = bridge.call("testRepairEntries", [{"claim": claim, "ruling": {**settled, "number": 7}}])
     assert got == [{"file": CONFLICT["file"], "test": CONFLICT["test"], "criterion": "1.1", "reason": TEST_REPAIR["why"],
                     "fix": TEST_REPAIR["change"], "ruling": {**settled, "number": 7}}], got
@@ -1080,7 +1080,9 @@ def test_tc73_a_test_repair_ruling_runs_no_confirmation_and_the_fixer_starts_rig
     opts = {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT, "attempts": 1}}, "rulings": {"1": [ruling("test_repair")]}, "testFix": TEST_FIX}
     out = run(bridge, project, opts, agents=roles("haiku", ["opus"]))
     ev = steps(out["events"])
-    assert ev[ev.index("task 1") + 1] == "arbiter task 1", "the arbiter follows the report, no confirmation label: " + ", ".join(ev)
+    between = ev[ev.index("task 1") + 1 : ev.index("arbiter task 1")]
+    assert all(e.startswith("arbiter-") for e in between), "only the arbiter's own thin steps sit between the report and the arbiter: " + ", ".join(ev)
+    assert not [e for e in between if re.match(r"^task 1 ", e)], "no confirmation, retry or escalation before the arbiter: " + ", ".join(ev)
     records = [i for i, e in enumerate(ev) if e.startswith("arbiter-record")]
     assert records, "the ruling was recorded: " + ", ".join(ev)
     assert ev[records[0] + 1] == "testfix ledger 1", "the fixer's ledger follows the record: " + ", ".join(ev)
@@ -1137,7 +1139,7 @@ def test_tc77_a_missing_requirement_is_an_entry_with_wording_and_reason_the_task
     project = arbiter_project(tmp_path)
     paths = [project.spec_dir / "requirements.md", project.target / "specs" / "demo" / "requirements.md"]
     before = read_all(paths)
-    missing_req = ruling("requirements", requirement={"kind": "missing", "wording": "wording-tc77-the-greeting-ends-with-a-newline", "reason": "reason-tc77-nothing-says-so"})
+    missing_req = ruling("requirements", requirement={"kind": "add", "wording": "wording-tc77-the-greeting-ends-with-a-newline", "reason": "reason-tc77-nothing-says-so"})
     opts = {"deps": {"1": [], "2": ["1"], "3": []}, "testConflicts": {"1": {"conflict": CONFLICT}}, "rulings": {"1": [missing_req]}}
     out = run(bridge, project, opts, agents=roles("haiku", []))
     ev = out["events"]
@@ -1165,15 +1167,15 @@ def test_tc78_a_rulings_entry_is_needs_input_not_failed_does_not_halt_and_notifi
     done = set_notify(notify_script(tmp_path / "bin", "ok", out_file))
     assert done.returncode == 0, done.stdout + done.stderr
     project = arbiter_project(tmp_path / "proj")
-    opts = {"deps": {"1": [], "3": []}, "testConflicts": {"1": {"conflict": CONFLICT}}, "rulings": {"1": [REQ]}}
+    opts = {"deps": {"1": [], "3": [], "4": ["3"]}, "testConflicts": {"1": {"conflict": CONFLICT}}, "rulings": {"1": [REQ]}}
     out = run(bridge, project, opts, agents=roles("haiku", []), onFailure="halt")
     result = out["result"]
     assert arbiter_calls(out["events"]) == ["arbiter task 1"], ", ".join(out["events"])
     assert len(needs(out)) == 1, json.dumps(result.get("needsInput"))
     assert REQ["requirement"]["wording"] in json.dumps(needs(out)[0]), "the entry is the ruling's: " + json.dumps(needs(out)[0])
     assert "1" not in [str(f.get("task")) for f in (result.get("failed") or [])], "not a failure: " + json.dumps(result.get("failed"))
-    assert not result.get("halted"), "no halt on failure: " + json.dumps(result)
-    assert "3" in result["merged"], "the independent task went on"
+    assert not result.get("halted") and result.get("outcome") != "halted", "no halt on failure: " + json.dumps(result)
+    assert "3" in result["merged"] and "4" in result["merged"], "the independent task and its dependent went on: " + json.dumps(result)
     assert "park 1" in out["prompts"], "the entry was parked: " + ", ".join(out["events"])
     # The park step is the one that notifies: run the workflow's own park command, with its note, through the real ck.
     sent = project.ck("worktree", "park", "demo", "1", "--json", stdin=park_note(out["prompts"]["park 1"]))
