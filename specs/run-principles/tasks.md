@@ -546,7 +546,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 23: Report justifications and plan-principle warnings from ck lint
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 1.11, 3.1, 3.6, 3.7
 **Description:** `lint_spec` in `src/claude_kiro/lint.py` adds `justifications` (story, title, message) and `warnings` (`{"kind": "principles", "plan", "message"}` when PLAN.md exists with a missing or empty `## Principles`), keeping every existing key unchanged. The `lint` command in `src/claude_kiro/cli/worktree.py` prints one line per finding and exits by `lint_verdict`. Harness Contract owner: `ck lint --json` `justifications` and `warnings` of kind `principles` (the contract's `planPrinciples`).

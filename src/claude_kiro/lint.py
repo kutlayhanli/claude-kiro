@@ -678,6 +678,38 @@ def _graph_findings(spec_dir: Path, project_dir: Path, tasks: Dict[str, SpecTask
     }
 
 
+def _justification_list(spec_dir: Path) -> List[Dict[str, str]]:
+    """Stories of requirements.md with no `**Without it:**` line in their own section (3.6). Never fatal alone."""
+    from claude_kiro.justifications import justification_findings
+
+    req = spec_dir / "requirements.md"
+    text = req.read_text(errors="replace") if req.is_file() else None
+    return [
+        {
+            "story": f.story,
+            "title": f.title,
+            "message": f"Story {f.story} ({f.title}) has no **Without it:** line in requirements.md",
+        }
+        for f in justification_findings(text)
+    ]
+
+
+def _principles_warnings(spec_dir: Path) -> List[Dict[str, str]]:
+    """A warning when PLAN.md exists and its `## Principles` section is missing or empty (3.7). Never fatal."""
+    from claude_kiro.principles import plan_section
+
+    plan = spec_dir / "PLAN.md"
+    if not plan.is_file():
+        return []
+    if plan_section(plan.read_text(errors="replace")) is not None:
+        return []
+    return [{
+        "kind": "principles",
+        "plan": str(plan),
+        "message": f"{spec_dir.name}/PLAN.md has an empty or missing ## Principles section",
+    }]
+
+
 def lint_spec(spec_dir: Path, project_dir: Path) -> Dict:
     tasks = {t.num: t for t in parse_tasks(spec_dir / "tasks.md")}
     cycles = dependency_cycles(tasks)
@@ -691,4 +723,6 @@ def lint_spec(spec_dir: Path, project_dir: Path) -> Dict:
         "criticalPath": [] if cycles else critical_path(tasks),
     }
     result.update(_graph_findings(spec_dir, project_dir, tasks, config))
+    result["justifications"] = _justification_list(spec_dir)
+    result["warnings"] = _principles_warnings(spec_dir)
     return result
