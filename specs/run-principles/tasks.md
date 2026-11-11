@@ -1661,7 +1661,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 71: Test the reading audit before an impl task
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.2, 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7, 13.8, 13.9, 8.3, 8.9, 8.16
 **Description:** Implement TC-120 to TC-126, TC-142, TC-151, TC-161 and TC-208 in `tests/test_arbiter_audit.py`, named `test_tc<N>_...`, under the real `spec-implement.js` with real `ck` (audit label `audit task <n>`). TC-120: the audit runs after the last verifying test task merged and before the impl task's first attempt, and reads the selected tests. TC-121: no problem: the task starts and no arbiter label runs. TC-122: a problem: the arbiter runs before any `task N` label and the ruling is recorded. TC-123: the shipped `plugin/agents/auditor.md` frontmatter lists exactly `Read, Grep, Glob`, the generated `ck-auditor.md` keeps it (generated into a temp directory, never read from `.claude/`), and the workflow starts the audit with `agentType` from `args.auditorAgent`. TC-124: the audit throws: the task starts and the report notes the missed audit (`missedAudits`). TC-125: a retried and an escalated task has one audit. TC-126: no verifying tests, a test-track task, and an impl task whose verifying test tasks a cross-test check in the run read with no blocking finding on their tests (fake_project `crossTest` and `testVerifies`): no audit; the same task with one of those test files named by a blocking finding: one audit (13.9). TC-142: an audit problem whose arbiter call throws, returns nothing usable, or asks because the principles file is missing: the task starts, `missedAudits` lists it and no needs-input entry appears. TC-161: an audit problem whose arbiter returns a malformed ruling (no principle, or an unknown outcome): no ruling is applied or recorded, the task does not start, a needs-input entry carries the arbiter's output, and the task is not in `missedAudits`. TC-151: a landed spec edit that gives a not-started impl task its first verifying test makes it audited; one that removes its last does not. TC-208: an audit problem ruled `test_repair` goes to the test-fixer before any `task N` label; once its fix lands the task's first attempt starts with no retry spent, and a fix the fixer does not land gives a `test-fix` entry and no `task N` label (D33).
@@ -1671,10 +1671,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 74 (TC-120 to 126, 142, 151, 161, 208)
 
 **Acceptance:**
-- [ ] Event-order cases assert the real label sequence
-- [ ] Tests exercise the real boundary named in the test plan (workflow, real `ck`, real files)
-- [ ] Tests fail before the implementation exists for the right reason (no audit step)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Event-order cases assert the real label sequence
+- [x] Tests exercise the real boundary named in the test plan (workflow, real `ck`, real files)
+- [x] Tests fail before the implementation exists for the right reason (no audit step)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (project fixture), Task 2 (`auditFindings`)
 **Complexity:** Medium
