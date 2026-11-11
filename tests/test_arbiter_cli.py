@@ -444,6 +444,7 @@ PROPERTIES = {
     "P-19": "test_p19_the_arbiter_is_called_exactly_under_the_task_limits",
     "P-17": "test_p17_only_a_well_formed_ruling_citing_an_effective_principle_is_valid",
     "P-37": "test_p37_each_outcome_goes_to_exactly_one_lane",
+    "P-26": "test_p26_records_keep_earlier_bytes_and_numbers_rise",
 }
 
 PROP = settings(derandomize=True, max_examples=200, database=None, deadline=None)
@@ -752,3 +753,65 @@ def test_p37_each_outcome_goes_to_exactly_one_lane(case):
         assert check.valid and not check.stronger_look, (raw, check)
         assert route.route == _LANE[outcome], (outcome, route)
     assert (route.route == "spec_edit") == (not invalid and not stronger and outcome == "spec_edit"), (raw, route)
+
+
+# --------------------------------------------------------------------------- property P-26
+
+_P26_FRAGMENTS = ["## 3", "## Ruling 3: fake", "---", "```", "```python\n", "\r\n", "\r", "\n", "- **Claim:** x", "# h",
+                  "\u00e9\u4e2d\U0001f600", "\u2028", "\t", " ", "x" * 5000]
+_p26_text = st.lists(st.one_of(st.sampled_from(_P26_FRAGMENTS),
+                               st.text(alphabet=st.characters(blacklist_categories=("Cs", "Cc")), max_size=30)),
+                     min_size=1, max_size=6).map("".join)
+_p26_fields = st.fixed_dictionaries({"claim_text": _p26_text, "reasoning": _p26_text, "changed": _p26_text,
+                                     "principle_text": _p26_text})
+_P26_SETTINGS = settings(derandomize=True, max_examples=30, database=None, deadline=None,
+                         suppress_health_check=list(__import__("hypothesis").HealthCheck))
+
+
+def _p26_record(n: int, fields: dict):
+    from claude_kiro.arbiter_policy import RulingRecord
+
+    payload = record_payload(n, **fields)
+    payload["moved"] = tuple(payload["moved"])
+    payload["landed"] = tuple(payload["landed"])
+    return RulingRecord(**payload)
+
+
+@_P26_SETTINGS
+@given(batch=st.lists(_p26_fields, min_size=1, max_size=5))
+def test_p26_records_keep_earlier_bytes_and_numbers_rise(batch):
+    """append_entry and next_number: every earlier prefix stays byte-identical and numbers strictly increase."""
+    from claude_kiro.arbiter_policy import append_entry, next_number
+
+    assert append_entry is not None
+    existing, last = None, 0
+    for i, fields in enumerate(batch, 1):
+        number = next_number(existing, last)
+        assert number > last, (number, last)
+        out = append_entry(existing, _p26_record(i, fields), number)
+        assert out.startswith(existing or ""), "an earlier entry changed"
+        assert len(out) > len(existing or "")
+        existing, last = out, number
+
+
+@_P26_SETTINGS
+@given(batch=st.lists(_p26_fields, min_size=1, max_size=3))
+def test_p26_real_processes_keep_earlier_bytes_and_numbers_rise(batch):
+    """`ck arbiter record`, each call a new process: no file before the first record, then prefixes and numbers hold."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        p = fresh(Path(tmp), "p")
+        path = p.target / "specs" / "demo" / "decisions.md"
+        assert not path.exists(), "decisions.md exists before the first record"
+        seen = b""
+        last = 0
+        for i, fields in enumerate(batch, 1):
+            done = record(p, record_payload(i, **fields))
+            assert done.returncode == 0, done.stdout + done.stderr
+            number = json.loads(done.stdout)["number"]
+            assert number > last, (number, last)
+            now = path.read_bytes()
+            assert now.startswith(seen), f"entries before record {i} changed"
+            assert len(now) > len(seen)
+            seen, last = now, number
