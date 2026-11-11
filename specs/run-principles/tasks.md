@@ -713,7 +713,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 30: Validate rulings and route them to a lane
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.7, 1.8, 5.6, 5.7, 7.1, 7.2, 7.7, 8.1, 8.8, 8.11, 8.13, 8.14
 **Description:** In `src/claude_kiro/arbiter_policy.py`, add `RulingCheck`, `RulingRoute`, `validate_ruling(raw, key, citable, mode)` and `route_ruling(check, tier, effective)`. A ruling is valid only with exactly one known outcome, or status `needs_stronger_look`, plus the claim, reasoning and a principle id that is citable. `route_ruling` returns `spec_edit`, `test_repair`, `code`, `needs_input` or `rerun`: `rerun` for a stronger look at the normal tier (counted as one ruling), `needs_input` with reason `exhausted` at the risky tier, `reserved` when the plan layer reserves `code` or `test repairs` and the outcome is that one, or when the ruling itself names a reservation in `reservedBy` (a reserved file the ruling does not report is refused at `decide_spec_edit`, Task 41), `requirements` for that outcome, `missing-requirement` for a found gap, and `invalid-ruling` with `record: false` for anything malformed. A plan's claimed grant over requirements is not an input. Harness Contract owner: `arbiter.validate_ruling` and `arbiter.route_ruling`, in `arbiter_policy`.
@@ -723,10 +723,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 8 (P-2, P-3 at `route_ruling`), Task 27 (P-17, P-37 at `validate_ruling` and `route_ruling`)
 
 **Acceptance:**
-- [ ] Each invalid form (no principle, uncited principle, unknown or several outcomes, malformed) is invalid with a named problem and `record: false`
-- [ ] Each outcome goes to exactly one lane
-- [ ] A stronger-look answer reruns once at the normal tier and goes to `needs_input` at the risky tier
-- [ ] A reservation only moves a ruling toward `needs_input`, and a requirements ruling is never a spec edit
+- [x] Each invalid form (no principle, uncited principle, unknown or several outcomes, malformed) is invalid with a named problem and `record: false`
+- [x] Each outcome goes to exactly one lane
+- [x] A stronger-look answer reruns once at the normal tier and goes to `needs_input` at the risky tier
+- [x] A reservation only moves a ruling toward `needs_input`, and a requirements ruling is never a spec edit
 
 **Dependencies:** Task 8 (its tests are the oracle), Task 11 (reads `EffectivePrinciples`), Task 27 (its tests are the oracle), Task 29 (extends `arbiter_policy.py`)
 **Complexity:** Medium
@@ -1429,7 +1429,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 61: Test the run's record and report of rulings
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 4.8, 10.3, 10.7, 10.9
 **Description:** Implement TC-34, TC-90, TC-94, TC-96 and TC-155 in `tests/test_arbiter_run.py`, named `test_tc<N>_...`. TC-34: a reviewer's serves-no-requirement finding: the task lands, the code stays, and `proposedCuts` in the result names it. TC-90: a ruling whose edit did not land records that and why. TC-94: with rulings from an earlier run, the report lists only this run's. TC-96: with `specs/demo` made read-only, the report says the entry was not written and a needs-input entry appears. TC-155: a spec edit lands and its record then fails (`arbiterStepFailures: {record: true}`): the task does not resume, and a needs-input entry says the edit landed.
@@ -1439,10 +1439,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 66 (TC-94, TC-96), Task 67 (TC-90, TC-155), Task 69 (TC-34)
 
 **Acceptance:**
-- [ ] TC-34 uses a real landing; TC-96 really removes write permission and restores it after
-- [ ] Tests exercise the real boundary named in the test plan (workflow, real files, real landing)
-- [ ] Tests fail before the implementation exists for the right reason (no record or `proposedCuts`)
-- [ ] No mocks of the project's own code in integration tests
+- [x] TC-34 uses a real landing; TC-96 really removes write permission and restores it after
+- [x] Tests exercise the real boundary named in the test plan (workflow, real files, real landing)
+- [x] Tests fail before the implementation exists for the right reason (no record or `proposedCuts`)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 60 (same test file)
 **Complexity:** Medium
