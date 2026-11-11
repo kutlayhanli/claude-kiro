@@ -251,6 +251,56 @@ def _log(input_data: Mapping[str, Any], tool: str, caller: str, block: _Block, c
         family=guard_policy.command_family(command), tool_use_id=text("tool_use_id")))
 
 
+def _arbiter_edit_decision(tool_name: str, tool_input: Mapping[str, Any], cwd: Path) -> guard_policy.GuardDecision:
+    """The arbiter's lane for a file edit. Anything unresolvable is outside the lane."""
+    from claude_kiro.arbiter import LANE_DIR_REL
+
+    raw = tool_input.get("file_path") if tool_name != "NotebookEdit" else tool_input.get("notebook_path", tool_input.get("file_path"))
+    if not isinstance(raw, str) or not raw:
+        return guard_policy.decide_arbiter_edit(guard_policy.ArbiterEditFacts("", None, (), False))
+    path = Path(os.path.abspath(raw if os.path.isabs(raw) else cwd / raw))
+    checkout = _checkout_of(path, cwd)
+    rel = _rel(path, checkout) if checkout is not None else None
+    if checkout is None or rel is None:
+        return guard_policy.decide_arbiter_edit(guard_policy.ArbiterEditFacts(raw, None, (), False))
+    m = guard_policy._ARBITER_WORKTREE.match(checkout.resolve().name)
+    worktree_spec = m.group(1) if m else None
+    lane_dir = checkout / LANE_DIR_REL
+    lanes = tuple(sorted(p.stem for p in lane_dir.glob("*.json"))) if lane_dir.is_dir() else ()
+    parts = rel.split("/")
+    started = False
+    if len(parts) == 3 and parts[0] == "specs" and parts[1]:
+        started = _implementation_started(checkout / "specs" / parts[1])
+    return guard_policy.decide_arbiter_edit(guard_policy.ArbiterEditFacts(rel, worktree_spec, lanes, started))
+
+
+def _arbiter_hook(input_data: dict, tool_name: str, tool_input: dict, cwd: Path) -> Optional[dict]:
+    """Send the arbiter only through its lane; an error here denies."""
+    command: Optional[str] = None
+    try:
+        if tool_name in FILE_TOOLS or tool_name == "NotebookEdit":
+            decision = _arbiter_edit_decision(tool_name, tool_input, cwd)
+        elif tool_name == "Bash":
+            raw = tool_input.get("command")
+            command = raw if isinstance(raw, str) else None
+            decision = guard_policy.decide_arbiter_bash(command, str(cwd))  # type: ignore[arg-type]
+        else:
+            return None
+        if not decision.block:
+            return None
+        rel = ", ".join(decision.paths)
+        if command is not None:
+            rel = f"{rel} (command: {command})"
+        block = _Block(decision, guard_policy.arbiter_block_reason(rel))
+        try:
+            _log(input_data, tool_name, "arbiter", block, command)
+        except Exception:
+            pass
+        return _decision("deny", block.reason)
+    except Exception:
+        return _decision("deny", guard_policy.arbiter_block_reason("(unresolved)"))
+
+
 def _hook(input_data: dict) -> Optional[dict]:
     if not isinstance(input_data, dict):
         return None
@@ -268,6 +318,9 @@ def _hook(input_data: dict) -> Optional[dict]:
         SessionTracker(session_id if isinstance(session_id, str) and session_id else "unknown", CacheManager())
     except Exception:
         pass
+
+    if guard_policy.is_arbiter_caller(input_data):
+        return _arbiter_hook(input_data, tool_name, tool_input, cwd)
 
     caller = guard_policy.classify_caller(input_data, os.environ, False)
     command: Optional[str] = None
@@ -297,6 +350,8 @@ def hook(input_data: dict) -> Optional[dict]:
     try:
         return _hook(input_data)
     except Exception:
+        if guard_policy.is_arbiter_caller(input_data):
+            return _decision("deny", guard_policy.arbiter_block_reason("(unresolved)"))
         return None
     finally:
         git_utils.set_deadline(None)

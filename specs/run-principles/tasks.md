@@ -852,7 +852,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 36: Enforce the arbiter's lane in the guard hook
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 9.1, 9.2, 9.3, 9.4, 9.7, 9.8, 11.7, 11.10
 **Description:** In `_hook` of `src/claude_kiro/hooks/pre_tool_guard.py`, check `is_arbiter_caller` first and send that caller only through the lane: gather `ArbiterEditFacts` (resolved path, arbiter worktree name, open lane tickets, whether any task of the spec is In Progress or Done) for Edit, Write and NotebookEdit, and `decide_arbiter_bash` for Bash. An exception on this path denies, and `guard` modes in `specs/ck.json` do not apply to it. Every other caller keeps today's path, including fail-open.
@@ -862,10 +862,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 1 (its identity fixture), Task 33 (TC-79 to 87, 101, 103, 106, 134 through the real hook), Task 34 (P-23 under real `bash -c`, P-39 through the real hook), Task 82 (red team of 11.7, 11.10 through the hook)
 
 **Acceptance:**
-- [ ] The arbiter edits the three lane files, including changes to existing text after implementation started
-- [ ] The arbiter is denied requirements.md in a run, any test, source, plan, principles or config path, and each shell form of those
-- [ ] An exception on the arbiter path denies
-- [ ] A task agent and a main session get today's decisions
+- [x] The arbiter edits the three lane files, including changes to existing text after implementation started
+- [x] The arbiter is denied requirements.md in a run, any test, source, plan, principles or config path, and each shell form of those
+- [x] An exception on the arbiter path denies
+- [x] A task agent and a main session get today's decisions
 
 **Dependencies:** Task 1 (its tests are the oracle), Task 32 (reads the lane tickets it writes), Task 33 (its tests are the oracle), Task 34 (its tests are the oracle), Task 35 (calls the lane seams), Task 82 (its tests are the oracle), Task 37 (provides `cmd:ck arbiter open`), Task 38 (provides `cmd:ck arbiter settle`), Task 42 (provides `cmd:ck arbiter record`)
 **Complexity:** High
