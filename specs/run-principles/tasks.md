@@ -1492,7 +1492,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 64: Red-team the prohibitions of Story 6
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 6.2, 6.3, 6.4, 6.6, 6.7, 6.10
 **Description:** Try to break each SHALL NOT clause of Story 6 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Target near-miss stop reports (a guard-stop word inside a plain failure's text, a test-conflict claim that appears only in a retry's output), a pass on the last possible rung, a worktree that is busy on one attempt and fine on the next, and every failure form of the arbiter call combined with a prior guard stop. Written from the requirements only, never from the implementation.
@@ -1502,10 +1502,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 69 (red team of 6.2, 6.3, 6.4, 6.6, 6.7, 6.10; the first task with every stop routed)
 
 **Acceptance:**
-- [ ] Each SHALL NOT clause has at least one adversarial test per listed input class that applies to it
-- [ ] Tests exercise the real boundary named in the test plan (real workflow, real `ck`)
-- [ ] Tests fail before the implementation exists for the right reason (no arbiter routing; today's ladder runs)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each SHALL NOT clause has at least one adversarial test per listed input class that applies to it
+- [x] Tests exercise the real boundary named in the test plan (real workflow, real `ck`)
+- [x] Tests fail before the implementation exists for the right reason (no arbiter routing; today's ladder runs)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (project fixture), Task 2 (fake runtime)
 **Complexity:** High
