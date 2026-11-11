@@ -531,13 +531,17 @@ def test_tc12_without_a_plan_principles_section_the_arbiter_rules_and_the_entry_
 NORMAL_TIER = ("sonnet", "medium")
 RISKY_TIER = ("opus", "max")
 CLAIM = {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT}}}
-STRONGER = {"status": "needs_stronger_look", "reasoning": "the first reading cannot tell the wording from the intent",
-            "established": "the greeting test compares a rounded value with exact equality"}
+# The claim key of CLAIM, in design.md's identity form (`19|test:tests/test_x.py::test_a`).
+KEY = f"1|test:{CONFLICT['file']}::{CONFLICT['test']}"
+# A valid "needs a stronger look" answer (7.1): the claim it answers, its reasoning and a citable principle.
+STRONGER = {"status": "needs_stronger_look", "claim": KEY, "reasoning": "the first reading cannot tell the wording from the intent",
+            "principle": PRINCIPLE, "established": "the greeting test compares a rounded value with exact equality"}
 
 
-def tier_roles():
+def tier_roles(complexity_routing=False):
     """Roles whose arbiter normal and risky tiers differ in both model and effort, so the tier shows in the agent options."""
     base = roles("haiku", [])
+    base["implementer"]["complexity_routing"] = complexity_routing
     return {**base, "arbiter": {"model": NORMAL_TIER[0], "effort": NORMAL_TIER[1], "risky_model": RISKY_TIER[0], "risky_effort": RISKY_TIER[1]}}
 
 
@@ -546,14 +550,14 @@ def tier_of(out, label="arbiter task 1"):
     return (out["opts"][label]["model"], out["opts"][label]["effort"])
 
 
-def tier_run(bridge, project, options, complexity=None, **args):
+def tier_run(bridge, project, options, complexity=None, complexity_routing=False, **args):
     """Pass risk and Complexity as a real run does: as workflow args (what the workflow reads) and in the plan answer."""
     if options.get("risk"):
         args["risk"] = options["risk"]
     if complexity:
         args["complexity"] = complexity
         options = {**options, "planSeq": [{"complexity": complexity}] * 8}
-    return run(bridge, project, options, agents=tier_roles(), **args)
+    return run(bridge, project, options, agents=tier_roles(complexity_routing), **args)
 
 
 def tc37_start(bridge, tmp_path, name, **options):
@@ -598,14 +602,16 @@ def test_tc39_a_high_complexity_task_with_no_other_signal_gets_the_normal_tier(b
 
 def test_tc40_needs_a_stronger_look_at_the_normal_tier_reruns_once_at_the_risky_tier_with_the_first_reasoning(bridge, tmp_path):  # noqa: F811
     project = arbiter_project(tmp_path)
-    out = tier_run(bridge, project, {**CLAIM, "rulings": {"1": [STRONGER, REQ]}})
+    risky_req = ruling("requirements", claim=KEY)
+    out = tier_run(bridge, project, {**CLAIM, "rulings": {"1": [STRONGER, risky_req]}})
     ev = out["events"]
-    assert arbiter_calls(ev) == ["arbiter task 1", "arbiter task 1 risky"], ", ".join(ev)
+    assert arbiter_calls(ev) == ["arbiter task 1", "arbiter task 1 risky"], "exactly one re-run, at the risky tier: " + ", ".join(ev)
     assert tier_of(out) == NORMAL_TIER
     assert tier_of(out, "arbiter task 1 risky") == RISKY_TIER
     assert STRONGER["reasoning"] in out["prompts"]["arbiter task 1 risky"], out["prompts"]["arbiter task 1 risky"]
-    assert len(needs(out)) == 1, json.dumps(out["result"].get("needsInput"))
-    assert REQ["requirement"]["wording"] in json.dumps(needs(out)[0]), json.dumps(needs(out)[0])
+    entries = needs(out)
+    assert len(entries) == 1, "the risky requirements ruling ends the run with one needs-input entry: " + json.dumps(out["result"].get("needsInput"))
+    assert "invalid-ruling" not in json.dumps(entries[0]), "both answers are valid rulings: " + json.dumps(entries[0])
 
 
 def test_tc41_needs_a_stronger_look_at_the_risky_tier_makes_no_further_call_and_the_entry_holds_what_was_established(bridge, tmp_path):  # noqa: F811
@@ -617,6 +623,7 @@ def test_tc41_needs_a_stronger_look_at_the_risky_tier_makes_no_further_call_and_
     entries = needs(out)
     assert len(entries) == 1, json.dumps(out["result"].get("needsInput"))
     assert STRONGER["established"] in json.dumps(entries[0]), json.dumps(entries[0])
+    assert "invalid-ruling" not in json.dumps(entries[0]), "a valid stronger-look answer is routed as exhausted (5.7), not invalid: " + json.dumps(entries[0])
 
 
 def untagged_risk_path_project(tmp_path, complexity):
@@ -644,3 +651,10 @@ def test_tc157_a_risk_path_match_with_no_risk_tag_starts_at_the_risky_tier_and_c
         assert arbiter_calls(out["events"]) == ["arbiter task 1"], ", ".join(out["events"])
         tiers.append(tier_of(out))
     assert tiers[0] == tiers[1] == NORMAL_TIER, tiers
+    routed = []
+    for level in ("High", "Low"):
+        plain = arbiter_project(tmp_path / f"routed-{level}")
+        out = tier_run(bridge, plain, {**CLAIM, "rulings": {"1": [REQ]}}, complexity={"1": level}, complexity_routing=True)
+        assert arbiter_calls(out["events"]) == ["arbiter task 1"], ", ".join(out["events"])
+        routed.append(tier_of(out))
+    assert routed[0] == routed[1] == NORMAL_TIER, "complexity routing on still never changes the arbiter tier: " + repr(routed)
