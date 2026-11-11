@@ -123,7 +123,7 @@ def test_a_retry_after_an_audit_problem_runs_no_second_audit(bridge, tmp_path):
     """The system's own output fed back: the audit's problem, ruled `code`, then the task fails and is retried."""
     proj_dir = arbiter_project(tmp_path)
     problem = {"file": "tests/test_greet.py", "test": "test_greet", "criterion": "1.1", "reason": "r", "needs": "n"}
-    ruling = {"status": "ruled", "outcome": "code", "principle": "project:test-intent",
+    ruling = {"claim": "@key", "status": "ruled", "outcome": "code", "principle": "project:test-intent",
               "reasoning": "the test is right; the code must change", "code": "print the greeting"}
     proj, args = scenario(
         project={"failUntil": {"2": 1}, "auditFindings": {"2": {"problems": [problem], "summary": "one"}},

@@ -45,7 +45,8 @@ REVIEW_ON = {"model": "opus", "effort": "high", "enabled": True, "rounds": 1}
 
 
 def ruling(outcome, **extra):
-    out = {"status": "ruled", "reasoning": f"ruled {outcome} because the principle says so", "outcome": outcome, "principle": PRINCIPLE}
+    # "@key": the fake arbiter copies the claim key from its prompt (tests/js/fake_project.mjs), as 7.1 requires
+    out = {"claim": "@key", "status": "ruled", "reasoning": f"ruled {outcome} because the principle says so", "outcome": outcome, "principle": PRINCIPLE}
     if outcome == "requirements":
         out["requirement"] = {"kind": "change", "wording": "the greeting is printed in full", "reason": "the test cannot pass as worded"}
     if outcome == "test_repair":

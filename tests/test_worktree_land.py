@@ -388,7 +388,7 @@ def test_land_raises_when_the_reset_after_a_red_gate_is_refused(repo: Path):
     commit_in(wt(repo, "1"), "one.txt", "1\n", "one")
     start = git(repo, "rev-parse", "main")
 
-    def red_and_locked(target: Path, group):
+    def red_and_locked(target: Path, group, whole: bool = True):
         lock = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-path", "index.lock"], cwd=target,
                               capture_output=True, text=True, check=True).stdout.strip()
         Path(lock).write_text("")

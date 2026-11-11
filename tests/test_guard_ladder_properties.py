@@ -96,7 +96,7 @@ def test_p14_bridge_ladder_independent_of_escalate(bridge):  # noqa: F811
 TASK_LABEL = re.compile(r"^task (\w+)(?: \[test\])?(?: guard (\d+) \((\w[\w.\-\[\]]*)\))?$")
 RETRY_LABEL = re.compile(r"^task (\w+)(?: \[test\])? retry ")
 GUARD_LABEL = re.compile(r" guard \d")
-CODE_RULING = {"status": "ruled", "outcome": "code", "reasoning": "the test states the requirement", "principle": "project:test-intent", "code": "keep the test, change the code"}
+CODE_RULING = {"claim": "@key", "status": "ruled", "outcome": "code", "reasoning": "the test states the requirement", "principle": "project:test-intent", "code": "keep the test, change the code"}
 
 
 def roles(model: str, escalate: List[str], review: bool) -> Dict[str, Any]:

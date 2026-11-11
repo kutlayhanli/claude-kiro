@@ -461,8 +461,14 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
       if (!list || !list.length) throw new Error(`no ruling scripted for "${l}" (rulings: {${n}: [...]})`)
       const k = state.rulingCalls[n] = (state.rulingCalls[n] || 0) + 1
       state.events.push(`${l} end`)
-      const answer = list[Math.min(k, list.length) - 1]
+      let answer = list[Math.min(k, list.length) - 1]
       if (answer === 'throw') throw new Error('arbiter agent failed')
+      // A scripted `claim: '@key'` is copied from the prompt's `Claim key: <key>` line, as a model copies the key it was given
+      // (design.md RULING). An answer with no `claim`, or any other value, is returned as scripted, so a malformed one stays malformed.
+      if (answer && typeof answer === 'object' && answer.claim === '@key') {
+        const m = String(prompt).match(/^Claim key: (\S+)\s*$/m) || String(prompt).match(/\b\d+\|[^\s"'`,)]+/)
+        answer = { ...answer, claim: m ? (m[1] || m[0]) : '' }
+      }
       const edit = arbiterEdits[n]
       if (edit && answer !== null) await arbiterWrite(prompt, edit.files || {}, state, n)
       return answer

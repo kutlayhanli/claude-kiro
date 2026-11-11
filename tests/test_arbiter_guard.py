@@ -711,6 +711,28 @@ def test_p23_every_shell_form_of_a_denied_change_is_denied(lane_world, data):
         assert done.returncode == 0, (step, done.stderr)
 
 
+EXPANSION_FORMS = [
+    "git diff ${X}--output=tests/test_x.py", 'git diff "$X"--output=tests/t.py', "git diff $X--output=tests/t.py",
+    "rg ${X}--pre=rm . tests/test_x.py", "file ${X}-C -m tests/x", "git commit -m x${IFS}--amend",
+    "git commit -m x${IFS}--no-verify", 'cat "${X}"specs/demo/requirements.md', "ls ${HOME}",
+]
+
+
+@pytest.mark.parametrize("command", EXPANSION_FORMS)
+def test_tc211_parameter_expansion_outside_single_quotes_is_denied(lane_world, command):
+    """TC-211 (9.4): an expanded word can hide an option from the word checks, so any `$` outside single quotes is
+    denied, as substitution is. The forms are the ones the 2026-11-11 review ran against Task 35's branch."""
+    decide = ah.seam("guard_policy.decide_arbiter_bash")
+    _, checkout = lane_world
+    assert decide(command, str(checkout)).block, command
+
+
+def test_tc211_a_dollar_inside_single_quotes_is_still_text(lane_world):
+    decide = ah.seam("guard_policy.decide_arbiter_bash")
+    _, checkout = lane_world
+    assert not decide("grep -c '$X' specs/demo/design.md", str(checkout)).block
+
+
 # --------------------------------------------------------------------------- P-39
 
 

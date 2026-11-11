@@ -162,8 +162,10 @@ def task_calls(outs: List[Dict[str, Any]], task: str) -> int:
 
 # --------------------------------------------------------------------------- TC-127 (NFR Bounded arbiter cost, 5.7)
 
-STRONGER = {"status": "needs_stronger_look", "reasoning": "the spec and the test disagree", "established": "which criterion the claim names"}
-RULED_CODE = {"status": "ruled", "outcome": "code", "reasoning": "the test is right", "principle": PRINCIPLE, "code": "make the code meet 1.1"}
+# "@key": the fake arbiter copies the claim key from its prompt (tests/js/fake_project.mjs), as 7.1 requires
+STRONGER = {"claim": "@key", "status": "needs_stronger_look", "reasoning": "the spec and the test disagree", "principle": PRINCIPLE,
+            "established": "which criterion the claim names"}
+RULED_CODE = {"claim": "@key", "status": "ruled", "outcome": "code", "reasoning": "the test is right", "principle": PRINCIPLE, "code": "make the code meet 1.1"}
 
 
 def test_tc127_a_repeated_claim_across_three_runs_makes_at_most_6_calls_on_a_task_and_2_on_a_claim(tmp_path):
@@ -236,7 +238,11 @@ def test_tc128_implement_guard_stop_ruling_under_a_throwing_date_and_math_random
                        project={"deps": {"1": [], "2": ["1"]}, "done": ["1"], "guardStops": {"2": "always"}, "rulings": {"2": [STRONGER]}})
     assert "error" not in out, out.get("error")
     seen = labels(out)
-    assert "arbiter task 2" in seen and "arbiter task 2 risky" in seen, seen
+    calls = [l for l in seen if l in ("arbiter task 2", "arbiter task 2 risky")]
+    # A guard stop starts at the risky tier (5.3), and a risky answer asking for a stronger look is not called again (5.7):
+    # one arbiter call, then a needs-input entry carrying what it did establish.
+    assert len(calls) == 1, seen
+    assert "which criterion the claim names" in json.dumps(out["result"].get("needsInput", [])), out["result"].get("needsInput")
 
 
 def test_tc128_create_rulings_under_a_throwing_date_and_math_random():
