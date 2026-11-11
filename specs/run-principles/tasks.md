@@ -1258,7 +1258,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (project fixture), Task 2 (fake runtime answers)
-**Implementation notes:** Runs the workflow through the bridge with the real `ck` behind the `arbiter-` steps. A case-changed test id is left out of 7.4: pytest ids are case-sensitive, so whether it is the same claim is the identity rule of 7.3. Rulings carry `claim` as `<task>|test:<file>::<test>`.
+**Implementation notes:** Runs the workflow through the bridge with the real `ck` behind the `arbiter-` steps. Rulings carry `claim` as `<task>|test:<file>::<test>`.
 **Complexity:** High
 **Risk:** safety (exercises the needs-input notification route)
 

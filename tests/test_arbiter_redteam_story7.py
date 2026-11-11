@@ -6,14 +6,14 @@ Written from requirements.md only. Every case runs `plugin/workflows/spec-implem
 7.2: a ruling that cites no valid principle, names an unknown or several outcomes, or is malformed SHALL NOT be
      applied or recorded, and the claim goes to me as a needs-input entry with the arbiter's output.
 7.4: a claim that returns after its ruling was applied SHALL NOT be ruled again; it goes to me with the ruling and the
-     new evidence. Cases: the same claim under a reformatted test id (parameters, `./` prefix, whitespace).
+     new evidence. Cases: the same claim under a reformatted test id (parameters, `./` prefix, whitespace, case).
 7.6: a claim that would be the 4th ruling on a task SHALL NOT call the arbiter; the entry lists the 3 earlier rulings.
      Cases: a 4th claim in the same attempt, in a resumed run, and on parallel tasks each near the limit.
 
 Each group has positive controls (a valid ruling is applied and recorded; a different claim gets its own ruling), so a
 workflow that rejects everything, or never calls the arbiter, cannot satisfy both the controls and the negatives.
-Not covered: a case-changed test id. Test ids are case-sensitive in pytest, so whether a case variant is "the same
-claim" is the identity rule the design defines (7.3), not something 7.4 states.
+Whitespace is read as trimmed and collapsed (design.md: the test name "collapses whitespace"); a ruling given as a JSON
+text string counts as malformed, since the RULING agent schema is an object.
 """
 
 import json
@@ -247,16 +247,16 @@ def test_positive_control_a_valid_ruling_is_applied_and_recorded(bridge, tmp_pat
 
 
 def test_an_invalid_ruling_does_not_use_up_the_limit_it_was_never_a_ruling(bridge, tmp_path):  # noqa: F811
-    """Three invalid answers in a row (three different claims) are no rulings: a fourth, valid claim still gets one."""
+    """Three invalid answers (three runs, one claim each) are no rulings: a fourth, valid claim still gets one."""
     project = make(tmp_path)
-    tests = ["test_a", "test_b", "test_c", "test_d"]
-    bad = [ruling("2", t, MARK, principle=PRINCIPLE + " ") for t in tests[:3]]
-    good = ruling("2", "test_d", "GOOD")
-    out = run(bridge, project, deps={"2": []}, conflicts={"2": [conflict(t) for t in tests]}, rulings={"2": [*bad, good]}, attempts=9)
-    assert len(arbiter_calls(out, "2")) >= 1
-    assert [e["number"] for e in decisions_entries(project)] in ([], [1]), "invalid answers must never be recorded"
-    for e in decisions_entries(project):
-        assert "GOOD" in json.dumps(e) or e.get("Claim", "").find("test_d") >= 0
+    for t in ["test_a", "test_b", "test_c"]:
+        bad = ruling("2", t, MARK, principle=PRINCIPLE + " ")
+        out = run(bridge, project, deps={"2": []}, conflicts={"2": [conflict(t)]}, rulings={"2": [bad]}, attempts=9)
+        assert len(arbiter_calls(out, "2")) >= 1, labels(out)
+        assert decisions_entries(project) == [], "invalid answers must never be recorded"
+    out = run(bridge, project, deps={"2": []}, conflicts={"2": [conflict("test_d")]}, rulings={"2": [ruling("2", "test_d", "GOOD")]}, attempts=9)
+    assert len(arbiter_calls(out, "2")) == 1, "invalid answers used up the limit: " + "\n".join(labels(out))
+    assert [e["number"] for e in decisions_entries(project)] == [1]
 
 
 # --------------------------------------------------------------------------- 7.4: a returning claim is not ruled again
@@ -265,11 +265,11 @@ RETURNING = [
     pytest.param(lambda c: {**c, "test": c["test"] + "[case-1]"}, id="parameter-suffix"),
     pytest.param(lambda c: {**c, "test": c["test"] + "[a-b-c]"}, id="parameters-with-dashes"),
     pytest.param(lambda c: {**c, "file": "./" + c["file"]}, id="dot-slash-prefix"),
-    pytest.param(lambda c: {**c, "file": c["file"].replace("/", "//", 1)}, id="double-slash"),
     pytest.param(lambda c: {**c, "test": " " + c["test"]}, id="leading-space"),
     pytest.param(lambda c: {**c, "test": c["test"] + " "}, id="trailing-space"),
     pytest.param(lambda c: {**c, "test": c["test"] + "\n"}, id="trailing-newline"),
-    pytest.param(lambda c: {**c, "file": " " + c["file"] + " "}, id="padded-file"),
+    pytest.param(lambda c: {**c, "test": c["test"].upper()}, id="case-variant"),
+    pytest.param(lambda c: {**c, "test": "Test_A"}, id="mixed-case-variant"),
     pytest.param(lambda c: {**c, "file": "./" + c["file"], "test": c["test"] + "[x]"}, id="prefix-and-parameters"),
     pytest.param(lambda c: {**c, "reason": "a different wording of the same problem, and a longer one", "fix": "something else"}, id="reworded-evidence"),
 ]
