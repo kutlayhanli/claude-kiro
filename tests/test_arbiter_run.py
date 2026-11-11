@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from arbiter_helpers import DEFAULT_TASKS, FAILURE_FORMS, arbiter_project, decisions_entries
+from arbiter_helpers import DEFAULT_TASKS, FAILURE_FORMS, arbiter_project, decisions_entries, seam
 from landing_bridge import bridge  # noqa: F401  (module-scoped fixture)
 
 JS = Path(__file__).parent / "js"
@@ -461,13 +461,17 @@ def test_tc7_the_arbiter_prompt_holds_the_text_of_both_layers(bridge, tmp_path):
 def test_tc9_a_ruling_naming_a_reservation_that_needs_a_design_edit_is_a_needs_input_entry_with_no_landing(bridge, tmp_path):  # noqa: F811
     project = arbiter_project(tmp_path, plan=RESERVES_PLAN)
     edited = "# Design: Demo\n\nA greeting, with a changed interface.\n"
-    answer = ruling("spec_edit", reservedBy="plan:reserves", changed="design.md: the interface changed")
+    parse_principles = seam("arbiter.effective_principles", "parse_principles")
+    reserved_by = next(p.id for p in parse_principles(RESERVES_PLAN.split("# Plan: Demo\n\n", 1)[1], "plan") if p.reserves)
+    answer = ruling("spec_edit", reservedBy=reserved_by, changed="design.md: the interface changed")
     opts = {**CONFLICT_OPTS, "rulings": {"1": [answer]}, "arbiterEdits": {"1": {"files": {"specs/demo/design.md": edited}}}}
     out = run(bridge, project, opts, agents=roles("haiku", ["opus"]))
     ev = out["events"]
     assert arbiter_calls(ev) == ["arbiter task 1"], ", ".join(ev)
     assert [str(e["task"]) for e in needs(out)] == ["1"], json.dumps(out["result"].get("needsInput"))
-    assert [e for e in ev if e.startswith("arbiter-land")] == [], "no landing ran: " + ", ".join(ev)
+    assert [e for e in ev if e.startswith(("arbiter-land", "land arbiter"))] == [], "no landing ran: " + ", ".join(ev)
+    assert "worktree land demo arbiter" not in argv_text(out), argv_text(out)
+    assert (project.target / "specs" / "demo" / "design.md").read_text() != edited, "design.md is unchanged"
     assert "interface" in json.dumps(needs(out)[0]) or "design.md" in json.dumps(needs(out)[0]), json.dumps(needs(out)[0])
 
 
@@ -499,7 +503,8 @@ def test_tc11_a_principles_file_that_is_missing_a_directory_or_unreadable_stops_
             if path.exists() and not path.is_dir():
                 path.chmod(0o644)
     ev = out["events"]
-    assert any_arbiter(ev) == [], "no arbiter label ran: " + ", ".join(ev)
+    assert [e for e in ev if e.startswith("arbiter task")] == [], "the arbiter agent did not run: " + ", ".join(ev)
+    assert "worktree land demo arbiter" not in argv_text(out), argv_text(out)
     entries = needs(out)
     assert len(entries) == 1, json.dumps(out["result"].get("needsInput"))
     assert "PRINCIPLES.md" in json.dumps(entries[0]), json.dumps(entries[0])
