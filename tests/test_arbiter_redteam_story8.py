@@ -128,7 +128,7 @@ def test_84_refusal_names_a_reason_and_leaves_the_arbiter_branch_landable(tmp_pa
     tip = edit_spec(wt, "tasks.md", "### Task 1: Greeting tests\n**Status:** Not Started", "### Task 1: Greeting tests\n**Status:** Done")
     before = head(p)
     entry = assert_not_landed(p, 1, ("REFUSED",), before)
-    assert entry.get("detail") or entry.get("reason") or entry.get("refusals"), "the landing result must say why: " + json.dumps(entry)
+    assert entry["detail"], "the landing result must say why: " + json.dumps(entry)
     from test_arbiter_land import git
 
     assert git(wt, "rev-parse", "HEAD").strip() == tip
@@ -186,8 +186,9 @@ def test_85_cycle_through_each_dependency_spelling(tmp_path, spelling):
         assert git(p.root, "rev-parse", INTO).strip() == head(p)
 
 
-def test_85_new_blocking_finding_created_by_a_target_move(tmp_path):
-    """The branch's edit is harmless alone; after the target moves, the combination is a verify cycle (a new finding)."""
+def test_85_an_edit_beside_a_verify_cycle_the_target_already_has_adds_none(tmp_path):
+    """The target moves to a verify cycle after the branch was cut. The branch's edit adds no finding of its own, so it
+    may land, and must leave the target's finding as it was; if it is refused the target does not move."""
     from test_arbiter_land import PERF, perf_tasks
     from arbiter_helpers import ck_run
 
@@ -223,12 +224,21 @@ def test_85_new_verify_cycle_in_every_resolvable_surface_form(tmp_path, verify):
 # =========================================================================== 8.6: Status fields and acceptance marks
 
 
-@pytest.mark.parametrize("new", ["Done", "In Progress", "Blocked", "done", "DONE", "Done  ", "  Done", "Done\t", "Not started"])
+@pytest.mark.parametrize("new", ["Done", "In Progress", "Blocked", "done", "DONE", "Done  ", "  Done", "Done\t"])
 def test_86_a_status_value_change_in_any_form(tmp_path, new):
     p = arbiter_project(tmp_path, tasks=tasks_text())
     wt = arbiter_wt(p)
     edit_spec(wt, "tasks.md", "### Task 2: Greeting\n**Status:** Not Started", f"### Task 2: Greeting\n**Status:** {new}")
     assert_not_landed(p, 1, ("REFUSED",), head(p))
+
+
+def test_86_a_case_only_change_of_the_same_status_value_is_either_outcome(tmp_path):
+    """Whether `Not started` for `Not Started` is a change is a reading of 8.6; either reading is allowed, a half-landing is not."""
+    p = arbiter_project(tmp_path, tasks=tasks_text())
+    wt = arbiter_wt(p)
+    edit_spec(wt, "tasks.md", "### Task 2: Greeting\n**Status:** Not Started", "### Task 2: Greeting\n**Status:** Not started")
+    done, entry = land(p)
+    assert entry["state"] in ("MERGED", "REFUSED"), entry
 
 
 @pytest.mark.parametrize("old,new", [("Not Started", "In Progress"), ("In Progress", "Not Started"), ("Done", "In Progress"), ("Done", "Not Started")])
@@ -362,9 +372,8 @@ def test_86_a_mark_flipped_in_the_same_commit_as_an_allowed_edit(tmp_path):
     assert_not_landed(p, 1, ("REFUSED",), head(p))
 
 
-def test_86_the_flip_split_over_two_commits_is_still_one_diff(tmp_path):
-    """The mark flips in the first commit and flips back in the second: the branch's net change is none and may land;
-    flipping in the first and doing an allowed edit in the second is still a net flip and is refused."""
+def test_86_a_flip_in_one_commit_and_an_allowed_edit_in_the_next_is_still_a_net_flip(tmp_path):
+    """Flipping the mark in the first commit and doing an allowed edit in the second is still a net flip and is refused."""
     p = arbiter_project(tmp_path, tasks=three())
     wt = arbiter_wt(p)
     edit_spec(wt, "tasks.md", "- [ ] done it", "- [x] done it", "tick")
@@ -384,8 +393,8 @@ def test_86_control_text_that_only_mentions_a_status_or_a_mark_lands(tmp_path, o
     assert_lands(p)
 
 
-def test_86_the_refusal_covers_every_spec_file_the_arbiter_may_touch(tmp_path):
-    """A Status line smuggled into design.md or test-plan.md is no task's Status; but a status flip in tasks.md beside it is."""
+def test_86_a_status_line_and_mark_in_design_md_is_no_task_status_and_lands(tmp_path):
+    """A Status line and a checked box added to design.md are no task's Status or mark, so the edit lands."""
     p = arbiter_project(tmp_path, tasks=three())
     wt = arbiter_wt(p)
     rewrite(wt, "design.md", lambda t: t + "\n**Status:** Done\n- [x] a note\n")
@@ -466,11 +475,11 @@ def test_812_the_same_issue_on_another_file_is_a_different_finding(bridge, other
     assert remaining == [BASE_ISSUE], out
 
 
-def test_812_a_minor_finding_is_never_the_blocker_and_a_blocking_one_beside_it_stays(bridge):  # noqa: F811
+def test_812_a_different_blocking_finding_beside_a_settled_one_stays(bridge):  # noqa: F811
     other = "an unrelated blocking problem"
     out, remaining = settle(bridge, [finding(), finding(issue=other)], [ident("tests/test_a.py", BASE_ISSUE)])
     assert remaining == [other], out
-    assert all(f["severity"] == "blocking" for f in out["findings"] if f["issue"] == other)
+    assert all(f["severity"] == "blocking" for f in out["findings"] if f["issue"] == other)  # it is passed through unchanged
 
 
 def test_812_no_settled_findings_removes_nothing_and_settledby_alone_is_not_a_match_on_an_empty_set(bridge):  # noqa: F811
@@ -501,6 +510,9 @@ AGENTS = {
     "resolver": {"model": "sonnet"},
 }
 RULING_PRINCIPLE = "project:test-intent"
+FAILURE = {"node": "tests/test_greet.py::test_greet", "tcId": "TC-1", "kind": "assertion"}
+# design.md, Claim identity: `<task>|gate:<sorted failing ids>`, a test id keeping what follows the last `::`, lowercased.
+CLAIM = "1|gate:test_greet"
 
 
 def run_with_ruling(bridge, tmp_path, *, escalate, fail_until, max_retries, ruled=True):  # noqa: F811
@@ -508,9 +520,9 @@ def run_with_ruling(bridge, tmp_path, *, escalate, fail_until, max_retries, rule
     tasks = (p.target / "specs/demo/tasks.md").read_text()
     edited = tasks.replace("**Description:** Print the greeting.", "**Description:** Print the greeting, as 1.1 says.")
     implementer = {**AGENTS["implementer"], **({"escalate": escalate} if escalate else {})}
-    project = {"deps": {"1": []}, "failUntil": {"1": fail_until}}
+    project = {"deps": {"1": []}, "failUntil": {"1": fail_until}, "taskFailures": {"1": [FAILURE]}}
     if ruled:
-        project["rulings"] = {"1": [{"claim": "1|gate-failure", "status": "ruled", "outcome": "spec_edit", "reasoning": "the spec was wrong",
+        project["rulings"] = {"1": [{"claim": CLAIM, "status": "ruled", "outcome": "spec_edit", "reasoning": "the spec was wrong",
                                       "principle": RULING_PRINCIPLE, "changed": "tasks.md: Task 1 description"}]}
         project["arbiterEdits"] = {"1": {"files": {"specs/demo/tasks.md": edited}}}
     args = {**p.run_args, "spec": "demo", "agents": {**AGENTS, "implementer": implementer, "arbiter": {"model": "opus", "effort": "high", "risky_model": "opus", "risky_effort": "max"}},
@@ -540,12 +552,12 @@ def test_82_a_ruling_after_the_top_escalated_model_failed_adds_no_escalation_and
     assert task["attempts"] == 4, task
 
 
-def test_82_the_resumed_attempt_runs_against_the_changed_spec_and_a_second_failure_is_not_forgiven(bridge, tmp_path):  # noqa: F811
+def test_82_a_second_failure_after_the_ruling_is_not_forgiven_and_is_not_ruled_again(bridge, tmp_path):  # noqa: F811
     """The ruling forgives nothing else: when the resumed attempt fails too, the task is not retried again on the ruling's account."""
     out, labels = run_with_ruling(bridge, tmp_path, escalate=None, fail_until=9, max_retries=1)
     [task] = [t for t in out["result"]["tasks"] if t["task"] == "1"]
     assert task["ok"] is False, task
-    assert task["attempts"] <= 4, task  # two configured, one resumed, at most one more the ruling's resume may be given; never an open loop
+    assert task["attempts"] <= 4, task  # two configured, one resumed, at most one more; never an open loop
     assert labels.count("arbiter task 1") <= 2, labels  # the same claim is never ruled again (7.3)
 
 
