@@ -16,6 +16,7 @@ nothing.
 import ast
 import hashlib
 import json
+import posixpath
 import re
 import tomllib
 from dataclasses import dataclass, field
@@ -99,7 +100,8 @@ class SpecGraph:
 
 def _norm_entry(raw: str) -> str:
     """A Files entry as written -> the path or glob it names: backticks, a leading "./" and " - reason" are dropped,
-    and a trailing "/" means everything under that directory ("dir/**")."""
+    a trailing "/" means everything under that directory ("dir/**"), and the path is normalised as POSIX does
+    (`//` collapsed, `.` and `..` segments resolved), so two spellings of one path name the same file (13.1)."""
     s = raw.strip()
     if s.startswith("`"):
         end = s.find("`", 1)
@@ -110,6 +112,8 @@ def _norm_entry(raw: str) -> str:
         s = s[2:]
     if s.endswith("/"):
         s += "**"
+    if s:
+        s = posixpath.normpath(s)
     return s
 
 
