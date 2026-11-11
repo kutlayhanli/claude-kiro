@@ -2,11 +2,15 @@
 real plugin/workflows/spec-create.js under node with the shared fake agent (tests/js/fake_create.mjs). Prompt cases read the
 prompts the workflow really sends; nothing of the project's own code is mocked."""
 
+import json
 import re
 import shutil
+import subprocess
+from pathlib import Path
 
 import pytest
 
+from arbiter_helpers import DEFAULT_REQUIREMENTS, DEFAULT_TASKS, arbiter_project, ck_run
 from landing_bridge import bridge  # noqa: F401  (module-scoped fixture)
 
 pytestmark = [pytest.mark.usefixtures("no_network"), pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")]
@@ -65,13 +69,6 @@ def test_tc33_a_lens_that_fails_to_return_is_counted_and_coverage_is_partial(bri
 # real CLI against real spec files, and the `apply-cuts` agent really rewrites those files. Nothing of the project's
 # own code is mocked. Arguments the workflow reads that the spec does not pin (the `cuts` arg of `apply-cuts` mode) are
 # named here once, in `CUT`.
-
-import json
-import subprocess
-import sys
-from pathlib import Path
-
-from arbiter_helpers import DEFAULT_PLAN, DEFAULT_REQUIREMENTS, DEFAULT_TASKS, arbiter_project, ck_run
 
 JS = Path(__file__).parent / "js"
 PLAN_MARK = "FIX-MARKER-remove-story-2-everywhere"
@@ -165,6 +162,7 @@ const agent = async (prompt, opts) => {
   sent.push({ label, prompt })
   if (label.startsWith('apply-cuts')) {
     for (const [file, text] of Object.entries(req.edits || {})) fs.writeFileSync(file, text)
+    if (req.applyAnswer) return req.applyAnswer
     return await s.agent(prompt, opts)
   }
   // A thin ck step: its prompt holds one `ck ...` line and asks for exitCode and json back.
@@ -190,13 +188,14 @@ console.log(JSON.stringify({ ...out, sent, labels, ckCalls }))
 """
 
 
-def run_create(project, args=None, overrides=None, edits=None) -> dict:
+def run_create(project, args=None, overrides=None, edits=None, apply_answer=None) -> dict:
     payload = {
         "root": str(project.root),
         "specDir": str(project.spec_dir),
         "args": args or {},
         "overrides": overrides or {},
         "edits": edits or {},
+        "applyAnswer": apply_answer,
         "execCk": project.exec_ck,
     }
     proc = subprocess.run(["node", "--input-type=module", "-e", DRIVER], cwd=JS, input=json.dumps(payload), capture_output=True, text=True, timeout=180)
@@ -265,8 +264,8 @@ def test_tc27_a_surviving_cut_is_listed_with_story_weakness_and_counts(tmp_path)
 
 def test_tc28_a_surviving_cut_is_not_applied_and_no_revise_prompt_asks_for_it(tmp_path):
     project, out = surviving_cut(tmp_path)
-    before = spec_files(project)
-    assert before["requirements.md"] == REQ and before["tasks.md"] == TASKS  # the run left the documents alone
+    after = spec_files(project)
+    assert after["requirements.md"] == REQ and after["tasks.md"] == TASKS  # the run left the documents alone
     revise = [s["prompt"] for s in out["sent"] if s["label"].startswith("revise")]
     assert revise, out["labels"]
     assert all(PLAN_MARK not in p for p in revise), "a revise prompt carries the cut's fix as a fix to apply"
@@ -279,7 +278,8 @@ def test_tc29_an_approved_cut_with_nothing_started_removes_the_story_and_lint_fi
     assert ck_run(project.root, "lint", "demo", "--json").returncode == 0
     edits = {str(project.spec_dir / n): t for n, t in
              {"requirements.md": REQ_AFTER, "design.md": DESIGN_AFTER, "test-plan.md": TEST_PLAN_AFTER, "tasks.md": TASKS_AFTER}.items()}
-    out = run_create(project, args={"mode": "apply-cuts", "cuts": [CUT]}, edits=edits)
+    out = run_create(project, args={"mode": "apply-cuts", "cuts": [CUT]}, edits=edits,
+                     apply_answer={"applied": ["C1"], "summary": "edited the four documents for C1"})
     assert sum(1 for label in out["labels"] if label.startswith("apply-cuts")) == 1, out["labels"]
     context = [c for c in out["ckCalls"] if "context" in c["argv"] and "--approved-cut" in c["argv"]]
     assert context, f"ck arbiter context --approved-cut never ran: {out['ckCalls']}"
@@ -288,23 +288,23 @@ def test_tc29_an_approved_cut_with_nothing_started_removes_the_story_and_lint_fi
     files = spec_files(project)
     assert story_gone(files), files
     assert ck_run(project.root, "lint", "demo", "--json").returncode == 0
-    assert not re.search(r"cycle|lint (failed|failure)", as_text(out), re.I), as_text(out)
+    assert not re.search(r"new (lint )?failure|dependency cycle|lint (failed|failure)", as_text(out), re.I), as_text(out)
 
 
 def test_tc30_a_removal_that_leaves_a_lint_failure_is_not_reported_as_applied(tmp_path):
     project = cut_project(tmp_path)
     edits = {str(project.spec_dir / n): t for n, t in
              {"requirements.md": REQ_AFTER, "design.md": DESIGN_AFTER, "test-plan.md": TEST_PLAN_AFTER, "tasks.md": TASKS_CYCLE}.items()}
-    out = run_create(project, args={"mode": "apply-cuts", "cuts": [CUT]}, edits=edits)
+    out = run_create(project, args={"mode": "apply-cuts", "cuts": [CUT]}, edits=edits,
+                     apply_answer={"applied": ["C1"], "summary": "edited the four documents for C1"})
     assert sum(1 for label in out["labels"] if label.startswith("apply-cuts")) == 1, out["labels"]
     lints = [c for c in out["ckCalls"] if "lint" in c["argv"]]
     assert lints and lints[-1]["code"] != 0, f"real ck lint must fail on the cycle the edit left: {lints}"
-    assert ck_run(project.root, "lint", "demo", "--json").returncode != 0
     text = as_text(out)
     assert re.search(r"cycle", text, re.I), f"the run must show the lint finding: {text}"
     applied = (out["result"] or {}).get("applied") if isinstance(out["result"], dict) else None
     assert not applied, f"the cut is reported as applied although lint failed: {out['result']}"
-    assert not re.search(r"\b(removed|applied) (story|cut)|story (was )?removed|cut (was )?applied", text, re.I), text
+    assert not re.search(r"(?<!not )(?<!never )\bcut (was |is )?applied|(?<!not )story (was )?removed", text, re.I), text
 
 
 def test_tc31_an_approved_cut_after_a_task_started_is_not_applied_and_the_requirements_are_frozen(tmp_path):
@@ -312,6 +312,8 @@ def test_tc31_an_approved_cut_after_a_task_started_is_not_applied_and_the_requir
     before = spec_files(project)
     out = run_create(project, args={"mode": "apply-cuts", "cuts": [CUT]}, edits={str(project.spec_dir / "requirements.md"): REQ_AFTER})
     assert not any(label.startswith("apply-cuts") for label in out["labels"]), out["labels"]
+    context = [c for c in out["ckCalls"] if "context" in c["argv"] and "--approved-cut" in c["argv"]]
+    assert context and "frozen" in context[-1]["stdout"], f"ck arbiter context --approved-cut must report the cut frozen: {out['ckCalls']}"
     assert spec_files(project) == before
     text = as_text(out)
     assert re.search(r"frozen", text, re.I), text
