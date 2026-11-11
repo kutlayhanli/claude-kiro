@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import json
+import re
 import os
 from dataclasses import fields, replace
 from datetime import datetime, timezone
@@ -421,3 +422,223 @@ def record_ruling(root: Path, spec: str, into: str, record: RulingRecord, lock_w
                 path.write_text(existing, encoding="utf-8")
             raise
     return {"number": number, "commit": sha}
+
+
+# --------------------------------------------------------------------------- /spec:create review (Task 43)
+
+_RESULT_LINE = re.compile(r"^\*\*Result:\*\*.*$", re.MULTILINE)
+_DECISION_HEAD = re.compile(r"^## Needs Your Decision[ \t]*$", re.MULTILINE)
+_NEXT_HEAD = re.compile(r"^## ", re.MULTILINE)
+
+
+def implementation_started(checkout: Path, spec: str) -> bool:
+    """Any task of the spec In Progress or Done (the guard's own rule)."""
+    from .hooks._shared.spec_parser import parse_tasks
+
+    return any(t.in_progress or t.done for t in parse_tasks(Path(checkout) / "specs" / spec / "tasks.md"))
+
+
+def create_context(checkout: Path, spec: str, approved_cut: bool) -> Dict[str, Any]:
+    """`ck arbiter context` for /spec:create: both principle layers, whether implementation has started,
+    the unusable principles file when there is one, and `decide_cut` for the approval flag."""
+    from .arbiter_policy import decide_cut
+
+    state, project_text = read_principles(checkout / PRINCIPLES_REL)
+    plan_text = _plan_text(checkout, spec)
+    project = parse_principles(project_text, "project") if state == "ok" else []
+    plan = parse_principles(plan_text, "plan") if plan_text is not None else None
+    effective = effective_principles(project, plan)
+    started = implementation_started(checkout, spec)
+    return {
+        "principles": [{"id": p.id, "layer": p.layer, "text": p.text} for p in effective.citable],
+        "planLayer": effective.plan_layer,
+        "implementationStarted": started,
+        "missing": str(PRINCIPLES_REL) if state != "ok" else None,
+        "cut": decide_cut(bool(approved_cut), started),
+    }
+
+
+def _subject_id(subject: Any) -> Optional[str]:
+    if isinstance(subject, dict):
+        value = subject.get("id")
+        return str(value) if isinstance(value, (str, int)) and str(value) else None
+    if isinstance(subject, (str, int)) and str(subject):
+        return str(subject)
+    return None
+
+
+def _subject_text(subject: Any) -> str:
+    if isinstance(subject, dict):
+        for k in ("problem", "title", "text", "claim", "weakness"):
+            if isinstance(subject.get(k), str) and subject[k].strip():
+                return subject[k]
+    return str(subject if not isinstance(subject, dict) else subject.get("id", ""))
+
+
+def _entries_of(output: Any) -> Optional[List[Any]]:
+    """The list of per-subject entries in the arbiter's output, or None when there is none to read."""
+    if isinstance(output, str):
+        try:
+            output = json.loads(output)
+        except ValueError:
+            return None
+    if isinstance(output, dict) and isinstance(output.get("rulings"), list):
+        output = output["rulings"]
+    return output if isinstance(output, list) else None
+
+
+def _append_drift(text: str, rows: List[Dict[str, Any]], decisions: List[Dict[str, Any]], result: Optional[str]) -> str:
+    """review.md with the drift rows, the `requirements` items in Needs Your Decision, and the Result line."""
+    def cell(s: Any) -> str:
+        return " ".join(str(s).split()).replace("|", "\\|")
+
+    if decisions:
+        lines = [
+            f"| {cell(d['id'])} | {cell(d['reasoning'])} | (a) Change PLAN.md to match; (b) leave the spec as it is | "
+            f"PLAN.md | arbiter drift check |"
+            for d in decisions
+        ]
+        head = _DECISION_HEAD.search(text)
+        if head is None:
+            text = text.rstrip("\n") + "\n\n## Needs Your Decision\n| ID | Question | Options | Conflicts with | Raised by |\n|---|---|---|---|---|\n" + "\n".join(lines) + "\n"
+        else:
+            nxt = _NEXT_HEAD.search(text, head.end())
+            end = nxt.start() if nxt else len(text)
+            section = text[head.end():end].rstrip("\n")
+            text = text[:head.end()] + section + "\n" + "\n".join(lines) + "\n" + ("\n" if nxt else "") + text[end:]
+    if rows:
+        body = "\n".join(
+            f"| {cell(r['id'])} | {cell(r['action'])} | {cell(r['outcome'])} | {cell(r['principle'])} | {cell(r['reasoning'])} |"
+            for r in rows
+        )
+        text = text.rstrip("\n") + "\n\n## Drift\n| ID | Action | Outcome | Principle | Reasoning |\n|---|---|---|---|---|\n" + body + "\n"
+    if result is not None:
+        line = f"**Result:** {result}"
+        if _RESULT_LINE.search(text):
+            text = _RESULT_LINE.sub(lambda _m: line, text, count=1)
+        else:
+            text = line + "\n\n" + text
+    return text
+
+
+def _decision_rows(text: str) -> bool:
+    head = _DECISION_HEAD.search(text)
+    if head is None:
+        return False
+    nxt = _NEXT_HEAD.search(text, head.end())
+    body = text[head.end(): nxt.start() if nxt else len(text)]
+    rows = [l for l in body.splitlines() if l.strip().startswith("|")]
+    return len([l for l in rows if not set(l.replace("|", "").strip()) <= set("-: ")]) > 1
+
+
+def review_step(root: Path, checkout: Path, spec: str, into: str, step: str, tier: str,
+                payload: Any, lock_wait: float = 120.0) -> Dict[str, Any]:
+    """`ReviewResult` for one /spec:create step. Each entry is validated and routed on its own, so a malformed
+    entry loses only its subject. Every applied ruling is recorded like a run's, with the commit as none."""
+    from .arbiter_policy import route_create_ruling, validate_ruling
+
+    if step not in ("refuted", "cuts", "drift"):
+        raise ArbiterError("step must be refuted, cuts or drift")
+    if tier not in ("normal", "risky"):
+        raise ArbiterError("tier must be normal or risky")
+    if not isinstance(payload, dict):
+        raise ArbiterError("stdin must be a JSON object with subjects, output and lostSteps")
+    subjects = payload.get("subjects") or []
+    lost_steps = payload.get("lostSteps") or []
+    if not isinstance(subjects, list) or not isinstance(lost_steps, list):
+        raise ArbiterError("subjects and lostSteps must be lists")
+
+    state, project_text = read_principles(checkout / PRINCIPLES_REL)
+    plan_text = _plan_text(checkout, spec)
+    project = parse_principles(project_text, "project") if state == "ok" else []
+    plan = parse_principles(plan_text, "plan") if plan_text is not None else None
+    effective = effective_principles(project, plan)
+    citable = {p.id: p for p in effective.citable}
+    started = implementation_started(checkout, spec)
+
+    # A principles file that cannot be read means the arbiter was never usable: nothing is ruled (1.12).
+    entries = _entries_of(payload.get("output")) if state == "ok" else None
+
+    by_id: Dict[str, Tuple[Any, Any]] = {}
+    if entries is not None:
+        for entry in entries:
+            if isinstance(entry, dict):
+                ident = entry.get("claim", entry.get("id"))
+                if isinstance(ident, (str, int)) and str(ident) and str(ident) not in by_id:
+                    by_id[str(ident)] = entry
+    # With no subjects named (the drift step), the arbiter names its own items.
+    items: List[Tuple[str, Any]] = []
+    for s in subjects:
+        ident = _subject_id(s)
+        if ident is not None:
+            items.append((ident, s))
+    if not items:
+        items = [(i, {"id": i}) for i in by_id]
+
+    results: List[Dict[str, Any]] = []
+    drift_rows: List[Dict[str, Any]] = []
+    decisions: List[Dict[str, Any]] = []
+    for ident, subject in items:
+        entry = by_id.get(ident)
+        key = f"{spec}|{step}:{ident}"
+        if entry is None:
+            results.append({"id": ident, "action": "lost", "reason": "no-ruling", "stronger": False, "ruling": None})
+            continue
+        raw = dict(entry)
+        raw["claim"] = key
+        check = validate_ruling(raw, key, citable, "create")
+        route = route_create_ruling(check, step, started)  # type: ignore[arg-type]
+        action, reason = route.action, route.reason
+        if action == "rerun" and tier == "risky":
+            action, reason = "lost", "exhausted"
+        ruling_no: Optional[int] = None
+        if route.record and action != "lost":
+            principle = citable[check.principle] if check.principle else None
+            changed = "nothing"
+            if action == "edit":
+                changed = str(entry.get("changed") or "requirements.md wording")
+            record = RulingRecord(
+                trigger=f"create-{step}", claim_key=key, claim_text=_subject_text(subject), task=None, tier=tier,  # type: ignore[arg-type]
+                outcome=check.outcome or "spec_edit", reasoning=str(raw.get("reasoning", "")),
+                principle_id=check.principle or "", principle_text=principle.text if principle else "",
+                plan_layer=effective.plan_layer, changed=changed, moved=(), commit=None, landed=None,
+            )
+            try:
+                ruling_no = int(record_ruling(root, spec, into, record, lock_wait)["number"])
+            except (ArbiterError, wt.WorktreeError, OSError) as exc:
+                action, reason, ruling_no = "lost", f"record-failed: {exc}", None
+        results.append({
+            "id": ident, "action": action, "reason": reason,
+            "stronger": check.stronger_look, "ruling": ruling_no,
+        })
+        if step == "drift" and action in ("edit", "report", "settled"):
+            drift_rows.append({"id": ident, "action": action, "outcome": check.outcome or "",
+                               "principle": check.principle or "", "reasoning": str(raw.get("reasoning", ""))})
+            if check.outcome == "requirements":
+                decisions.append({"id": ident, "reasoning": str(raw.get("reasoning", ""))})
+
+    lost = (not items and step != "drift") or any(r["action"] == "lost" for r in results)
+    if payload.get("output") is None or entries is None:
+        lost = True
+
+    if step == "drift":
+        review = checkout / "specs" / spec / "review.md"
+        text = review.read_text(encoding="utf-8") if review.is_file() else f"# Spec Review: {spec}\n\n"
+        if state != "ok":
+            drift_rows.append({"id": "principles", "action": "lost", "outcome": "", "principle": "",
+                               "reasoning": f"{PRINCIPLES_REL} is missing or unreadable; run `ck principles init`. The check did not run."})
+        elif lost and not drift_rows:
+            drift_rows.append({"id": "drift", "action": "lost", "outcome": "", "principle": "",
+                               "reasoning": "the drift check did not run or returned nothing valid"})
+        new_text = _append_drift(text, drift_rows, decisions, None)
+        if lost or lost_steps:
+            result = "Needs work"
+        elif _decision_rows(new_text):
+            result = "Ready after decisions"
+        else:
+            result = None
+        new_text = _append_drift(new_text, [], [], result) if result else new_text
+        review.parent.mkdir(parents=True, exist_ok=True)
+        review.write_text(new_text, encoding="utf-8")
+
+    return {"results": results, "lost": lost}

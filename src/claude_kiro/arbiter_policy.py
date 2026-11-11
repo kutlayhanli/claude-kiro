@@ -514,3 +514,43 @@ def rulings_summary(rulings: Sequence[Mapping]) -> Mapping:
 
     return {"total": len(rulings), "byTrigger": count("trigger"), "byOutcome": count("outcome"),
             "byTier": count("tier")}
+
+
+# --------------------------------------------------------------------------- /spec:create rules (Task 43)
+
+
+@dataclass(frozen=True)
+class CreateRoute:
+    """What `/spec:create` does with one checked ruling. `action` is `settled` (the finding or cut is handled as
+    the ruling says, nothing in the spec changes), `edit` (a wording correction, not-started specs only),
+    `report` (goes to me, never applied), `rerun` (one re-run at the risky tier) or `lost` (the check did not run)."""
+
+    action: Literal["settled", "edit", "report", "rerun", "lost"]
+    reason: str  # "" | "invalid-ruling" | "requirements" | "frozen" | "not-a-create-outcome"
+    record: bool  # whether this answer becomes a numbered ruling
+
+
+def route_create_ruling(check: RulingCheck, step: Step, started: bool) -> CreateRoute:
+    """Sends a checked `/spec:create` ruling to one action. Anything that adds, removes or changes what PLAN.md
+    decided is `requirements` and is reported, never applied (11.6, 11.10). A wording correction is allowed only
+    while implementation has not started (11.5, 11.7)."""
+    if not check.valid:
+        return CreateRoute("lost", "invalid-ruling", False)
+    if check.stronger_look:
+        return CreateRoute("rerun", "", False)
+    if check.outcome == "requirements":
+        return CreateRoute("report", "requirements", True)
+    if check.outcome == "spec_edit":
+        if step == "drift" and started:
+            return CreateRoute("report", "frozen", True)
+        return CreateRoute("edit" if step == "drift" else "settled", "", True)
+    # code and test_repair do not exist during /spec:create: nothing is applied
+    return CreateRoute("report", "not-a-create-outcome", True)
+
+
+def decide_cut(approved: bool, started: bool) -> Literal["apply", "hold", "frozen"]:
+    """`apply` only when I approved the cut and implementation has not started; `frozen` when I approved it
+    after it started (the change is mine to make); else `hold` (4.3-4.5)."""
+    if not approved:
+        return "hold"
+    return "frozen" if started else "apply"
