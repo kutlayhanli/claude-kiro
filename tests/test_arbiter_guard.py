@@ -570,8 +570,13 @@ def test_p24_only_the_arbiter_type_with_an_agent_id_is_the_arbiter(agent_id, age
         bare = {"session_id": "s", "cwd": "/x", "tool_name": "Write", "tool_input": {}}
         if has_id:
             bare["agent_id"] = agent_id
-        with mock.patch.dict(os.environ, {}, clear=False):
-            assert is_arbiter(bare) is False
+        assert is_arbiter(bare) is False
+        for key, val in (("subagent_type", "ck-arbiter"), ("caller", "arbiter"), ("agent", "ck-arbiter"),
+                         ("role", "spec:arbiter")):
+            near = dict(data)
+            near.pop("agent_type", None)
+            near[key] = val
+            assert is_arbiter(near) is False, near
     for other in (None, "ck-arbiter", 7, [], ["agent_type", "ck-arbiter"]):
         assert is_arbiter(other) is False
 
@@ -647,7 +652,7 @@ WRITE_FORMS = ["rm {p}", "git rm {p}", "git rm -f {p}", "mv {p} {p}.bak", "mv {p
                "echo x | tee {p}", "echo x | tee -a {p}", "cp specs/demo/design.md {p}", "sed -i s/a/b/ {p}",
                "perl -i -pe s/a/b/ {p}", "python -c \"open('{p}','w').write('x')\"", "truncate -s 0 {p}",
                "dd if=/dev/zero of={p} count=1"]
-READ_FORMS = ["cat {p}", "head -n 3 {p}", "grep -n x {p}", "ls -l {p}", "wc -l {p}"]
+READ_FORMS = ["cat {p}", "head -n 3 {p}", "grep -c '' {p}", "ls -l {p}", "wc -l {p}"]
 
 
 @st.composite
