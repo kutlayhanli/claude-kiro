@@ -9,8 +9,10 @@
   scope findings and justification findings set `exit_nonzero`; warnings do
   not. Only verify-scope findings are `launch_blockers`.
 
-Pure functions over parsed tasks and plain result mappings: no project code
-is imported, and no file is read (NFR: lint imports no project code).
+`scope_findings` and `dedupe_scope` are pure over a `SimInput`. `load_sim_input`
+is the only reader: it parses tasks.md and the test files with `ast` and text,
+never imports or runs a test file, and uses no network (NFR: lint imports no
+project code under test).
 """
 
 import ast
