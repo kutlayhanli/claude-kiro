@@ -188,5 +188,6 @@ def test_tc41_redteam_the_claim_twice_in_one_attempt_spelled_two_ways_costs_two_
     twice = [CONFLICT, REPEAT_SPELLINGS["dot-slash"], REPEAT_SPELLINGS["upper"]]
     out = run(bridge, p, [FIRST, risky(), risky()], conflicts=twice)
     calls = arbiter_calls(out)
+    assert calls[:1] == ["arbiter task 1"], f"the claim never reached the arbiter: {calls}"
     assert len(calls) <= 2, f"one claim spelled three ways made {len(calls)} arbiter calls: {calls}"
     assert parked(out)
