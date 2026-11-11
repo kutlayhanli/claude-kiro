@@ -833,20 +833,21 @@ def after(ev, label):
 
 def test_tc62_after_a_spec_edit_lands_the_task_resumes_with_attempts_and_escalations_as_before(bridge, tmp_path):  # noqa: F811
     project = arbiter_project(tmp_path)
-    opts = {**CONFLICT_OPTS, "rulings": {"1": [SPEC_EDIT]}, "arbiterEdits": {"1": {"files": {"specs/demo/tasks.md": REWIRED}}}}
+    opts = {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT, "attempts": 1}}, "failUntil": {"1": 99},
+            "rulings": {"1": [SPEC_EDIT, REQ]}, "arbiterEdits": {"1": {"files": {"specs/demo/tasks.md": REWIRED}}}}
     out = run(bridge, project, opts, agents=roles("haiku", ["opus"]))
     ev = out["events"]
-    assert arbiter_calls(ev) == ["arbiter task 1"], ", ".join(ev)
+    assert arbiter_calls(ev)[0] == "arbiter task 1", ", ".join(ev)
     assert (project.target / "specs" / "demo" / "tasks.md").read_text() == REWIRED, "the spec edit landed on the integration branch"
     resumed = [e for e in after(ev, "arbiter task 1") if re.match(r"^task 1( |$)", e) and not e.endswith(" end")]
-    assert len(resumed) == 1, "the task resumed once after the landing: " + ", ".join(ev)
-    assert models_of(out) == ["haiku", "haiku"], "no escalation was spent by the ruling: " + ", ".join(ev)
-    assert "(opus)" not in resumed[0], resumed[0]
-    assert not needs(out), json.dumps(out["result"].get("needsInput"))
-    assert out["result"]["merged"] == ["1"]
+    assert resumed, "the task resumed after the landing: " + ", ".join(ev)
+    assert "(opus)" not in resumed[0], "the resume itself spent no escalation: " + resumed[0]
+    # The conflicting attempt, the resume, then the whole ladder as a run with no ruling has it: retry 1, then opus.
+    assert models_of(out) == ["haiku", "haiku", "haiku", "opus"], ", ".join(ev)
     plain = arbiter_project(tmp_path / "plain")
-    base = run(bridge, plain, {"deps": {"1": []}, "failUntil": {"1": 1}}, agents=roles("haiku", ["opus"]))
-    assert models_of(base) == models_of(out), "the resumed run climbs the ladder as a plain first failure does"
+    base = run(bridge, plain, {"deps": {"1": []}, "failUntil": {"1": 99}, "rulings": {"1": [REQ]}}, agents=roles("haiku", ["opus"]))
+    assert models_of(base) == ["haiku", "haiku", "opus"], ", ".join(base["events"])
+    assert models_of(out)[2:] == models_of(base)[1:], "the ruling spent neither a retry nor an escalation"
 
 
 def test_tc63_a_landed_edit_that_adds_a_dependency_on_a_not_started_task_changes_the_next_plans_schedule(bridge, tmp_path):  # noqa: F811
@@ -859,11 +860,18 @@ def test_tc63_a_landed_edit_that_adds_a_dependency_on_a_not_started_task_changes
 
     before = schedule()
     assert "3" in before["ready"], "task 3 is schedulable before the edit: " + json.dumps(before)
+    # One slot: task 1 (the longest chain) runs alone, so task 3 has not started when the ruling lands.
     opts = {"deps": {"1": [], "2": ["1"], "3": []}, "testConflicts": {"1": {"conflict": CONFLICT}}, "rulings": {"1": [SPEC_EDIT]},
             "arbiterEdits": {"1": {"files": {"specs/demo/tasks.md": THREE_REWIRED}}}}
-    out = run(bridge, project, opts, agents=roles("haiku", ["opus"]))
-    assert arbiter_calls(out["events"]) == ["arbiter task 1"], ", ".join(out["events"])
+    out = run(bridge, project, opts, agents=roles("haiku", ["opus"]), maxConcurrent=1)
+    ev = out["events"]
+    assert arbiter_calls(ev) == ["arbiter task 1"], ", ".join(ev)
     assert (project.target / "specs" / "demo" / "tasks.md").read_text() == THREE_REWIRED, "the edit landed"
+    landed = ev.index("arbiter task 1")
+    first_three = ev.index(attempts(ev, "3")[0]) if attempts(ev, "3") else len(ev)
+    assert first_three > landed, "task 3 had not started when the edit landed: " + ", ".join(ev)
+    replans = [e for e in ev[landed + 1:first_three] if re.match(r"^plan \d+", e)]
+    assert replans, "the workflow planned again after the landing and before task 3 started: " + ", ".join(ev)
     later = schedule()
     assert later != before, "the next plan differs"
     assert "3" not in later["ready"], "task 3 now waits on task 2: " + json.dumps(later)
@@ -941,7 +949,7 @@ def test_tc146_a_different_blocking_finding_gets_its_own_ruling_a_settled_one_ra
 
 def test_tc210_a_review_deadlock_ruled_test_repair_goes_to_the_fixer_and_the_task_is_reviewed_again_with_no_revision_or_attempt_spent(bridge, tmp_path):  # noqa: F811
     project = arbiter_project(tmp_path)
-    opts = {"deps": {"1": []}, "reviews": {"1": [deadlock(F1)] * 2}, "rulings": {"1": [ruling("test_repair"), REQ]},
+    opts = {"deps": {"1": []}, "reviews": {"1": [deadlock(F1)] * 2}, "rulings": {"1": [ruling("test_repair", testRepair={**ruling("test_repair")["testRepair"], "change": "change-tc210-text"}), REQ]},
             "testFix": {CONFLICT["file"]: {"verdict": "fixed"}}}
     out = run(bridge, project, opts, agents=roles("haiku", ["opus"], REVIEW_ON))
     ev = out["events"]
@@ -953,5 +961,5 @@ def test_tc210_a_review_deadlock_ruled_test_repair_goes_to_the_fixer_and_the_tas
     rereviews = [e for e in rest if e in review_labels(ev)]
     assert rereviews, "the task was reviewed again after the fix landed: " + ", ".join(ev)
     prompt = out["prompts"][rereviews[0]]
-    assert "compare the printed text" in prompt or "ruled test_repair" in prompt, "the re-review prompt carries the ruling:\n" + prompt
+    assert "change-tc210-text" in prompt, "the re-review prompt carries the ruling:\n" + prompt
     assert out["result"]["merged"] == ["1"], json.dumps(out["result"])
