@@ -2170,7 +2170,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 94: Record refused integration updates in ck's git hooks
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 14.1, 14.5
 **Description:** In `src/claude_kiro/protect.py`, add the `Refusal` dataclass and `record_refusal`, `refusal_for` and `clear_refusal` (design.md, "Landing recovery and bisection" under Data Models), keeping the latest refusal per ref in `<git common dir>/ck/refusals.json` under a file lock. `record_refusal` never raises. In `src/claude_kiro/cli/githooks.py`, `reference_transaction` records each `refs/heads/integrate/*` update it refuses (protected change without a token, or an update it cannot verify) with the update's old value and the realpath of the working directory, and `pre_merge_commit` does the same with `HEAD` when it refuses. A failed write leaves the refusal itself unchanged.
@@ -2181,9 +2181,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 93 (TC-168)
 
 **Acceptance:**
-- [ ] A refused raw merge, fast-forward or not, leaves a record naming the ref, its head and the checkout
-- [ ] An allowed or tokened update leaves no record
-- [ ] A record that cannot be written changes nothing about the refusal
+- [x] A refused raw merge, fast-forward or not, leaves a record naming the ref, its head and the checkout
+- [x] An allowed or tokened update leaves no record
+- [x] A record that cannot be written changes nothing about the refusal
 
 **Dependencies:** Task 93 (its tests are the oracle)
 **Complexity:** Low
