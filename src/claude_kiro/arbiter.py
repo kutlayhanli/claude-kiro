@@ -278,3 +278,83 @@ def open_claim(root: Path, spec: str, into: str, task: str, claim: Claim, task_m
 
         result.update({"worktree": rel, "branch": branch, "number": str(number)})
         return result
+
+
+# --------------------------------------------------------------------------- settle (Task 38)
+
+
+def _principles_at(root: Path, base: str, spec: str) -> Any:
+    """The effective principles as they stood at the arbiter worktree's starting commit."""
+    def show(rel: Path) -> Optional[str]:
+        done = wt.git(root, "show", f"{base}:{rel.as_posix()}", check=False)
+        return done.stdout if done.returncode == 0 else None
+
+    project_text = show(PRINCIPLES_REL)
+    plan_text = show(Path("specs") / spec / "PLAN.md")
+    project = parse_principles(project_text, "project") if project_text is not None else []
+    plan = parse_principles(plan_text, "plan") if plan_text is not None else None
+    return effective_principles(project, plan)
+
+
+def _remove_worktree(root: Path, rel: Optional[str], branch: Optional[str]) -> None:
+    if rel:
+        wt.git(root, "worktree", "remove", "--force", str(root / rel), check=False)
+    if branch:
+        wt.git(root, "branch", "-D", branch, check=False)
+
+
+def settle_claim(root: Path, spec: str, key: str, raw_text: str, tier: str) -> Dict[str, Any]:
+    """`SettleResult` for the arbiter's raw answer to claim KEY: validate it, route it, update the ledger and
+    deal with the arbiter's worktree by route (design.md, `ck arbiter settle`)."""
+    if tier not in ("normal", "risky"):
+        raise ArbiterError("tier must be normal or risky")
+    from .arbiter_policy import route_ruling, validate_ruling
+
+    with ledger_lock(root, spec):
+        ledger = load_ledger(ledger_path(root, spec))
+        entry = ledger["claims"].get(key)
+        if entry is None:
+            raise ArbiterError(f"no claim {key!r} in the arbiter ledger; it was never opened")
+        base = entry.get("base")
+        if not base:
+            raise ArbiterError(f"the ledger entry for {key!r} has no starting commit")
+        effective = _principles_at(root, base, spec)
+        citable = {p.id: p for p in effective.citable}
+        try:
+            raw: Any = json.loads(raw_text)
+        except ValueError:
+            raw = raw_text
+        check = validate_ruling(raw, key, citable, "run")
+        route = route_ruling(check, tier, effective)  # type: ignore[arg-type]
+
+        rel, branch = entry.get("worktree"), entry.get("branch")
+        if not check.valid:
+            status = "failed"
+        elif route.reason == "exhausted":
+            status = "exhausted"
+        else:
+            status = entry.get("status", "open")
+        for other in ledger["claims"].values():
+            if other.get("worktree") == rel and other.get("branch") == branch and other.get("status") == "open":
+                other["status"] = status if status in ("failed", "exhausted") else "open"
+        entry["status"] = status
+        if route.route == "rerun":
+            # The risky re-run is a second real call on this claim (one ruling, two calls).
+            entry["calls"] = int(entry.get("calls", 0)) + 1
+        write_ledger(ledger_path(root, spec), ledger)
+
+        if route.route in ("test_repair", "code", "needs_input"):
+            _remove_worktree(root, rel, branch)
+        elif route.route == "rerun" and rel:
+            path = root / rel
+            wt.git(path, "reset", "--hard", base)
+            wt.git(path, "clean", "-fdq")
+
+        principle = citable.get(check.principle) if check.principle else None
+        return {
+            "route": route.route,
+            "reason": route.reason,
+            "record": route.record,
+            "principle": {"id": principle.id, "text": principle.text} if principle is not None else None,
+            "problems": list(check.problems),
+        }

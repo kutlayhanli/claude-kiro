@@ -897,7 +897,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 38: Add ck arbiter settle
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.7, 5.6, 5.7, 7.1, 7.2, 7.7
 **Description:** Add `ck arbiter settle SPEC KEY --tier normal|risky --json` (stdin: the arbiter's raw output, stdout: `SettleResult`). It calls `validate_ruling` and `route_ruling`, updates the ledger (status `exhausted` after a risky stronger-look; `failed` for nothing valid), counts a re-run and its first call as one ruling, and handles the worktree by route: it removes the worktree and branch on `test_repair`, `code` and `needs_input`, keeps them on `spec_edit` for the landing, and on `rerun` keeps them and resets the branch to the ledger's `base` so the risky re-run starts clean. Harness Contract owner: `ck arbiter route`, which is `ck arbiter settle`.
@@ -909,10 +909,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 1 (its strategies), Task 7 (TC-10), Task 25 (TC-53, TC-135, TC-150)
 
 **Acceptance:**
-- [ ] A valid ruling and each stronger-look status settle to the route `route_ruling` gives
-- [ ] An invalid ruling leaves no record flag and carries its problems
-- [ ] The ledger marks `exhausted` so later runs ask
-- [ ] The arbiter worktree is removed on `test_repair`, `code` and `needs_input`, and on `rerun` it stays with its branch reset to the starting commit
+- [x] A valid ruling and each stronger-look status settle to the route `route_ruling` gives
+- [x] An invalid ruling leaves no record flag and carries its problems
+- [x] The ledger marks `exhausted` so later runs ask
+- [x] The arbiter worktree is removed on `test_repair`, `code` and `needs_input`, and on `rerun` it stays with its branch reset to the starting commit
 
 **Dependencies:** Task 1 (its tests are the oracle), Task 7 (its tests are the oracle), Task 25 (its tests are the oracle), Task 30 (calls `validate_ruling` and `route_ruling`), Task 37 (uses the ledger and worktree)
 **Complexity:** Medium
