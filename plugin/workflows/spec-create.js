@@ -8,6 +8,7 @@ export const meta = {
     { title: 'Task Tracks', detail: 'implementation and test task lists in parallel' },
     { title: 'Link', detail: 'merge tracks into tasks.md, wire Verified by, lint the dependency graph' },
     { title: 'Adversarial Review', detail: '4 lenses, each finding challenged by a refuter' },
+    { title: 'Arbiter', detail: 'rules on refuted findings and proposed cuts' },
     { title: 'Revise', detail: 'snapshot the spec, apply confirmed fixes, write review.md' },
     { title: 'Consistency Check', detail: 'diff the revision against the snapshot and check it against the criteria and properties' },
   ],
@@ -644,6 +645,193 @@ if (unverified.length) log(`${unverified.length} finding(s) could not be verifie
 const shouldExistLost = reviewed.some((r, i) => !r && LENSES[i].cuts)
 log(`should-exist: ${proposedCuts.length} proposed cut(s).`)
 
+// ---------------------------------------------------------------------------
+// Arbiter (Task 84): rules on refuted findings and proposed cuts. Arbiter calls
+// are plain agents of the arbiter type; every `ck` step is a thin call through
+// the runner agent. Without an arbiter agent the steps with subjects are lost
+// (11.12); without usable principles no arbiter call runs (1.12). A lost step
+// leaves its findings or cuts as they stood and makes the result Needs work.
+// ---------------------------------------------------------------------------
+
+const RUNNER_AGENT = typeof A.runnerAgent === 'string' && A.runnerAgent ? A.runnerAgent : null
+const ARBITER_AGENT = typeof A.arbiterAgent === 'string' && A.arbiterAgent ? A.arbiterAgent : null
+const ARBITER_CFG = A.agents && A.agents.arbiter ? A.agents.arbiter : {}
+// Model and effort of a tier from agents.arbiter (risky_model/risky_effort, falling back to the normal ones).
+function arbiterTierOpts(tier) {
+  const pick = (...vals) => vals.find(v => typeof v === 'string' && v && v !== 'inherit')
+  const risky = tier === 'risky'
+  const model = risky ? pick(ARBITER_CFG.risky_model, ARBITER_CFG.model) : pick(ARBITER_CFG.model)
+  const effort = risky ? pick(ARBITER_CFG.risky_effort, ARBITER_CFG.effort) : pick(ARBITER_CFG.effort)
+  return { ...(model ? { model } : {}), ...(effort ? { effort } : {}) }
+}
+
+const CK_CALL = {
+  type: 'object',
+  properties: {
+    exitCode: { type: 'integer', description: 'the exit code of the ck command' },
+    json: { type: ['object', 'null'], description: 'the JSON the command printed, copied exactly; null if it printed none' },
+    error: { type: 'string', description: 'only if the command could not run or printed no JSON: what happened' },
+  },
+  required: ['exitCode', 'json'],
+}
+
+const ARBITER_RULINGS = {
+  type: 'object',
+  properties: {
+    rulings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          claim: { type: 'string', description: 'the id of the subject this ruling settles' },
+          status: { type: 'string', enum: ['ruled', 'needs_stronger_look'] },
+          outcome: { type: 'string', enum: ['spec_edit'] },
+          verdict: { type: 'string', description: 'finding stands | refutation stands (refuted step); sound | unsound (cuts step)' },
+          reasoning: { type: 'string', description: 'one or two sentences citing the subject\'s evidence' },
+          principle: { type: 'string', description: 'one id from the principles list' },
+          changed: { type: 'string' },
+        },
+        required: ['claim', 'status', 'verdict', 'reasoning', 'principle'],
+      },
+    },
+  },
+  required: ['rulings'],
+}
+
+const ARBITER_RULES = {
+  refuted: 'Each subject is a finding that a refuter marked refuted; its "refutation" is the refuter\'s reason. Verdict "finding stands" when the defect is real and the fix is sound; verdict "refutation stands" when the refuter is right.',
+  cuts: 'Each subject is a proposed cut: a story whose "Without it" justification the should-exist lens says fails. Verdict "sound" when the justification fails and the cut is right; verdict "unsound" when the story should stay.',
+}
+
+// One thin `ck` step through the runner agent: a mechanical call, no judgement. Returns {code, json}.
+const shellWord = s => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${String(s).replace(/'/g, `'\\''`)}'`)
+async function thinCk(label, argv, what, stdin) {
+  const cmd = `ck ${argv.map(shellWord).join(' ')}`
+  const doc = stdin == null ? cmd : `${cmd} <<'CK_STDIN'\n${stdin}\nCK_STDIN`
+  const prompt = `${what}. Do exactly this, nothing else. Edit no file.
+Run this command on its own line, with no other command:
+${doc}
+A non-zero exit is an answer, not a failure: still return its exit code and JSON.
+Return exitCode (the command's exit code) and json (its JSON output, copied exactly as printed; json must be an object, or null if it printed none). Put a message in error only if the command could not run or printed no JSON; no notes or remarks anywhere.`
+  const opts = { label, phase: 'Arbiter', schema: CK_CALL, effort: 'low', ...(RUNNER_AGENT ? { agentType: RUNNER_AGENT } : {}) }
+  let a = null
+  try {
+    a = await agent(prompt, opts)
+  } catch (e) {
+    return { code: -1, json: null, error: String(e && e.message) }
+  }
+  if (!a || typeof a !== 'object' || !Number.isInteger(a.exitCode)) return { code: -1, json: null, error: 'answer does not match CK_CALL' }
+  return { code: a.exitCode, json: a.json && typeof a.json === 'object' ? a.json : null, error: a.error || '' }
+}
+
+const arbiterPrompt = (step, subjects, ctx) => `You are the arbiter of a spec review. Rule on each subject below yourself; defer to me only when the principles cannot settle it.
+
+${BRIEF}
+
+Subject kind: ${step}. ${ARBITER_RULES[step]}
+
+Cite exactly one principle per ruling, from this list (its id):
+${JSON.stringify(ctx.principles || [], null, 2)}
+Plan layer: ${ctx.planLayer || '(none)'}
+
+Return one ruling per subject: claim (the subject's id), status ("ruled", or "needs_stronger_look" when a stronger model should decide), verdict, reasoning (one or two sentences citing the subject's evidence), principle (an id from the list above), outcome ("spec_edit"), and changed ("nothing"). Do not edit any file.
+
+Subjects (JSON):
+${JSON.stringify(subjects, null, 2)}`
+
+// One arbiter call for a step at one tier. Returns the arbiter's answer, or null when the call failed.
+async function arbiterAsk(step, tier, subjects, ctx) {
+  const label = `arbiter ${step}${tier === 'risky' ? ' risky' : ''}`
+  try {
+    const out = await agent(arbiterPrompt(step, subjects, ctx), { label, phase: 'Arbiter', schema: ARBITER_RULINGS, ...(ARBITER_AGENT ? { agentType: ARBITER_AGENT } : {}), ...arbiterTierOpts(tier) })
+    return out === undefined ? null : out
+  } catch (e) {
+    log(`${label} failed: ${String(e && e.message)}`)
+    return null
+  }
+}
+
+// `ck arbiter review`: validates each entry on its own and records the rulings. Returns its results, or null when it did not answer.
+async function arbiterReview(step, tier, subjects, output) {
+  const stdin = JSON.stringify({ subjects, output: output === undefined ? null : output, lostSteps: [] })
+  const a = await thinCk(`arbiter review ${step} ${tier}`, ['-C', ROOT, 'arbiter', 'review', A.feature, '--step', step, '--tier', tier, '--json'],
+    `Validation step for the ${step} rulings of spec ${A.feature}, ${tier} tier`, stdin)
+  return a.code === 0 && a.json && Array.isArray(a.json.results) ? a.json.results : null
+}
+
+const SETTLED = ['confirm', 'keep-refuted', 'show-cut', 'reject-cut']
+
+// Rules on one step's subjects: one normal call, then one risky re-run for the entries that ask for a stronger look.
+async function ruleStep(step, subjects, ctx) {
+  const outcome = new Map()   // subject id -> {action, reason, ruling, reasoning}
+  const round = async (tier, subs) => {
+    const answer = await arbiterAsk(step, tier, subs, ctx)
+    const results = await arbiterReview(step, tier, subs, answer)
+    if (!results) return false
+    const rulings = answer && Array.isArray(answer.rulings) ? answer.rulings : []
+    for (const r of results) {
+      const entry = rulings.find(x => x && typeof x === 'object' && String((x.claim ?? x.id)) === String(r.id))
+      outcome.set(String(r.id), { action: r.action, reason: r.reason, ruling: r.ruling, reasoning: entry ? String(entry.reasoning || '') : '' })
+    }
+    return true
+  }
+  const ran = await round('normal', subjects)
+  const stronger = subjects.filter(s => { const o = outcome.get(String(s.id)); return o && o.action === 'unchecked' && o.reason === 'stronger-look' })
+  if (stronger.length) await round('risky', stronger)
+  const lost = subjects.map(s => String(s.id)).filter(id => { const o = outcome.get(id); return !(o && SETTLED.includes(o.action)) })
+  return { ran, outcome, lost }
+}
+
+const arb = { ran: [], lost: [], rulings: [], missing: null }
+const shownCuts = []     // proposed cuts the arbiter found sound: the only cuts that reach the report
+const standing = []      // refuted findings the arbiter ruled standing: they join the confirmed set
+const refutedBefore = refuted.length
+if (refuted.length || proposedCuts.length) {
+  phase('Arbiter')
+  const want = [refuted.length ? 'refuted' : null, proposedCuts.length ? 'cuts' : null].filter(Boolean)
+  const context = await thinCk('arbiter context', ['-C', ROOT, 'arbiter', 'context', A.feature, '--json'], `Context step for spec ${A.feature} before the arbiter`)
+  const ctx = context.code === 0 && context.json ? context.json : null
+  if (ctx && ctx.missing) arb.missing = String(ctx.missing)
+  const usable = !!ctx && !ctx.missing && !!ARBITER_AGENT
+  if (!usable) {
+    arb.lost.push(...want)
+    if (ctx && ctx.missing) log(`Arbiter did not run: ${ctx.missing} is missing or unusable. Run ck principles init.`)
+    else if (!ctx) log('Arbiter did not run: ck arbiter context did not answer.')
+    else log('Arbiter did not run: no arbiter agent is configured (arbiterAgent).')
+  } else {
+    await thinCk('arbiter lane open', ['-C', ROOT, 'arbiter', 'lane', 'open', A.feature, '--json'], `Lane step for spec ${A.feature}: the arbiter's ticket`)
+    const subjectsOf = {
+      refuted,
+      cuts: proposedCuts.map(c => ({ id: String(c.id), story: c.story, title: c.title, weakness: c.weakness, saves: c.saves })),
+    }
+    const outs = await parallel(want.map(step => () => ruleStep(step, subjectsOf[step], ctx)))
+    want.forEach((step, i) => {
+      const out = outs[i]
+      if (out.ran) arb.ran.push(step)
+      if (out.lost.length) arb.lost.push(step)
+      for (const o of out.outcome.values()) if (o.ruling != null) arb.rulings.push(o.ruling)
+      if (step === 'refuted') {
+        for (const f of refuted) {
+          const o = out.outcome.get(String(f.id))
+          if (!o) continue
+          if (o.action === 'confirm') standing.push({ ...f, verification: o.reasoning || o.reason })
+          else if (o.action === 'keep-refuted') f.arbiter = { ruling: o.ruling, reasoning: o.reasoning }
+        }
+      } else {
+        for (const c of proposedCuts) {
+          const o = out.outcome.get(String(c.id))
+          if (o && o.action === 'show-cut') shownCuts.push({ id: String(c.id), story: c.story, title: c.title, weakness: c.weakness, saves: c.saves, ruling: o.ruling, reasoning: o.reasoning })
+        }
+      }
+    })
+    const standingIds = new Set(standing.map(f => String(f.id)))
+    refuted.splice(0, refuted.length, ...refuted.filter(f => !standingIds.has(String(f.id))))
+  }
+  if (shownCuts.length) log(`${shownCuts.length} proposed cut(s) listed in review.md, not applied; awaiting your approval.`)
+  if (arb.lost.length) log(`Arbiter: no usable ruling for ${arb.lost.join(', ')}; those stand as they were and the result is Needs work.`)
+}
+confirmed.push(...standing)
+
 const toFix = confirmed.filter(f => !f.needsUserDecision)
 const forUser = confirmed.filter(f => f.needsUserDecision)
 log(`Review: ${confirmed.length} confirmed (${toFix.length} to fix, ${forUser.length} need your decision), ${refuted.length} refuted.`)
@@ -697,10 +885,16 @@ const GOVERNING_RULE = `**Fixes that change behaviour.** A fix changes behaviour
 
 const FROZEN_RULE = `**Frozen spec.** First read the Status line of every task in ${DIR}/tasks.md. If any task is not Not Started, implementation has started and requirements.md and test-plan.md are the contract it is checked against. Then a fix that changes or removes existing text in requirements.md or test-plan.md (rewording, renumbering, narrowing, weakening or deleting an existing requirement, criterion, test case or property) is one you do NOT apply, whatever the finding says. Return it under "escalated" instead: the finding id, the question (for example "Change <id> although implementation has started?"), and 2-3 options: one with the proposed text verbatim, and one "leave the spec as is". It goes in "escalated" only, not in "fixed" or "notFixed". Fixes that only add (a new requirement or criterion, a new test case or property, a new task, design or tasks.md edits) are add-only and are applied as usual. When every task is Not Started, this rule does not apply.`
 
-// Only the lens's silence is reported here; proposed cuts never reach this prompt (Task 84 routes them to the arbiter).
+// Only the lens's silence is reported here. Cuts reach this prompt only as listed proposals, never as fixes (cutsNote).
 const shouldExistNote = shouldExistLost || proposedCuts.length
   ? ''
   : '\n## Should-exist\nThe should-exist lens found nothing to cut. Say so in one sentence under this heading.\n'
+const cutsNote = shownCuts.length
+  ? `\n## Proposed cuts\nThe arbiter found these cuts sound. Do NOT apply them and do NOT edit any spec file for them. List each under "## Proposed cuts" in review.md with its story, title, weakness and what it saves, marked as not applied and awaiting my approval.\n${JSON.stringify(shownCuts.map(c => ({ id: c.id, story: c.story, title: c.title, weakness: c.weakness, saves: c.saves })), null, 2)}\n`
+  : ''
+const arbiterNote = arb.missing || arb.lost.length
+  ? `\n## Arbiter\n${arb.missing ? `${arb.missing} is missing or unusable, so the arbiter did not run. Name that file and the command \`ck principles init\` in this section.\n` : ''}${arb.lost.length ? `These arbiter steps returned no usable ruling: ${arb.lost.join(', ')}. Their findings and cuts stand as they were, and **Result:** must be Needs work.\n` : ''}`
+  : ''
 
 const revision = await pagent(`
 You are revising a spec after adversarial review.
@@ -725,7 +919,7 @@ ${JSON.stringify(forUser.map(f => ({ id: f.id, question: f.question || f.problem
 
 **Date:** ${A.date || ''}
 **Mode:** ${MODE}
-**Result:** [Ready | Ready after decisions | Needs work]  (Ready after decisions whenever "Needs Your Decision" has a row, including ones you escalated)
+**Result:** [Ready | Ready after decisions | Needs work]  (Ready after decisions whenever "Needs Your Decision" has a row, including ones you escalated; Needs work whenever the Arbiter section below lists a step)
 
 ## Fixed
 | ID | File | Severity | Problem | Fix applied |
@@ -736,11 +930,11 @@ The items from step 2 ("adversarial review"), then every finding you escalated i
 
 ## Refuted
 | ID | Problem | Why it was refuted |
-${JSON.stringify(refuted.map(f => ({ id: f.id, problem: f.problem, why: f.refutation })), null, 2)}
+${JSON.stringify(refuted.map(f => ({ id: f.id, problem: f.problem, why: f.refutation, ...(f.arbiter ? { arbiterRuling: f.arbiter.reasoning } : {}) })), null, 2)}
 
 ## Unverified
 ${unverified.length ? JSON.stringify(unverified.map(f => ({ id: f.id, problem: f.problem })), null, 2) : 'None'}
-${shouldExistNote}
+${shouldExistNote}${cutsNote}${arbiterNote}
 ## Schedule
 Re-run \`ck lint ${A.feature}\` from ${ROOT} after your fixes. Update the Schedule section of tasks.md from its "critical path" and "ready now" lines, and copy those two lines here.
 ${snapshot ? `\nDo not touch ${SNAP}/; it is the pre-revision snapshot a later check diffs against.\n` : ''}
@@ -897,6 +1091,7 @@ const openQuestions = [
 
 let result = revision ? revision.result : 'Needs work'
 if (result === 'Ready' && openQuestions.length) result = 'Ready after decisions'
+if (arb.lost.length) result = 'Needs work'
 
 return {
   mode: MODE,
@@ -913,9 +1108,11 @@ return {
     notFixed: revision ? revision.notFixed : toFix.map(f => ({ id: f.id, reason: 'revise step failed' })),
     escalated,
     openQuestions,
-    refutedCount: refuted.length,
+    refutedCount: refutedBefore,
     unverified: unverified.map(f => ({ id: f.id, problem: f.problem })),
     lensesLost,
+    proposedCuts: shownCuts,
+    arbiter: arb,
   },
   consistency,
   schedule: revision ? revision.schedule : null,
