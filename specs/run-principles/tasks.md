@@ -57,7 +57,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 2: Extend the JS fake runtime and bridge for rulings
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.8, 7.1, 8.1, 8.9, 13.1
 **Description:** Build the workflow side of the test infrastructure (test-plan "What must be added", items 2-5), on `integrate/run-principles`: the fake project must follow the workflow's `thinCk`, `CK_CALL` and `agentType` handling as on master. All options default to absent so existing suites behave as before.
@@ -77,15 +77,16 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 65 (the fake runtime it runs under), Task 66 (the bridge `call` op for `testRepairEntries`), Task 67 (`arbiterEdits`, the real landing), Task 74 (`auditFindings`)
 
 **Acceptance:**
-- [ ] Every existing `tests/js/*.test.mjs` suite still passes unchanged with the extended fake project (the create-side suites migrate in Task 90, which verifies them, so this Verify filters them out: `-k "not spec_create"` is a substring match, so it also drops `spec_create_provides.test.mjs`, which Task 90 runs)
-- [ ] An `arbiter-` label with no `execCk` throws, so a scenario cannot skip the real CLI
-- [ ] `arbiterEdits` commits with real git, so a landing in a scenario is a real landing
-- [ ] `throwingDate: true` makes both `Date` and `Math.random` throw when workflow code uses them
-- [ ] Tests exercise the real boundary named in the test plan (the real workflow scripts under the fake runtime)
-- [ ] Tests fail before the implementation exists for the right reason (self-checks of workflow options name the missing label, not a broken harness)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Every existing `tests/js/*.test.mjs` suite still passes unchanged with the extended fake project (the create-side suites migrate in Task 90, which verifies them, so this Verify filters them out: `-k "not spec_create"` is a substring match, so it also drops `spec_create_provides.test.mjs`, which Task 90 runs)
+- [x] An `arbiter-` label with no `execCk` throws, so a scenario cannot skip the real CLI
+- [x] `arbiterEdits` commits with real git, so a landing in a scenario is a real landing
+- [x] `throwingDate: true` makes both `Date` and `Math.random` throw when workflow code uses them
+- [x] Tests exercise the real boundary named in the test plan (the real workflow scripts under the fake runtime)
+- [x] Tests fail before the implementation exists for the right reason (self-checks of workflow options name the missing label, not a broken harness)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** None
+**Implementation notes:** `throwingGlobals` lives in `tests/js/load_workflow.mjs` (new `scriptMath` option of `runWorkflow`); the bridge `call` op already existed. `arbiter-` steps find the arbiter checkout as the prompt's path ending `-task-arbiter<k>`. `arbiter-` steps read the command line and stdin in thinCk's shape (shellWord quoting, `<<'CK_PARK'` here-document; a fenced JSON block is the fallback), checked against the template read from `spec-implement.js`. `emit_labels.mjs` answers thin steps in the CK_CALL envelope (they had stopped its implement scenarios at `plan`), and its run-principles scenarios raise each claim trigger, make the audit due through `verifiedBy`, and answer OpenResult, SettleResult (`rerun` first), RULING and AUDIT as design.md shapes them.
 **Complexity:** High
 **Risk:** safety (the harness that proves the needs-input notifications and landings on the integration branch)
 
@@ -499,7 +500,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 21: Red-team the prohibitions of Story 12
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 12.9, 12.10
 **Description:** Try to break each SHALL NOT clause of Story 12 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. For 12.9: a Verify with shell variables, globs, `$(...)`, an unreadable `-k`, a directory, or quoting that looks resolvable and is not. For 12.10: the same problem described in different words by an existing rule, a problem found through both `verifyCycles` and Story 12, and this spec's own tasks.md fed back in. Written from the requirements only, never from the implementation.
@@ -509,10 +510,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 24 (red team of 12.9, 12.10 through `ck lint`)
 
 **Acceptance:**
-- [ ] Each SHALL NOT clause has at least one adversarial test per listed input class that applies to it
-- [ ] Tests exercise the real boundary named in the test plan (`ck lint` through the CLI)
-- [ ] Tests fail before the implementation exists for the right reason (no `notChecked` handling or dedupe)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each SHALL NOT clause has at least one adversarial test per listed input class that applies to it
+- [x] Tests exercise the real boundary named in the test plan (`ck lint` through the CLI)
+- [x] Tests fail before the implementation exists for the right reason (no `notChecked` handling or dedupe)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (project fixture)
 **Complexity:** Medium
@@ -2170,7 +2171,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 94: Record refused integration updates in ck's git hooks
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 14.1, 14.5
 **Description:** In `src/claude_kiro/protect.py`, add the `Refusal` dataclass and `record_refusal`, `refusal_for` and `clear_refusal` (design.md, "Landing recovery and bisection" under Data Models), keeping the latest refusal per ref in `<git common dir>/ck/refusals.json` under a file lock. `record_refusal` never raises. In `src/claude_kiro/cli/githooks.py`, `reference_transaction` records each `refs/heads/integrate/*` update it refuses (protected change without a token, or an update it cannot verify) with the update's old value and the realpath of the working directory, and `pre_merge_commit` does the same with `HEAD` when it refuses. A failed write leaves the refusal itself unchanged.
@@ -2181,9 +2182,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 93 (TC-168)
 
 **Acceptance:**
-- [ ] A refused raw merge, fast-forward or not, leaves a record naming the ref, its head and the checkout
-- [ ] An allowed or tokened update leaves no record
-- [ ] A record that cannot be written changes nothing about the refusal
+- [x] A refused raw merge, fast-forward or not, leaves a record naming the ref, its head and the checkout
+- [x] An allowed or tokened update leaves no record
+- [x] A record that cannot be written changes nothing about the refusal
 
 **Dependencies:** Task 93 (its tests are the oracle)
 **Complexity:** Low
