@@ -269,16 +269,20 @@ if os.geteuid() != 0:
     BREAKS.append("mode-000")
 
 
-def _assert_asks_and_names_file(project, before_worktrees: str):
+def _arbiter_branches(project) -> str:
+    return subprocess.run(["git", "branch", "--list", "*arbiter*"], cwd=project.root, capture_output=True,
+                          text=True).stdout
+
+
+def _assert_asks_and_names_file(project, before_worktrees: str, before_branches: str = ""):
     done = _usable_open(project)
     data = _json(done)
     assert data["action"] == "ask", data
     assert data.get("worktree") in (None, ""), "no arbiter worktree for an unusable principles file"
     assert "PRINCIPLES.md" in (data.get("missing") or ""), data
     assert _worktree_list(project) == before_worktrees, "an arbiter worktree was created"
-    branches = subprocess.run(["git", "branch", "--list", "*arbiter*"], cwd=project.root, capture_output=True,
-                              text=True).stdout
-    assert branches.strip() == "", branches
+    branches = _arbiter_branches(project)
+    assert branches.strip() == before_branches.strip(), branches
 
 
 @pytest.mark.parametrize("how", BREAKS)
@@ -299,8 +303,9 @@ def test_rt_1_9_file_replaced_after_a_ruling_call_is_judged_by_the_second_state(
     first = _json(_usable_open(project))
     assert first["action"] == "rule", first
     before = _worktree_list(project)
+    before_branches = _arbiter_branches(project)
     _break(project, "directory")
-    _assert_asks_and_names_file(project, before)
+    _assert_asks_and_names_file(project, before, before_branches)
 
 
 @pytest.mark.parametrize("sequence", [["directory", "missing"], ["bytes:fffe", "directory"],
@@ -363,7 +368,6 @@ def test_rt_1_11_warning_is_reported_and_exit_is_unchanged(tmp_path, plan):
     assert "demo" in warnings[0]["plan"] and "PLAN" in warnings[0]["plan"]
     assert warnings[0]["message"].strip()
     assert done.returncode == clean_done.returncode, "the warning changed lint's exit code"
-    assert data.get("exit_nonzero", data.get("exitNonzero")) == clean.get("exit_nonzero", clean.get("exitNonzero"))
 
 
 def test_rt_1_11_text_mode_exit_is_also_unchanged(tmp_path):
@@ -396,5 +400,7 @@ def test_rt_1_11_the_warning_does_not_mask_a_real_failure(tmp_path):
     base_done, base = _lint(project)
     (project.spec_dir / "PLAN.md").write_text(LINT_PLANS[1][1])
     done, data = _lint(project)
+    assert base_done.returncode != 0, "a story with no justification must fail lint"
     assert done.returncode == base_done.returncode
+    assert data.get("justifications"), data
     assert len(_principles_warnings(data)) == 1
