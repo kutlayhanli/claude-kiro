@@ -230,7 +230,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 9: Contract tests over the plan skill's text
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.3, 1.4, 1.5, 2.1, 2.2
 **Description:** Implement TC-2, TC-4, TC-5, TC-6, TC-14 and TC-15 in `tests/test_skill_contracts.py`, over the shipped `plugin/skills/plan/SKILL.md` only, never the vendored `.claude/commands/spec/*.md`. TC-2: the skill runs `ck principles init` before recording decisions and tells me when it created the file. TC-4: it asks directly for tie-breakers, overrides and what may change without asking, and its PLAN.md template has `## Principles`. TC-5: the step that sets Status to Decided comes after, and depends on, a non-empty `## Principles`, and a plan with nothing to add says so. TC-6: it asks for a reason before recording an override, and records it as `**Reason:** <text>`. TC-14: it asks what breaks without each In-scope item and the template has `*Without it:*`. TC-15: it offers the cut when nothing concrete breaks and removes the item only on acceptance.
@@ -240,11 +240,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 48 (TC-2, 4, 5, 6, 14, 15 over the shipped skill)
 
 **Acceptance:**
-- [ ] Each case reads the real shipped skill text and asserts instruction order or conditions, not just keyword presence, where the criterion is about order
-- [ ] No case reads a vendored `.claude/` copy
-- [ ] Tests exercise the real boundary named in the test plan (the shipped `SKILL.md`)
-- [ ] Tests fail before the implementation exists for the right reason (the skill does not yet say these things)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each case reads the real shipped skill text and asserts instruction order or conditions, not just keyword presence, where the criterion is about order
+- [x] No case reads a vendored `.claude/` copy
+- [x] Tests exercise the real boundary named in the test plan (the shipped `SKILL.md`)
+- [x] Tests fail before the implementation exists for the right reason (the skill does not yet say these things)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** None
 **Complexity:** Low
