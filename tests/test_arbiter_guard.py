@@ -765,6 +765,15 @@ BYPASS_COMMANDS = [
     "sudo ls",
     "true #'\necho `rm -rf tests`\ntrue #'",
     "cd /other/checkout && git commit -m x",
+    # review round 2
+    "echo $'\\'' `rm -rf tests` $'\\''\\'",
+    "test -v 'a[$(rm -rf tests)]'",
+    "[ -v 'a[$(rm -rf tests)]' ]",
+    "rg --pre rm . tests/test_x.py",
+    "rg --pre=rm . tests/test_x.py",
+    "rg --hostname-bin=rm x",
+    "file -C -m tests/test_x",
+    "date -s 2020-01-01",
 ]
 
 

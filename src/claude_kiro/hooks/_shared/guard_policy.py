@@ -722,6 +722,8 @@ def _has_substitution(command: str) -> bool:
             continue
         if c == "`" or command.startswith("$(", i):
             return True
+        if command.startswith("$'", i) and not in_double:
+            return True  # ANSI-C quoting: `\'` inside it does not end the quote; deny rather than model it
         if c == "#" and not in_double and (i == 0 or command[i - 1] in " \t\n;&|()"):
             return True  # a comment can hide quotes from this scan; deny rather than model it
         if command.startswith("<(", i) or command.startswith(">(", i):
@@ -758,6 +760,41 @@ def _unsafe_segment(words: Sequence[str]) -> Optional[str]:
                 i += 1
             else:
                 break
+    args = rest[1:]
+    if first in ("test", "["):
+        # `test -v 'a[$(cmd)]'` evaluates the subscript as arithmetic, running the substitution.
+        operands = args[:-1] if first == "[" and args and args[-1] == "]" else args
+        for a in operands:
+            if a in ("-v", "-R") or "[" in a or "]" in a or "$(" in a or "`" in a:
+                return a
+    elif first == "rg":
+        # rg --pre / --hostname-bin run a program; -z / --search-zip run decompressors.
+        for a in args:
+            if a == "--":
+                break
+            if a.startswith("--"):
+                if a.split("=", 1)[0] in ("--pre", "--hostname-bin", "--search-zip"):
+                    return a
+            elif a.startswith("-") and "z" in a:
+                return a
+    elif first == "file":
+        # file -C / --compile writes a compiled magic file.
+        for a in args:
+            if a == "--":
+                break
+            if a == "--compile" or (a.startswith("-") and not a.startswith("--") and "C" in a):
+                return a
+    elif first == "date":
+        # date -s / --set changes the system clock.
+        for a in args:
+            if a.split("=", 1)[0] == "--set":
+                return a
+            if a.startswith("-") and not a.startswith("--"):
+                for ch in a[1:]:
+                    if ch == "s":
+                        return a
+                    if ch in "dfrI":  # the rest of the bundle is this flag's value
+                        break
     return None
 
 
