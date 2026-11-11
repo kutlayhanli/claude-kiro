@@ -104,7 +104,10 @@ const CONFLICT = { file: 'tests/unit/test_decay_golden.py', test: 'test_decay_pr
 // The arbiter's thin steps run the real `ck` in a real git project: the main checkout holds specs/PRINCIPLES.md and the
 // scenario's spec, and the integration checkout is made by `ck worktree integration`.
 const REPO = path.join(here, '../..')
-const CK_CMD = [path.join(REPO, '.venv/bin/python'), '-m', 'claude_kiro.cli']
+const CK_PYTHON = fs.existsSync(path.join(REPO, '.venv/bin/python')) ? path.join(REPO, '.venv/bin/python') : 'python3'
+const CK_CMD = [CK_PYTHON, '-m', 'claude_kiro.cli']
+const tempRepos = []
+process.on('exit', () => { for (const d of tempRepos) fs.rmSync(d, { recursive: true, force: true }) })
 const PRINCIPLES = `# Principles
 
 ## Principles
@@ -128,6 +131,7 @@ function taskBlock(n, deps) {
 }
 function arbiterProject(deps) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'si-arbiter-'))
+  tempRepos.push(tmp)
   const root = path.join(tmp, 'repo')
   const sh = (cmd, ...args) => execFileSync(cmd, args, { cwd: root, encoding: 'utf8' })
   const git = (...args) => sh('git', ...args)
@@ -529,13 +533,17 @@ await test('escalation: off by default, so a failing task just fails', async () 
   assert.equal(result.failed[0].task, '1')
 })
 
-await test('escalation: blocking review findings that survive the rounds get a revision on the next model', async () => {
-  const p = project({ deps: { 1: [] }, reviews: { 1: ['changes', 'changes', 'approve'] } })
-  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: HAIKU(['opus']) } })
-  assert.deepEqual(modelsOf(p.state, 'task 1 revise'), ['haiku', 'opus'])
+await test('escalation: blocking review findings that survive the rounds go to the arbiter, not up the model ladder (6.3)', async () => {
+  const a = arbiterProject({ 1: [] })
+  const ruling = { status: 'ruled', outcome: 'code', principle: 'project:test-intent', reasoning: 'the findings are real: the code must change, the revision stays on its model' }
+  const p = project({ deps: { 1: [] }, reviews: { 1: ['changes', 'changes', 'approve'] }, rulings: { 1: [ruling] }, execCk: a.execCk })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...arbiterArgs(a), agents: HAIKU(['opus']) } })
+  assert.ok(p.state.events.includes('arbiter task 1'), `the deadlock reached the arbiter: ${p.state.events.join(', ')}`)
+  assert.ok(!p.state.events.some(e => /^task 1 revise \(opus\)/.test(e)), 'no revise (opus) escalation label runs')
+  assert.ok(!modelsOf(p.state, 'task 1 revise').includes('opus'), 'the revision never moves up the ladder')
+  assert.ok(!(result.tasks[0].escalations || []).some(x => x.stage === 'revise'), JSON.stringify(result.tasks[0].escalations))
   assert.deepEqual(result.merged, ['1'])
-  assert.deepEqual(result.tasks[0].escalations, [{ stage: 'revise', model: 'opus' }])
-  assert.equal(result.tasks[0].review.verdict, 'approve')
+  assert.equal(result.tasks[0].review.verdict, 'approve', 'the re-review follows the code ruling')
 })
 
 await test('escalation: a task still red on landing after the fix gets a fix on the next model', async () => {
