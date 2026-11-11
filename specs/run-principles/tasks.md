@@ -2145,7 +2145,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 93: Test the integration checkout recovery
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 14.1, 14.2, 14.3, 14.4, 14.5
 **Description:** Create `tests/test_land_recovery.py` with TC-162 to TC-168, TC-196, TC-197 and P-47 (test-plan.md). Keep TC-168 to the hook side (no `tc168_` test depends on the recovery: none runs `ck worktree merge` or `ck worktree land` after a refused merge; its tokened landing is a `ck worktree land` of a clean task into a clean checkout), since it is Task 94's whole Verify; the merge restore and the cleared record are TC-196. TC-197 makes its spec edit with `ck arbiter open` and lands it with `ck worktree land demo arbiter<k>`, and records with `ck arbiter record`. Build each case on a real repository with ck's git hooks installed and a real integration worktree, using `tests/unattended_helpers.py` (`init_repo`, `commit_all`, `hooks_repo`, `integration_worktree`). Define this file's own `protected_branch` (a branch off `integrate/demo` whose only change adds `.claude/CLAUDE.md`) in `tests/test_land_recovery.py`; do not import it from `tests/test_unattended_smoke.py`, which Task 100 edits and whose module fixtures start full runs. Make the refused merge with a real `git merge --no-verify`, so the residue is exactly what git leaves. Read the refusal record only through `protect.refusal_for`, and the landing result only through `ck worktree land --json`. P-47 drives the pure `worktrees.decide_recovery` with Hypothesis (`derandomize=True, max_examples=200, database=None, deadline=None`) and carries a `PROPERTIES` map. Import project modules inside test bodies.
