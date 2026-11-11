@@ -398,9 +398,6 @@ def test_tc206_two_conflicts_in_one_attempt_are_each_ruled_and_the_fix_still_rea
 
 
 def test_tc207_a_test_repair_ruling_on_a_guard_stopped_revision_goes_through_the_one_hand_off(bridge, tmp_path):  # noqa: F811
-    source = "\n".join(line for line in SCRIPT.read_text().splitlines() if not line.lstrip().startswith("//"))
-    sites = re.findall(r"(?<!function )handOffTestRepair\(", source)
-    assert len(sites) == 1, f"handOffTestRepair has one call site, found {len(sites)}"
     project = arbiter_project(tmp_path)
     opts = revise_opts(rulings={"1": [ruling("test_repair")]}, testFix={CONFLICT["file"]: {"verdict": "fixed"}})
     out = run(bridge, project, opts, agents=roles("haiku", ["opus"], REVIEW_ON))
@@ -412,3 +409,6 @@ def test_tc207_a_test_repair_ruling_on_a_guard_stopped_revision_goes_through_the
     assert ev.index("testfix 1 (Task 1)") < ev.index(revisions[1]), ", ".join(ev)
     assert [e for e in attempts(ev) if " retry " in e] == [], "no attempt spent: " + ", ".join(ev)
     assert "review 1 round 2" in ev, "the review continues: " + ", ".join(ev)
+    source = "\n".join(line for line in SCRIPT.read_text().splitlines() if not line.lstrip().startswith("//"))
+    sites = re.findall(r"(?<!function )handOffTestRepair\(", source)
+    assert len(sites) == 1, f"handOffTestRepair has one call site, found {len(sites)}"
