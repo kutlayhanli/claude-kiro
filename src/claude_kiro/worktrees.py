@@ -32,6 +32,7 @@ from claude_kiro.config import load_config
 from claude_kiro.paths import LEGACY_WORKTREES_DIR, WORKTREES_DIR
 
 if TYPE_CHECKING:
+    from claude_kiro.protect import Refusal
     from claude_kiro.progress import Liveness
 
 
@@ -118,6 +119,90 @@ def _git_merge(root: Path, target: Path, into: str, branch: str, message: str) -
                              _tree_protected(root, old, tree))
     extra = {"env": env} if env else {}
     return git(target, "merge", "--no-ff", "-m", message, branch, check=False, **extra)
+
+
+@dataclass(frozen=True)
+class RecoveryFacts:
+    into: str
+    target: str                  # realpath of the checkout of `into`
+    managed: bool                # integrate/* checkout under the worktree directory, not the main checkout
+    dirty: Tuple[str, ...]       # tracked dirty paths plus unmerged paths, sorted
+    merge_in_progress: bool      # MERGE_HEAD exists in the target
+    head: str
+    refusal: Optional["Refusal"]
+
+
+def decide_recovery(facts: RecoveryFacts) -> Tuple[str, str]:
+    """("clean" | "recover" | "refuse", reason). Pure (14.1, 14.3, 14.5)."""
+    if not facts.dirty and not facts.merge_in_progress:
+        return "clean", ""
+    base = f"{facts.target} has uncommitted changes to tracked files; refusing to land into {facts.into}"
+    if not facts.managed:
+        return "refuse", base
+    refusal = facts.refusal
+    if not (refusal is not None and refusal.ref == f"refs/heads/{facts.into}" and refusal.head == facts.head
+            and refusal.checkout == facts.target):
+        return "refuse", base + ": no refused ref update is recorded at this head; ck will not discard it"
+    return "recover", ""
+
+
+def _is_managed_checkout(root: Path, target: Path, into: str) -> bool:
+    if not into.startswith("integrate/"):
+        return False
+    real = os.path.realpath(target)
+    if real == os.path.realpath(root):
+        return False
+    for directory in (configured_dir(root), root / LEGACY_WORKTREES_DIR):
+        base = os.path.realpath(directory)
+        if real == base or real.startswith(base + os.sep):
+            return True
+    return False
+
+
+def _git_dir_of(target: Path) -> Path:
+    raw = git(target, "rev-parse", "--git-dir").stdout.strip()
+    path = Path(raw)
+    return path if path.is_absolute() else target / path
+
+
+def _recovery_state(target: Path) -> Tuple[List[str], bool, str]:
+    dirty = set(dirty_files(target, tracked_only=True))
+    paths = set()
+    for line in dirty:
+        paths.add(line[3:].split(" -> ")[-1].strip().strip('"') if len(line) > 3 else line)
+    unmerged = git(target, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split("\n")
+    paths.update(p for p in unmerged if p)
+    merging = (_git_dir_of(target) / "MERGE_HEAD").exists()
+    head = git(target, "rev-parse", "HEAD").stdout.strip()
+    return sorted(paths), merging, head
+
+
+def recover_target(root: Path, target: Path, into: str) -> Optional[Dict]:
+    """Restore a refused integration checkout before a write into it (Story 14).
+
+    None when clean; WorktreeError when it must be refused; else resets to the checkout's own head and returns
+    {"paths", "mergeInProgress", "head"}."""
+    from claude_kiro.protect import clear_refusal, refusal_for
+
+    paths, merging, head = _recovery_state(target)
+    facts = RecoveryFacts(
+        into=into, target=os.path.realpath(target), managed=_is_managed_checkout(root, target, into),
+        dirty=tuple(paths), merge_in_progress=merging, head=head,
+        refusal=refusal_for(root, f"refs/heads/{into}") if (paths or merging) else None)
+    verdict, reason = decide_recovery(facts)
+    if verdict == "clean":
+        return None
+    if verdict == "refuse":
+        raise WorktreeError(reason)
+    try:
+        _git_reset(root, target, into, head)
+    except (WorktreeError, subprocess.CalledProcessError, OSError) as exc:
+        raise WorktreeError(f"could not restore {target} to {head[:12]}: {exc}; the refusal record is kept") from exc
+    after_paths, after_merging, after_head = _recovery_state(target)
+    if after_head != head or after_merging or after_paths:
+        raise WorktreeError(f"restoring {target} to {head[:12]} did not leave it clean; the refusal record is kept")
+    clear_refusal(root, f"refs/heads/{into}", head)
+    return {"paths": paths, "mergeInProgress": merging, "head": head}
 
 
 def _git_reset(root: Path, target: Path, into: str, commit: str) -> None:
@@ -858,7 +943,8 @@ def _record_fixtures(root: Path, target: Path, spec: str, base: str, merged: Lis
     return None
 
 
-def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, keep: bool = False) -> List[Outcome]:
+def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, keep: bool = False,
+          on_recovered: Optional[Callable[[Path, Dict], None]] = None) -> List[Outcome]:
     """Merge task branches into `into` one at a time (--no-ff); stop at the first conflict.
 
     The merge runs in the checkout that has `into` checked out. A merged task's
@@ -868,9 +954,10 @@ def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, ke
     target = checkout_of(root, into)
     if target is None:
         raise WorktreeError(f"branch {into} is not checked out anywhere; check it out or create the integration worktree")
-    dirty = dirty_files(target, tracked_only=True)
-    if dirty:
-        raise WorktreeError(f"{target} has uncommitted changes to tracked files; refusing to merge into {into}")
+    with land_lock(root, into):
+        recovered = recover_target(root, target, into)
+    if recovered and on_recovered:
+        on_recovered(target, recovered)
 
     outcomes = []
     allow = land_allow_paths(target)
@@ -935,6 +1022,7 @@ class Landed:
     fixtureDrift: List[Dict] = field(default_factory=list)  # [{file, task, change}] recorded fixtures changed (15.2)
     commit: Optional[str] = None  # the target's HEAD after a spec-edit landing (MERGED only)
     moved: List[Dict] = field(default_factory=list)  # tests a spec edit moved out of a Verify selection (8.7)
+    recovered: Optional[Dict] = None  # the checkout was restored before this landing (14.2)
 
     def line(self) -> str:
         text = f"{self.state} {self.task} ({self.branch})"
@@ -1107,13 +1195,11 @@ def land(
     target = checkout_of(root, into)
     if target is None:
         raise WorktreeError(f"branch {into} is not checked out anywhere; check it out or create the integration worktree")
-    dirty = dirty_files(target, tracked_only=True)
-    if dirty:
-        raise WorktreeError(f"{target} has uncommitted changes to tracked files; refusing to land into {into}")
     priority = priority or {}
     order = sorted(dict.fromkeys(nums), key=lambda n: (-priority.get(n, 1), int(n) if n.isdigit() else 0))
 
     with land_lock(root, into):
+        recovered = recover_target(root, target, into)
         started = _now()
         hook_notes: List[Dict] = []
         _ensure_hooks(root, target, hook_notes)
@@ -1296,6 +1382,7 @@ def land(
             "tasks": [asdict(results[n]) for n in order if n in results],
             "gates": gates,
             "bisected": len(gates) > 1,
+            **({"recovered": recovered} if recovered else {}),
             **({"hooks": hook_notes[-1]} if hook_notes else {}),
             **({"fixtureError": fixture_error} if fixture_error else {}),
         }
@@ -1399,8 +1486,10 @@ def land_spec_edit(
     with land_lock(root, into, wait_s=wait_s):
         if not branch_exists(root, branch):
             return Landed(num, "MISSING", "no branch", branch)
-        if dirty_files(target, tracked_only=True):
-            return Landed(num, "ERROR", f"{target} has uncommitted changes to tracked files; refusing to land into {into}", branch)
+        try:
+            recovered = recover_target(root, target, into)
+        except WorktreeError as exc:
+            return Landed(num, "ERROR", str(exc), branch)
         start = git(target, "rev-parse", "HEAD").stdout.strip()
         if int(git(root, "rev-list", "--count", f"{start}..{branch}").stdout.strip() or 0) == 0:
             return Landed(num, "SKIP", f"no commits ahead of {into}", branch)
@@ -1456,7 +1545,7 @@ def land_spec_edit(
         commit = git(target, "rev-parse", "HEAD").stdout.strip()
         note = _cleanup_merged(root, target, path, branch)
         return Landed(num, "MERGED", f"into {into}{note}", branch, list(changed), True if gate is not None and scope else None,
-                      "", _now(), commit=commit, moved=moved)
+                      "", _now(), commit=commit, moved=moved, recovered=recovered)
 
 
 def status(root: Path, spec: str) -> List[Outcome]:
