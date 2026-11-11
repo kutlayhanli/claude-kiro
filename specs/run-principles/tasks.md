@@ -430,7 +430,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 18: Test Verify-scope lint through the CLI
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 12.1, 12.2, 12.3, 12.4, 12.5, 12.8, 12.9, 12.10
 **Description:** Implement TC-109 to TC-113, TC-117, TC-118, TC-119, TC-136 and TC-145 in `tests/test_verify_scope_lint.py`, named `test_tc<N>_...`. TC-109, TC-111 and TC-112 use `ck graph`/`**Provides:**`/`commandEdges` as on master. TC-109: `ck lint demo --simulate --task N --json` lists each not-Done task's due suites and selections, Done tasks absent. TC-110: two test tasks share a file and the first's Verify has no filter while the second's task is not Done: a finding names the task and suite. TC-111: a selected test invokes a command a later task's `**Provides:**` names: `verifyScope` has no finding for it and `commandEdges` still lists the edge (D30). TC-112: not due, filtered out, a direct dependency and a transitive dependency: no finding. TC-113: a finding makes `ck lint` exit non-zero and appears in `ck plan --json` `verifyScope`. TC-117: running `ck lint` directly starts no agent, and text and JSON each name the task and the suite. TC-118: a Verify using `$(...)` or a script: top-level `notChecked` names the task and exit is 0. TC-119: a problem already in `verifyCycles` appears once. TC-136: `ck lint` and `justifications.justification_findings` / `lint_scope.scope_findings` agree on one failing fixture each. TC-145: a Verify selecting a test file not yet on disk: `notChecked` names the task and exit is 0.
@@ -440,10 +440,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 24 (TC-109 to 113, 117 to 119, 136, 145)
 
 **Acceptance:**
-- [ ] Each case uses real generated test files and real tasks.md through `ck lint`
-- [ ] Tests exercise the real boundary named in the test plan (CLI, real parse)
-- [ ] Tests fail before the implementation exists for the right reason (no `verifyScope` key)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each case uses real generated test files and real tasks.md through `ck lint`
+- [x] Tests exercise the real boundary named in the test plan (CLI, real parse)
+- [x] Tests fail before the implementation exists for the right reason (no `verifyScope` key)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (project fixture)
 **Complexity:** High
