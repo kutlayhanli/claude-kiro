@@ -121,4 +121,13 @@ async function createAgent(prompt, opts) {
 }
 await runWorkflow(CREATE, { agent: createAgent, args: createArgs })
 
+// run-principles: the labels of the arbiter and the auditor (design.md). The scripts that emit them are built by later
+// tasks, so the corpus lists them from here, as the label grammar of the roles table (analytics/roles.py) must cover them.
+for (const label of ['arbiter task 1', 'arbiter task 1 risky', 'audit task 1', 'arbiter-open', 'arbiter-settle', 'arbiter-record', 'arbiter-land']) {
+  labelCorpus.push({ workflow: 'spec-implement', label, phase: null })
+}
+for (const label of ['arbiter refuted', 'arbiter refuted risky', 'arbiter cuts', 'arbiter cuts risky', 'arbiter drift', 'arbiter drift risky', 'apply-cuts', 'review: should-exist']) {
+  labelCorpus.push({ workflow: 'spec-create', label, phase: null })
+}
+
 process.stdout.write(JSON.stringify(labelCorpus, null, 1) + '\n')

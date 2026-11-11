@@ -1,6 +1,8 @@
 // A fake project for the spec-implement workflow tests: `ck plan` semantics over deps/done, task
 // durations, failures, timestamps. Shared by spec_implement.test.mjs and the bridge.
 import { execFile } from 'node:child_process'
+import fs from 'node:fs'
+import path from 'node:path'
 import { sleep as realSleep } from './load_workflow.mjs'
 
 // --- execCk: the fake agents record progress events through the real CLI -------------------------------------
@@ -47,15 +49,16 @@ export function writtenCommands(prompt) {
 // Run one `ck` command through execCk {cmd, env, cwd, dry} (in dry mode, or with no execCk, only record it in
 // log). The outcome {argv, code, error, stdout, stderr} is pushed to results, never swallowed: tests assert the
 // CLI really ran. Returns the parsed --json output, else the trimmed stdout (null in dry mode).
-export async function execCkRun(execCk, argv, { log, results, external = p => p }) {
+export async function execCkRun(execCk, argv, { log, results, external = p => p, input = null }) {
   log.push(argv)
   if (!execCk || execCk.dry) return null
   const env = { ...process.env, ...(execCk.env || {}), CK_PROGRESS_TEST_KINDS: '1' }
   const [bin, ...pre] = execCk.cmd
   const res = await external(new Promise(resolve => {
-    execFile(bin, [...pre, ...argv], { env, cwd: execCk.cwd || process.cwd(), encoding: 'utf8' }, (err, out, errOut) => {
+    const child = execFile(bin, [...pre, ...argv], { env, cwd: execCk.cwd || process.cwd(), encoding: 'utf8' }, (err, out, errOut) => {
       resolve({ argv, code: err ? (typeof err.code === 'number' ? err.code : -1) : 0, error: err ? String(err.message) : null, stdout: out || '', stderr: errOut || '' })
     })
+    if (input !== null) { child.stdin.on('error', () => {}); child.stdin.end(input) }
   }))
   results.push(res)
   try { return JSON.parse(res.stdout) } catch { return res.stdout.trim() }
@@ -82,7 +85,7 @@ function chainLengths(deps, done) {
 
 // A call is a thin ck call when it carries the CK_CALL schema (an object with an exitCode property) or an agentType.
 export const isCkCall = opts => !!opts && (!!opts.agentType || !!(opts.schema && opts.schema.properties && opts.schema.properties.exitCode))
-export const THIN_LABEL = /^(plan \d+|land |report$|park \d+|relink \d+|full gate @|re-check |final gate$|gate$|run start$|audit$|testfix ledger |testfix prove )/
+export const THIN_LABEL = /^(plan \d+|land |report$|park \d+|relink \d+|full gate @|re-check |final gate$|gate$|run start$|audit$|testfix ledger |testfix prove |arbiter-)/
 const GATE_LABEL = /^(full gate @|re-check |final gate$|gate$)/
 // today's {green} answer as a ck-gate/1 object
 export function gateJson(green, spec = 'demo') {
@@ -93,6 +96,36 @@ export function gateJson(green, spec = 'demo') {
 const isRawGate = e => e && typeof e === 'object' && 'code' in e && 'stdout' in e && Object.keys(e).length <= 3
 const parseJson = t => { try { const v = JSON.parse(t); return v && typeof v === 'object' ? v : null } catch { return null } }
 const never = () => new Promise(() => {})
+
+// --- arbiter helpers -------------------------------------------------------------------------------------------
+// The one `ck ... arbiter ...` (or `ck ... worktree land ...`) line of a thin step's prompt, as an argv.
+export function arbiterArgv(prompt) {
+  const m = /\bck ((?:-C \S+ )?(?:arbiter|principles|worktree land)(?: |"[^"\n]*"|[^\n"`])*)/.exec(prompt)
+  if (!m) return null
+  return [...m[1].trim().matchAll(/"([^"]*)"|(\S+)/g)].map(t => (t[1] !== undefined ? t[1] : t[2])).filter(t => t !== '')
+}
+// The prompt's one fenced JSON block, as the step's stdin (null when there is none).
+export function arbiterStdin(prompt) {
+  const m = /```(?:json)?[ \t]*\n([\s\S]*?)\n```/.exec(prompt)
+  return m ? m[1] : null
+}
+const IDENT = { GIT_AUTHOR_NAME: 'arbiter', GIT_AUTHOR_EMAIL: 'arbiter@example.invalid', GIT_COMMITTER_NAME: 'arbiter', GIT_COMMITTER_EMAIL: 'arbiter@example.invalid' }
+const git = (cwd, args) => new Promise((resolve, reject) => {
+  execFile('git', ['-C', cwd, ...args], { encoding: 'utf8', env: { ...process.env, ...IDENT } }, (err, out, errOut) => (err ? reject(new Error(`git ${args.join(' ')}: ${errOut || err.message}`)) : resolve(out)))
+})
+// Really write and commit `files` in the arbiter checkout the prompt names (an absolute path ending `-task-arbiter<k>`).
+async function arbiterWrite(prompt, files, state, n) {
+  const m = /(\/[^\s"'`]*-task-arbiter\d+)/.exec(prompt)
+  if (!m) throw new Error(`arbiterEdits[${n}]: the prompt names no arbiter checkout (a path ending -task-arbiter<k>)`)
+  const dir = m[1]
+  for (const [rel, text] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true })
+    fs.writeFileSync(path.join(dir, rel), text)
+  }
+  await git(dir, ['add', '--', ...Object.keys(files)])
+  await git(dir, ['commit', '-q', '-m', `arbiter: task ${n} ruling`])
+  state.arbiterEdited[n] = { dir, files: Object.keys(files) }
+}
 
 // Options beyond the scenario knobs:
 //   planDurations: {k: ms}                 plan call k takes that long
@@ -139,7 +172,20 @@ const never = () => new Promise(() => {})
 // Thin labels: `plan <k>`, `land ...`, `report`, `park <n>`, `relink <n>`, `full gate @k`, `re-check k`, `final gate`,
 // `run start`, `audit`, `testfix ledger <k>`, `testfix prove <k>`. Whenever the call carries `schema: CK_CALL` or an
 // `agentType`, the answer is wrapped in {exitCode, json}; otherwise it is today's answer unchanged.
-export function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [], gitReport = null, conflictRounds = {}, planDurations = {}, externalDone = null, planFail = [], worktree = {}, guardStops = {}, guardStopIn = {}, parkOutcome = null, relinkOutcome = null, testConflicts = {}, execCk = null, etaAnswer = null, sleep = realSleep, external = p => p, planSeq = null, badReady = null, risk = null, gateAnswers = [], taskFailures = {}, testConflictsList = {}, testFix = {}, priorFixes = {}, crossTest = null, fidelity = null, fixtureStatus = null, owns = null, overlaps = null, testVerifies = null, provides = null, missingCommand = null, audit = null, runStart = null }) {
+//   -- run-principles additions (all optional, additive) --
+//   rulings: {n: [answer, ...]}            answers of `arbiter task <n>` and `arbiter task <n> risky`, in order (the
+//                                          last repeats); null, 'throw' or any object. A call for a task with no
+//                                          scripted answer throws, naming the label.
+//   auditFindings: {n: answer}             answer of `audit task <n>` (default {problems: [], summary}: no problems)
+//   arbiterEdits: {n: {files: {path: text}}}  what the `arbiter task <n>` agent really writes and commits (real git) in
+//                                          the `...-task-arbiter<k>` checkout its prompt names
+//   arbiterStepFailures: {record: true}    the `arbiter-<step>` thin step reports a failed command (exit 1, {error}),
+//                                          after the real command has run
+//   ledgerFail: true                       `testfix ledger <k>` returns exit 1 with {error}
+//   reviews entries may carry {finding: 'serves-no-requirement'}: each finding then has noRequirement: true
+// Labels starting `arbiter-` run the one `ck ... arbiter ...` (or `ck ... worktree land ...`) line of their prompt, with
+// the prompt's one fenced JSON block as stdin, through execCkRun, and return {exitCode, json}; without execCk they throw.
+export function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [], gitReport = null, conflictRounds = {}, planDurations = {}, externalDone = null, planFail = [], worktree = {}, guardStops = {}, guardStopIn = {}, parkOutcome = null, relinkOutcome = null, testConflicts = {}, execCk = null, etaAnswer = null, sleep = realSleep, external = p => p, planSeq = null, badReady = null, risk = null, gateAnswers = [], taskFailures = {}, testConflictsList = {}, testFix = {}, priorFixes = {}, crossTest = null, fidelity = null, fixtureStatus = null, owns = null, overlaps = null, testVerifies = null, provides = null, missingCommand = null, audit = null, runStart = null, rulings = {}, auditFindings = {}, arbiterEdits = {}, arbiterStepFailures = {}, ledgerFail = false }) {
   let rechecksLeftRed = recheckRed
   let planCalls = 0  // plan agent invocations so far: call k consumes planSeq[k-1]
   // RED landings left per task: checkRed tasks are red on their first landing, redLands sets a count.
@@ -155,7 +201,7 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
     if (m) return m[1].split(/[,\s]+/).filter(Boolean)
     return []
   }
-  const state = { execResults: [], deps: { ...deps }, done: new Set(done), merged: new Set(), events: [], prompts: {}, opts: {}, optsList: [], reviewCount: {}, reviewTasks: {}, relinked: new Set(), relinks: [], attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0, landings: [], parks: [], revises: {}, resolved: new Set(), conflictsHit: {}, execLog: [] }
+  const state = { rulingCalls: {}, auditCalls: [], arbiterEdited: {}, arbiterSteps: [], execResults: [], deps: { ...deps }, done: new Set(done), merged: new Set(), events: [], prompts: {}, opts: {}, optsList: [], reviewCount: {}, reviewTasks: {}, relinked: new Set(), relinks: [], attempts: {}, plans: 0, merging: 0, maxMerging: 0, running: 0, maxRunning: 0, landings: [], parks: [], revises: {}, resolved: new Set(), conflictsHit: {}, execLog: [] }
   let clock = Date.parse('2026-10-04T10:00:00Z')
   const stamp = () => new Date((clock += 60000)).toISOString().replace('.000', '')
   const ready = exclude => {
@@ -177,8 +223,8 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
   // Calls run one at a time in call order, so agents resume in a fixed order however fast each subprocess is
   // (otherwise two identical runs stamp concurrent tasks in different orders).
   let ckChain = Promise.resolve()
-  const runCk = argv => {
-    const done = ckChain.then(() => execCkRun(execCk, argv, { log: state.execLog, results: state.execResults, external }))
+  const runCk = (argv, input = null) => {
+    const done = ckChain.then(() => execCkRun(execCk, argv, { log: state.execLog, results: state.execResults, external, input }))
     ckChain = done.catch(() => {})
     return done
   }
@@ -350,6 +396,39 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
       state.events.push(`${l} end`)
       return { parked: true, notification: 'sent', detail: '', ...(parkOutcome ?? {}) }
     }
+    if (l.startsWith('arbiter task ')) {
+      const n = l.match(/^arbiter task (\d+)/)[1]
+      const list = rulings[n]
+      if (!list || !list.length) throw new Error(`no ruling scripted for "${l}" (rulings: {${n}: [...]})`)
+      const k = state.rulingCalls[n] = (state.rulingCalls[n] || 0) + 1
+      state.events.push(`${l} end`)
+      const answer = list[Math.min(k, list.length) - 1]
+      if (answer === 'throw') throw new Error('arbiter agent failed')
+      const edit = arbiterEdits[n]
+      if (edit && answer !== null) await arbiterWrite(prompt, edit.files || {}, state, n)
+      return answer
+    }
+    if (l.startsWith('audit task ')) {
+      const n = l.match(/^audit task (\d+)/)[1]
+      state.auditCalls.push(n)
+      state.events.push(`${l} end`)
+      const a = auditFindings[n]
+      if (a === 'throw') throw new Error('auditor agent failed')
+      return a ?? { problems: [], summary: 'no problems' }
+    }
+    if (l.startsWith('arbiter-')) {
+      if (!execCk) throw new Error(`"${l}" is a thin step of the real ck CLI: pass execCk (a scenario cannot skip the real CLI)`)
+      const argv = arbiterArgv(prompt)
+      if (!argv) throw new Error(`"${l}": no \`ck ... arbiter ...\` line in its prompt`)
+      const input = arbiterStdin(prompt)
+      const before = state.execResults.length
+      const json = await runCk(argv, input)
+      const res = state.execResults[before] ?? { code: 0, stdout: '', stderr: '' }
+      state.arbiterSteps.push({ label: l, argv, code: res.code })
+      const step = l.slice('arbiter-'.length)
+      if (arbiterStepFailures[step] || arbiterStepFailures[l]) return { exitCode: 1, json: { error: `${step} failed (injected)` }, stdout: '' }
+      return { exitCode: res.code, json: json && typeof json === 'object' ? json : null, stdout: res.stdout, stderr: res.stderr }
+    }
     if (l.startsWith('review')) {
       const covered = reviewTasksOf(l, prompt)
       const n = covered[0]
@@ -371,7 +450,7 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
       const verdict = typeof spec === 'string' ? spec : (spec.verdict || 'approve')
       const findings = typeof spec === 'string'
         ? (verdict === 'changes' ? [{ severity: 'blocking', issue: reviewIssue || 'contradicts design.md' }] : [])
-        : (spec.findings || [])
+        : spec.findings || (spec.finding === 'serves-no-requirement' ? [{ severity: 'blocking', file: 'specs/demo/tasks.md', issue: 'serves no requirement', noRequirement: true }] : [])
       return { verdict, findings, summary: typeof spec === 'string' ? verdict : (spec.summary || verdict), startedAt, finishedAt: stamp() }
     }
     if (l.startsWith('cross-test') && crossTest) {
@@ -404,6 +483,7 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
       return audit ?? { schema: 'ck-audit/1', spec: 'demo', into: 'integrate/demo', head: 'abc1234', complete: true, clean: true, drift: [], hooks: { installed: true, active: true, intact: true, chainedTo: null, problems: [] }, fixtures: { drift: [], newLocks: [], lockTampered: false, handcrafted: [] }, problems: [] }
     }
     if (l.startsWith('testfix ledger ')) {
+      if (ledgerFail) return { error: 'cannot read the test-fix ledger', __exitCode: 1 }
       // `ck testfix check SPEC --test NODE ...`: a node is already fixed when its file part is in priorFixes.
       const nodes = [...String(prompt).matchAll(/--test[ =](\S+)/g)].map(m => m[1].replace(/^["']|["']$/g, ''))
       const fixed = n => Object.keys(priorFixes).find(f => priorFixes[f] && n.split('::')[0] === f)
@@ -445,6 +525,7 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
     const l = opts.label
     // Calls that need no envelope go straight to today's agent, adding no microtask hop (the real-timer suites
     // order their agents by timing).
+    if (l.startsWith('arbiter-')) return rawAgent(prompt, opts)  // always an envelope, and always the real CLI
     if (!(THIN_LABEL.test(l) && isCkCall(opts))) return rawAgent(prompt, opts)
     return thinAgent(prompt, opts)
   }
@@ -463,6 +544,7 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
       return { exitCode: e.ok === false ? 1 : 0, json: e }
     }
     const out = await rawAgent(prompt, opts)
+    if (out && typeof out === 'object' && '__exitCode' in out) { const { __exitCode, ...json } = out; return { exitCode: __exitCode, json } }
     // audit: exit 0 clean, 3 incomplete, 1 drift or hook problems (design.md ck-audit/1).
     if (l === 'audit' && out && typeof out === 'object') return { exitCode: out.complete === false ? 3 : out.clean === false ? 1 : 0, json: out }
     return { exitCode: 0, json: out }
