@@ -16,8 +16,16 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
-from arbiter_helpers import CK, DEFAULT_PLAN, ArbiterProject, arbiter_caller, arbiter_project, ck_run, decisions_entries
+from arbiter_helpers import CK, DEFAULT_PLAN, ArbiterProject, arbiter_caller, arbiter_project, ck_run, decisions_entries, seam
+
+PROPERTIES = {
+    "P-21": "test_p21_spec_text_changes_lists_exactly_status_and_mark_changes",
+    "P-36": "test_p36_a_refused_landing_never_moves_the_integration_branch",
+    "P-38": "test_p38_a_reserved_file_never_lands_whatever_the_ruling_says",
+}
 
 INTO = "integrate/demo"
 PERF = "tests/test_perf.py"
@@ -500,3 +508,152 @@ def test_tc156_open_then_hook_then_commit_then_land(tmp_path):
     assert "twice" in (p.target / "specs/demo/tasks.md").read_text()
     assert "greeting" in (p.target / "specs/demo/requirements.md").read_text()
     assert head(p) != before
+
+
+# --------------------------------------------------------------------------- properties (P-21, P-36, P-38)
+
+BASE = dict(derandomize=True, database=None, deadline=None,
+            suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture, HealthCheck.data_too_large])
+
+_STATUSES = ["Not Started", "In Progress", "Done"]
+_MARK_FORMS = [("-", "x"), ("-", "X"), ("*", "x"), ("*", "X")]
+_TEXTS = st.sampled_from(["python -c pass", "python -c 'print(1)'", "uv run pytest -q tests/x.py", "false"])
+_PROSE = st.sampled_from(["Print it.", "Print it, and the Status is Done in prose.", "Status: In Progress is only a word here.",
+                          "Mark `- [x]` in a sentence.", "Keep Status unchanged."])
+
+
+@st.composite
+def _task_spec(draw) -> dict:
+    return {
+        "status": draw(st.sampled_from(_STATUSES)),
+        "form": draw(st.sampled_from(["plain", "spaces", "moved"])),
+        "marks": [(draw(st.booleans()), draw(st.sampled_from(_MARK_FORMS))) for _ in range(3)],
+        "verify": draw(_TEXTS), "deps": draw(st.sampled_from(["None", "Task 1", "Task 2"])), "desc": draw(_PROSE),
+    }
+
+
+def _render_p21(tasks: list) -> str:
+    out = ["# Implementation Tasks: Demo\n", "**Status:** Not Started\n", "## Task Breakdown\n"]
+    for n, t in enumerate(tasks, 1):
+        value = {"plain": f"**Status:** {t['status']}", "spaces": f"**Status:**   {t['status']}  ", "moved": f"**Status:** {t['status']}"}[t["form"]]
+        head_lines = [f"### Task {n}: Thing {n}"]
+        body = ["**Track:** impl", "**Requirements:** 1.1", f"**Description:** {t['desc']}", f"**Verify:** `{t['verify']}`"]
+        if t["form"] == "moved":
+            body.insert(1, value)
+        else:
+            head_lines.append(value)
+        marks = [f"{b} [{c if on else ' '}] criterion {i}" if on else f"{b} [ ] criterion {i}" for i, (on, (b, c)) in enumerate(t["marks"])]
+        out.append("\n".join(head_lines + body + ["", "**Acceptance:**"] + marks + ["", f"**Dependencies:** {t['deps']}", "", "---", ""]))
+    return "\n".join(out)
+
+
+@st.composite
+def _edits(draw):
+    before = [draw(_task_spec()) for _ in range(2)]
+    after = []
+    changed = False
+    for t in before:
+        a = {k: (list(v) if isinstance(v, list) else v) for k, v in t.items()}
+        if draw(st.booleans()):
+            a["status"] = draw(st.sampled_from([s for s in _STATUSES if s != t["status"]]))
+            a["form"] = draw(st.sampled_from(["plain", "spaces", "moved"]))
+            changed = True
+        for i in range(3):
+            if draw(st.booleans()):
+                on, form = t["marks"][i]
+                a["marks"][i] = (not on, draw(st.sampled_from(_MARK_FORMS)))
+                changed = True
+        for key, pool in (("verify", _TEXTS), ("desc", _PROSE), ("deps", st.sampled_from(["None", "Task 1", "Task 2"]))):
+            if draw(st.booleans()):
+                a[key] = draw(pool)  # negatives: these never count
+        after.append(a)
+    return _render_p21(before), _render_p21(after), changed
+
+
+def _count(changes) -> int:
+    """How many changes a `SpecTextChanges` lists, whatever container the seam chose (dataclass, mapping, sequence)."""
+    import dataclasses
+
+    if changes is None:
+        return 0
+    if dataclasses.is_dataclass(changes) and not isinstance(changes, type):
+        changes = dataclasses.asdict(changes)
+    if isinstance(changes, dict):
+        # design.md leaves the shape open: only collection-valued fields list changes (a name or summary string does not)
+        return sum(_count(v) for v in changes.values() if isinstance(v, (dict, list, tuple, set, frozenset)))
+    if isinstance(changes, (list, tuple, set, frozenset)):
+        return sum(max(_count(v), 1) if isinstance(v, (dict, list, tuple, set, frozenset)) else 1 for v in changes)
+    return 1 if changes else 0
+
+
+@settings(max_examples=200, **BASE)
+@given(_edits())
+def test_p21_spec_text_changes_lists_exactly_status_and_mark_changes(case):
+    spec_text_changes = seam("arbiter.spec_edit_refusals", "spec_text_changes")
+    before, after, changed = case
+    assert (_count(spec_text_changes(before, after)) > 0) == changed, (before, after)
+    assert _count(spec_text_changes(before, before)) == 0
+
+
+_LAND_KINDS = ["conflict", "red", "refused-path", "cycle", "blocking"]
+_LAND_STATES = {"conflict": ("CONFLICT",), "red": ("RED",), "refused-path": ("PROTECTED", "REFUSED"),
+                "cycle": ("REFUSED",), "blocking": ("REFUSED",)}
+
+
+def _stage_refusal(p: ArbiterProject, kind: str, k: int, word: str) -> None:
+    wt = arbiter_wt(p, k)
+    if kind == "conflict":
+        edit_spec(wt, "tasks.md", "**Description:** Print the greeting.", f"**Description:** from the arbiter {word}.")
+        path = p.target / "specs/demo/tasks.md"
+        commit_target(p, "specs/demo/tasks.md", path.read_text().replace("**Description:** Print the greeting.", f"**Description:** from a task {word}."), "other edit")
+    elif kind == "red":
+        edit_spec(wt, "tasks.md", "**Verify:** `python -c pass`\n**Verifies:**", "**Verify:** `false`\n**Verifies:**")
+    elif kind == "refused-path":
+        text = (wt / "specs/demo/tasks.md").read_text().replace("Print the greeting.", f"Print the greeting {word}.", 1)
+        commit_in(wt, {"specs/demo/tasks.md": text, ".claude/settings.json": "{}\n"})
+    elif kind == "cycle":
+        edit_spec(wt, "tasks.md", "**Dependencies:** None", "**Dependencies:** Task 2")
+    else:
+        edit_spec(wt, "tasks.md", "**Verify:** `python -c pass`\n**Dependencies:** None\n\n---\n\n### Task 3",
+                  f"**Verify:** `uv run pytest -q {PERF}`\n**Dependencies:** None\n\n---\n\n### Task 3")
+
+
+@settings(max_examples=30, **BASE)
+@given(kind=st.sampled_from(_LAND_KINDS), k=st.integers(1, 3), word=st.sampled_from(["once", "twice", "loudly"]))
+def test_p36_a_refused_landing_never_moves_the_integration_branch(kind, k, word):
+    import tempfile
+
+    tasks = perf_tasks() if kind == "blocking" else tasks_text(s1="Done" if kind == "red" else "Not Started")
+    with tempfile.TemporaryDirectory() as tmp:
+        p = arbiter_project(Path(tmp), tasks=tasks)
+        before = head(p)
+        _stage_refusal(p, kind, k, word)
+        if kind == "conflict":
+            before = head(p)
+        done, entry = land(p, k)
+        assert done.returncode != 0 and entry["state"] in _LAND_STATES[kind], (kind, entry, done.stdout, done.stderr)
+        assert_untouched(p, before)
+        assert decisions_entries(p) == [], "a refused landing must not write a second ruling"
+
+
+_LANE = ["tasks.md", "design.md", "test-plan.md"]
+_NEAR = ["code", "test repairs", "requirements.md", "PLAN.md"]
+
+
+@settings(max_examples=200, **BASE)
+@given(changed=st.sets(st.sampled_from(_LANE), min_size=1), reserved=st.sets(st.sampled_from(_LANE + _NEAR)),
+       order=st.randoms(use_true_random=False))
+def test_p38_a_reserved_file_never_lands_whatever_the_ruling_says(changed, reserved, order):
+    SpecEditFacts, decide_spec_edit = seam("arbiter.spec_edit_refusals", "SpecEditFacts", "decide_spec_edit")
+    paths = [f"specs/demo/{f}" for f in changed]
+    scopes = list(reserved)
+    order.shuffle(paths)
+    order.shuffle(scopes)
+    facts = SpecEditFacts(spec="demo", changed=tuple(paths), status_changes=(), mark_changes=(), new_cycles=(),
+                          new_blocking=(), reserved=tuple(scopes))
+    decision = decide_spec_edit(facts)
+    hit = sorted(changed & reserved)
+    assert decision.land == (not hit), (paths, scopes, decision)
+    reasons = " ".join(decision.reasons)
+    for name in _LANE:
+        assert (name in reasons) == (name in hit), (name, hit, decision.reasons)
