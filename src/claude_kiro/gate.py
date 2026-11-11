@@ -40,6 +40,7 @@ from claude_kiro import properties as props
 from claude_kiro import verified
 from claude_kiro import xdist
 from claude_kiro import fidelity
+from claude_kiro import lint_scope
 from claude_kiro.attribution import (
     Attribution,
     AttributionIndex,
@@ -998,8 +999,7 @@ def _run_gate(
     assumed_done = {n for n, t in tasks.items() if t.done} | {t.num for t in selected}
 
     def suite_due(test_task: SpecTask) -> bool:
-        targets = [n for n in test_task.verifies if n in tasks]
-        return bool(targets) and all(n in assumed_done for n in targets)
+        return lint_scope.suite_due(test_task, tasks, assumed_done)
 
     has_test_track = any(t.track == "test" for t in tasks.values())
     spec_complete = all(n in assumed_done for n in tasks)

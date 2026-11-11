@@ -114,7 +114,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 4: Property test for the arbiter's role settings
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.1, 5.2
 **Description:** Implement P-9 with Hypothesis in `tests/test_arbiter_agents.py`, named `test_p9_...`: for any subset of the four settings across global, project and override layers, an unset one follows `reviewer.risky_*`, a set one wins by layer, and an invalid value exits with the reviewer's message. Generators: valid and invalid models and efforts, `inherit`, aliases, an unset reviewer. Settings `@settings(derandomize=True, max_examples=200, database=None, deadline=None)`. The file declares `PROPERTIES = {"P-9": ...}`.
@@ -125,12 +125,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 5 (P-9 at `agents.resolve`)
 
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the P-9 row
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] The tests call the decision seam (`agents.resolve`), not a server
-- [ ] Tests exercise the real boundary named in the test plan (the seam)
-- [ ] Tests fail before the implementation exists for the right reason (`arbiter` is an unknown role)
-- [ ] No mocks of the project's own code in integration tests
+- [x] The generators cover every surface form and negative listed in the P-9 row
+- [x] Settings are deterministic (derandomized, no database)
+- [x] The tests call the decision seam (`agents.resolve`), not a server
+- [x] Tests exercise the real boundary named in the test plan (the seam)
+- [x] Tests fail before the implementation exists for the right reason (`arbiter` is an unknown role)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 3 (same test file)
 **Complexity:** Medium
@@ -230,7 +230,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 9: Contract tests over the plan skill's text
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.3, 1.4, 1.5, 2.1, 2.2
 **Description:** Implement TC-2, TC-4, TC-5, TC-6, TC-14 and TC-15 in `tests/test_skill_contracts.py`, over the shipped `plugin/skills/plan/SKILL.md` only, never the vendored `.claude/commands/spec/*.md`. TC-2: the skill runs `ck principles init` before recording decisions and tells me when it created the file. TC-4: it asks directly for tie-breakers, overrides and what may change without asking, and its PLAN.md template has `## Principles`. TC-5: the step that sets Status to Decided comes after, and depends on, a non-empty `## Principles`, and a plan with nothing to add says so. TC-6: it asks for a reason before recording an override, and records it as `**Reason:** <text>`. TC-14: it asks what breaks without each In-scope item and the template has `*Without it:*`. TC-15: it offers the cut when nothing concrete breaks and removes the item only on acceptance.
@@ -240,11 +240,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 48 (TC-2, 4, 5, 6, 14, 15 over the shipped skill)
 
 **Acceptance:**
-- [ ] Each case reads the real shipped skill text and asserts instruction order or conditions, not just keyword presence, where the criterion is about order
-- [ ] No case reads a vendored `.claude/` copy
-- [ ] Tests exercise the real boundary named in the test plan (the shipped `SKILL.md`)
-- [ ] Tests fail before the implementation exists for the right reason (the skill does not yet say these things)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each case reads the real shipped skill text and asserts instruction order or conditions, not just keyword presence, where the criterion is about order
+- [x] No case reads a vendored `.claude/` copy
+- [x] Tests exercise the real boundary named in the test plan (the shipped `SKILL.md`)
+- [x] Tests fail before the implementation exists for the right reason (the skill does not yet say these things)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** None
 **Complexity:** Low
@@ -409,7 +409,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 17: Move suite_due into lint_scope and add the lint verdict
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.11, 3.1, 3.7, 12.1, 12.5
 **Description:** Create `src/claude_kiro/lint_scope.py` holding `suite_due(test_task, tasks, assumed_done)` (the `suite_due` closure in `_run_gate` in `src/claude_kiro/gate.py`, ~line 1000, which closes over `tasks` and `assumed_done` at ~998; the moved function takes both as parameters), `done_at_gate(tasks, num)`, and `lint_verdict(result)` with `LintVerdict`. `gate.py` calls the moved `suite_due`, so the gate and its simulation cannot disagree. `lint_verdict` sets `exit_nonzero` for cycles, verify cycles, verify scope and justifications, ignores warnings, and lists only verify-scope findings as `launch_blockers`. Harness Contract owner: `lint_scope.lint_verdict`, the exit rule behind `lint.verify_scope`. Foundation task: its Verify is a smoke check (the existing gate suites). `lint_verdict` and `done_at_gate` are verified at Task 23 by Task 12 and Task 13 (P-41), and at Task 24 by Task 18.
@@ -419,9 +419,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verify:** `uv run pytest tests/test_gate.py tests/test_gate_properties.py -q`
 
 **Acceptance:**
-- [ ] The gate's behaviour is unchanged, shown by the existing gate suites
-- [ ] `done_at_gate` returns Done tasks, the task and its transitive dependencies
-- [ ] `lint_verdict` never lists a justification finding or warning in `launch_blockers`, and warnings alone do not set `exit_nonzero`
+- [x] The gate's behaviour is unchanged, shown by the existing gate suites
+- [x] `done_at_gate` returns Done tasks, the task and its transitive dependencies
+- [x] `lint_verdict` never lists a justification finding or warning in `launch_blockers`, and warnings alone do not set `exit_nonzero`
 
 **Dependencies:** None
 **Complexity:** Medium
@@ -2312,7 +2312,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 100: Migrate the unattended smoke scenarios to the recovery and the unreproduced route
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 8.9, 8.10, 14.1, 14.2, 15.2, 15.3
 **Description:** In `tests/test_unattended_smoke.py`, leave the shared `tc176_run` fixture and its cleanup unchanged, so the existing TC-176 and TC-178 tests stay green throughout. Add a `tc169_run` fixture running the same scenario with TC-178's raw merge and no cleanup step (from commit a64c0aa), keeping the merge's exit code and heads, and TC-169 on it: a later landing entry carries `recovered` naming `.claude/CLAUDE.md`, and the run-end audit is clean. Add a `tc174_run` fixture running the TC-176 scenario without `landOrder`, and TC-174's tests on it (test-plan.md). The existing TC-176 and TC-178 tests keep their assertions. Migrate TC-177 and TC-43b to the arbiter's test-repair ruling, since Task 65 removes the confirmation they rely on: the scripted agent gives `audit task <n>` a no-problem answer (`{problems: [], summary}`), answers `arbiter task 2` with a `test_repair` ruling citing a principle in the demo project's `specs/PRINCIPLES.md` (added to `demo_project`), adds `arbiter` to the commands its thin steps run through the real `ck`, and the run's args carry `arbiterAgent`; Task 2's conflict is reported on its first attempt with no confirm prompt. `test_tc177_conflict_confirmation_then_the_real_testfix_check_and_prove` becomes a test that the arbiter ruled on Task 2's conflict (an `arbiter task 2` label, no confirmation agent) before the real `ck testfix check` and `prove`; its other assertions, and TC-43b's, stay. Give the scripted agent the same `audit task` and `arbiter-` answers for every scenario, so no junk answer decides TC-176, TC-178 or TC-179.
@@ -2322,12 +2322,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 66 (TC-177 and TC-43b: a test-repair ruling reaches the real test-fixer), Task 95 (TC-169), Task 97 (TC-174's landing), Task 99 (TC-174's route)
 
 **Acceptance:**
-- [ ] `tc176_run`, its cleanup, and the TC-176 and TC-178 tests are unchanged; only `tc169_run`'s agent skips the cleanup
-- [ ] TC-174 runs the observed scenario with no `landOrder`
-- [ ] TC-177 asserts the arbiter ruling in place of the confirmation agent, and keeps its fixer, proof and landing assertions
-- [ ] Tests exercise the real boundary named in the test plan (the real workflow under the fake runtime, real `ck`, real hooks)
-- [ ] Tests fail before the implementation exists for the right reason (the landing after the refused merge refuses the dirty checkout; Task 7 is blamed)
-- [ ] No mocks of the project's own code in integration tests
+- [x] `tc176_run`, its cleanup, and the TC-176 and TC-178 tests are unchanged; only `tc169_run`'s agent skips the cleanup
+- [x] TC-174 runs the observed scenario with no `landOrder`
+- [x] TC-177 asserts the arbiter ruling in place of the confirmation agent, and keeps its fixer, proof and landing assertions
+- [x] Tests exercise the real boundary named in the test plan (the real workflow under the fake runtime, real `ck`, real hooks)
+- [x] Tests fail before the implementation exists for the right reason (the landing after the refused merge refuses the dirty checkout; Task 7 is blamed)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** None
 **Complexity:** Medium
