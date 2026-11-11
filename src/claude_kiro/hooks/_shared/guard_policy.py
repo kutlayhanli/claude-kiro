@@ -702,7 +702,7 @@ def decide_arbiter_edit(facts: ArbiterEditFacts) -> GuardDecision:
 
 
 def _has_substitution(command: str) -> bool:
-    """True for a `$`, a backtick, `<(` or `>(` outside single quotes, or an unterminated quote."""
+    """True for a `$`, a backtick, `<(` or `>(` outside single quotes, a heredoc, a brace expansion, or an unterminated quote."""
     i, n = 0, len(command)
     in_double = False
     while i < n:
@@ -726,6 +726,14 @@ def _has_substitution(command: str) -> bool:
             return True  # a comment can hide quotes from this scan; deny rather than model it
         if command.startswith("<(", i) or command.startswith(">(", i):
             return True
+        if not in_double:
+            if command.startswith("<<", i) and not command.startswith("<<<", i) and (i == 0 or command[i - 1] != "<"):
+                return True  # a heredoc body is not quoting; bash still expands `$(...)` in it
+            if c in "{}":
+                before_ok = i == 0 or command[i - 1] in " \t\n;&|()"
+                after_ok = i + 1 >= n or command[i + 1] in " \t\n;&|()"
+                if not (before_ok and after_ok):
+                    return True  # brace expansion (`{--opt=x,y}`) can hide an option from word checks
         i += 1
     return in_double
 

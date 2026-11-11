@@ -796,6 +796,10 @@ BYPASS_COMMANDS = [
     "rg --hostname-bin=rm x",
     "file -C -m tests/test_x",
     "date -s 2020-01-01",
+    # review round 3
+    "cat <<EOF\n'$(rm -rf tests)'\nEOF",
+    "git diff {--output=tests/t.py,HEAD}",
+    "rg {--pre=rm,x} . tests/t.py",
 ]
 
 
