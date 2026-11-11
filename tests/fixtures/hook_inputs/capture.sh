@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
 # Capture real Claude Code hook inputs for the prompt-free-runs tests (Task 2 runs this, outside any sandbox).
 # It starts paid `claude -p` sessions. Usage: capture.sh [out-dir]   (default: this directory)
+#
+# Arbiter mode (run-principles Task 91, TC-160): capture.sh --arbiter [out-dir]
+#   Non-interactive. Two `claude -p` runs, each a one-agent Workflow whose agent is started with `agentType` set to
+#   the arbiter: `spec:arbiter` with this checkout's plugin loaded (--plugin-dir), and `ck-arbiter` with the
+#   vendored agent file `ck agents sync` writes into the temp project. Writes arbiter-agent-pretooluse.json and
+#   arbiter-vendored-agent-pretooluse.json (no `_derivedFrom` key). Set CK to the ck command of this checkout
+#   (default: `uv run --directory <repo> ck`) so the vendored agent file comes from this branch.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MODE=default
+if [ "${1:-}" = "--arbiter" ]; then MODE=arbiter; shift; fi
 OUT="${1:-$HERE}"
 RAW="$(mktemp -d)"
 PROJECT="$(mktemp -d)"
@@ -31,6 +40,100 @@ cat > "$PROJECT/.claude/settings.json" <<JSON
 JSON
 git -C "$PROJECT" add -A
 git -C "$PROJECT" commit -qm init
+
+if [ "$MODE" = arbiter ]; then
+  # Arbiter mode: the arbiter's identity as Claude Code really sends it (TC-160). No manual step.
+  REPO="$(cd "$HERE/../../.." && pwd)"
+  PLUGIN="$REPO/plugin"
+  [ -f "$PLUGIN/agents/arbiter.md" ] || { echo "no arbiter agent at $PLUGIN/agents/arbiter.md" >&2; exit 1; }
+  if [ -n "${CK:-}" ]; then
+    # shellcheck disable=SC2086
+    $CK -C "$PROJECT" agents sync >/dev/null
+  else
+    uv run --quiet --directory "$REPO" ck -C "$PROJECT" agents sync >/dev/null
+  fi
+  [ -f "$PROJECT/.claude/agents/ck-arbiter.md" ] || {
+    echo "ck agents sync wrote no .claude/agents/ck-arbiter.md (is CK this branch's ck?)" >&2; exit 1; }
+  git -C "$PROJECT" add -A
+  git -C "$PROJECT" commit -qm "vendored agents"
+
+  arbiter_prompt() {  # $1 agent type, $2 marker
+    printf '%s\n' "Do exactly this, with no other tool calls.
+Run a Workflow with an inline script that starts exactly one agent, passing agentType: '$1' in that agent's options.
+The agent's prompt must be: Run the Bash command: echo $2 and then reply \"ok\". Make no other tool call.
+Then stop."
+  }
+  ( cd "$PROJECT" && claude -p --permission-mode bypassPermissions --plugin-dir "$PLUGIN" \
+      "$(arbiter_prompt spec:arbiter CAPTURE_ARBITER_PLUGIN)" ) > "$RAW/claude-output-plugin.txt" 2>&1 || {
+    echo "claude -p (spec:arbiter) failed; see $RAW/claude-output-plugin.txt" >&2; cat "$RAW/claude-output-plugin.txt" >&2; exit 1; }
+  ( cd "$PROJECT" && claude -p --permission-mode bypassPermissions \
+      "$(arbiter_prompt ck-arbiter CAPTURE_ARBITER_VENDORED)" ) > "$RAW/claude-output-vendored.txt" 2>&1 || {
+    echo "claude -p (ck-arbiter) failed; see $RAW/claude-output-vendored.txt" >&2; cat "$RAW/claude-output-vendored.txt" >&2; exit 1; }
+
+  python3 - "$RAW" "$OUT" "$PROJECT" <<'PY'
+import glob, json, os, sys
+
+raw, out, project = sys.argv[1:4]
+home = os.path.expanduser("~")
+records = []
+for path in sorted(glob.glob(os.path.join(raw, "*.json"))):
+    with open(path) as fh:
+        records.append(json.load(fh))
+
+def pick(marker):
+    for rec in records:
+        inp = rec["input"]
+        if inp.get("hook_event_name") == "PreToolUse" and marker in ((inp.get("tool_input") or {}).get("command") or ""):
+            return inp
+    return None
+
+ids = {}
+def fake(value, prefix):
+    if not value:
+        return value
+    return ids.setdefault((prefix, value), f"{prefix}-{len([k for k in ids if k[0] == prefix]) + 1:04d}")
+
+def scrub(obj):
+    if isinstance(obj, dict):
+        res = {}
+        for k, v in obj.items():
+            if k in ("session_id", "sessionId"):
+                res[k] = fake(v, "session")
+            elif k in ("agent_id", "agentId"):
+                res[k] = fake(v, "agent")
+            elif k in ("tool_use_id", "toolUseID"):
+                res[k] = fake(v, "toolu")
+            elif k == "transcript_path":
+                res[k] = "/home/user/.claude/projects/demo/transcript.jsonl"
+            else:
+                res[k] = scrub(v)
+        return res
+    if isinstance(obj, list):
+        return [scrub(v) for v in obj]
+    if isinstance(obj, str):
+        s = obj.replace(project, "/work/demo")
+        if home and home != "/":
+            s = s.replace(home, "/home/user")
+        return s
+    return obj
+
+failed = False
+for name, marker in (("arbiter-agent-pretooluse.json", "CAPTURE_ARBITER_PLUGIN"),
+                     ("arbiter-vendored-agent-pretooluse.json", "CAPTURE_ARBITER_VENDORED")):
+    rec = pick(marker)
+    if rec is None:
+        print(f"ERROR: no recorded PreToolUse input for {marker}", file=sys.stderr)
+        failed = True
+        continue
+    with open(os.path.join(out, name), "w") as fh:
+        json.dump(scrub(rec), fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    print(f"{name}: agent_type={rec.get('agent_type')!r} agent_id present={bool(rec.get('agent_id'))}")
+sys.exit(1 if failed else 0)
+PY
+  echo "If an agent_type above is not spec:arbiter / ck-arbiter, change is_arbiter_caller in design.md first (Task 91)."
+  exit 0
+fi
 
 # 2. Headless, Workflow agent and Agent-tool subagent in one `claude -p` run: the prompt runs one Bash call itself,
 #    then a one-agent Workflow whose agent runs one Bash call, then one Agent-tool subagent that runs one Bash call.
