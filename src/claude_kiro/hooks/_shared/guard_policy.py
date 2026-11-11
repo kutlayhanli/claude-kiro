@@ -646,3 +646,213 @@ def post_check_reason(finding: PostCheckFinding) -> str:
     if finding.mode == "ask":
         return f"{head} Ask me before keeping this change."
     return f"{head} {restore}."
+
+
+# --- the arbiter's lane ---------------------------------------------------------------------------
+
+ARBITER_AGENT_TYPES = ("spec:arbiter", "ck-arbiter")
+_LANE_FILES = ("tasks.md", "design.md", "test-plan.md")
+_ARBITER_WORKTREE = re.compile(r"^(.+)-task-arbiter\d+$")
+
+
+@dataclass(frozen=True)
+class ArbiterEditFacts:
+    rel: str  # path relative to its checkout, symlinks and ".." resolved
+    arbiter_worktree_spec: Optional[str]  # the <spec> of a checkout named <spec>-task-arbiter<k>, else None
+    lane_specs: Tuple[str, ...]  # specs with an open lane ticket in this checkout
+    implementation_started: bool  # for the spec named by rel: any task In Progress or Done
+
+
+def is_arbiter_caller(hook_input: Any) -> bool:
+    """True only for a non-empty `agent_id` with `agent_type` exactly spec:arbiter or ck-arbiter."""
+    if not isinstance(hook_input, Mapping):
+        return False
+    agent_id = hook_input.get("agent_id")
+    agent_type = hook_input.get("agent_type")
+    return (
+        isinstance(agent_id, str)
+        and agent_id != ""
+        and isinstance(agent_type, str)
+        and agent_type in ARBITER_AGENT_TYPES
+    )
+
+
+def arbiter_block_reason(rel: str) -> str:
+    return (
+        f"[ck guard] Denied: {rel} is outside the arbiter's lane. The arbiter may change only "
+        "specs/<spec>/tasks.md, design.md and test-plan.md of the spec it rules on (requirements.md only "
+        "under a /spec:create lane ticket before implementation starts). Return a needs-input ruling "
+        "instead of editing this file."
+    )
+
+
+def decide_arbiter_edit(facts: ArbiterEditFacts) -> GuardDecision:
+    """Allow only the lane's paths; everything else is denied."""
+    parts = facts.rel.split("/") if isinstance(facts.rel, str) else []
+    allowed = False
+    if len(parts) == 3 and parts[0] == "specs" and parts[1]:
+        spec, name = parts[1], parts[2]
+        if facts.arbiter_worktree_spec is not None:
+            allowed = spec == facts.arbiter_worktree_spec and name in _LANE_FILES
+        elif spec in facts.lane_specs:
+            allowed = name in _LANE_FILES or (name == "requirements.md" and not facts.implementation_started)
+    if allowed:
+        return GuardDecision(False)
+    return GuardDecision(True, "deny", (facts.rel,), ("outside the arbiter's lane",), "arbiter_lane")
+
+
+def _has_substitution(command: str) -> bool:
+    """True for a `$`, a backtick, `<(` or `>(` outside single quotes, a heredoc, a brace expansion,
+    an unquoted control character, a comment, or an unterminated quote."""
+    i, n = 0, len(command)
+    in_double = False
+    while i < n:
+        c = command[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "'" and not in_double:
+            j = command.find("'", i + 1)
+            if j < 0:
+                return True
+            i = j + 1
+            continue
+        if c == '"':
+            in_double = not in_double
+            i += 1
+            continue
+        if c == "`" or c == "$":
+            return True  # any `$` (parameter expansion, `$(`, ANSI-C `$'`) can hide an option or a command
+        if not in_double and c not in "\t\n" and (ord(c) < 32 or ord(c) == 127):
+            # The word scan splits on `\r`, bash does not: an unquoted control character makes
+            # the two disagree on where words and comments start. Deny rather than model it.
+            return True
+        if c == "#" and not in_double and (i == 0 or command[i - 1] in " \t\r\n;&|()<>"):
+            return True  # a comment can hide quotes from this scan; deny rather than model it
+        if command.startswith("<(", i) or command.startswith(">(", i):
+            return True
+        if not in_double:
+            if command.startswith("<<", i) and not command.startswith("<<<", i) and (i == 0 or command[i - 1] != "<"):
+                return True  # a heredoc body is not quoting; bash still expands `$(...)` in it
+            if c in "{}":
+                before_ok = i == 0 or command[i - 1] in " \t\n;&|()"
+                after_ok = i + 1 >= n or command[i + 1] in " \t\n;&|()"
+                if not (before_ok and after_ok):
+                    return True  # brace expansion (`{--opt=x,y}`) can hide an option from word checks
+        i += 1
+    return in_double
+
+
+def _in_arbiter_worktree(cwd: str) -> Optional[str]:
+    m = _ARBITER_WORKTREE.match(posixpath.basename(posixpath.normpath(cwd or "")))
+    return m.group(1) if m else None
+
+
+def _unsafe_segment(words: Sequence[str]) -> Optional[str]:
+    """The offending word when a segment sets env, wraps the program, changes directory or
+    configures git inline; such forms can run a command inside a read-only one."""
+    rest = list(words)
+    while rest and rest[0] in _PREFIX_WORDS:
+        rest.pop(0)
+    if not rest:
+        return None
+    first = rest[0]
+    if _ASSIGN.match(first) or first in _OPT_WRAPPERS or first == "cd":
+        return first
+    if first == "git":
+        i = 1
+        while i < len(rest):
+            w = rest[i]
+            if w == "-C":
+                i += 2
+            elif w == "-c" or w.startswith("--config-env") or w.startswith("--exec-path"):
+                return w
+            elif w.startswith("-"):
+                i += 1
+            else:
+                break
+    args = rest[1:]
+    if first in ("test", "["):
+        # `test -v 'a[$(cmd)]'` evaluates the subscript as arithmetic, running the substitution.
+        operands = args[:-1] if first == "[" and args and args[-1] == "]" else args
+        for a in operands:
+            if a in ("-v", "-R") or "[" in a or "]" in a or "$(" in a or "`" in a:
+                return a
+    elif first == "rg":
+        # rg --pre / --hostname-bin run a program; -z / --search-zip run decompressors.
+        for a in args:
+            if a == "--":
+                break
+            if a.startswith("--"):
+                if a.split("=", 1)[0] in ("--pre", "--hostname-bin", "--search-zip"):
+                    return a
+            elif a.startswith("-") and "z" in a:
+                return a
+    elif first == "file":
+        # file -C / --compile writes a compiled magic file.
+        for a in args:
+            if a == "--":
+                break
+            if a == "--compile" or (a.startswith("-") and not a.startswith("--") and "C" in a):
+                return a
+    elif first == "date":
+        # date -s / --set changes the system clock.
+        for a in args:
+            if a.split("=", 1)[0] == "--set":
+                return a
+            if a.startswith("-") and not a.startswith("--"):
+                for ch in a[1:]:
+                    if ch == "s":
+                        return a
+                    if ch in "dfrI":  # the rest of the bundle is this flag's value
+                        break
+    return None
+
+
+def decide_arbiter_bash(command: str, cwd: str) -> GuardDecision:
+    reasons = ("shell command outside the arbiter's lane",)
+
+    def deny(offender: str) -> GuardDecision:
+        return GuardDecision(True, "deny", (offender,), reasons, "arbiter_lane")
+
+    if not isinstance(command, str):
+        return deny("")
+    if _has_substitution(command):
+        return deny(command)
+    segments = _scan(command)
+    spec = _in_arbiter_worktree(cwd)
+    for seg in segments:
+        if seg.paren:
+            continue
+        bad = _unsafe_segment(seg.words)
+        if bad is not None:
+            return deny(bad)
+        if _segment_read_only(seg):
+            continue
+        if seg.writes or seg.tee:
+            return deny(seg.writes[0] if seg.writes else "tee")
+        words = _strip_prefix(seg.words)
+        offender = words[0] if words else ""
+        if spec is None or not words or words[0] != "git" or len(words) < 2:
+            return deny(offender)
+        sub, rest = words[1], words[2:]
+        if sub == "add":
+            lane = {f"specs/{spec}/{n}" for n in _LANE_FILES}
+            ops = [r for r in rest if r != "--"]
+            if not ops:
+                return deny("git add")
+            for o in ops:
+                if _rel_to(cwd, o) not in lane:
+                    return deny(o)
+        elif sub == "commit":
+            if len(rest) != 2 or rest[0] != "-m":
+                return deny("git commit")
+        else:
+            return deny(f"git {sub}")
+    return GuardDecision(False)
+
+
+def _rel_to(cwd: str, path: str) -> str:
+    absolute = _abs(cwd, path)
+    root = posixpath.normpath(cwd)
+    return absolute[len(root) + 1 :] if absolute.startswith(root + "/") else absolute
