@@ -735,7 +735,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 31: Add ck principles init and check
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 1.1, 1.2, 1.4
 **Description:** Create `src/claude_kiro/cli/arbiter.py` with the `principles` group: `ck principles init [--commit]` (creates `specs/PRINCIPLES.md` from the starter text if missing, leaves an existing file untouched, prints `{"created", "path", "commit"}`; `--commit` also commits that file alone on the checkout's branch when it created it, so a launch gets it onto the target checkout) and `ck principles check SPEC --json` (`{"ok", "reason"}`, exit 1 when the plan may not be Decided). Create an empty `arbiter` group in the same file. Register both in `src/claude_kiro/cli/main.py`. Harness Contract owner: `ck principles init`.
