@@ -344,7 +344,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 14: Red-team the prohibition of Story 2
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.5
 **Description:** Try to break each SHALL NOT clause of Story 2 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Target `ck lint` and `justification_findings`: a criterion-looking line inside a story that has a `**Without it:**` line, criteria carrying their own partial markers, criteria numbered oddly, and a real story block from this spec's requirements fed back in. Written from the requirements only, never from the implementation.
@@ -354,10 +354,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 23 (red team of 2.5 through `ck lint`)
 
 **Acceptance:**
-- [ ] 2.5's SHALL NOT clause has at least one adversarial test per listed input class that applies to it
-- [ ] Tests exercise the real boundary named in the test plan (CLI)
-- [ ] Tests fail before the implementation exists for the right reason (no justification check)
-- [ ] No mocks of the project's own code in integration tests
+- [x] 2.5's SHALL NOT clause has at least one adversarial test per listed input class that applies to it
+- [x] Tests exercise the real boundary named in the test plan (CLI)
+- [x] Tests fail before the implementation exists for the right reason (no justification check)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (project fixture)
 **Complexity:** Low
