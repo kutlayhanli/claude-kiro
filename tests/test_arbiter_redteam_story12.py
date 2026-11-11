@@ -112,7 +112,9 @@ def test_129_unchecked_task_does_not_hide_findings_of_other_tasks(tmp_path, veri
     code, data = lint(tmp_path)
     assert unchecked(data, "3") == []
     assert unchecked(data, "1") and unchecked(data, "5") == []
-    assert [(f["task"], f["suite"]) for f in scope(data)] == [("5", A)], data
+    # A is shared by test tasks 2 and 4, so Task 5 may carry one finding per sharing test task (design: ScopeFinding.testTask).
+    assert {(f["task"], f["suite"]) for f in scope(data)} == {("5", A)}, data
+    assert {f["testTask"] for f in scope(data)} == {"2", "4"}, data
     text = ck(tmp_path, "lint", "sim")
     assert text.exit_code == 1, text.output
 
@@ -243,16 +245,17 @@ def test_1210_dependency_cycle_is_reported_once(tmp_path):
 
 
 def test_1210_each_task_and_suite_occurs_once_in_verify_scope(tmp_path):
-    """Two test tasks make A shared with Task 1: still one finding for (1, A), not one per sharing test task."""
+    """Two test tasks make A shared with Task 1: one finding per (task, suite, testTask), none repeated.
+    design.md: ScopeFinding.testTask names the test task that makes the suite shared, and scopeClaims groups them."""
     files(tmp_path)
     blocks = shape()
     blocks += block(5, "More", files=["src/c.py"], verify=f"{PYTEST} {B}")
     blocks += block(6, "More tests", track="test", files=[A], verifies="Task 5")
     write_spec(tmp_path, blocks)
     _, data = lint(tmp_path)
-    got = [(f["task"], f["suite"]) for f in scope(data)]
-    assert got.count(("1", A)) == 1, got
-    assert len(got) == len(set(got))
+    got = [(f["task"], f["suite"], f["testTask"]) for f in scope(data)]
+    assert len(got) == len(set(got)), got
+    assert {t for (task, suite, t) in got if (task, suite) == ("1", A)} == {"4", "6"}, got
 
 
 def test_1210_json_output_fed_back_is_stable(tmp_path):
