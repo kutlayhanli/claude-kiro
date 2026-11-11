@@ -640,7 +640,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 27: Property tests for ruling validity and routing
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.1, 7.2, 8.8, 8.9, 8.11, 8.13
 **Description:** Implement P-17 and P-37 with Hypothesis at `arbiter_policy.validate_ruling` and `route_ruling`, in `tests/test_arbiter_cli.py`, named `test_p<N>_...`. P-17: `valid` is true exactly for the well-formed set; negatives come from real data (a principle id from another spec's plan, a D-n decision id, a reasonless override's id, a truncated id, a case variant, a principle's text in place of its id, two outcomes, unknown outcome, missing fields, wrong types). P-37: each of the 4 outcomes, with and without `needs_stronger_look`, over valid and invalid rulings, goes to exactly one lane: a valid ruling with no stronger-look status goes spec edit to `spec_edit`, code to `code`, requirements to `needs_input`, test repair to `test_repair` (the test-fixer); a stronger look goes to `rerun` at the normal tier and `needs_input` (`exhausted`) at the risky tier; an invalid ruling goes to `needs_input` with `record: false`; only a valid spec edit reaches `spec_edit`. What the fixer does with it (lands, or a `test-fix` entry) is TC-71, TC-72 and TC-199 at Task 60. Settings `@settings(derandomize=True, max_examples=200, database=None, deadline=None)`. Add both to the file's `PROPERTIES` map.
@@ -651,12 +651,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 30 (P-17, P-37 at `validate_ruling` and `route_ruling`)
 
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the P-17 and P-37 rows
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] The tests call the decision seams, not a server
-- [ ] Tests exercise the real boundary named in the test plan (the seams)
-- [ ] Tests fail before the implementation exists for the right reason (the seams do not exist)
-- [ ] No mocks of the project's own code in integration tests
+- [x] The generators cover every surface form and negative listed in the P-17 and P-37 rows
+- [x] Settings are deterministic (derandomized, no database)
+- [x] The tests call the decision seams, not a server
+- [x] Tests exercise the real boundary named in the test plan (the seams)
+- [x] Tests fail before the implementation exists for the right reason (the seams do not exist)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (strategies), Task 26 (same test file)
 **Complexity:** Medium
@@ -1315,7 +1315,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 56: Test that a ruling gets the principle layers
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.6, 1.7, 1.9, 1.10
 **Description:** Implement TC-7, TC-9, TC-11 and TC-12 in `tests/test_arbiter_run.py`, named `test_tc<N>_...`. TC-7: with both layers on disk, the `arbiter task 1` prompt holds the text of both. TC-9: with a plan principle reserving design edits, a ruling needing a design edit and naming the reservation in `reservedBy` makes a needs-input entry and no landing runs (a ruling that leaves it out is refused at the landing, TC-149). TC-11: with `specs/PRINCIPLES.md` missing, then a directory, then unreadable (mode 000), no `arbiter` label runs and the entry names the file. TC-12: with no PLAN.md, then a PLAN.md with no section, the arbiter rules and the entry records the plan layer as absent.
@@ -1325,10 +1325,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 65 (TC-7, 9, 11), Task 66 (TC-12, the entry records the layer)
 
 **Acceptance:**
-- [ ] TC-11 and TC-12 use real files and real `decisions.md`
-- [ ] Tests exercise the real boundary named in the test plan (workflow, real `ck arbiter`, real files)
-- [ ] Tests fail before the implementation exists for the right reason (no arbiter step)
-- [ ] No mocks of the project's own code in integration tests
+- [x] TC-11 and TC-12 use real files and real `decisions.md`
+- [x] Tests exercise the real boundary named in the test plan (workflow, real `ck arbiter`, real files)
+- [x] Tests fail before the implementation exists for the right reason (no arbiter step)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 55 (same test file)
 **Complexity:** Medium
