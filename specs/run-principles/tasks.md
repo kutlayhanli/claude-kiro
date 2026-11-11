@@ -777,7 +777,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 33: Test the arbiter's lane through the real guard hook
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 11.5, 11.7, 11.10
 **Description:** Implement TC-79 to TC-87, TC-101, TC-103, TC-106 and TC-134 in `tests/test_arbiter_guard.py`, named `test_tc<N>_...`, through real `execute_hook("pre-tool-guard", ...)` and real `bash -c`, with the caller coming only from `arbiter_caller`. TC-79: tasks.md, design.md and test-plan.md edits allowed, changing existing text, with a task In Progress. TC-80: requirements.md denied by edit and by add-only append, under each task-status mix. TC-81: a test, a source file, PLAN.md, PRINCIPLES.md, `specs/ck.json`, another spec's tasks.md, `.claude/x`, `/etc/x`: denied. TC-82: `rm`, `mv`, `>`, `tee`, `sed -i`, `python -c`, `cp` onto requirements.md and a test: denied, and each command-substitution form (`echo "$(rm tests/x.py)"`, a backtick form of `cat`, `git commit -m "$(rm x)"`, `<(...)`, `>(...)`) denied, while `git commit -m 'text $(x)'` in single quotes is not. TC-83: a task agent with `CK_ARBITER=1`, a `ck-arbiter` argument or prompt text claiming the lane is decided as without the claim. TC-84: an input claiming the arbiter type with no agent id, or a malformed type, gets the same decision as the unclaimed input. TC-85: a task agent and a main session on requirements.md and test-plan.md, before and after implementation started: today's decisions. TC-86: a denial names the file and says it is outside the arbiter's lane. TC-87: the arbiter's `git add`, `git commit` and `ck lint` in its checkout are not denied and the commit touches only allowed files. TC-101: with a lane ticket and every task Not Started, requirements wording correction is allowed. TC-103: with a started task the create-phase arbiter is denied requirements.md and `spec_review_frozen` still governs the reviser. TC-106: PLAN.md is denied in create and in run. TC-134: the real hook and `guard_policy.decide_arbiter_edit` agree on one allowed and one denied path.
@@ -787,12 +787,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 36 (TC-79 to 87, 101, 103, 106, 134 through the real hook)
 
 **Acceptance:**
-- [ ] Every decision comes from the real hook, and shell forms run under real `bash -c`
-- [ ] Denied cases assert the file on disk is unchanged where the case writes
-- [ ] No test states the arbiter's identity except through `arbiter_caller`
-- [ ] Tests exercise the real boundary named in the test plan (real hook, real files, real git)
-- [ ] Tests fail before the implementation exists for the right reason (no arbiter lane in the guard)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Every decision comes from the real hook, and shell forms run under real `bash -c`
+- [x] Denied cases assert the file on disk is unchanged where the case writes
+- [x] No test states the arbiter's identity except through `arbiter_caller`
+- [x] Tests exercise the real boundary named in the test plan (real hook, real files, real git)
+- [x] Tests fail before the implementation exists for the right reason (no arbiter lane in the guard)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (`arbiter_project`, `arbiter_caller`, derived fixture)
 **Complexity:** High
