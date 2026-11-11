@@ -1286,7 +1286,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 55: Test which stops go to the arbiter
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 6.9, 6.10, 6.11, 6.13, 8.8, 8.9, 8.11, 8.16
 **Description:** Implement TC-42 to TC-52, TC-200 to TC-204, TC-206 and TC-207 in `tests/test_arbiter_run.py`, named `test_tc<N>_...`, under the real `spec-implement.js` with real `ck` through `exec_ck`. TC-42: a test conflict on the first attempt: `task 1` is followed by the arbiter, with no retry, escalation or confirmation label. TC-43: a guard stop: the arbiter runs and no `guard <k>` label does. TC-44: blocking findings after the configured rounds on an individually reviewed task: the arbiter runs and no `revise (model)` label. TC-45: same for a task flagged by a landing batch's review. TC-46: a plain gate failure with retries and an escalate list keeps today's labels in today's order and the arbiter runs only after the top model failed. TC-47: with no escalate list the arbiter follows the last retry. TC-48: a retry or escalation that passes means no arbiter label. TC-49: BUSY and ERROR worktree outcomes: no arbiter label. TC-50: the arbiter prompt holds the stop type, claim text, evidence, task, models tried, both layers and the spec paths. TC-51: with a slow arbiter on task 1, its dependent has not started when independent task 3 finishes (virtual clock). TC-52: for each `arbiter_failures()` form, on a test conflict and on a gate-failure claim, a needs-input entry appears and no guard or confirmation label runs. TC-200: a guard stop on review revision round 1 reaches the arbiter with no `guard <k>` label; a `code` ruling re-runs that revision with the ruling text and no attempt spent, and the review continues; a `requirements` ruling gives one needs-input entry with the ruling. TC-201: a guard stop on the retry after a landed test fix (fake_project `testFix`) reaches the arbiter with no `guard <k>` label. TC-202: a gate failing on a missing command an unfinished task provides (fake_project `missingCommand` and `provides`), with no escalate list: a live edge is recorded, no retry is spent, and no `arbiter` label runs. TC-203: a missing command no task provides: the arbiter runs on a test-conflict claim naming the invoking test, with no confirmation label. TC-204: a missing command whose only provider depends on the task (a command cycle): the arbiter runs on a `command-cycle` claim keyed `<task>|command:<provider>:<command>`, no live edge is recorded, no retry is spent, and a landed spec edit rewiring tasks.md resumes the task (D29). TC-206: one attempt reports two conflicts, ruled `test_repair` then `requirements`: the second's entry appears, the first still reaches `testfix ledger <k>` and `testfix <k> (Task n)`, and no task retry label follows; ruled `test_repair` then `code`, the task retries once, after both claims are recorded, with the code ruling's text and `afterFixNote` (D32). TC-207: a guard stop on review revision round 1 ruled `test_repair`: `testfix ledger <k>` and `testfix <k> (Task n)` run, the shipped script still has one `handOffTestRepair(` call site, and the same revision runs again with no attempt spent and the review continues (D31).
@@ -1296,10 +1296,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 65 (TC-42, 43, 49 to 52, 203, 204), Task 66 (TC-201), Task 68 (TC-46 to 48, 202, 206), Task 69 (TC-44, TC-45, TC-200, TC-207)
 
 **Acceptance:**
-- [ ] Event-order cases assert the actual label sequence of the workflow, not just presence
-- [ ] Tests exercise the real boundary named in the test plan (real workflow script, real `ck`, real temp repo)
-- [ ] Tests fail before the implementation exists for the right reason (no arbiter label; today's ladder runs)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Event-order cases assert the actual label sequence of the workflow, not just presence
+- [x] Tests exercise the real boundary named in the test plan (real workflow script, real `ck`, real temp repo)
+- [x] Tests fail before the implementation exists for the right reason (no arbiter label; today's ladder runs)
+- [x] No mocks of the project's own code in integration tests
+
+**Implementation notes:** `tests/test_arbiter_run.py` drives the shipped script through `bridge.run` with real `ck` (`exec_ck`). TC-201 uses a small node runner (the fake's `guardStops` would also stop the first attempt, so the runner makes only the retry after a landed fix guard-stop). TC-51 models a slow arbiter with a long independent task, because the fake arbiter agent has no duration and the virtual clock stands still during real `ck` calls.
 
 **Dependencies:** Task 1 (`arbiter_project`, strategies), Task 2 (fake runtime)
 **Complexity:** High
