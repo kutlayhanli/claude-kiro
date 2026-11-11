@@ -77,7 +77,7 @@ function arbiterSteps({ routes = {} }) {
 // `gate-failure` past retries and escalation, a `guard-stop` or a `test-conflict` claim), verifiedBy (the plan's
 // field, so `auditDue` holds for an impl task whose test task no cross-test passed), routes ({n: SettleResult route}).
 function fake({ deps, failUntil = {}, reviews = {}, conflictRounds = {}, redLands = {}, recheckRed = 0, fullRed = false, planFailFirst = false,
-  failUntilRuled = [], guardUntilRuled = [], conflictUntilRuled = [], verifiedBy, routes = {} }) {
+  failUntilRuled = [], guardUntilRuled = [], conflictUntilRuled = [], verifiedBy, routes = {}, unreproduced = null }) {
   const done = new Set()
   const attempts = {}
   const reviewCount = {}
@@ -123,6 +123,12 @@ function fake({ deps, failUntil = {}, reviews = {}, conflictRounds = {}, redLand
         if ((red[n] || 0) > 0) { red[n]--; out.push({ task: n, state: 'RED', checkGreen: false, checkTail: `red: task ${n}` }); continue }
         done.add(n)
         out.push({ task: n, state: 'MERGED', checkGreen: true, mergedAt: '2026-10-04T10:02:00Z' })
+      }
+      const batch = l.slice(5).split(' ')
+      if (unreproduced && !hit.unreproduced && unreproduced.batch.every(n => batch.includes(n)) && out.every(t => t.state === 'MERGED')) {
+        // run-principles Story 15: red as a batch, no task reproduces it: the run sends it to the full gate
+        hit.unreproduced = 1
+        return { tasks: out, gates: [{ tasks: batch, green: false }, ...batch.map(n => ({ tasks: [n], green: true }))], bisected: true, unreproduced: { tasks: batch, tail: 'red as a batch', failures: [] }, startedAt: '2026-10-04T10:01:00Z', finishedAt: '2026-10-04T10:02:00Z' }
       }
       return { tasks: out, gates: [{ tasks: [], green: true }], bisected: false, startedAt: '2026-10-04T10:01:00Z', finishedAt: '2026-10-04T10:02:00Z' }
     }
@@ -202,6 +208,8 @@ const scenarios = [
     failUntilRuled: [1], guardUntilRuled: [2], conflictUntilRuled: [3], reviews: { 4: ['changes', 'changes', 'changes', 'approve'] },
     verifiedBy: { 1: ['5'], 2: ['5'], 4: ['5'] }, routes: { 2: 'spec_edit' },
   },
+  // run-principles Story 15: a landing red as a batch only, no task RED: `full gate @1 (unreproduced landing)`
+  { deps: { 1: [] }, mergeBatch: 1, fullGateEvery: 0, unreproduced: { batch: ['1'] } },
 ]
 
 for (const { tracks, fullGateEvery, mergeBatch, arbiter, crossTest, ...knobs } of scenarios) {
