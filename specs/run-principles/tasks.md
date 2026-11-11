@@ -183,7 +183,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 7: Test the principles file and the two layers through the CLI
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.2, 1.6, 1.8, 1.9
 **Description:** Implement TC-1, TC-3, TC-8, TC-10, TC-140 and TC-153 in `tests/test_principles.py`, each named `test_tc<N>_...`. TC-1: `ck principles init --json` creates `specs/PRINCIPLES.md` with all four defaults and `created: true`. TC-3: with an edited file, bytes and mtime stay and `created: false`. TC-8: with a plan override that has a reason and one that has none, `ck arbiter open` returns the plan's principle for the first and the project default for the second. TC-10: with a plan that grants the arbiter requirements changes, `ck arbiter settle` on an outcome-requirements ruling routes to `needs_input`. TC-140: `ck principles init --commit --json` in a checkout with no file commits it alone on that branch and reports `commit`; with the file present, no commit and `commit` null. TC-153: with `specs/PRINCIPLES.md` missing, a directory, a broken symlink, mode 000 or non-UTF-8, `ck arbiter open` returns `ask`, `missing` names the file and no worktree is made; a readable or empty file may rule.
@@ -193,10 +193,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 31 (TC-1, TC-3, TC-140), Task 37 (TC-8, TC-153), Task 38 (TC-10)
 
 **Acceptance:**
-- [ ] Each case asserts the JSON and the file on disk, through a real CLI subprocess in a real temp directory
-- [ ] Tests exercise the real boundary named in the test plan (CLI, filesystem)
-- [ ] Tests fail before the implementation exists for the right reason (no `ck principles` or `ck arbiter` command)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each case asserts the JSON and the file on disk, through a real CLI subprocess in a real temp directory
+- [x] Tests exercise the real boundary named in the test plan (CLI, filesystem)
+- [x] Tests fail before the implementation exists for the right reason (no `ck principles` or `ck arbiter` command)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (uses `arbiter_project`)
 **Complexity:** Low
