@@ -18,7 +18,7 @@ from typing import Optional
 import click
 
 from .. import worktrees as wt
-from ..arbiter import ArbiterError, claim_from_json, close_lane, open_claim, open_lane
+from ..arbiter import ArbiterError, claim_from_json, close_lane, open_claim, open_lane, settle_claim
 from ..arbiter_policy import TaskMeta
 from ..principles import STARTER_TEXT, plan_may_be_decided
 
@@ -121,6 +121,22 @@ def arbiter_open(spec: str, task: str, into: str, as_json: bool):
         result = open_claim(root, spec, into, task, claim, task_meta)
     except (ArbiterError, wt.WorktreeError, ValueError) as exc:
         click.echo(f"ck arbiter open: {exc}", err=True)
+        sys.exit(2)
+    click.echo(json.dumps(result))
+
+
+@arbiter.command("settle")
+@click.argument("spec")
+@click.argument("key")
+@click.option("--tier", "tier", required=True, type=click.Choice(["normal", "risky"]))
+@click.option("--json", "as_json", is_flag=True)
+def arbiter_settle(spec: str, key: str, tier: str, as_json: bool):
+    """Validate and route the arbiter's raw answer (stdin) to claim KEY; update the ledger and the worktree."""
+    try:
+        root = wt.main_root(_toplevel())
+        result = settle_claim(root, spec, key, sys.stdin.read(), tier)
+    except (ArbiterError, wt.WorktreeError) as exc:
+        click.echo(f"ck arbiter settle: {exc}", err=True)
         sys.exit(2)
     click.echo(json.dumps(result))
 
