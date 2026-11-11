@@ -2212,7 +2212,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 95: Restore a refused integration checkout before landing
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 14.1, 14.2, 14.3, 14.4, 14.5
 **Description:** In `src/claude_kiro/worktrees.py`, add `RecoveryFacts`, the pure `decide_recovery` and `recover_target` (design.md, "Landing recovery and bisection"). Replace the dirty-target refusals in `land` (inside `land_lock`) and `merge` (inside a `land_lock` taken for that step) with `recover_target`. It restores only with `_git_reset(root, target, into, head)` to the checkout's current head, then checks that HEAD is unchanged, MERGE_HEAD is gone and no tracked file is dirty, and clears the refusal. `land`'s result gains `recovered` when it restored. In `src/claude_kiro/cli/worktree.py`, `merge` prints `restored <checkout> to <head>: discarded <paths>` first when it restored, ending `; a merge was in progress` when one was (14.2). Call `recover_target` too at the start of `land_spec_edit` under its `land_lock` (its entry carries `recovered`), and in `ck arbiter record` on the `INTO` checkout under the `land_lock` it takes, before it commits `decisions.md`, when `INTO` is an `integrate/*` branch (its output carries `recovered` when it restored, 14.2), so no write into the integration checkout skips the restore (14.1). A record on any other branch, such as a `/spec:create` ruling through `ck arbiter review`, never calls it and still commits `decisions.md` alone (10.2, 14.3). When `recover_target` refuses (a dirty integration checkout with no matching refusal, 14.5), the record leaves the checkout unchanged and still commits `decisions.md` alone; it takes the 10.9 path only when git cannot make that commit, such as while a merge is in progress (10.1, D26).
@@ -2232,6 +2232,8 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Dependencies:** Task 93 (its tests are the oracle), Task 100 (its tests are the oracle), Task 101 (its tests are the oracle), Task 94 (the refusal record), Task 44 (edits the same `worktrees.py` and `cli/worktree.py`; adds `land_spec_edit`), Task 42 (adds `ck arbiter record` in `cli/arbiter.py`), Task 43 (edits the same `cli/arbiter.py`)
 **Complexity:** Medium
 **Risk:** safety (resets a checkout that protected-file hooks guard)
+
+**Implementation notes:** `ck arbiter record` restores `INTO` inside `arbiter.record_ruling` (in `src/claude_kiro/arbiter.py`, outside the Files list), the function that takes the `land_lock` and commits `decisions.md`. `ck arbiter open` now returns `number` as `arbiter<k>`, the label `ck worktree land` takes, as design.md's OpenResult (`number: string | null, // arbiter<k>`) states. It returned the bare `<k>` before, so TC-197 landed task `<k>` instead of the arbiter branch. `merge` takes an optional `on_recovered` callback so the CLI prints the restore line first. `recovered` sits on the `Landed` dataclass, so ordinary task entries carry it as null.
 
 ---
 

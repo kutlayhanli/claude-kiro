@@ -280,7 +280,7 @@ def open_claim(root: Path, spec: str, into: str, task: str, claim: Claim, task_m
             _discard_worktree(root, path, branch)
             raise
 
-        result.update({"worktree": str(path), "branch": branch, "number": str(number)})
+        result.update({"worktree": str(path), "branch": branch, "number": f"arbiter{number}"})  # design.md OpenResult: the `ck worktree land` label
         return result
 
 
