@@ -298,7 +298,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 12: Test justification lint through the CLI and at launch
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 1.11, 2.5, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7
 **Description:** Implement TC-13 and TC-18 to TC-25 in `tests/test_justification_lint.py`, named `test_tc<N>_...`. TC-13: an empty `## Principles` gives a `warnings` entry of kind `principles` naming the plan, exit 0, and a clean spec has none. TC-18: lines per story and none per criterion give no finding. TC-19: Story 2 with no line exits non-zero and names "Story 2" and its title. TC-20: whitespace, `**`, `_ _` count as missing. TC-21: "n/a" and "nice to have" give no finding. TC-22: a line above the first story, under another heading or in a fence counts for no story. TC-23: no requirements.md and one with no stories give no finding, and the other lint keys remain. TC-24: JSON lists `justifications[]` with `story` and `title`, and every key of today's output is present and equal to the same spec's output with requirements.md removed. TC-25: through the real workflow with `ck plan`, a spec with only justification findings is not refused and tasks start.
