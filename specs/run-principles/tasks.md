@@ -475,7 +475,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 20: Property tests for Verify-scope lint
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 12.1, 12.2, 12.3, 12.4, 12.10
 **Description:** Implement P-31, P-32, P-33 and P-34 with Hypothesis in `tests/test_verify_scope_lint.py`, named `test_p<N>_...`, at `lint_scope.scope_findings` and `dedupe_scope`. P-31: findings equal a brute-force oracle over generated task graphs and Verify forms (`uv run pytest`, `python -m pytest`, `pytest`, with `-q`, `-x`, `-n auto`, `-k x`, `-kx`, `-k=x`, node ids), shared and unshared files, suites not due, dependency chains, Done tasks, in both directions. P-32: metamorphic, adding calls to a later task's commands in selected tests (`["ck", "x"]`, `"ck x"`, `invoke(cli, ["x"])`, flags) never changes `verifyScope` (D30). P-33: each (task, suite) occurs once across keys. P-34: two `ck lint --json` runs are byte-identical, and findings are sorted independent of task block order. Settings `@settings(derandomize=True, max_examples=200, database=None, deadline=None)`. The file declares `PROPERTIES = {"P-31": ..., "P-32": ..., "P-33": ..., "P-34": ...}`.
@@ -486,12 +486,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 22 (P-31, P-32, P-33 at `scope_findings` and `dedupe_scope`), Task 24 (P-34 through the CLI)
 
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the P-31 to P-34 rows
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] The tests call the decision seams, not a server (P-34 alone runs the real CLI)
-- [ ] Tests exercise the real boundary named in the test plan (the seams; the CLI for P-34)
-- [ ] Tests fail before the implementation exists for the right reason (the seams do not exist)
-- [ ] No mocks of the project's own code in integration tests
+- [x] The generators cover every surface form and negative listed in the P-31 to P-34 rows
+- [x] Settings are deterministic (derandomized, no database)
+- [x] The tests call the decision seams, not a server (P-34 alone runs the real CLI)
+- [x] Tests exercise the real boundary named in the test plan (the seams; the CLI for P-34)
+- [x] Tests fail before the implementation exists for the right reason (the seams do not exist)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (strategies), Task 19 (same test file)
 **Complexity:** High
@@ -1196,7 +1196,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 51: Migrate the test-conflict confirmation tests to the arbiter
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.1, 6.3, 8.10
 **Description:** Triage and migrate the existing tests that encode the second-agent confirmation and the review-deadlock model ladder: the issue #8 confirmation cases of `tests/js/spec_implement.test.mjs` (around lines 101-127), and the ladder and confirmation labels used in `tests/test_stats_interruptions.py` and `tests/test_stats_submit.py`. The cases at lines 101-127 now assert the confirmation followed by `testfix`: the confirmation step becomes the arbiter's `test_repair` ruling (a fake `rulings` answer), and the fixer assertions stay (6.1, 8.10). A review deadlock no longer escalates the revision (6.3). The other unattended-correctness suites that start from a confirmed conflict migrate in Task 102 and Task 100; grep `tests/` for `Check that claim yourself|confirm` when triaging and leave those files to their owners. Task 2's fake throws on an `arbiter-` thin step when `execCk` is absent, so a migrated case that reaches the arbiter passes `execCk` and a run root pointing at a temporary git project holding `specs/PRINCIPLES.md` and the scenario's spec. Keep label-only uses meaning what they did, as labels that exist in the corpus. Do not delete a test to get a pass. `spec_implement.test.mjs` runs whole, so it must also keep every other case in that file green with the extended fake project.
@@ -1208,11 +1208,13 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 69 (confirmation and revise-ladder routing; `spec_implement.test.mjs` runs whole, so it needs every replaced path gone)
 
 **Acceptance:**
-- [ ] Every assertion about the replaced behaviour is migrated, none deleted to get a pass
-- [ ] Assertions unrelated to confirmation or the ladder are unchanged
-- [ ] Tests exercise the real boundary named in the test plan (real workflow script, real stats)
-- [ ] Tests fail before the implementation exists for the right reason (the confirmation label still runs)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Every assertion about the replaced behaviour is migrated, none deleted to get a pass
+- [x] Assertions unrelated to confirmation or the ladder are unchanged
+- [x] Tests exercise the real boundary named in the test plan (real workflow script, real stats)
+- [x] Tests fail before the implementation exists for the right reason (the confirmation label still runs)
+- [x] No mocks of the project's own code in integration tests
+
+**Implementation notes:** The two issue #8 cases now run the arbiter: a real temp git project (PRINCIPLES.md, the spec, `ck worktree integration`) with `execCk`, and a `test_repair` ruling in `rulings`. `tests/test_stats_interruptions.py` and `tests/test_stats_submit.py` hold only label-only uses (a guard-ladder agent label, a PR-confirm test), so they are unchanged. Other confirmation suites (`attributed_gates`, `command_deps`, `test_fix`) belong to Tasks 100 and 102.
 
 **Dependencies:** Task 2 (`rulings` answers in the fake runtime)
 **Complexity:** Medium
@@ -1684,7 +1686,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 72: Property test for when the audit runs
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 13.1, 13.2, 13.6, 13.7, 13.9
 **Description:** Implement P-35 with Hypothesis in `tests/test_arbiter_audit.py`, named `test_p35_...` (W): over `dags()`, tracks, tasks with and without Verified by, retries and escalations, and cross-test answers with and without blocking findings, the audit runs exactly once before the first attempt for impl tasks with verifying tests that no cross-test check in the run passed in full, and never for others; the workflow's `auditDue` seam is reached through the bridge. Settings `@settings(derandomize=True, max_examples=30, database=None, deadline=None)`. The file declares `PROPERTIES = {"P-35": ...}`.
@@ -1695,12 +1697,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 74 (P-35 at `auditDue`)
 
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the P-35 row
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] The tests call the workflow through the bridge, not a server
-- [ ] Tests exercise the real boundary named in the test plan (real workflow under the fake runtime, real `ck`)
-- [ ] Tests fail before the implementation exists for the right reason (no audit step)
-- [ ] No mocks of the project's own code in integration tests
+- [x] The generators cover every surface form and negative listed in the P-35 row
+- [x] Settings are deterministic (derandomized, no database)
+- [x] The tests call the workflow through the bridge, not a server
+- [x] Tests exercise the real boundary named in the test plan (real workflow under the fake runtime, real `ck`)
+- [x] Tests fail before the implementation exists for the right reason (no audit step)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (strategies), Task 71 (same test file)
 **Complexity:** Medium
@@ -1826,7 +1828,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 78: Test proposed cuts in /spec:create
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 4.2, 4.3, 4.4, 4.5
 **Description:** Implement TC-27 to TC-31 in `tests/test_arbiter_create.py`, named `test_tc<N>_...`. TC-27: a surviving cut appears in review.md and in the result's `review.proposedCuts` with the story, the weakness and criteria, tasks and test-case counts. TC-28: no revise prompt lists it and the result says it was not applied. TC-29: an approved cut with every task Not Started: when `apply-cuts` runs and the fake agent really removes the story from all four documents, real `ck lint` reports no new failure. TC-30: when the removal leaves a new lint failure, the run does not report the cut as applied and shows the finding. TC-31: with a started task, no `apply-cuts` runs and the message says requirements are frozen and the change is mine.
@@ -1836,10 +1838,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 84 (TC-27, TC-28), Task 86 (TC-29 to TC-31)
 
 **Acceptance:**
-- [ ] TC-29 and TC-30 run real `ck lint` on the real edited files
-- [ ] Tests exercise the real boundary named in the test plan (workflow, real files, real lint)
-- [ ] Tests fail before the implementation exists for the right reason (no cut handling)
-- [ ] No mocks of the project's own code in integration tests
+- [x] TC-29 and TC-30 run real `ck lint` on the real edited files
+- [x] Tests exercise the real boundary named in the test plan (workflow, real files, real lint)
+- [x] Tests fail before the implementation exists for the right reason (no cut handling)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 77 (same test file)
 **Complexity:** High

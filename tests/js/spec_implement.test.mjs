@@ -2,8 +2,10 @@
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import fs from 'node:fs'
 import { runWorkflow, sleep } from './load_workflow.mjs'
 import { directCk, gateJson, project } from './fake_project.mjs'
+import { arbiterProject as sharedArbiterProject, repairRuling } from './arbiter_project.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const SCRIPT = path.join(here, '../../plugin/workflows/spec-implement.js')
@@ -98,12 +100,29 @@ await test('issue #6: a refused relink skips the task as before, and relink: fal
 
 const CONFLICT = { file: 'tests/unit/test_decay_golden.py', test: 'test_decay_printed', criterion: '14.6', reason: 'rel_tol 1e-12 on a rounded input', fix: 'rel_tol 1e-5 for the printed input' }
 
-await test('issue #8: a confirmed test conflict goes to the test-fixer; one that persists after the fix parks only that task (needs-input, kind test-fix)', async () => {
-  const p = project({ deps: { 1: [], 2: [], 3: ['2'], 4: [] }, testConflicts: { 2: { conflict: CONFLICT } } })
-  const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, onFailure: 'halt' } })
+// The arbiter's thin steps run the real `ck` in a real git project (tests/js/arbiter_project.mjs, shared with the other
+// arbiter suites): the main checkout holds specs/PRINCIPLES.md and the scenario's spec, and the integration checkout is
+// made by `ck worktree integration`. Each scripted ruling carries the claim key it answers (7.1).
+const tempRepos = []
+process.on('exit', () => { for (const d of tempRepos) fs.rmSync(d, { recursive: true, force: true }) })
+function arbiterProject(deps) {
+  const a = sharedArbiterProject({ deps })
+  tempRepos.push(path.dirname(a.root))
+  return { root: a.root, targetDir: a.target, execCk: a.execCk }
+}
+const arbiterArgs = a => ({ ...baseArgs, root: a.root, targetDir: a.targetDir, ...(a.extra || {}) })
+
+await test('issue #8: a test conflict is ruled test_repair by the arbiter (no confirmation agent), goes to the test-fixer; one that persists after the fix parks only that task (needs-input, kind test-fix)', async () => {
+  const deps = { 1: [], 2: [], 3: ['2'], 4: [] }
+  const a = arbiterProject(deps)
+  const p = project({ deps, testConflicts: { 2: { conflict: CONFLICT } }, rulings: { 2: [repairRuling(2, CONFLICT)] }, execCk: a.execCk })
+  const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...arbiterArgs(a), onFailure: 'halt' } })
   const t2 = p.state.events.filter(e => /^task 2( |$)/.test(e) && !e.endsWith(' end'))
-  assert.deepEqual(t2, ['task 2', 'task 2 retry 1', 'task 2 retry 2'], 'one report, one confirmation, then one fresh attempt after the landed fix')
-  assert.match(p.state.prompts['task 2 retry 1'], /Check that claim yourself/)
+  assert.equal(t2[0], 'task 2')
+  assert.equal(t2.length, 2, `one report, then one resumed attempt after the landed fix (no confirmation attempt): ${t2.join(' | ')}`)
+  assert.ok(!Object.values(p.state.prompts).some(t => /Check that claim yourself/.test(t)), 'no confirmation prompt')
+  assert.ok(p.state.events.includes('arbiter task 2'), `the arbiter ruled: ${p.state.events.join(', ')}`)
+  assert.ok(idx(p.state, 'arbiter task 2') < idx(p.state, 'testfix 1 (Task 2)'), 'the ruling comes before the fixer')
   assert.ok(p.state.events.includes('testfix 1 (Task 2)'), 'a test-fixer ran for Task 2')
   assert.equal(result.halted, false, 'a test conflict never halts the run, even with onFailure halt')
   assert.deepEqual(result.merged.sort(), ['1', '4'])
@@ -119,18 +138,21 @@ await test('issue #8: a confirmed test conflict goes to the test-fixer; one that
   assert.ok(logs.some(l => l.startsWith('Test fixes (1)')))
 })
 
-await test('issue #8: the confirmation runs on the strongest rung, and an agent that passes the gate wins', async () => {
+await test('issue #8: no confirmation rung: the conflict goes to the arbiter, a landed fix resumes the task, and a resumed agent that passes the gate wins', async () => {
   const roles = { implementer: { model: 'sonnet', effort: 'medium', escalate: ['opus'] } }
-  const p = project({ deps: { 1: [] }, testConflicts: { 1: { conflict: CONFLICT } } })
-  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: roles } })
-  assert.ok(p.state.events.includes('task 1 retry 1 (opus)'), p.state.events.join(', '))
-  assert.equal(p.state.opts['task 1 retry 1 (opus)'].model, 'opus')
+  const a = arbiterProject({ 1: [] })
+  const p = project({ deps: { 1: [] }, testConflicts: { 1: { conflict: CONFLICT } }, rulings: { 1: [repairRuling(1, CONFLICT)] }, execCk: a.execCk })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...arbiterArgs(a), agents: roles } })
+  assert.ok(p.state.events.includes('arbiter task 1'), p.state.events.join(', '))
+  assert.ok(!p.state.events.includes('task 1 retry 1 (opus)'), 'the strongest rung no longer confirms the claim')
   assert.equal(result.testFixes.length, 1)
 
-  const q = project({ deps: { 1: [] }, testConflicts: { 1: { conflict: CONFLICT, attempts: 1 } } })
-  const won = await runWorkflow(SCRIPT, { agent: q.agent, args: { ...baseArgs, agents: roles } })
-  assert.deepEqual(won.result.merged, ['1'], 'the confirming agent passed the gate: the task merges')
-  assert.deepEqual(won.result.testFixes, [])
+  const b = arbiterProject({ 1: [] })
+  const q = project({ deps: { 1: [] }, testConflicts: { 1: { conflict: CONFLICT, attempts: 1 } }, rulings: { 1: [repairRuling(1, CONFLICT)] }, execCk: b.execCk })
+  const won = await runWorkflow(SCRIPT, { agent: q.agent, args: { ...arbiterArgs(b), agents: roles } })
+  assert.deepEqual(won.result.merged, ['1'], 'the resumed agent passed the gate: the task merges')
+  assert.equal(won.result.testFixes.length, 1, 'the fix the ruling asked for landed')
+  assert.ok(!Object.values(q.state.prompts).some(t => /Check that claim yourself/.test(t)), 'no confirmation prompt')
 })
 
 await test('issue #11: with a direct ck global, plan, land and relink run as ck calls, not agents', async () => {
@@ -464,13 +486,26 @@ await test('escalation: off by default, so a failing task just fails', async () 
   assert.equal(result.failed[0].task, '1')
 })
 
-await test('escalation: blocking review findings that survive the rounds get a revision on the next model', async () => {
-  const p = project({ deps: { 1: [] }, reviews: { 1: ['changes', 'changes', 'approve'] } })
-  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: HAIKU(['opus']) } })
-  assert.deepEqual(modelsOf(p.state, 'task 1 revise'), ['haiku', 'opus'])
+await test('escalation: blocking review findings that survive the rounds go to the arbiter, not up the model ladder (6.3)', async () => {
+  const a = arbiterProject({ 1: [] })
+  // One explicit blocking finding, so the deadlock's claim key is knowable: the task, then `review:` and the sorted
+  // `<file>#<issue>` identities of the findings never ruled on (issue lowercased, whitespace collapsed).
+  const finding = { severity: 'blocking', file: 'src/work1.py', issue: 'Greeting is printed to stderr, not stdout', fix: 'print the greeting to stdout' }
+  const changes = { verdict: 'changes', findings: [finding], summary: 'changes' }
+  const identity = `${finding.file}#${finding.issue.toLowerCase().replace(/\s+/g, ' ')}`
+  const ruling = {
+    claim: `1|review:${identity}`, status: 'ruled', outcome: 'code', principle: 'project:test-intent',
+    reasoning: 'the finding is real: the code must change, the revision stays on its model',
+    code: 'print the greeting to stdout, as requirement 1.1 and the finding say', settles: [identity],
+  }
+  const p = project({ deps: { 1: [] }, reviews: { 1: [changes, changes, 'approve'] }, rulings: { 1: [ruling] }, execCk: a.execCk })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...arbiterArgs(a), agents: HAIKU(['opus']) } })
+  assert.ok(p.state.events.includes('arbiter task 1'), `the deadlock reached the arbiter: ${p.state.events.join(', ')}`)
+  assert.ok(!p.state.events.some(e => /^task 1 revise \(opus\)/.test(e)), 'no revise (opus) escalation label runs')
+  assert.ok(!modelsOf(p.state, 'task 1 revise').includes('opus'), 'the revision never moves up the ladder')
+  assert.ok(!(result.tasks[0].escalations || []).some(x => x.stage === 'revise'), JSON.stringify(result.tasks[0].escalations))
   assert.deepEqual(result.merged, ['1'])
-  assert.deepEqual(result.tasks[0].escalations, [{ stage: 'revise', model: 'opus' }])
-  assert.equal(result.tasks[0].review.verdict, 'approve')
+  assert.equal(result.tasks[0].review.verdict, 'approve', 'the re-review follows the code ruling')
 })
 
 await test('escalation: a task still red on landing after the fix gets a fix on the next model', async () => {

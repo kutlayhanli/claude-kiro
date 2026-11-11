@@ -16,7 +16,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Optional
 
 import pytest
 
@@ -762,3 +762,342 @@ def test_tc209_a_launch_claim_ruled_test_repair_goes_to_the_fixer_then_the_launc
     assert run.result.get("refused") is not True
     assert key(target_lint(run), "verifyScope") == [], "findings remain after the fix landed"
     assert (run.target / "tests" / "test_beta.py").exists(), "the fix did not land on the target"
+
+
+# =========================================================================== properties (Task 20: P-31 to P-34)
+#
+# P-31, P-32 and P-33 run the pure seams `lint_scope.scope_findings` and `lint_scope.dedupe_scope` over generated spec
+# models. P-34 runs the real `ck lint --json` over the same models rendered to tasks.md and test files.
+#
+# The oracle (brute force, written from requirements 12.1, 12.2, 12.4 and gate.py, not from lint_scope):
+#   - Task N is simulated when it is not Done. Assumed Done at its gate: every Done task, N, and N's transitive
+#     dependencies. A test task is due when it verifies at least one task and all of them are assumed Done.
+#   - The gate of an impl task N runs N's own Verify commands, plus the Verify of each task in N's "Verified by" that
+#     is Done and due. The gate of a test task N runs its own Verify only when N is due.
+#   - A command selects, per test file, the tests its filter lets through: no filter selects the file whole, `-k WORD`
+#     (spelled `-k x`, `-kx` or `-k=x`) selects the tests whose name holds WORD (case-insensitive), node ids select
+#     exactly the named tests.
+#   - A shared file is one that two or more test tasks list in **Files:**. A test task's tests in a file are what its own
+#     Verify selects there. A finding (N, file, T) exists when N's gate selects a test of a shared file that belongs to a
+#     test task T that is not due at N's gate (12.2). Due suites, filters that exclude the tests, dependencies on the
+#     tasks the tests are for, and Done tasks give no finding (12.4).
+# Generators keep a shared file's test tasks on disjoint tests (each filters to its own `t<N>_` group) so no reading of
+# "whose tests are these" is needed beyond the one above.
+
+import random  # noqa: E402
+import tempfile  # noqa: E402
+from dataclasses import dataclass  # noqa: E402
+
+from hypothesis import HealthCheck, given, settings  # noqa: E402
+from hypothesis import strategies as st  # noqa: E402
+
+PROPERTIES = {
+    "P-31": "test_p31_findings_equal_the_brute_force_oracle",
+    "P-32": "test_p32_calls_to_later_commands_never_change_verify_scope",
+    "P-33": "test_p33_no_problem_is_reported_twice",
+    "P-34": "test_p34_lint_output_is_stable_and_sorted",
+}
+
+PROP_SETTINGS = dict(derandomize=True, max_examples=200, database=None, deadline=None,
+                     suppress_health_check=list(HealthCheck))
+
+PROP_FILES = ["tests/test_a.py", "tests/test_b.py"]
+PROP_PROGRAMS = ["uv run pytest", "python -m pytest", "pytest"]
+PROP_FLAGS = [[], ["-q"], ["-x"], ["-n", "auto"], ["-q", "-x"], ["-n", "auto", "-q"]]
+PROP_K_STYLES = ["-k x", "-kx", "-k=x"]
+PROP_CONFIG = {"tests": {"dirs": ["tests"], "files": ["test_*.py"]}}
+
+
+def prop_render(cmd: dict) -> str:
+    words = cmd["program"].split() + list(cmd["flags"])
+    flt = cmd["filter"]
+    if flt is not None and flt[0] == "nodes":
+        words += [f"{cmd['files'][0]}::{n}" for n in flt[1]]
+    else:
+        words += list(cmd["files"])
+    if flt is not None and flt[0] == "k":
+        chunk = {"-k x": ["-k", flt[2]], "-kx": [f"-k{flt[2]}"], "-k=x": [f"-k={flt[2]}"]}[flt[1]]
+        words = chunk + words if cmd["kfirst"] else words + chunk
+    return " ".join(words)
+
+
+def prop_selected(cmd: dict, path: str, names: List[str]) -> set:
+    """The tests of `path` (whose test names are `names`) that `cmd` selects, from the structured command."""
+    if path not in cmd["files"]:
+        return set()
+    flt = cmd["filter"]
+    if flt is None:
+        return set(names)
+    if flt[0] == "k":
+        return {n for n in names if flt[2].lower() in n.lower()}
+    return {n for n in names if n in flt[1]}
+
+
+@dataclass
+class PropModel:
+    nums: List[str]
+    track: dict
+    done: dict
+    deps: dict
+    verifies: dict
+    files: dict
+    commands: dict   # task -> [cmd dict]
+    tests_of: dict   # file -> [test names]
+    provides: dict   # task -> [command text]
+
+    def verified_by(self, n: str) -> List[str]:
+        return [t for t in self.nums if self.track[t] == "test" and n in self.verifies[t]]
+
+    def owners(self, path: str) -> List[str]:
+        return [t for t in self.nums if self.track[t] == "test" and path in self.files[t]]
+
+    def verify_lines(self, n: str) -> List[str]:
+        return [prop_render(c) for c in self.commands[n]]
+
+
+@st.composite
+def prop_models(draw, with_provides: bool = False) -> PropModel:
+    n = draw(st.integers(2, 7))
+    nums = [str(i) for i in range(1, n + 1)]
+    track = {k: draw(st.sampled_from(["impl", "test", "test"])) for k in nums}
+    if "impl" not in track.values():
+        track[nums[-1]] = "impl"
+    if "test" not in track.values():
+        track[nums[0]] = "test"
+    done = {k: draw(st.sampled_from([False, False, False, True])) for k in nums}
+    deps = {k: draw(st.lists(st.sampled_from(nums[:i]), unique=True, max_size=2)) if i else []
+            for i, k in enumerate(nums)}
+    impls = [k for k in nums if track[k] == "impl"]
+    tests = [k for k in nums if track[k] == "test"]
+    verifies, files = {}, {}
+    for k in nums:
+        if track[k] == "test":
+            verifies[k] = draw(st.lists(st.sampled_from(impls), min_size=1, max_size=2, unique=True))
+            files[k] = draw(st.lists(st.sampled_from(PROP_FILES), min_size=1, max_size=2, unique=True))
+        else:
+            verifies[k], files[k] = [], [f"src/m{k}.py"]
+    model = PropModel(nums, track, done, deps, verifies, files, {}, {}, {})
+    for path in PROP_FILES:
+        model.tests_of[path] = [f"test_t{t}_{j}" for t in model.owners(path) for j in (0, 1)] + ["test_misc_0"]
+
+    def pick_filter(path: str, own: Optional[str]):
+        names = model.tests_of[path]
+        shared = len(model.owners(path)) >= 2
+        if own is not None and shared:
+            return draw(st.sampled_from([("k", None, f"t{own}_"), ("nodes", [f"test_t{own}_0", f"test_t{own}_1"])]))
+        words = [f"t{m}_" for m in tests] + ["test_", "zzz", "misc"]
+        kinds = [None, ("k", None, draw(st.sampled_from(words))),
+                 ("nodes", draw(st.lists(st.sampled_from(names + ["test_nope"]), min_size=1, max_size=2, unique=True)))]
+        return draw(st.sampled_from(kinds))
+
+    def build(path: str, own: Optional[str]) -> dict:
+        flt = pick_filter(path, own)
+        if flt is not None and flt[0] == "k":
+            flt = ("k", draw(st.sampled_from(PROP_K_STYLES)), flt[2])
+        files_in = [path]
+        if flt is None and own is None and draw(st.booleans()):
+            files_in = draw(st.lists(st.sampled_from(PROP_FILES), min_size=1, max_size=2, unique=True))
+        return {"program": draw(st.sampled_from(PROP_PROGRAMS)), "flags": draw(st.sampled_from(PROP_FLAGS)),
+                "files": files_in, "filter": flt, "kfirst": draw(st.booleans())}
+
+    for k in nums:
+        if track[k] == "test":
+            model.commands[k] = [build(path, k) for path in files[k]]
+        else:
+            model.commands[k] = [build(draw(st.sampled_from(PROP_FILES)), None)
+                                 for _ in range(draw(st.integers(1, 2)))]
+    for k in nums:
+        later = draw(st.sampled_from(["x", "y", "z"])) if with_provides and track[k] == "impl" else None
+        model.provides[k] = [f"ck {later}"] if later else []
+    return model
+
+
+def prop_oracle(model: PropModel) -> set:
+    """{(task, suite, testTask)} by brute force over the model."""
+    def closure(n: str) -> set:
+        seen, frontier = set(), list(model.deps[n])
+        while frontier:
+            d = frontier.pop()
+            if d not in seen:
+                seen.add(d)
+                frontier += model.deps[d]
+        return seen
+
+    def due(t: str, assumed: set) -> bool:
+        return bool(model.verifies[t]) and all(v in assumed for v in model.verifies[t])
+
+    found = set()
+    for n in model.nums:
+        if model.done[n]:
+            continue
+        assumed = {k for k in model.nums if model.done[k]} | {n} | closure(n)
+        ran: List[dict] = []
+        if model.track[n] == "test":
+            if due(n, assumed):
+                ran += model.commands[n]
+        else:
+            ran += model.commands[n]
+            for t in model.verified_by(n):
+                if model.done[t] and due(t, assumed):
+                    ran += model.commands[t]
+        for path in PROP_FILES:
+            owners = model.owners(path)
+            if len(owners) < 2:
+                continue
+            names = model.tests_of[path]
+            chosen = set().union(*[prop_selected(c, path, names) for c in ran]) if ran else set()
+            for t in owners:
+                if due(t, assumed):
+                    continue
+                mine = set().union(*[prop_selected(c, path, names) for c in model.commands[t]])
+                if chosen & mine:
+                    found.add((n, path, t))
+    return found
+
+
+def prop_test_source(names: List[str], calls: Optional[dict] = None) -> str:
+    out = []
+    for name in names:
+        body = (calls or {}).get(name, "")
+        out.append(f"def {name}():\n    assert True\n" + (f"    {body}\n" if body else ""))
+    return "\n\n".join(out)
+
+
+def prop_sim(model: PropModel, calls: Optional[dict] = None):
+    """A SimInput for the model; `calls` maps a test name to a line of code added to every file's test of that name."""
+    from claude_kiro.hooks._shared.spec_parser import SpecTask
+    from claude_kiro.lint import _verify_runs
+    from claude_kiro.lint_scope import SimInput, SimTest
+
+    tasks = {}
+    for k in model.nums:
+        tasks[k] = SpecTask(
+            num=k, title=f"Task {k}", status="Done" if model.done[k] else "Not Started", track=model.track[k],
+            files=list(model.files[k]), verify=model.verify_lines(k), verified_by=model.verified_by(k),
+            verifies=list(model.verifies[k]), dependencies=list(model.deps[k]), provides=list(model.provides[k]))
+    runs = {k: _verify_runs(tasks[k].verify, PROP_CONFIG) for k in model.nums}
+    tests = {p: [SimTest(name=n, cls="", source=f"def {n}():\n    assert True\n" + (f"    {calls[n]}\n" if calls and n in calls else ""))
+                 for n in names] for p, names in model.tests_of.items()}
+    return SimInput(tasks=tasks, runs=runs, unresolved={k: [] for k in model.nums}, tests=tests,
+                    module_source={p: "" for p in model.tests_of}, programs=("ck",))
+
+
+def triples(result) -> set:
+    return {(f.task, f.suite, f.testTask) for f in result.findings}
+
+
+@settings(**PROP_SETTINGS)
+@given(prop_models())
+def test_p31_findings_equal_the_brute_force_oracle(model):
+    from claude_kiro.lint_scope import scope_findings
+
+    result = scope_findings(prop_sim(model))
+    got = [(f.task, f.suite, f.testTask) for f in result.findings]
+    want = prop_oracle(model)
+    assert set(got) == want, (
+        f"missing {sorted(want - set(got))}, spurious {sorted(set(got) - want)}\n"
+        + "\n".join(f"Task {k} {model.track[k]} done={model.done[k]} deps={model.deps[k]} verifies={model.verifies[k]} "
+                    f"files={model.files[k]} verify={model.verify_lines(k)}" for k in model.nums))
+    assert len(got) == len(set(got)), f"a finding is repeated: {got}"
+    assert all(f.kind == "unfiltered-shared-suite" for f in result.findings)
+    assert [(int(f.task), f.kind, f.suite) for f in result.findings] == sorted(
+        (int(f.task), f.kind, f.suite) for f in result.findings), "findings are not sorted by (task, kind, suite)"
+    assert list(result.not_checked) == [], f"nothing is unresolved, yet: {result.not_checked}"
+
+
+PROP_CALLS = ['subprocess.run(["ck", "x"])', 'subprocess.run(["ck", "x", "--y"])', 'run("ck x")', 'run("ck x --y=1")',
+              'runner.invoke(cli, ["x"])', 'runner.invoke(cli, ["x", "--y"])', 'runner.invoke(cli, ["x", "--y=1"])',
+              'subprocess.run(["ck", "y", "--y=1"], check=True)']
+
+
+@settings(**PROP_SETTINGS)
+@given(prop_models(with_provides=True), st.data())
+def test_p32_calls_to_later_commands_never_change_verify_scope(model, data):
+    from claude_kiro.lint_scope import scope_findings
+
+    names = sorted({n for ns in model.tests_of.values() for n in ns})
+    chosen = data.draw(st.lists(st.sampled_from(names), unique=True, max_size=len(names)))
+    calls = {n: data.draw(st.sampled_from(PROP_CALLS)) for n in chosen}
+    before = scope_findings(prop_sim(model))
+    after = scope_findings(prop_sim(model, calls))
+    assert after.findings == before.findings, f"calls {calls} changed verifyScope"
+    assert triples(after) == prop_oracle(model)
+    assert all(f.kind == "unfiltered-shared-suite" for f in after.findings), "a command-kind finding appeared"
+
+
+@settings(**PROP_SETTINGS)
+@given(prop_models(), st.data())
+def test_p33_no_problem_is_reported_twice(model, data):
+    from claude_kiro.lint_scope import dedupe_scope, scope_findings
+
+    result = scope_findings(prop_sim(model))
+    pairs = sorted({(f.task, f.suite) for f in result.findings})
+    taken = {p for p in pairs if data.draw(st.booleans())}
+    # An existing rule's entries (the verifyCycles shape) naming the same task and suite, plus unrelated ones.
+    entries = [{"task": t, "verifiedBy": "1", "needs": "9", "module": s, "message": f"Task {t} runs {s}"}
+               for t, s in sorted(taken)]
+    entries += [{"task": "98", "verifiedBy": "1", "needs": "9", "module": "tests/test_other.py", "message": "other"}]
+    existing = {"verifyCycles": entries}
+    deduped, extra = dedupe_scope(result, existing)
+    assert isinstance(extra, list)
+    kept = {(f.task, f.suite) for f in deduped.findings}
+    assert not (kept & taken), f"reported twice, in verifyCycles and verifyScope: {sorted(kept & taken)}"
+    assert deduped.findings == tuple(f for f in result.findings if (f.task, f.suite) not in taken), \
+        "dedupe changed or reordered findings that no existing rule reports"
+    again, _ = dedupe_scope(deduped, existing)
+    assert again.findings == deduped.findings, "dedupe is not idempotent"
+    untouched, _ = dedupe_scope(result, {})
+    assert untouched.findings == result.findings, "dedupe against nothing changed the findings"
+
+
+def prop_write_project(root: Path, model: PropModel, order: List[str]) -> None:
+    spec = root / "specs" / SPEC
+    spec.mkdir(parents=True)
+    blocks = {}
+    for k in model.nums:
+        lines = [f"### Task {k}: Task {k}", f"**Status:** {'Done' if model.done[k] else 'Not Started'}",
+                 f"**Track:** {model.track[k]}", "**Files:**"] + [f"- `{f}` - x" for f in model.files[k]]
+        if model.verify_lines(k):
+            lines.append("**Verify:** " + " ".join(f"`{v}`" for v in model.verify_lines(k)))
+        if model.verified_by(k) and model.track[k] == "impl":
+            lines.append("**Verified by:** " + ", ".join(f"Task {t}" for t in model.verified_by(k)))
+        if model.verifies[k]:
+            lines.append("**Verifies:** " + ", ".join(f"Task {t}" for t in model.verifies[k]))
+        lines.append("**Dependencies:** " + (", ".join(f"Task {d}" for d in model.deps[k]) or "None"))
+        blocks[k] = "\n".join(lines) + "\n\n---\n\n"
+    (spec / "tasks.md").write_text("# Implementation Tasks: Sim\n\n## Task Breakdown\n\n" + "".join(blocks[k] for k in order))
+    (spec / "requirements.md").write_text("# Feature: Sim\n\n- 1.1 WHEN a THE SYSTEM SHALL b\n")
+    (spec / "design.md").write_text("# Design: Sim\n")
+    (spec / "test-plan.md").write_text("# Test Plan: Sim\n")
+    for path, names in model.tests_of.items():
+        target = root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(prop_test_source(names))
+
+
+def prop_lint_stdout(root: Path) -> str:
+    code, out, err = ck_text(root, "lint", SPEC, "--json")
+    assert out.strip().startswith("{"), f"ck lint --json printed no JSON (exit {code}): {out[:300]} {err[-300:]}"
+    return out
+
+
+@settings(**{**PROP_SETTINGS})
+@given(prop_models(), st.randoms(use_true_random=False))
+def test_p34_lint_output_is_stable_and_sorted(model, rnd):
+    order = list(model.nums)
+    shuffled = list(order)
+    rnd.shuffle(shuffled)
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        prop_write_project(base / "a", model, order)
+        prop_write_project(base / "b", model, shuffled)
+        first = prop_lint_stdout(base / "a")
+        second = prop_lint_stdout(base / "a")
+        assert first == second, "two lint runs over one project differ byte for byte"
+        other = prop_lint_stdout(base / "b")
+    one, two = json.loads(first), json.loads(other)
+    scope = one["verifyScope"]
+    keys = [(int(f["task"]), f["kind"], f["suite"]) for f in scope]
+    assert keys == sorted(keys), f"verifyScope is not sorted: {keys}"
+    assert scope == two["verifyScope"], f"verifyScope depends on the order of task blocks in tasks.md: {order} vs {shuffled}"
+    assert one["notChecked"] == two["notChecked"]

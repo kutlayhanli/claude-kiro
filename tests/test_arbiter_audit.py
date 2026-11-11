@@ -435,3 +435,77 @@ def test_tc151_a_landed_spec_edit_that_removes_its_last_verifying_test_means_no_
     assert audits(out, 2), "Task 2 is verified throughout and must be audited"
     assert started(out, 3), f"Task 3 never started: {out['events']}"
     assert not audits(out, 3), f"Task 3 was audited after the edit removed its last verifying test: {out['events']}"
+
+
+# --------------------------------------------------------------------------- P-35 (property, W)
+
+from hypothesis import HealthCheck, given, settings  # noqa: E402
+from hypothesis import strategies as st  # noqa: E402
+
+from landing_bridge import dags  # noqa: E402
+
+PROPERTIES = {"P-35": "test_p35_the_audit_runs_exactly_once_before_the_first_attempt_for_impl_tasks_with_unchecked_verifying_tests"}
+
+P35_SETTINGS = dict(derandomize=True, max_examples=30, database=None, deadline=None,
+                    suppress_health_check=list(HealthCheck))
+
+
+@st.composite
+def p35_specs(draw):
+    """A DAG, a track per task, a Verified by per task (real test tasks, only dangling ids, or nothing), and a
+    retry or an escalation for some impl task."""
+    deps = draw(dags(max_tasks=6, dangling=False))
+    ids = list(deps)
+    tracks = {t: draw(st.sampled_from(["test", "impl"])) for t in ids}
+    verified: Dict[str, List[str]] = {}
+    expect: Dict[str, bool] = {}
+    for pos, t in enumerate(ids):
+        lower_tests = [i for i in ids[:pos] if tracks[i] == "test"]
+        form = draw(st.sampled_from(["none", "real", "dangling"]))
+        if form == "real" and lower_tests:
+            chosen = draw(st.lists(st.sampled_from(lower_tests), min_size=1, max_size=3, unique=True))
+            verified[t] = chosen
+            deps[t] = sorted(set(deps[t]) | set(chosen), key=int)
+            expect[t] = tracks[t] == "impl"
+        elif form == "dangling":
+            verified[t] = ["999"]  # names no task in the spec
+            expect[t] = False
+        else:
+            expect[t] = False
+    impl = [t for t in ids if tracks[t] == "impl"]
+    fail = {}
+    if impl and draw(st.booleans()):
+        fail = {draw(st.sampled_from(impl)): draw(st.sampled_from([1, 3]))}
+    return deps, tracks, verified, expect, fail
+
+
+@settings(**P35_SETTINGS)
+@given(spec=p35_specs())
+def test_p35_the_audit_runs_exactly_once_before_the_first_attempt_for_impl_tasks_with_unchecked_verifying_tests(bridge, tmp_path_factory, spec):
+    deps, tracks, verified, expect, fail = spec
+    project = two(tmp_path_factory.mktemp("p35"))
+    out = run(bridge, project, deps=deps, tracks=tracks, verified_by=verified, opts={"failUntil": fail}, real_cli=False)
+    for t in deps:
+        got = audits(out, t)
+        if not expect[t]:
+            assert not got, f"task {t} ({tracks[t]}, verified by {verified.get(t)}) was audited: {out['events']}"
+        elif started(out, t):
+            assert len(got) == 1, f"task {t} expected exactly one audit, got {got}: {out['events']}"
+            assert first(out, rf"^audit task {t}$") < first(out, rf"^task {t}( |$)"), out["events"]
+
+
+@settings(**P35_SETTINGS)
+@given(finding=st.sampled_from([None, TEST_A]), retries=st.sampled_from([0, 1, 3]))
+def test_p35_a_passed_cross_test_check_skips_the_audit_and_a_blocking_finding_keeps_one(bridge, tmp_path_factory, finding, retries):
+    crossed = {"verdict": "approve", "findings": [], "summary": "ok"} if finding is None else \
+        {"verdict": "changes", "findings": [{"severity": "blocking", "file": TEST_A, "issue": "reads a name the design does not define"}], "summary": "drift"}
+    opts = {"crossTest": crossed, "testVerifies": {TEST_A: ["3"]}, "testFix": {TEST_A: {}}}
+    if retries:
+        opts["failUntil"] = {"3": retries}
+    out = run(bridge, two(tmp_path_factory.mktemp("p35x")), deps=CROSS_DEPS, tracks=CROSS_TRACKS,
+              verified_by={"3": ["1", "2"]}, cross_test=True, opts=opts)
+    assert [e for e in out["events"] if e.startswith("cross-test")], "the cross-test check never ran"
+    assert started(out, 3), out["events"]
+    assert len(audits(out, 3)) == (0 if finding is None else 1), out["events"]
+    if finding is not None:
+        assert first(out, r"^audit task 3$") < first(out, r"^task 3( |$)")
