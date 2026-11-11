@@ -540,11 +540,43 @@ def _append_drift(text: str, rows: List[Dict[str, Any]], decisions: List[Dict[st
                          ["| ID | Action | Outcome | Principle | Reasoning |", "|---|---|---|---|---|"], body)
     if result is not None:
         line = f"**Result:** {result}"
-        if _RESULT_LINE.search(text):
-            text = _RESULT_LINE.sub(lambda _m: line, text, count=1)
+        current = _RESULT_LINE.search(text)
+        if current is not None:
+            # Only upgrade: `Needs work` is never replaced by a weaker result (design.md, 11.12).
+            if _result_rank(current.group(0)) < _result_rank(line):
+                text = text[:current.start()] + line + text[current.end():]
         else:
-            text = line + "\n\n" + text
+            text = _insert_result(text, line)
     return text
+
+
+_RESULT_RANK = {"ready": 0, "ready after decisions": 1, "needs work": 2}
+
+
+def _result_rank(line: str) -> int:
+    """How strong a `**Result:**` line is; anything unrecognized (a template placeholder) counts as weakest."""
+    value = line.split("**Result:**", 1)[-1].strip().lower()
+    return _RESULT_RANK.get(value, -1)
+
+
+_H1 = re.compile(r"^# .*$", re.MULTILINE)
+_META_LINE = re.compile(r"^\*\*(Date|Mode):\*\*.*$", re.MULTILINE)
+
+
+def _insert_result(text: str, line: str) -> str:
+    """`text` with the Result line placed as in the template: after Date/Mode when present, else after the H1."""
+    h1 = _H1.search(text)
+    if h1 is None:
+        return line + "\n\n" + text
+    pos = h1.end()
+    nxt = _NEXT_HEAD.search(text, pos)
+    limit = nxt.start() if nxt else len(text)
+    for meta in _META_LINE.finditer(text, pos, limit):
+        pos = meta.end()
+    if pos == h1.end():
+        rest = text[pos:].lstrip("\n")
+        return text[:pos] + "\n\n" + line + "\n\n" + rest
+    return text[:pos] + "\n" + line + text[pos:]
 
 
 def _decision_rows(text: str) -> bool:
@@ -567,6 +599,27 @@ def _requirement_text(raw: Mapping[str, Any]) -> Tuple[str, str]:
         why = str(req.get("reason") or "").strip() or reasoning
         return (f"Proposed requirement ({kind}): {wording}" if wording else f"Proposed requirement ({kind})"), why
     return reasoning, reasoning
+
+
+def _is_lost(r: Mapping[str, Any]) -> bool:
+    """A result whose subject went unchecked for good (a stronger-look ask still has its risky re-run)."""
+    return r["action"] == "lost" or (r["action"] == "unchecked" and not (r["stronger"] and r["reason"] != "exhausted"))
+
+
+def _recorded_text(root: Path, spec: str, into: str) -> str:
+    try:
+        checkout = wt.checkout_of(root, into)
+    except (wt.WorktreeError, OSError):
+        return ""
+    path = checkout / decisions_rel(spec) if checkout is not None else None
+    try:
+        return path.read_text(encoding="utf-8") if path is not None and path.is_file() else ""
+    except OSError:
+        return ""
+
+
+def _has_ruling(recorded: str, key: str) -> bool:
+    return re.search(rf"^- \*\*Claim:\*\* {re.escape(key)} - ", recorded, re.MULTILINE) is not None
 
 
 def review_step(root: Path, checkout: Path, spec: str, into: str, step: str, tier: str,
@@ -598,22 +651,36 @@ def review_step(root: Path, checkout: Path, spec: str, into: str, step: str, tie
     entries = _entries_of(payload.get("output")) if state == "ok" else None
 
     by_id: Dict[str, Tuple[Any, Any]] = {}
+    unkeyed = 0  # entries with no usable claim/id: each loses its (unknown) finding
     if entries is not None:
         for entry in entries:
-            if isinstance(entry, dict):
-                ident = entry.get("claim", entry.get("id"))
-                if isinstance(ident, (str, int)) and str(ident) and str(ident) not in by_id:
+            ident = entry.get("claim", entry.get("id")) if isinstance(entry, dict) else None
+            if isinstance(ident, (str, int)) and not isinstance(ident, bool) and str(ident).strip():
+                if str(ident) not in by_id:
                     by_id[str(ident)] = entry
+            else:
+                unkeyed += 1
     # With no subjects named (the drift step), the arbiter names its own items.
     items: List[Tuple[str, Any]] = []
     for s in subjects:
         ident = _subject_id(s)
         if ident is not None:
             items.append((ident, s))
+    named = bool(items)
     if not items:
         items = [(i, {"id": i}) for i in by_id]
+        # Contract for the workflow (Task 84): the risky re-run passes the stronger-look ids as `subjects`. When it
+        # sends the whole output instead, an item whose claim key already has a ruling in decisions.md was settled
+        # at the normal tier and is not recorded or appended again.
+        if tier == "risky":
+            recorded = _recorded_text(root, spec, into)
+            items = [(i, s) for i, s in items if not _has_ruling(recorded, f"{spec}|{step}:{i}")]
 
     results: List[Dict[str, Any]] = []
+    if not named:
+        for n in range(unkeyed):
+            results.append({"id": f"entry-{n + 1}", "action": "unchecked", "reason": "invalid-ruling",
+                            "stronger": False, "ruling": None})
     drift_rows: List[Dict[str, Any]] = []
     decisions: List[Dict[str, Any]] = []
     for ident, subject in items:
@@ -660,7 +727,7 @@ def review_step(root: Path, checkout: Path, spec: str, into: str, step: str, tie
             drift_rows.append({"id": ident, "action": action, "outcome": check.outcome or "",
                                "principle": check.principle or "", "reasoning": reasoning})
 
-    lost = (not items and step != "drift") or any(r["action"] == "lost" or (r["action"] == "unchecked" and not (r["stronger"] and r["reason"] != "exhausted")) for r in results)
+    lost = (not items and step != "drift") or any(_is_lost(r) for r in results)
     if payload.get("output") is None or entries is None:
         lost = True
 
@@ -670,9 +737,14 @@ def review_step(root: Path, checkout: Path, spec: str, into: str, step: str, tie
         if state != "ok":
             drift_rows.append({"id": "principles", "action": "lost", "outcome": "", "principle": "",
                                "reasoning": f"{PRINCIPLES_REL} is missing or unreadable; run `ck principles init`. The check did not run."})
-        elif lost and not drift_rows:
-            drift_rows.append({"id": "drift", "action": "lost", "outcome": "", "principle": "",
-                               "reasoning": "the drift check did not run or returned nothing valid"})
+        else:
+            for r in results:
+                if r["action"] == "unchecked" and _is_lost(r):
+                    drift_rows.append({"id": r["id"], "action": "lost", "outcome": "", "principle": "",
+                                       "reasoning": f"not checked ({r['reason']}); the drift check did not run for this item"})
+            if lost and not drift_rows:
+                drift_rows.append({"id": "drift", "action": "lost", "outcome": "", "principle": "",
+                                   "reasoning": "the drift check did not run or returned nothing valid"})
         new_text = _append_drift(text, drift_rows, decisions, None)
         if lost or lost_steps:
             result = "Needs work"
