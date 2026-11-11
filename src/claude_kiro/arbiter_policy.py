@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping, Optional, Tuple
 
+from claude_kiro.hooks._shared.spec_parser import _field, parse_tasks_text
 from claude_kiro.principles import EffectivePrinciples
 
 Tier = Literal["normal", "risky"]
@@ -285,9 +286,9 @@ def route_ruling(check: RulingCheck, tier: Tier, effective: EffectivePrinciples)
 
 # --------------------------------------------------------------------------- spec edits (Task 41)
 
-_TASK_HEAD = re.compile(r"^###\s+Task\s+(\d+)\b")
-_STATUS_LINE = re.compile(r"^\*\*Status:\*\*\s*(.*?)\s*$")
-_MARK_LINE = re.compile(r"^\s*[-*]\s+\[([ xX])\]")
+_TASK_HEAD = re.compile(r"^### Task ?(\d+): ")
+_MARK_LINE = re.compile(r"^\s*[-*]\s+\[([ xX])\]\s*(.*)$")
+_FIRST_TASK = re.compile(r"^### Task ?\d", re.MULTILINE)
 _LANE_FILES = ("tasks.md", "design.md", "test-plan.md")
 
 
@@ -323,31 +324,42 @@ class MovedTest:
 
 
 def _task_fields(text: str) -> dict:
-    """task id ("header" for the file-level Status) -> (status, tuple of acceptance marks)."""
+    """task id ("header" for the file-level Status) -> (status, acceptance criteria as (mark, text)).
+    Read through the project's own parser so the two cannot drift apart."""
     out: dict = {}
-    cur = "header"
-    status: dict = {}
+    first = _FIRST_TASK.search(text)
+    head = text[: first.start()] if first else text
+    header_status = _field(head, "Status")
+    if header_status is not None:
+        out["header"] = (header_status, ())
     marks: dict = {}
+    cur = None
     for line in text.splitlines():
-        m = _TASK_HEAD.match(line)
-        if m:
-            cur = m.group(1)
-            continue
-        s = _STATUS_LINE.match(line)
-        if s and cur not in status:
-            status[cur] = s.group(1)
+        h = _TASK_HEAD.match(line)
+        if h:
+            cur = h.group(1)
             continue
         k = _MARK_LINE.match(line)
-        if k and cur != "header":
-            marks.setdefault(cur, []).append(k.group(1) != " ")
-    for key in set(status) | set(marks):
-        out[key] = (status.get(key), tuple(marks.get(key, ())))
+        if k and cur is not None:
+            marks.setdefault(cur, []).append((k.group(1) != " ", " ".join(k.group(2).split())))
+    for task in parse_tasks_text(text):
+        if task.num in out:
+            continue
+        out[task.num] = (task.status, tuple(marks.get(task.num, ())))
     return out
+
+
+def _checked_by_text(criteria: Tuple[Tuple[bool, str], ...]) -> dict:
+    counts: dict = {}
+    for mark, text in criteria:
+        counts[text] = counts.get(text, 0) + (1 if mark else 0)
+    return counts
 
 
 def spec_text_changes(before: str, after: str) -> SpecTextChanges:
     """Status-field and acceptance-mark changes between two tasks.md texts, by task (8.6). A removed task that
-    was not Not Started counts as a Status change."""
+    was not Not Started counts as a Status change. Criteria are paired by text, so inserting an unchecked
+    criterion changes no mark; a flipped mark, or a checked criterion added or removed, does."""
     b, a = _task_fields(before), _task_fields(after)
     statuses = []
     marks = []
@@ -362,11 +374,20 @@ def spec_text_changes(before: str, after: str) -> SpecTextChanges:
                 statuses.append(f"Task {key}")
         elif bs != as_:
             statuses.append(f"Task {key}" if key != "header" else "header")
-        n = max(len(bm), len(am))
-        for i in range(n):
-            x = bm[i] if i < len(bm) else False
-            y = am[i] if i < len(am) else False
-            if x != y:
+        bc, ac = _checked_by_text(bm), _checked_by_text(am)
+        seen = []
+        for _, text in list(am) + list(bm):
+            if text not in seen:
+                seen.append(text)
+        changed = {t for t in seen if bc.get(t, 0) != ac.get(t, 0)}
+        reported = set()
+        for i, (_, text) in enumerate(am):
+            if text in changed and text not in reported:
+                reported.add(text)
+                marks.append(f"Task {key} criterion {i + 1}")
+        for i, (_, text) in enumerate(bm):
+            if text in changed and text not in reported:
+                reported.add(text)
                 marks.append(f"Task {key} criterion {i + 1}")
     return SpecTextChanges(tuple(statuses), tuple(marks))
 
