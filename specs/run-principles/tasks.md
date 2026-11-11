@@ -2023,7 +2023,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 87: Test the non-functional requirements
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.7, 7.6, 12.8, NFR Bounded arbiter cost, NFR Runtime compatibility, NFR Lint performance and safety, NFR Compatibility, NFR Determinism
 **Description:** Implement TC-127 to TC-132 in `tests/test_arbiter_nfr.py`, named `test_tc<N>_...`. TC-127: repeated claims across 3 runs make at most 6 calls on a task and 2 on a claim. TC-128: both workflows run scenarios with the arbiter, audit and create rulings under a throwing `Date` and `Math.random` (`throwingDate: true`). TC-129: with a canary module raising on import, under `no_network`, `ck lint` imports nothing and connects to nothing. TC-130: a generated 108-task spec lints in under 10 s, marked `serial`. TC-131: a spec with verifying tests, no claims and no findings runs today's labels in today's order, with `audit task <n>` and its thin `ck` step inserted before each verified impl task's first attempt, no other new label, no `arbiter` label and no `decisions.md`. TC-132: two `ck lint --json` runs on a tree with findings are byte-identical.
@@ -2033,11 +2033,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 24 (TC-129, 130, 132), Task 74 (TC-127, TC-131, and the implement half of TC-128), Task 85 (the create half of TC-128)
 
 **Acceptance:**
-- [ ] TC-127 drives real `ck` and real files across runs in one repo
-- [ ] TC-130 measures a real `ck lint` subprocess on a generated spec and is marked `serial`
-- [ ] Tests exercise the real boundary named in the test plan (workflows under the fake runtime, the real CLI)
-- [ ] Tests fail before the implementation exists for the right reason (no arbiter steps, no Story 12 keys)
-- [ ] No mocks of the project's own code in integration tests
+- [x] TC-127 drives real `ck` and real files across runs in one repo
+- [x] TC-130 measures a real `ck lint` subprocess on a generated spec and is marked `serial`
+- [x] Tests exercise the real boundary named in the test plan (workflows under the fake runtime, the real CLI)
+- [x] Tests fail before the implementation exists for the right reason (no arbiter steps, no Story 12 keys)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (project fixture, canary helpers), Task 2 (`throwingDate`, fake runtime)
 **Complexity:** High
