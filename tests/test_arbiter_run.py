@@ -815,3 +815,143 @@ def test_tc60_rulings_from_an_earlier_run_on_disk_count_toward_the_limits_in_a_n
     text = needs_text(later)
     for n in ("alpha", "beta", "gamma"):
         assert f"reasoning-{n}-held" in text, f"the entry lists {n}: " + text
+
+
+# --------------------------------------------------------------------------- TC-62, TC-63, TC-74, TC-75, TC-146, TC-210 (how rulings are applied)
+
+TASK_3 = ("### Task 3: Farewell\n**Status:** Not Started\n**Track:** impl\n**Requirements:** 1.1\n**Description:** Print the farewell.\n"
+          "**Files:**\n- `src/bye.py` - the farewell\n**Verify:** `true`\n**Dependencies:** None\n\n---\n")
+THREE_TASKS = DEFAULT_TASKS + "\n" + TASK_3
+THREE_REWIRED = THREE_TASKS.replace("**Description:** Print the farewell.\n**Files:**\n- `src/bye.py` - the farewell\n**Verify:** `true`\n**Dependencies:** None",
+                                    "**Description:** Print the farewell.\n**Files:**\n- `src/bye.py` - the farewell\n**Verify:** `true`\n**Dependencies:** Task 2")
+SPEC_EDIT = ruling("spec_edit", changed="tasks.md: rewired the dependencies")
+
+
+def after(ev, label):
+    return ev[ev.index(label) + 1:]
+
+
+def test_tc62_after_a_spec_edit_lands_the_task_resumes_with_attempts_and_escalations_as_before(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    opts = {**CONFLICT_OPTS, "rulings": {"1": [SPEC_EDIT]}, "arbiterEdits": {"1": {"files": {"specs/demo/tasks.md": REWIRED}}}}
+    out = run(bridge, project, opts, agents=roles("haiku", ["opus"]))
+    ev = out["events"]
+    assert arbiter_calls(ev) == ["arbiter task 1"], ", ".join(ev)
+    assert (project.target / "specs" / "demo" / "tasks.md").read_text() == REWIRED, "the spec edit landed on the integration branch"
+    resumed = [e for e in after(ev, "arbiter task 1") if re.match(r"^task 1( |$)", e) and not e.endswith(" end")]
+    assert len(resumed) == 1, "the task resumed once after the landing: " + ", ".join(ev)
+    assert models_of(out) == ["haiku", "haiku"], "no escalation was spent by the ruling: " + ", ".join(ev)
+    assert "(opus)" not in resumed[0], resumed[0]
+    assert not needs(out), json.dumps(out["result"].get("needsInput"))
+    assert out["result"]["merged"] == ["1"]
+    plain = arbiter_project(tmp_path / "plain")
+    base = run(bridge, plain, {"deps": {"1": []}, "failUntil": {"1": 1}}, agents=roles("haiku", ["opus"]))
+    assert models_of(base) == models_of(out), "the resumed run climbs the ladder as a plain first failure does"
+
+
+def test_tc63_a_landed_edit_that_adds_a_dependency_on_a_not_started_task_changes_the_next_plans_schedule(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path, tasks=THREE_TASKS)
+
+    def schedule():
+        planned = project.ck("plan", "demo", "--json", cwd=project.target)
+        assert planned.returncode == 0, planned.stdout + planned.stderr
+        return json.loads(planned.stdout)
+
+    before = schedule()
+    assert "3" in before["ready"], "task 3 is schedulable before the edit: " + json.dumps(before)
+    opts = {"deps": {"1": [], "2": ["1"], "3": []}, "testConflicts": {"1": {"conflict": CONFLICT}}, "rulings": {"1": [SPEC_EDIT]},
+            "arbiterEdits": {"1": {"files": {"specs/demo/tasks.md": THREE_REWIRED}}}}
+    out = run(bridge, project, opts, agents=roles("haiku", ["opus"]))
+    assert arbiter_calls(out["events"]) == ["arbiter task 1"], ", ".join(out["events"])
+    assert (project.target / "specs" / "demo" / "tasks.md").read_text() == THREE_REWIRED, "the edit landed"
+    later = schedule()
+    assert later != before, "the next plan differs"
+    assert "3" not in later["ready"], "task 3 now waits on task 2: " + json.dumps(later)
+    assert [str(d) for d in later["deps"]["3"]] == ["2"], json.dumps(later["deps"])
+
+
+def test_tc74_a_code_ruling_puts_the_ruling_in_the_retry_prompt_and_a_failing_gate_after_it_leaves_the_task_unfinished(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    opts = {**CONFLICT_OPTS, "failUntil": {"1": 99}, "rulings": {"1": [ruling("code"), REQ]}}
+    out = run(bridge, project, opts, agents=roles("haiku", []))
+    ev = out["events"]
+    assert arbiter_calls(ev)[0] == "arbiter task 1", ", ".join(ev)
+    retries = [e for e in after(ev, "arbiter task 1") if re.match(r"^task 1( |$)", e) and not e.endswith(" end")]
+    assert retries, "the task was retried after the ruling: " + ", ".join(ev)
+    assert "print the greeting before exiting" in out["prompts"][retries[0]], out["prompts"][retries[0]]
+    assert "1" not in out["result"]["merged"], "the gate kept failing, so the task is unfinished: " + json.dumps(out["result"])
+    assert "1" not in (out["result"].get("done") or [])
+
+
+def deadlock(issue, file="src/greet.py"):
+    return {"verdict": "changes", "findings": [{"task": "1", "severity": "blocking", "file": file, "issue": issue}]}
+
+
+F1 = "the greeting is never printed"
+F2 = "the greeting is printed twice"
+F3 = "the farewell is never printed"
+
+
+def review_labels(ev):
+    return [e for e in ev if re.match(r"^review 1( |$)", e) and not e.endswith(" end")]
+
+
+def test_tc75_the_re_review_prompt_holds_the_ruling_and_the_settled_finding_raised_again_does_not_block(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    opts = {"deps": {"1": []}, "reviews": {"1": [deadlock(F1)] * 6}, "rulings": {"1": [ruling("code"), REQ]}}
+    out = run(bridge, project, opts, agents=roles("haiku", ["opus"], REVIEW_ON))
+    ev = out["events"]
+    assert arbiter_calls(ev) == ["arbiter task 1"], "the settled finding is not ruled on again: " + ", ".join(ev)
+    later = [e for e in after(ev, "arbiter task 1") if e in review_labels(ev)]
+    assert later, "the task was reviewed again after the ruling: " + ", ".join(ev)
+    assert "print the greeting before exiting" in out["prompts"][later[0]], out["prompts"][later[0]]
+    assert not needs(out), "the raised-again finding was settled, so it did not block: " + json.dumps(out["result"].get("needsInput"))
+    assert out["result"]["merged"] == ["1"]
+
+
+def finding_ruling(mark):
+    return ruling("code", reasoning=f"reasoning-{mark}-held", code=f"code-{mark}-text")
+
+
+def test_tc146_a_different_blocking_finding_gets_its_own_ruling_a_settled_one_raised_again_makes_no_call_and_a_mixed_deadlock_splits(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    agents = roles("haiku", ["opus"], REVIEW_ON)
+    first = run(bridge, project, {"deps": {"1": []}, "reviews": {"1": [deadlock(F1)] * 2 + [deadlock(F2)] * 6},
+                                  "rulings": {"1": [finding_ruling("f1"), finding_ruling("f2")]}}, agents=agents)
+    assert len(arbiter_calls(first["events"])) == 2, ", ".join(first["events"])
+    assert len(decisions_entries(project)) == 2, "the different finding on the same file got its own ruling: " + str(decisions_entries(project))
+    # The same finding raised again in a new deadlock is covered by its ruling: no call, an entry holding the ruling.
+    again = run(bridge, project, {"deps": {"1": []}, "reviews": {"1": [deadlock(F1)] * 6}, "rulings": {"1": [REQ]}}, agents=agents)
+    assert arbiter_calls(again["events"]) == [], "no arbiter call: " + ", ".join(again["events"])
+    entries = needs(again)
+    assert len(entries) == 1, json.dumps(again["result"].get("needsInput"))
+    assert "reasoning-f1-held" in json.dumps(entries[0]), json.dumps(entries[0])
+    assert len(decisions_entries(project)) == 2, "nothing new was recorded"
+    # A deadlock mixing the ruled finding and a new one: the ruled one goes to me with its ruling, only the new one to the arbiter.
+    mixed_review = {"verdict": "changes", "findings": deadlock(F1)["findings"] + deadlock(F3)["findings"]}
+    mixed = run(bridge, project, {"deps": {"1": []}, "reviews": {"1": [mixed_review] * 6}, "rulings": {"1": [finding_ruling("f3")]}}, agents=agents)
+    calls = arbiter_calls(mixed["events"])
+    assert len(calls) == 1, "one call, for the new finding: " + ", ".join(mixed["events"])
+    prompt = mixed["prompts"][calls[0]]
+    assert F3 in prompt, prompt
+    assert F1 not in prompt, "the ruled finding is not sent to the arbiter:\n" + prompt
+    to_me = json.dumps(needs(mixed))
+    assert "reasoning-f1-held" in to_me and F1 in to_me, "the ruled finding went to me with its ruling: " + to_me
+
+
+def test_tc210_a_review_deadlock_ruled_test_repair_goes_to_the_fixer_and_the_task_is_reviewed_again_with_no_revision_or_attempt_spent(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    opts = {"deps": {"1": []}, "reviews": {"1": [deadlock(F1)] * 2}, "rulings": {"1": [ruling("test_repair"), REQ]},
+            "testFix": {CONFLICT["file"]: {"verdict": "fixed"}}}
+    out = run(bridge, project, opts, agents=roles("haiku", ["opus"], REVIEW_ON))
+    ev = out["events"]
+    assert arbiter_calls(ev) == ["arbiter task 1"], ", ".join(ev)
+    assert "testfix 1 (Task 1)" in ev, "the fixer ran: " + ", ".join(ev)
+    rest = after(ev, "testfix 1 (Task 1)")
+    spent = [e for e in rest if re.match(r"^task 1( |$)", e) and not e.endswith(" end")]
+    assert spent == [], "no revision or attempt after the fix: " + ", ".join(ev)
+    rereviews = [e for e in rest if e in review_labels(ev)]
+    assert rereviews, "the task was reviewed again after the fix landed: " + ", ".join(ev)
+    prompt = out["prompts"][rereviews[0]]
+    assert "compare the printed text" in prompt or "ruled test_repair" in prompt, "the re-review prompt carries the ruling:\n" + prompt
+    assert out["result"]["merged"] == ["1"], json.dumps(out["result"])
