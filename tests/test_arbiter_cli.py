@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 import pytest
-from hypothesis import given, settings, strategies as st
+from hypothesis import assume, given, settings, strategies as st
 
 from arbiter_helpers import DEFAULT_PRINCIPLES, ArbiterProject, arbiter_project, ck_run, claims, decisions_entries
 from landing_bridge import bridge  # noqa: F401  (module-scoped fixture)
@@ -442,6 +442,8 @@ PROPERTIES = {
     "P-10": "test_p10_tier_is_risky_exactly_for_safety_guard_stop_or_unruled_repeat",
     "P-18": "test_p18_a_claim_after_its_applied_ruling_is_never_ruled_again",
     "P-19": "test_p19_the_arbiter_is_called_exactly_under_the_task_limits",
+    "P-17": "test_p17_only_a_well_formed_ruling_citing_an_effective_principle_is_valid",
+    "P-37": "test_p37_each_outcome_goes_to_exactly_one_lane",
 }
 
 PROP = settings(derandomize=True, max_examples=200, database=None, deadline=None)
@@ -600,3 +602,153 @@ def test_p19_the_arbiter_is_called_exactly_under_the_task_limits(n_ruled, n_fail
         assert (got.action, got.reason, got.tier) == ("ask", "task-ruling-limit", None), got
     else:
         assert got.action == "rule" and got.reason == "" and got.tier is not None, got
+
+
+# --------------------------------------------------------------------------- properties P-17, P-37
+
+_KEY = "2|test:tests/test_greet.py::test_x"
+_OTHER_PLAN = (
+    "# Plan: Other\n\n## Principles\n\n"
+    "- **Alpha rule:** other spec one.\n- **Beta rule:** other spec two.\n- **Gamma rule:** other spec three.\n"
+    "- **Delta rule:** other spec four.\n- **Epsilon rule:** other spec five.\n"
+)
+_MY_PLAN = (
+    "# Plan: Mine\n\n## Principles\n\n"
+    "- **Local rule:** this spec's own rule.\n"
+    "- **Overrides remove-first:** drop it, no reason given.\n"
+)
+
+
+def _effective_set():
+    from claude_kiro.principles import effective_principles, parse_principles
+
+    project = parse_principles(DEFAULT_PRINCIPLES, "project")
+    plan = parse_principles(_MY_PLAN, "plan")
+    effective = effective_principles(project, plan)
+    citable = {pr.id: pr for pr in effective.citable}
+    return project, plan, effective, citable
+
+
+def _good(outcome: str, principle: str, stronger: bool) -> dict:
+    if stronger:
+        out = stronger_look(_KEY)
+        out["principle"] = principle
+        return out
+    return ruling(_KEY, outcome, principle=principle)
+
+
+@st.composite
+def _p17_case(draw):
+    """(raw, expect_valid). Positives cite a real effective id; negatives are real near-misses and malformed shapes."""
+    from claude_kiro.principles import parse_principles
+
+    project, plan, effective, citable = _effective_set()
+    ids = sorted(citable)
+    form = draw(st.sampled_from([
+        "valid", "valid", "other-plan", "decision", "ignored-override", "truncated", "case", "text",
+        "two-outcomes", "unknown-outcome", "missing", "wrong-type", "wrong-claim", "not-a-dict"]))
+    outcome = draw(st.sampled_from(OUTCOMES_P))
+    stronger = draw(st.booleans())
+    pid = draw(st.sampled_from(ids))
+    if form == "valid":
+        return _good(outcome, pid, stronger), True
+    if form == "other-plan":
+        foreign = [x.id for x in parse_principles(_OTHER_PLAN, "plan") if x.id not in citable]
+        assume(foreign)
+        return _good(outcome, draw(st.sampled_from(foreign)), stronger), False
+    if form == "decision":
+        return _good(outcome, f"D-{draw(st.integers(1, 99))}", stronger), False
+    if form == "ignored-override":
+        ignored = [x.id for x in effective.ignored if x.id not in citable]
+        assume(ignored)
+        return _good(outcome, draw(st.sampled_from(ignored)), stronger), False
+    if form == "truncated":
+        cut = pid[: draw(st.integers(0, len(pid) - 1))]
+        assume(cut not in citable)
+        return _good(outcome, cut, stronger), False
+    if form == "case":
+        variant = draw(st.sampled_from([pid.upper(), pid.title(), pid.swapcase()]))
+        assume(variant not in citable)
+        return _good(outcome, variant, stronger), False
+    if form == "text":
+        return _good(outcome, citable[pid].text, stronger), False
+    if form == "two-outcomes":
+        raw = _good(outcome, pid, False)
+        raw["outcome"] = draw(st.sampled_from([["code", "spec_edit"], "code,spec_edit", "code spec_edit", ["code", "code"]]))
+        return raw, False
+    if form == "unknown-outcome":
+        raw = _good(outcome, pid, False)
+        raw["outcome"] = draw(st.sampled_from(["revert", "SPEC_EDIT", "spec-edit", "", "code ", 3, None, True]))
+        return raw, False
+    if form == "missing":
+        raw = _good(outcome, pid, stronger)
+        del raw[draw(st.sampled_from(["claim", "reasoning", "principle"]))]
+        return raw, False
+    if form == "wrong-type":
+        raw = _good(outcome, pid, stronger)
+        raw[draw(st.sampled_from(["claim", "reasoning", "principle"]))] = draw(
+            st.sampled_from([1, None, ["x"], {"a": 1}, True]))
+        return raw, False
+    if form == "wrong-claim":
+        raw = _good(outcome, pid, stronger)
+        raw["claim"] = "3|test:tests/test_other.py::test_y"
+        return raw, False
+    return draw(st.sampled_from([None, [], "code", 7, [{"claim": _KEY}]])), False
+
+
+OUTCOMES_P = ["spec_edit", "test_repair", "code", "requirements"]
+
+
+@PROP
+@given(case=_p17_case())
+def test_p17_only_a_well_formed_ruling_citing_an_effective_principle_is_valid(case):
+    from claude_kiro.arbiter_policy import validate_ruling
+
+    raw, expect = case
+    _, _, _, citable = _effective_set()
+    check = validate_ruling(raw, _KEY, citable, "run")
+    assert check.valid is expect, (raw, check)
+    if not expect:
+        assert check.problems, raw
+
+
+@st.composite
+def _p37_case(draw):
+    outcome = draw(st.sampled_from(OUTCOMES_P))
+    stronger = draw(st.booleans())
+    invalid = draw(st.booleans())
+    tier = draw(st.sampled_from(["normal", "risky"]))
+    raw = _good(outcome, "project:test-intent", stronger)
+    if invalid:
+        raw = draw(st.sampled_from([
+            {**raw, "principle": "project:made-up"}, {**raw, "principle": ""},
+            {**raw, "outcome": ["code", "spec_edit"]} if not stronger else {**raw, "reasoning": 5},
+            {k: v for k, v in raw.items() if k != "reasoning"}, {**raw, "claim": "9|other"}, None, "text"]))
+    return raw, tier, invalid, stronger, outcome
+
+
+_LANE = {"spec_edit": "spec_edit", "code": "code", "requirements": "needs_input", "test_repair": "test_repair"}
+
+
+@PROP
+@given(case=_p37_case())
+def test_p37_each_outcome_goes_to_exactly_one_lane(case):
+    from claude_kiro.arbiter_policy import route_ruling, validate_ruling
+
+    raw, tier, invalid, stronger, outcome = case
+    _, _, effective, citable = _effective_set()
+    check = validate_ruling(raw, _KEY, citable, "run")
+    route = route_ruling(check, tier, effective)
+    if invalid:
+        assert not check.valid, raw
+        assert route.route == "needs_input" and route.record is False, (raw, route)
+    elif stronger:
+        assert check.valid and check.stronger_look, (raw, check)
+        if tier == "normal":
+            assert route.route == "rerun", route
+        else:
+            assert (route.route, route.reason) == ("needs_input", "exhausted"), route
+    else:
+        assert check.valid and not check.stronger_look, (raw, check)
+        assert route.route == _LANE[outcome], (outcome, route)
+    assert (route.route == "spec_edit") == (not invalid and not stronger and outcome == "spec_edit"), (raw, route)
