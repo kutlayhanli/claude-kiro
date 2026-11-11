@@ -374,7 +374,7 @@ def test_tc131_a_clean_spec_runs_todays_labels_with_only_the_audit_steps_added(t
     seen = labels(out)
     audits = [i for i, c in enumerate(out["calls"]) if c["label"] == "audit task 2"]
     simulates = [i for i, c in enumerate(out["calls"]) if c.get("simulate")]
-    assert len(audits) == 1, f"one audit for the verified impl task, none for its retry, none elsewhere: {seen}"
+    assert audits and audits == audits[:1], f"one audit for the verified impl task, none for its retry, none elsewhere: {seen}"
     assert simulates and out["calls"][simulates[0]]["simulate"] == "2", f"the thin `ck lint --simulate --task 2` step: {seen}"
     first_attempt = seen.index("task 2")
     assert max(audits[0], simulates[0]) < first_attempt and simulates[0] < audits[0], f"both come before the first attempt: {seen}"
