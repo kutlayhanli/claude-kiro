@@ -74,7 +74,7 @@ function arbiterProject(deps) {
 
 // A valid ruling that sends the implementer back with `text`, and the answers that are no ruling at all (6.10, P-16).
 const CODE = 'KEEP-THE-TEST-CHANGE-THE-CODE'
-const codeRuling = { status: 'ruled', outcome: 'code', reasoning: 'the test states the requirement', principle: 'project:test-intent', code: CODE }
+const codeRuling = { claim: '1|test:tests/test_guarded.py::test_x', status: 'ruled', outcome: 'code', reasoning: 'the test states the requirement', principle: 'project:test-intent', code: CODE }
 const FAILED_CALLS = ['throw', null, {}, 7, 'a string', [], { status: 3, reasoning: { bad: true } }]
 
 const roles = (model, escalate, extra = {}) => ({

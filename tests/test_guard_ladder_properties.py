@@ -33,7 +33,7 @@ PROPERTIES = {
 
 PURE = dict(max_examples=200, derandomize=True, database=None, deadline=None, suppress_health_check=list(HealthCheck))
 CLI = dict(max_examples=40, derandomize=True, database=None, deadline=None, suppress_health_check=list(HealthCheck))
-RUN = dict(max_examples=10, derandomize=True, database=None, deadline=None, suppress_health_check=list(HealthCheck))
+RUN = dict(max_examples=30, derandomize=True, database=None, deadline=None, suppress_health_check=list(HealthCheck))
 
 RANK = {"haiku": 0, "sonnet": 1, "opus": 2, "fable": 3}
 LADDER = ["sonnet", "opus", "fable"]
@@ -161,9 +161,9 @@ def ladder_scenarios(draw):
 @given(sc=ladder_scenarios())
 @settings(**RUN)
 def test_p15_attempts_follow_the_ladder_rules(bridge, sc):  # noqa: F811
-    """Restated for the arbiter (6.2, P-12): a guard stop is followed at once by the arbiter, never by a ladder step."""
+    """Restates run-principles P-12 (the old P-15) for the arbiter (6.2): a guard stop is followed at once by the arbiter, never by a ladder step."""
     deps, start, escalate, guarded, in_revise, fail_until = sc
-    project: Dict[str, Any] = {"guardStops": dict(guarded), "failUntil": fail_until, "rulings": {t: [CODE_RULING] for t in guarded}}
+    project: Dict[str, Any] = {"guardStops": dict(guarded), "failUntil": fail_until, "rulings": {t: [{"claim": f"{t}|test:tests/test_guarded.py::test_x", **CODE_RULING}] for t in guarded}}
     if in_revise:
         project["guardStopIn"] = {t: "revise" for t in guarded}
         project["reviews"] = {t: ["changes", "approve"] for t in guarded}
