@@ -105,6 +105,9 @@ def _plan(project_dir: Path, spec: str, exclude: set) -> dict:
     return {
         **plan,
         **lint,
+        # plan_waves' warnings (strings) keep their key; lint's principles warnings travel as lintWarnings.
+        "warnings": plan["warnings"],
+        "lintWarnings": lint["warnings"],
         # Routing inputs for /spec:implement: "safety" tasks start on a stronger model
         # and get the risky reviewer; complexity feeds implementer.complexity_routing.
         "risk": task_risk({t.num: t for t in tasks}, load_config(project_dir))["risk"],
@@ -218,9 +221,11 @@ def lint(spec: str, as_json: bool, contracts: bool, fidelity: bool, tasks, base,
 
     result = _plan(Path.cwd(), spec, set())
     if as_json:
-        click.echo(json.dumps({k: result[k] for k in ("cycles", "verifyCycles", "reasonless", "criticalPath", "waves", "riskUntagged",
-                                                      "commandEdges", "unknownCommands", "untaggedTests", "noWriteSet", "graphProblems",
-                                                      "justifications", "warnings")}, indent=2))
+        payload = {k: result[k] for k in ("cycles", "verifyCycles", "reasonless", "criticalPath", "waves", "riskUntagged",
+                                          "commandEdges", "unknownCommands", "untaggedTests", "noWriteSet", "graphProblems",
+                                          "justifications")}
+        payload["warnings"] = result["lintWarnings"]
+        click.echo(json.dumps(payload, indent=2))
     else:
         click.echo(f"Plan lint for {result['spec']}:")
         if result["cycles"]:
@@ -272,7 +277,7 @@ def lint(spec: str, as_json: bool, contracts: bool, fidelity: bool, tasks, base,
         # The requirements' justifications fail lint (3.1); the plan's principles warn only (3.7).
         for item in result["justifications"]:
             click.echo(f"  ✗ {item['message']}")
-        for item in result["warnings"]:
+        for item in result["lintWarnings"]:
             click.echo(f"  ⚠ {item['message']}")
         path = result["criticalPath"]
         if path:

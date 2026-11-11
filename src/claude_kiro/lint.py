@@ -701,6 +701,7 @@ def _principles_warnings(spec_dir: Path) -> List[Dict[str, str]]:
     plan = spec_dir / "PLAN.md"
     if not plan.is_file():
         return []
+    # plan_section returns None for both a missing and an empty section, so None means "warn".
     if plan_section(plan.read_text(errors="replace")) is not None:
         return []
     return [{
