@@ -109,3 +109,39 @@ def test_malformed_review_wave_labels_stay_other():
         m = parse_label(label, "spec-implement")
         assert _get(m, "matched") is False, label
         assert _get(m, "role") == "other", label
+
+
+def test_tc137_arbiter_audit_and_unreproduced_labels_parse_to_a_known_role():
+    """TC-137 (10.8): every label the real scripts emit, including the arbiter, audit, `arbiter-` step and
+    `full gate @<n> (unreproduced landing)` forms, parses to a known role through the real parse_label."""
+    import re
+
+    from claude_kiro.analytics import parse_label
+
+    # The forms the workflows name, parsed directly.
+    literal = [
+        ("spec-implement", "arbiter task 3"),
+        ("spec-implement", "arbiter task 3 risky"),
+        ("spec-implement", "arbiter drift"),
+        ("spec-implement", "audit task 3"),
+        ("spec-implement", "full gate @3 (unreproduced landing)"),
+    ]
+    _check_corpus(literal)
+
+    corpus = [(c["workflow"], c["label"]) for c in _emitted()]
+    _check_corpus(corpus)
+    labels = [label for _, label in corpus]
+    families = {
+        "arbiter task <n>": re.compile(r"^arbiter task \d+$"),
+        "arbiter task <n> risky": re.compile(r"^arbiter task \d+ risky$"),
+        "arbiter <step>": re.compile(r"^arbiter (?!task )\S"),
+        "audit task <n>": re.compile(r"^audit task \d+$"),
+        "arbiter- step": re.compile(r"^arbiter-"),
+        "unreproduced landing": re.compile(r"^full gate @\S+ \(unreproduced landing\)$"),
+    }
+    absent = [name for name, rx in families.items() if not any(rx.search(l) for l in labels)]
+    assert not absent, f"emit_labels.mjs never emits: {absent}"
+    for workflow, l in corpus:
+        if any(rx.search(l) for rx in families.values()):
+            m = parse_label(l, workflow)
+            assert _get(m, "matched") and _get(m, "role") != "other", l
