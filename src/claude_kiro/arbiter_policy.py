@@ -134,14 +134,17 @@ def claim_facts(claim: Claim, ledger: Mapping[str, Any], principles_read: str, t
         e = entries[key]
         prior = PriorClaim(status=e["status"], calls=int(e.get("calls", 0)), ruling=e.get("ruling"))
 
-    task_rulings = 0
+    # Calls add up over the task's entries; a ruling counts once by its number, since a deadlock's
+    # per-finding entries share the ruling of its combined entry (arbiter.open_claim, settle).
+    ruling_ids = set()
     task_calls = 0
-    for e in entries.values():
+    for entry_key, e in entries.items():
         if str(e.get("task")) != task_id:
             continue
         task_calls += int(e.get("calls", 0))
         if e.get("status") == "ruled":
-            task_rulings += 1
+            ruling_ids.add(int(e["ruling"]) if e.get("ruling") is not None else ("entry", entry_key))
+    task_rulings = len(ruling_ids)
 
     return ClaimFacts(
         key=key,

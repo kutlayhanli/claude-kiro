@@ -874,7 +874,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 37: Add ck arbiter open with the claim ledger and worktree
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.6, 1.9, 1.10, 5.3, 5.4, 6.8, 7.3, 7.8, 8.1, 7.5, 7.6
 **Description:** `ck arbiter open` splits a review deadlock per finding: findings already covered by an applied ruling become a needs-input entry with that ruling, only findings never ruled on reach the arbiter as one claim, and the ledger records the ruling under each of their identities (7.4). In `src/claude_kiro/arbiter.py`, add the per-spec ledger at `<git common dir>/ck/<spec>/arbiter-ledger.json` (`ck-arbiter-ledger/1`, written under a per-spec file lock) and the `arbiter<k>` worktree created from the integration branch, in the same naming as `fix<k>`. Add `ck arbiter open SPEC --task N --into BRANCH --json` (stdin: `{"claim": Claim, "task": TaskMeta}`, stdout: `OpenResult`), which reads both principle layers (turning each file form into a `PrinciplesRead` result), calls `claim_key`, `claim_facts` and `decide_claim`, updates the ledger, and returns `OpenResult.earlier` (the task's rulings) and `OpenResult.missing` (the unusable file) for `ask`. It records the worktree's starting commit as `base` in the ledger entry. A non-zero exit means no decision was made. Harness Contract owner: `ck arbiter decide`, which is `ck arbiter open`.
@@ -886,9 +886,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 1 (its project fixture and strategies), Task 7 (TC-8, TC-153), Task 10 (red team of 1.6, 1.9 through `ck arbiter open`), Task 25 (TC-133, TC-154)
 
 **Acceptance:**
-- [ ] A rule decision returns tier, key, both principle layers, the plan-layer state, worktree, branch and number
-- [ ] A missing or unreadable `specs/PRINCIPLES.md` returns `ask` naming the file, and no worktree is made
-- [ ] Ledger counts persist across processes and across runs of the spec
+- [x] A rule decision returns tier, key, both principle layers, the plan-layer state, worktree, branch and number
+- [x] A missing or unreadable `specs/PRINCIPLES.md` returns `ask` naming the file, and no worktree is made
+- [x] Ledger counts persist across processes and across runs of the spec
 
 **Dependencies:** Task 1 (its tests are the oracle), Task 7 (its tests are the oracle), Task 10 (its tests are the oracle), Task 25 (its tests are the oracle), Task 29 (calls `decide_claim`), Task 32 (edits `arbiter.py` and `cli/arbiter.py`)
 **Complexity:** High

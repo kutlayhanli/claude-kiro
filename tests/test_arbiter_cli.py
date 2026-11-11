@@ -815,3 +815,25 @@ def test_p26_real_processes_keep_earlier_bytes_and_numbers_rise(batch):
             assert now.startswith(seen), f"entries before record {i} changed"
             assert len(now) > len(seen)
             seen, last = now, number
+
+
+
+# --------------------------------------------------------------------------- one call, one count
+
+
+def test_a_deadlock_of_two_findings_counts_one_call_on_the_task_after_one_open(tmp_path):
+    from claude_kiro.arbiter import load_ledger
+    from claude_kiro.arbiter_policy import Claim, TaskMeta, claim_facts
+
+    p = fresh(tmp_path, "p")
+    raw = {"task": "2", "trigger": "review-deadlock", "text": "deadlock",
+           "findings": [["tests/test_a.py", "first issue"], ["tests/test_b.py", "second issue"]]}
+    got = parsed(open_claim(p, raw))
+    assert got["action"] == "rule", got
+    ledger = load_ledger(ledger_path(p))
+    assert len(ledger["claims"]) == 3, ledger["claims"]  # the combined entry and one alias per finding
+    claim = Claim(task="2", trigger="review-deadlock", text="deadlock",
+                  findings=(("tests/test_a.py", "first issue"), ("tests/test_b.py", "second issue")))
+    facts = claim_facts(claim, ledger, "ok", TaskMeta(risk="normal", complexity="Low"))
+    assert facts.task_calls == 1, ledger["claims"]
+    assert facts.task_rulings == 0, ledger["claims"]
