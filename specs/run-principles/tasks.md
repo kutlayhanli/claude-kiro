@@ -1476,7 +1476,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 63: Property tests for a ruling's lifecycle in a run
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.6, 5.7, 6.9, 8.2, 8.14, 8.15, 10.7
 **Description:** Implement P-11, P-15, P-20 and P-27 with Hypothesis in `tests/test_arbiter_run.py`, named `test_p<N>_...`, all (W). P-11: for any answer sequence, a claim makes at most 2 calls, normal then at most one risky, and a risky needs-a-stronger-look ends in needs-input. P-15: for any `dags()` DAG and a claim on any task with a slow arbiter, exactly its transitive dependents are held and the entry is in `needsInput`. P-20: metamorphic, attempts and `escalations` equal the same run without the ruling, at any attempt number and retry budget. P-27: for any partition of rulings across earlier and current runs, the report's rulings equal this run's set. Settings `@settings(derandomize=True, max_examples=30, database=None, deadline=None)`. Add them to the file's `PROPERTIES` map.
@@ -1487,12 +1487,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 65 (P-11), Task 66 (P-15, P-27), Task 67 (P-20)
 
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the P-11, P-15, P-20 and P-27 rows
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] The tests call the workflow's decisions through the bridge, not a server
-- [ ] Tests exercise the real boundary named in the test plan (real workflow under the fake runtime, real `ck`)
-- [ ] Tests fail before the implementation exists for the right reason (no arbiter step)
-- [ ] No mocks of the project's own code in integration tests
+- [x] The generators cover every surface form and negative listed in the P-11, P-15, P-20 and P-27 rows
+- [x] Settings are deterministic (derandomized, no database)
+- [x] The tests call the workflow's decisions through the bridge, not a server
+- [x] Tests exercise the real boundary named in the test plan (real workflow under the fake runtime, real `ck`)
+- [x] Tests fail before the implementation exists for the right reason (no arbiter step)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (strategies), Task 62 (same test file)
 **Complexity:** High
