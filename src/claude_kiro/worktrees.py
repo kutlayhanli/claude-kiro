@@ -924,7 +924,7 @@ def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, ke
 @dataclass
 class Landed:
     task: str
-    state: str  # MERGED RED CONFLICT DEFERRED PROTECTED SKIP MISSING BUSY ERROR
+    state: str  # MERGED RED CONFLICT DEFERRED PROTECTED REFUSED SKIP MISSING BUSY ERROR
     detail: str = ""
     branch: str = ""
     files: List[str] = field(default_factory=list)
@@ -933,6 +933,8 @@ class Landed:
     mergedAt: str = ""
     failures: List[Dict] = field(default_factory=list)  # the gate's failure entries (ck-gate/1), RED only
     fixtureDrift: List[Dict] = field(default_factory=list)  # [{file, task, change}] recorded fixtures changed (15.2)
+    commit: Optional[str] = None  # the target's HEAD after a spec-edit landing (MERGED only)
+    moved: List[Dict] = field(default_factory=list)  # tests a spec edit moved out of a Verify selection (8.7)
 
     def line(self) -> str:
         text = f"{self.state} {self.task} ({self.branch})"
@@ -1297,6 +1299,164 @@ def land(
             **({"hooks": hook_notes[-1]} if hook_notes else {}),
             **({"fixtureError": fixture_error} if fixture_error else {}),
         }
+
+
+SPEC_EDIT_LOCK_WAIT_S = 120.0
+
+
+def _spec_dir_of(checkout: Path, spec: str) -> Optional[Path]:
+    from claude_kiro.paths import LEGACY_SPECS_DIR, SPECS_DIR
+
+    for base_dir in (SPECS_DIR, LEGACY_SPECS_DIR):
+        d = checkout / base_dir / spec
+        if (d / "tasks.md").is_file():
+            return d
+    return None
+
+
+def _finding_keys(lint: Mapping) -> set:
+    """Identities of the blocking findings of a lint result: cycles, verify cycles, verify scope, justifications."""
+    import json
+
+    keys = set()
+    for name in ("cycles", "verifyCycles", "verifyScope", "justifications"):
+        for entry in lint.get(name) or ():
+            if isinstance(entry, Mapping):
+                pick = {k: entry[k] for k in ("task", "kind", "file", "module", "suite", "testTask") if k in entry}
+                keys.add(f"{name}:{json.dumps(pick or dict(entry), sort_keys=True, default=str)}")
+            else:
+                keys.add(f"{name}:{json.dumps(entry, sort_keys=True, default=str)}")
+    return keys
+
+
+def _program_of(command: str) -> str:
+    import shlex
+
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        words = command.split()
+    at = next((i for i, w in enumerate(words) if Path(w).name == "pytest"), None)
+    return " ".join(words[: at + 1]) if at is not None else (words[0] if words else "")
+
+
+def _spec_facts(checkout: Path, spec: str) -> Dict:
+    """What a landing compares before and after the merge: tasks.md text, lint findings, test selections per
+    task, each task's verification fields, and the Done tasks."""
+    from claude_kiro.hooks._shared.spec_parser import parse_tasks_text
+    from claude_kiro.lint import _verify_runs, lint_spec
+    from claude_kiro.lint_scope import _norm, _selection, load_sim_input
+
+    spec_dir = _spec_dir_of(checkout, spec)
+    if spec_dir is None:
+        return {"text": "", "findings": set(), "selections": {}, "verification": {}, "done": set()}
+    text = (spec_dir / "tasks.md").read_text(encoding="utf-8", errors="replace")
+    config = load_config(checkout)
+    findings = _finding_keys(lint_spec(spec_dir, checkout))
+    sim = load_sim_input(spec_dir / "tasks.md", checkout, config)
+    selections: Dict[str, List[Tuple[str, Optional[str], str]]] = {}
+    for num, task in sim.tasks.items():
+        chosen = []
+        for command in task.verify:
+            for path, selector in _verify_runs([command], config).items():
+                path = _norm(path)
+                tests = sim.tests.get(path, ())
+                names = sorted(_selection({path: selector}, path, tests))
+                program = _program_of(command)
+                chosen.extend((path, name, program) for name in names) if names else chosen.append((path, None, program))
+        selections[num] = chosen
+    tasks = parse_tasks_text(text)
+    return {
+        "text": text, "findings": findings, "selections": selections,
+        "verification": {t.num: (tuple(t.verify), tuple(t.verified_by), tuple(t.verifies)) for t in tasks},
+        "done": {t.num for t in tasks if t.done},
+    }
+
+
+def land_spec_edit(
+    root: Path,
+    spec: str,
+    num: str,
+    into: Optional[str] = None,
+    gate: Optional[GateFn] = None,
+    wait_s: float = SPEC_EDIT_LOCK_WAIT_S,
+) -> Landed:
+    """Land one arbiter branch (`arbiter<k>`) on `into` under the merge-queue lock (8.1, 8.4-8.7, 1.7).
+
+    Refuses a conflict (`git merge-tree`); takes lint findings and test selections on the target, merges, takes
+    them again, and asks `decide_spec_edit` about the difference. Gates only the Done tasks whose verification
+    the edit changed. The target goes back to its earlier commit on any refusal or red gate.
+    """
+    from claude_kiro import arbiter_policy as policy
+    from claude_kiro.arbiter import _principles_at
+
+    into = into or current_branch(root)
+    branch = task_branch(spec, num)
+    path = task_path(root, spec, num)
+    target = checkout_of(root, into)
+    if target is None:
+        raise WorktreeError(f"branch {into} is not checked out anywhere; check it out or create the integration worktree")
+    with land_lock(root, into, wait_s=wait_s):
+        if not branch_exists(root, branch):
+            return Landed(num, "MISSING", "no branch", branch)
+        if dirty_files(target, tracked_only=True):
+            return Landed(num, "ERROR", f"{target} has uncommitted changes to tracked files; refusing to land into {into}", branch)
+        start = git(target, "rev-parse", "HEAD").stdout.strip()
+        if int(git(root, "rev-list", "--count", f"{start}..{branch}").stdout.strip() or 0) == 0:
+            return Landed(num, "SKIP", f"no commits ahead of {into}", branch)
+
+        ok, _, files = merge_tree(root, start, branch)
+        if not ok:
+            return Landed(num, "CONFLICT", f"conflicts with {into}; target untouched", branch, files)
+        touched = git(root, "diff", "--name-only", "--no-renames", "-z", f"{start}...{branch}").stdout.split("\0")
+        touched = [f for f in touched if f]
+        lane = {f"specs/{spec}/{n}" for n in policy._LANE_FILES}
+        outside = [f for f in touched if f not in lane]
+        if outside:
+            return Landed(num, "REFUSED", "; ".join(f"{f} is outside the spec-edit lane" for f in outside), branch, outside)
+
+        before = _spec_facts(target, spec)
+        effective = _principles_at(root, start, spec)
+        proc = _git_merge(root, target, into, branch, f"Merge {branch} (task {num})")
+        if proc.returncode != 0:
+            conflicted = git(target, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split()
+            git(target, "merge", "--abort", check=False)
+            return Landed(num, "CONFLICT", f"merge into {into} conflicted (precheck missed it); aborted", branch, conflicted)
+
+        def undo() -> None:
+            _git_reset(root, target, into, start)
+
+        try:
+            after = _spec_facts(target, spec)
+            changes = policy.spec_text_changes(before["text"], after["text"])
+            changed = git(target, "diff", "--name-only", "--no-renames", start, "HEAD").stdout.split()
+            facts = policy.SpecEditFacts(
+                spec=spec, changed=tuple(changed), status_changes=changes.status_changes,
+                mark_changes=changes.mark_changes,
+                new_cycles=tuple(sorted(k for k in after["findings"] - before["findings"] if k.startswith("cycles:"))),
+                new_blocking=tuple(sorted(k for k in after["findings"] - before["findings"] if not k.startswith("cycles:"))),
+                reserved=tuple(effective.reserved),
+            )
+            decision = policy.decide_spec_edit(facts)
+            if not decision.land:
+                undo()
+                return Landed(num, "REFUSED", "; ".join(decision.reasons), branch, list(changed))
+            moved = [asdict(m) for m in policy.moved_out_of_verify(before["selections"], after["selections"])]
+            scope = policy.gate_scope_of_edit(before["verification"], after["verification"], before["done"] & after["done"])
+            if gate is not None and scope:
+                green, tail, failures = gate(target, [str(n) for n in scope])
+                if not green:
+                    undo()
+                    return Landed(num, "RED", f"the gate on {into} fails with this edit; it was not landed", branch,
+                                  list(changed), False, tail, failures=failures)
+        except BaseException:
+            with contextlib.suppress(Exception):
+                undo()
+            raise
+        commit = git(target, "rev-parse", "HEAD").stdout.strip()
+        note = _cleanup_merged(root, target, path, branch)
+        return Landed(num, "MERGED", f"into {into}{note}", branch, list(changed), True if gate is not None and scope else None,
+                      "", _now(), commit=commit, moved=moved)
 
 
 def status(root: Path, spec: str) -> List[Outcome]:
