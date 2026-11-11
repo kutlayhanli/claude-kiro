@@ -1315,7 +1315,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 56: Test that a ruling gets the principle layers
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.6, 1.7, 1.9, 1.10
 **Description:** Implement TC-7, TC-9, TC-11 and TC-12 in `tests/test_arbiter_run.py`, named `test_tc<N>_...`. TC-7: with both layers on disk, the `arbiter task 1` prompt holds the text of both. TC-9: with a plan principle reserving design edits, a ruling needing a design edit and naming the reservation in `reservedBy` makes a needs-input entry and no landing runs (a ruling that leaves it out is refused at the landing, TC-149). TC-11: with `specs/PRINCIPLES.md` missing, then a directory, then unreadable (mode 000), no `arbiter` label runs and the entry names the file. TC-12: with no PLAN.md, then a PLAN.md with no section, the arbiter rules and the entry records the plan layer as absent.
@@ -1325,10 +1325,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 65 (TC-7, 9, 11), Task 66 (TC-12, the entry records the layer)
 
 **Acceptance:**
-- [ ] TC-11 and TC-12 use real files and real `decisions.md`
-- [ ] Tests exercise the real boundary named in the test plan (workflow, real `ck arbiter`, real files)
-- [ ] Tests fail before the implementation exists for the right reason (no arbiter step)
-- [ ] No mocks of the project's own code in integration tests
+- [x] TC-11 and TC-12 use real files and real `decisions.md`
+- [x] Tests exercise the real boundary named in the test plan (workflow, real `ck arbiter`, real files)
+- [x] Tests fail before the implementation exists for the right reason (no arbiter step)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 55 (same test file)
 **Complexity:** Medium
