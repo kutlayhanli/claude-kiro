@@ -13,6 +13,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping, Optional, Tuple
 
+from claude_kiro.principles import EffectivePrinciples
+
 Tier = Literal["normal", "risky"]
 Trigger = Literal["test-conflict", "guard-stop", "review-deadlock", "command-cycle", "gate-failure", "audit", "lint"]
 Outcome = Literal["spec_edit", "test_repair", "code", "requirements"]
@@ -171,3 +173,111 @@ def decide_claim(facts: ClaimFacts) -> ClaimDecision:
     repeat = prior is not None and prior.status in ("open", "failed")
     risky = facts.safety or facts.trigger == "guard-stop" or repeat
     return ClaimDecision("rule", "risky" if risky else "normal", "")
+
+
+# --------------------------------------------------------------------------- rulings (Task 30)
+
+OUTCOMES = ("spec_edit", "test_repair", "code", "requirements")
+_STATUSES = ("ruled", "needs_stronger_look")
+_LANES = {"spec_edit": "spec_edit", "test_repair": "test_repair", "code": "code"}
+# A plan reservation names the scope a ruling's outcome would change: `code` or `test repairs`.
+_RESERVABLE = {"code": "code", "test_repair": "test repairs"}
+
+
+@dataclass(frozen=True)
+class RulingCheck:
+    valid: bool
+    stronger_look: bool
+    outcome: Optional[Outcome]
+    principle: Optional[str]
+    reserved_by: Optional[str]
+    problems: Tuple[str, ...]
+    raw: Any  # kept for the needs-input entry (7.2)
+
+
+@dataclass(frozen=True)
+class RulingRoute:
+    route: Literal["spec_edit", "test_repair", "code", "needs_input", "rerun"]
+    reason: str  # "" | "invalid-ruling" | "exhausted" | "reserved" | "requirements" | "missing-requirement"
+    record: bool  # whether this answer becomes a numbered ruling
+
+
+def validate_ruling(raw: Any, key: str, citable: Mapping[str, Any], mode: str) -> RulingCheck:
+    """Checks one arbiter answer against the validity rules (7.1, 7.2). `mode` is "run" or "create";
+    both apply the same rules (11.9). `citable` maps principle ids to principles; the cited id must be one of them."""
+    if mode not in ("run", "create"):
+        raise ValueError(f"unknown mode: {mode!r}")
+    if not isinstance(raw, dict):
+        return RulingCheck(False, False, None, None, None, ("the answer is not an object",), raw)
+
+    problems: list = []
+    if raw.get("claim") != key:
+        problems.append("claim is missing or is not the claim this ruling answers")
+
+    status = raw.get("status", "ruled")
+    if status not in _STATUSES:
+        problems.append("status is neither ruled nor needs_stronger_look")
+    stronger = status == "needs_stronger_look"
+
+    reasoning = raw.get("reasoning")
+    if not isinstance(reasoning, str) or not reasoning.strip():
+        problems.append("reasoning is missing or not text")
+
+    principle = raw.get("principle")
+    if not isinstance(principle, str) or not principle:
+        problems.append("principle is missing or not text")
+        principle = None
+    elif principle not in citable:
+        problems.append(f"principle {principle!r} is not a citable principle of either layer")
+
+    outcome = None
+    if not stronger:
+        value = raw.get("outcome")
+        if isinstance(value, str) and value in OUTCOMES:
+            outcome = value
+        else:
+            problems.append("outcome must be exactly one of spec_edit, test_repair, code, requirements")
+
+    reserved_by = raw.get("reservedBy")
+    if reserved_by in (None, ""):
+        reserved_by = None
+    elif not isinstance(reserved_by, str):
+        problems.append("reservedBy is not text")
+        reserved_by = None
+
+    return RulingCheck(
+        valid=not problems,
+        stronger_look=stronger,
+        outcome=outcome,
+        principle=principle,
+        reserved_by=reserved_by,
+        problems=tuple(problems),
+        raw=raw,
+    )
+
+
+def _reserved(check: RulingCheck, effective: EffectivePrinciples) -> bool:
+    """A reservation applies when the ruling names a reserving plan principle, or when the plan reserves the
+    scope the outcome would change. Grants are never read here (1.8)."""
+    if check.reserved_by is not None:
+        if any(p.id == check.reserved_by and p.reserves for p in effective.citable):
+            return True
+    scope = _RESERVABLE.get(check.outcome or "")
+    return scope is not None and any(s.lower() == scope for s in effective.reserved)
+
+
+def route_ruling(check: RulingCheck, tier: Tier, effective: EffectivePrinciples) -> RulingRoute:
+    """Sends a checked ruling to exactly one lane. A reservation only moves a ruling toward needs_input (1.7)."""
+    if not check.valid:
+        return RulingRoute("needs_input", "invalid-ruling", False)
+    if check.stronger_look:
+        if tier == "normal":
+            return RulingRoute("rerun", "", False)  # one re-run; the two calls count as one ruling (7.7)
+        return RulingRoute("needs_input", "exhausted", True)
+    if _reserved(check, effective):
+        return RulingRoute("needs_input", "reserved", True)
+    if check.outcome == "requirements":
+        req = check.raw.get("requirement") if isinstance(check.raw, dict) else None
+        kind = req.get("kind") if isinstance(req, dict) else None
+        return RulingRoute("needs_input", "missing-requirement" if kind == "add" else "requirements", True)
+    return RulingRoute(_LANES[check.outcome], "", True)

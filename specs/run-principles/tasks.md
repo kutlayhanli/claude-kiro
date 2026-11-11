@@ -713,7 +713,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 30: Validate rulings and route them to a lane
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.7, 1.8, 5.6, 5.7, 7.1, 7.2, 7.7, 8.1, 8.8, 8.11, 8.13, 8.14
 **Description:** In `src/claude_kiro/arbiter_policy.py`, add `RulingCheck`, `RulingRoute`, `validate_ruling(raw, key, citable, mode)` and `route_ruling(check, tier, effective)`. A ruling is valid only with exactly one known outcome, or status `needs_stronger_look`, plus the claim, reasoning and a principle id that is citable. `route_ruling` returns `spec_edit`, `test_repair`, `code`, `needs_input` or `rerun`: `rerun` for a stronger look at the normal tier (counted as one ruling), `needs_input` with reason `exhausted` at the risky tier, `reserved` when the plan layer reserves `code` or `test repairs` and the outcome is that one, or when the ruling itself names a reservation in `reservedBy` (a reserved file the ruling does not report is refused at `decide_spec_edit`, Task 41), `requirements` for that outcome, `missing-requirement` for a found gap, and `invalid-ruling` with `record: false` for anything malformed. A plan's claimed grant over requirements is not an input. Harness Contract owner: `arbiter.validate_ruling` and `arbiter.route_ruling`, in `arbiter_policy`.
