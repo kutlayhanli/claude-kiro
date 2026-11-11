@@ -114,7 +114,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 4: Property test for the arbiter's role settings
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.1, 5.2
 **Description:** Implement P-9 with Hypothesis in `tests/test_arbiter_agents.py`, named `test_p9_...`: for any subset of the four settings across global, project and override layers, an unset one follows `reviewer.risky_*`, a set one wins by layer, and an invalid value exits with the reviewer's message. Generators: valid and invalid models and efforts, `inherit`, aliases, an unset reviewer. Settings `@settings(derandomize=True, max_examples=200, database=None, deadline=None)`. The file declares `PROPERTIES = {"P-9": ...}`.
@@ -125,12 +125,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 5 (P-9 at `agents.resolve`)
 
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the P-9 row
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] The tests call the decision seam (`agents.resolve`), not a server
-- [ ] Tests exercise the real boundary named in the test plan (the seam)
-- [ ] Tests fail before the implementation exists for the right reason (`arbiter` is an unknown role)
-- [ ] No mocks of the project's own code in integration tests
+- [x] The generators cover every surface form and negative listed in the P-9 row
+- [x] Settings are deterministic (derandomized, no database)
+- [x] The tests call the decision seam (`agents.resolve`), not a server
+- [x] Tests exercise the real boundary named in the test plan (the seam)
+- [x] Tests fail before the implementation exists for the right reason (`arbiter` is an unknown role)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 3 (same test file)
 **Complexity:** Medium
@@ -409,7 +409,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 17: Move suite_due into lint_scope and add the lint verdict
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.11, 3.1, 3.7, 12.1, 12.5
 **Description:** Create `src/claude_kiro/lint_scope.py` holding `suite_due(test_task, tasks, assumed_done)` (the `suite_due` closure in `_run_gate` in `src/claude_kiro/gate.py`, ~line 1000, which closes over `tasks` and `assumed_done` at ~998; the moved function takes both as parameters), `done_at_gate(tasks, num)`, and `lint_verdict(result)` with `LintVerdict`. `gate.py` calls the moved `suite_due`, so the gate and its simulation cannot disagree. `lint_verdict` sets `exit_nonzero` for cycles, verify cycles, verify scope and justifications, ignores warnings, and lists only verify-scope findings as `launch_blockers`. Harness Contract owner: `lint_scope.lint_verdict`, the exit rule behind `lint.verify_scope`. Foundation task: its Verify is a smoke check (the existing gate suites). `lint_verdict` and `done_at_gate` are verified at Task 23 by Task 12 and Task 13 (P-41), and at Task 24 by Task 18.
@@ -419,9 +419,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verify:** `uv run pytest tests/test_gate.py tests/test_gate_properties.py -q`
 
 **Acceptance:**
-- [ ] The gate's behaviour is unchanged, shown by the existing gate suites
-- [ ] `done_at_gate` returns Done tasks, the task and its transitive dependencies
-- [ ] `lint_verdict` never lists a justification finding or warning in `launch_blockers`, and warnings alone do not set `exit_nonzero`
+- [x] The gate's behaviour is unchanged, shown by the existing gate suites
+- [x] `done_at_gate` returns Done tasks, the task and its transitive dependencies
+- [x] `lint_verdict` never lists a justification finding or warning in `launch_blockers`, and warnings alone do not set `exit_nonzero`
 
 **Dependencies:** None
 **Complexity:** Medium
@@ -1751,7 +1751,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 75: Contract tests over the implement, create and review skill text
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 4.2, 4.4, 4.5, 10.7, 12.5, 12.6, 1.1, 6.12, 11.9, 12.12
 **Description:** Added at Link, because the test plan has no row for this skill text and the impl tasks that write it would have no oracle; it follows the test plan's "Contract only" level for skill text. In `tests/test_arbiter_skill_contracts.py`, over the shipped `plugin/skills/implement/SKILL.md`, `plugin/skills/create/SKILL.md` and `plugin/skills/review/SKILL.md` only, never the vendored `.claude/commands/spec/*.md`. Name cases `test_implement_skill_...`, `test_create_skill_...` and `test_review_skill_...`, with the case id inside the name where one applies, so each impl task's Verify selects its own. Implement: the implement skill passes `arbiterAgent`, `auditorAgent`, `verifiedBy` and `agents.arbiter`; a `verify-scope` finding launches the workflow on a whole-spec run and refuses a single-task run whose task it names; it reports this run's rulings and proposed cuts. Create and review: each reports `review.proposedCuts` with the story, the weakness and what the cut saves. Create: an approved cut with no task started goes through `apply-cuts` and reports any new `ck lint` failure, and an approved cut after a task started tells me the requirements are frozen and the change is mine. TC-139: the create, review and implement skills run `ck principles init` (implement on the target checkout with `--commit`) and tell me when it created the file. TC-147: the implement skill and `without-workflow-tool.md` run the read-only audit before the first attempt of a single-task or no-Workflow run, and say a claim there, including an audit problem, is a needs-input entry with no guard ladder and no confirmation agent, and a single-task run refuses when a `verify-scope` entry names its task. TC-159: the create and review skills run `ck agents --json` and pass `arbiterAgent`, `runnerAgent` and `agents.arbiter`. Use we/you/me framing in any expected text.
@@ -1761,11 +1761,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 76 (the implement skill text), Task 86 (the create and review skill text)
 
 **Acceptance:**
-- [ ] Each case reads the real shipped skill text and asserts instruction order or conditions where the criterion is about order
-- [ ] No case reads a vendored `.claude/` copy
-- [ ] Tests exercise the real boundary named in the test plan (the shipped `SKILL.md` files)
-- [ ] Tests fail before the implementation exists for the right reason (the skills do not yet say these things)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each case reads the real shipped skill text and asserts instruction order or conditions where the criterion is about order
+- [x] No case reads a vendored `.claude/` copy
+- [x] Tests exercise the real boundary named in the test plan (the shipped `SKILL.md` files)
+- [x] Tests fail before the implementation exists for the right reason (the skills do not yet say these things)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** None
 **Complexity:** Low
