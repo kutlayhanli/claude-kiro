@@ -1704,7 +1704,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 73: Red-team the prohibitions of Story 13
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 13.6, 13.7
 **Description:** Try to break each SHALL NOT clause of Story 13 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Target a retry, an escalation and a resumed attempt after a ruling (none may re-audit), a test-track task that names a verified impl task, an impl task whose only Verified by entry names no task in the spec, and a resumed run for a task audited by an earlier run. Written from the requirements only, never from the implementation.
@@ -1714,10 +1714,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 74 (red team of 13.6, 13.7)
 
 **Acceptance:**
-- [ ] Each SHALL NOT clause has at least one adversarial test per listed input class that applies to it
-- [ ] Tests exercise the real boundary named in the test plan (real workflow, real `ck`)
-- [ ] Tests fail before the implementation exists for the right reason (no audit step)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each SHALL NOT clause has at least one adversarial test per listed input class that applies to it
+- [x] Tests exercise the real boundary named in the test plan (real workflow, real `ck`)
+- [x] Tests fail before the implementation exists for the right reason (no audit step)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (project fixture), Task 2 (`auditFindings`)
 **Complexity:** Medium
