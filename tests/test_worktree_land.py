@@ -163,7 +163,10 @@ def test_red_batch_bisects_to_the_culprit(repo):
     assert "bad.txt" in by["2"]["checkTail"]
     assert data["bisected"] is True
     assert sorted(data["gates"][0]["tasks"]) == ["1", "2", "3"] and data["gates"][0]["green"] is False
-    assert len(data["gates"]) < 5  # a green left half proves the right half red without re-gating it
+    # Every half is gated, none inferred red: at most 2n-1 gates for n tasks, the right half's own gate included.
+    assert len(data["gates"]) <= 2 * 3 - 1
+    right = [g for g in data["gates"] if sorted(g["tasks"]) == ["2", "3"]]
+    assert len(right) == 1 and right[0]["green"] is False
     # The target holds the green tasks only; the culprit's branch and worktree stay for the fixer.
     assert (repo / "one.txt").exists() and (repo / "three.txt").exists()
     assert not (repo / "bad.txt").exists()

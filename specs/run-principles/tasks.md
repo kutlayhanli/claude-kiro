@@ -344,7 +344,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 14: Red-team the prohibition of Story 2
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.5
 **Description:** Try to break each SHALL NOT clause of Story 2 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Target `ck lint` and `justification_findings`: a criterion-looking line inside a story that has a `**Without it:**` line, criteria carrying their own partial markers, criteria numbered oddly, and a real story block from this spec's requirements fed back in. Written from the requirements only, never from the implementation.
@@ -354,10 +354,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 23 (red team of 2.5 through `ck lint`)
 
 **Acceptance:**
-- [ ] 2.5's SHALL NOT clause has at least one adversarial test per listed input class that applies to it
-- [ ] Tests exercise the real boundary named in the test plan (CLI)
-- [ ] Tests fail before the implementation exists for the right reason (no justification check)
-- [ ] No mocks of the project's own code in integration tests
+- [x] 2.5's SHALL NOT clause has at least one adversarial test per listed input class that applies to it
+- [x] Tests exercise the real boundary named in the test plan (CLI)
+- [x] Tests fail before the implementation exists for the right reason (no justification check)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (project fixture)
 **Complexity:** Low
@@ -430,7 +430,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 18: Test Verify-scope lint through the CLI
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 12.1, 12.2, 12.3, 12.4, 12.5, 12.8, 12.9, 12.10
 **Description:** Implement TC-109 to TC-113, TC-117, TC-118, TC-119, TC-136 and TC-145 in `tests/test_verify_scope_lint.py`, named `test_tc<N>_...`. TC-109, TC-111 and TC-112 use `ck graph`/`**Provides:**`/`commandEdges` as on master. TC-109: `ck lint demo --simulate --task N --json` lists each not-Done task's due suites and selections, Done tasks absent. TC-110: two test tasks share a file and the first's Verify has no filter while the second's task is not Done: a finding names the task and suite. TC-111: a selected test invokes a command a later task's `**Provides:**` names: `verifyScope` has no finding for it and `commandEdges` still lists the edge (D30). TC-112: not due, filtered out, a direct dependency and a transitive dependency: no finding. TC-113: a finding makes `ck lint` exit non-zero and appears in `ck plan --json` `verifyScope`. TC-117: running `ck lint` directly starts no agent, and text and JSON each name the task and the suite. TC-118: a Verify using `$(...)` or a script: top-level `notChecked` names the task and exit is 0. TC-119: a problem already in `verifyCycles` appears once. TC-136: `ck lint` and `justifications.justification_findings` / `lint_scope.scope_findings` agree on one failing fixture each. TC-145: a Verify selecting a test file not yet on disk: `notChecked` names the task and exit is 0.
@@ -440,10 +440,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 24 (TC-109 to 113, 117 to 119, 136, 145)
 
 **Acceptance:**
-- [ ] Each case uses real generated test files and real tasks.md through `ck lint`
-- [ ] Tests exercise the real boundary named in the test plan (CLI, real parse)
-- [ ] Tests fail before the implementation exists for the right reason (no `verifyScope` key)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each case uses real generated test files and real tasks.md through `ck lint`
+- [x] Tests exercise the real boundary named in the test plan (CLI, real parse)
+- [x] Tests fail before the implementation exists for the right reason (no `verifyScope` key)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (project fixture)
 **Complexity:** High
@@ -2145,7 +2145,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 93: Test the integration checkout recovery
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 14.1, 14.2, 14.3, 14.4, 14.5
 **Description:** Create `tests/test_land_recovery.py` with TC-162 to TC-168, TC-196, TC-197 and P-47 (test-plan.md). Keep TC-168 to the hook side (no `tc168_` test depends on the recovery: none runs `ck worktree merge` or `ck worktree land` after a refused merge; its tokened landing is a `ck worktree land` of a clean task into a clean checkout), since it is Task 94's whole Verify; the merge restore and the cleared record are TC-196. TC-197 makes its spec edit with `ck arbiter open` and lands it with `ck worktree land demo arbiter<k>`, and records with `ck arbiter record`. Build each case on a real repository with ck's git hooks installed and a real integration worktree, using `tests/unattended_helpers.py` (`init_repo`, `commit_all`, `hooks_repo`, `integration_worktree`). Define this file's own `protected_branch` (a branch off `integrate/demo` whose only change adds `.claude/CLAUDE.md`) in `tests/test_land_recovery.py`; do not import it from `tests/test_unattended_smoke.py`, which Task 100 edits and whose module fixtures start full runs. Make the refused merge with a real `git merge --no-verify`, so the residue is exactly what git leaves. Read the refusal record only through `protect.refusal_for`, and the landing result only through `ck worktree land --json`. P-47 drives the pure `worktrees.decide_recovery` with Hypothesis (`derandomize=True, max_examples=200, database=None, deadline=None`) and carries a `PROPERTIES` map. Import project modules inside test bodies.
@@ -2155,13 +2155,13 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 94 (TC-168's refusal record), Task 95 (the recovery in `land`, `merge`, `land_spec_edit` and `ck arbiter record`: TC-162 to TC-167, TC-196, TC-197, P-47)
 
 **Acceptance:**
-- [ ] Each refused merge is a real `git merge --no-verify` refused by the real installed hook
-- [ ] TC-166 covers no record, a record at an older head, and a record from another checkout
-- [ ] No `tc168_` test depends on the recovery itself (Task 95)
-- [ ] P-47 generates every combination its row lists
-- [ ] Tests exercise the real boundary named in the test plan (real git, real hooks, the `ck` CLI)
-- [ ] Tests fail before the implementation exists for the right reason (the landing refuses the dirty checkout; no refusal record exists; for TC-197, the arbiter landing or record does not restore the checkout, or `ck arbiter` does not exist yet)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each refused merge is a real `git merge --no-verify` refused by the real installed hook
+- [x] TC-166 covers no record, a record at an older head, and a record from another checkout
+- [x] No `tc168_` test depends on the recovery itself (Task 95)
+- [x] P-47 generates every combination its row lists
+- [x] Tests exercise the real boundary named in the test plan (real git, real hooks, the `ck` CLI)
+- [x] Tests fail before the implementation exists for the right reason (the landing refuses the dirty checkout; no refusal record exists; for TC-197, the arbiter landing or record does not restore the checkout, or `ck arbiter` does not exist yet)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** None
 **Complexity:** Medium
@@ -2216,7 +2216,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 96: Test that bisection blames only a task whose own gate fails
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 15.1, 15.2, 15.3
 **Description:** Create `tests/test_land_bisect.py` with TC-170, TC-171, TC-172, TC-175, TC-198 and P-48 (test-plan.md). TC-170 to TC-172 and TC-175 run the real `ck worktree land --gate --json` on a real repository with a spec whose task branches each commit their own files and their own `**Status:** Done` in `tasks.md`, as real implementers do, so a gate after an earlier half has MERGED sees those tasks Done on the target; TC-171's `specs/ck.json` `verify` runs a test file no task's Verify selects, and it asserts that the gate on the last single task, which sees the spec complete, ran task-scoped. P-48 calls `worktrees.land` with an in-process gate function over real task branches, at `max_examples=30`, and carries a `PROPERTIES` map; its gate function models `gate.py`'s scope rule (full suite when called with `whole` true and the tasks Done on the target plus its group cover the spec), so it fails on a design that lets a sub-batch gate widen. Migrate `tests/test_worktree_land.py::test_red_batch_bisects_to_the_culprit`: its `len(data["gates"]) < 5` and the comment "a green left half proves the right half red without re-gating it" encode the behaviour 15.1 replaces; assert the 2n-1 bound and the right half's own gate instead, keeping its other assertions.
@@ -2227,12 +2227,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 97 (bisection without inference and `unreproduced`)
 
 **Acceptance:**
-- [ ] TC-171 reproduces the observed case: a spec-completing batch red only under the full suite, with task branches that mark themselves Done, and the last task is not RED
-- [ ] The migrated test keeps every assertion not about the gate count
-- [ ] P-48 generates every combination its row lists
-- [ ] Tests exercise the real boundary named in the test plan (real git, real `ck gate`, the `ck` CLI)
-- [ ] Tests fail before the implementation exists for the right reason (the right half is inferred red and a task is blamed by elimination)
-- [ ] No mocks of the project's own code in integration tests
+- [x] TC-171 reproduces the observed case: a spec-completing batch red only under the full suite, with task branches that mark themselves Done, and the last task is not RED
+- [x] The migrated test keeps every assertion not about the gate count
+- [x] P-48 generates every combination its row lists
+- [x] Tests exercise the real boundary named in the test plan (real git, real `ck gate`, the `ck` CLI)
+- [x] Tests fail before the implementation exists for the right reason (the right half is inferred red and a task is blamed by elimination)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** None
 **Complexity:** Medium
@@ -2244,9 +2244,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Status:** Not Started
 **Track:** impl
 **Requirements:** 15.1, 15.2, 15.3
-**Description:** In `src/claude_kiro/worktrees.py`, rewrite `land_group` inside `land` as design.md's "Bisection" shows: drop `known_red`, gate every group it merges, report RED only for a single task whose own gate failed, with that gate's tail and failures, and recurse into both halves otherwise. Only the batch gate may widen to the full suite: `GateFn` gains a keyword `whole: bool = True`, `land` calls every gate below the batch gate with `whole=False`, `_gate_fn` in `src/claude_kiro/cli/worktree.py` passes it to `run_gate` as `escalate_complete`, and `run_gate` in `src/claude_kiro/gate.py` gains `escalate_complete: bool = True`, which when false takes `spec_complete` as false (design.md, "Gate scope below the batch"; 15.1, 15.2). After `land_group(batch)`, when the batch gate was red and no task is RED, add `unreproduced: {tasks, tail, failures}` from the batch gate to the result; the tasks whose own gates passed stay MERGED (15.3). A batch in which only one task merges is gated with `whole=False` too, so a lone task is never gated with the full suite at landing (D25, TC-198).
+**Description:** In `src/claude_kiro/worktrees.py`, rewrite `land_group` inside `land` as design.md's "Bisection" shows: drop `known_red`, gate every group it merges, report RED only for a single task whose own gate failed, with that gate's tail and failures, and recurse into both halves otherwise. Each `gates` entry gains `checkTail` and `failures`, that gate's failing output and failure entries (`""` and `[]` when green), so a RED task's `checkTail` and `failures` equal those of its own gate entry (design.md, `ck worktree land --json` keys; 15.2). Only the batch gate may widen to the full suite: `GateFn` gains a keyword `whole: bool = True`, `land` calls every gate below the batch gate with `whole=False`, `_gate_fn` in `src/claude_kiro/cli/worktree.py` passes it to `run_gate` as `escalate_complete`, and `run_gate` in `src/claude_kiro/gate.py` gains `escalate_complete: bool = True`, which when false takes `spec_complete` as false (design.md, "Gate scope below the batch"; 15.1, 15.2). After `land_group(batch)`, when the batch gate was red and no task is RED, add `unreproduced: {tasks, tail, failures}` from the batch gate to the result; the tasks whose own gates passed stay MERGED (15.3). A batch in which only one task merges is gated with `whole=False` too, so a lone task is never gated with the full suite at landing (D25, TC-198).
 **Files:**
-- `src/claude_kiro/worktrees.py` - `land_group`, `GateFn`'s `whole`, and the `unreproduced` key
+- `src/claude_kiro/worktrees.py` - `land_group`, `GateFn`'s `whole`, the `unreproduced` key, and `checkTail` and `failures` on `gates` entries
 - `src/claude_kiro/gate.py` - `run_gate(..., escalate_complete=True)`
 - `src/claude_kiro/cli/worktree.py` - `_gate_fn` passes `whole` as `escalate_complete`
 **Verify:** `uv run pytest tests/test_land_bisect.py -q` `uv run pytest tests/test_worktree_land.py -q`
