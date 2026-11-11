@@ -389,10 +389,10 @@ Decisions block of `spec-implement.js`, via `loadDecisions({extra: [...]})`: `te
 
 ### Workflow surfaces
 
-- Labels: `arbiter <N>`, `arbiter <N> risky`, `audit <N>`, and `arbiter-decide <N>`, `arbiter-route <N>`, `arbiter-record <N>`, `arbiter-land <N>`; for create, `review: should-exist`, `arbiter: refuted <id>`, `arbiter: drift`, `arbiter: cut <id>`, each with an optional ` risky` suffix, and `apply-cuts`.
+- Labels: `arbiter task <N>`, `arbiter task <N> risky`, `audit task <N>`, and `arbiter-decide <N>`, `arbiter-route <N>`, `arbiter-record <N>`, `arbiter-land <N>`; for create, `review: should-exist`, `arbiter: refuted <id>`, `arbiter: drift`, `arbiter: cut <id>`, each with an optional ` risky` suffix, and `apply-cuts`.
 - Each `arbiter-*` step prompt holds one `ck -C <dir> arbiter <verb> <spec> ... --json` line and at most one fenced `json` block used as its stdin.
 - Each arbiter agent call passes `model`, `effort` and `schema` from the resolved tier. The tier comes from `args.agents.arbiter`.
-- Result keys: `rulings` (this run's, each `{number, task, trigger, outcome, tier, principle, commit}`), `proposedCuts`, and the existing `needsInput`. A ruling's needs-input entry keeps the fields of today's entry and adds `ruling`, and `evidence` when new evidence exists; a `test-fix` entry from a test-repair ruling also adds `testRepair` (the exact change and why, 8.8).
+- Result keys: `rulings` (this run's, each `{number, task, trigger, outcome, tier, principle, commit, landed}`), `proposedCuts`, and the existing `needsInput`. A ruling's needs-input entry keeps the fields of today's entry and adds `ruling`, and `evidence` when new evidence exists; a `test-fix` entry from a test-repair ruling also adds `testRepair` (the exact change and why, 8.8).
 - Create result keys: `arbiterChecks: {refuted, drift, cuts}` each `"ran"` or `"not_run"`, and `proposedCuts`.
 - `ck-arbiter` agent source: `plugin/agents/arbiter.md`, in `plugin.AGENT_ROLES`.
 - Landing entries: `landings[].recovered` and `landings[].unreproduced`; a gate record with `kind: 'unreproduced'`; fake-project landing option `unreproduced: {batch: [n...]}`.

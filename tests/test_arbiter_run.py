@@ -12,12 +12,15 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from arbiter_helpers import DEFAULT_TASKS, FAILURE_FORMS, arbiter_project, decisions_entries, seam
-from landing_bridge import bridge  # noqa: F401  (module-scoped fixture)
+from landing_bridge import bridge, dags  # noqa: F401  (bridge is a module-scoped fixture)
 
 JS = Path(__file__).parent / "js"
 SCRIPT = Path(__file__).parent.parent / "plugin" / "workflows" / "spec-implement.js"
@@ -67,6 +70,9 @@ def run_args(project, **extra):
 
 
 def run(bridge, project, options, **args):
+    # Risk goes in the workflow args too (the workflow routes reviews from args, as tier_run does), as well as in the plan answer.
+    if options.get("risk") and "risk" not in args:
+        args["risk"] = options["risk"]
     return bridge.run(options, args=run_args(project, **args), exec_ck=project.exec_ck)
 
 
@@ -973,3 +979,703 @@ def test_tc210_a_review_deadlock_ruled_test_repair_goes_to_the_fixer_and_the_tas
     prompt = out["prompts"][rereviews[0]]
     assert "change-tc210-text" in prompt, "the re-review prompt carries the ruling:\n" + prompt
     assert out["result"]["merged"] == ["1"], json.dumps(out["result"])
+
+
+# --------------------------------------------------------------------------- TC-71 to TC-78, TC-199, TC-205 (test repairs and rulings that end with me)
+
+TEST_REPAIR = ruling("test_repair")["testRepair"]
+TEST_FIX = {CONFLICT["file"]: {"verdict": "fixed"}}
+CONFLICT_NODE = f"{CONFLICT['file']}::{CONFLICT['test']}"
+
+
+def steps(ev):
+    return [e for e in ev if not e.endswith(" end")]
+
+
+def fix_labels(ev):
+    return [e for e in steps(ev) if re.match(r"^testfix \d+ \(Task", e)]
+
+
+def retry_labels(ev):
+    return [e for e in steps(ev) if re.match(r"^task 1 retry", e)]
+
+
+def seed_test_file(project):
+    """The real test file the conflict names, in the main checkout and the integration checkout."""
+    paths = []
+    for base in (project.root, project.target):
+        path = base / CONFLICT["file"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"def test_greeting_printed():\n    assert round(1.0, 2) == 1.0\n")
+        paths.append(path)
+    return paths
+
+
+def read_all(paths):
+    return [p.read_bytes() for p in paths]
+
+
+def entry_fields(entry, what):
+    assert entry.get("kind") == "test-fix", f"{what}: kind test-fix, got {entry.get('kind')!r}: " + json.dumps(entry)
+    assert isinstance(entry.get("ruling"), int) and entry["ruling"] >= 1, f"{what}: `ruling` is the number: " + json.dumps(entry)
+    assert entry.get("testRepair", {}).get("change") == TEST_REPAIR["change"], f"{what}: the exact change: " + json.dumps(entry)
+    assert entry["testRepair"].get("why") == TEST_REPAIR["why"], f"{what}: the why: " + json.dumps(entry)
+
+
+@pytest.mark.parametrize("how", ["prior-fix", "ledger-fail"])
+def test_tc71_a_test_repair_ruling_the_fixer_cannot_take_is_one_test_fix_entry_with_the_exact_change_and_the_test_untouched(bridge, tmp_path, how):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    paths = seed_test_file(project)
+    before = read_all(paths)
+    opts = {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT, "attempts": 1}}, "rulings": {"1": [ruling("test_repair"), REQ]}, "testFix": TEST_FIX}
+    opts["priorFixes" if how == "prior-fix" else "ledgerFail"] = {CONFLICT["file"]: True} if how == "prior-fix" else True
+    out = run(bridge, project, opts, agents=roles("haiku", []))
+    ev = out["events"]
+    assert arbiter_calls(ev) == ["arbiter task 1"], ", ".join(ev)
+    assert "testfix ledger 1" in ev, "the ledger was asked: " + ", ".join(ev)
+    assert fix_labels(ev) == [], "no fixer ran: " + ", ".join(ev)
+    entries = needs(out)
+    assert len(entries) == 1, json.dumps(out["result"].get("needsInput"))
+    entry_fields(entries[0], how)
+    assert entries[0]["ruling"] == decisions_entries(project)[0]["number"], "the number the record gave: " + json.dumps(entries[0])
+    assert read_all(paths) == before, "the test file is byte-identical"
+    assert "1" not in out["result"]["merged"]
+
+
+def conflict_entries_of(prompt):
+    lines = [line for line in prompt.splitlines() if line.startswith("[{")]
+    assert len(lines) == 1, "the fixer prompt carries one JSON list of conflict entries:\n" + prompt
+    return json.loads(lines[0])
+
+
+def test_tc72_a_test_repair_ruling_runs_ledger_fixer_proof_land_and_a_retry_that_spends_nothing(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    opts = {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT, "attempts": 1}}, "rulings": {"1": [ruling("test_repair"), REQ]}, "testFix": TEST_FIX}
+    out = run(bridge, project, opts, agents=roles("haiku", ["opus"]))
+    ev = out["events"]
+    order = ["testfix ledger 1", "testfix 1 (Task 1)", "testfix prove 1", "land testfix1"]
+    for label in order:
+        assert label in ev, f"{label!r} ran: " + ", ".join(ev)
+    assert [ev.index(x) for x in order] == sorted(ev.index(x) for x in order), "ledger, fixer, proof, land in order: " + ", ".join(ev)
+    assert arbiter_calls(ev) == ["arbiter task 1"], "no second ruling: " + ", ".join(ev)
+    entries = conflict_entries_of(out["prompts"]["testfix 1 (Task 1)"])
+    assert len(entries) == 1, entries
+    entry = entries[0]
+    assert entry["fix"] == TEST_REPAIR["change"] and entry["reason"] == TEST_REPAIR["why"], entry
+    settled = entry["ruling"]
+    assert isinstance(settled, dict), "the settled ruling object, attached: " + json.dumps(entry)
+    assert settled.get("outcome") == "test_repair" and settled.get("testRepair") == TEST_REPAIR, json.dumps(settled)
+    assert settled.get("reasoning") == ruling("test_repair")["reasoning"] and settled.get("principle") == PRINCIPLE, json.dumps(settled)
+    retries = retry_labels(ev)
+    assert len(retries) == 1 and ev.index(retries[0]) > ev.index("land testfix1"), "one retry after the landed fix: " + ", ".join(ev)
+    assert "(" not in retries[0], "the retry is no escalation: " + retries[0]
+    assert len(attempts(ev)) == 2, "the first attempt and one retry: " + ", ".join(ev)
+    assert "were fixed and landed on" in out["prompts"][retries[0]], out["prompts"][retries[0]]
+    assert out["result"]["merged"] == ["1"] and not needs(out), json.dumps(out["result"])
+    source = "\n".join(line for line in SCRIPT.read_text().splitlines() if not line.lstrip().startswith("//"))
+    sites = re.findall(r"(?<!function )handOffTestRepair\(", source)
+    assert len(sites) == 1, f"handOffTestRepair has one call site, found {len(sites)}"
+    claim = {"key": "1|test:" + CONFLICT_NODE, "task": "1", "trigger": "test-conflict", "file": CONFLICT["file"], "test": CONFLICT["test"], "criterion": "1.1"}
+    got = bridge.call("testRepairEntries", [{"claim": claim, "ruling": {**settled, "number": 7}}])
+    assert got == [{"file": CONFLICT["file"], "test": CONFLICT["test"], "criterion": "1.1", "reason": TEST_REPAIR["why"],
+                    "fix": TEST_REPAIR["change"], "ruling": {**settled, "number": 7}}], got
+
+
+def test_tc73_a_test_repair_ruling_runs_no_confirmation_and_the_fixer_starts_right_after_the_record(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    opts = {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT, "attempts": 1}}, "rulings": {"1": [ruling("test_repair")]}, "testFix": TEST_FIX}
+    out = run(bridge, project, opts, agents=roles("haiku", ["opus"]))
+    ev = steps(out["events"])
+    between = ev[ev.index("task 1") + 1 : ev.index("arbiter task 1")]
+    assert all(e.startswith("arbiter-") for e in between), "only the arbiter's own thin steps sit between the report and the arbiter: " + ", ".join(ev)
+    assert not [e for e in between if re.match(r"^task 1 ", e)], "no confirmation, retry or escalation before the arbiter: " + ", ".join(ev)
+    records = [i for i, e in enumerate(ev) if e.startswith("arbiter-record")]
+    assert records, "the ruling was recorded: " + ", ".join(ev)
+    assert ev[records[0] + 1] == "testfix ledger 1", "the fixer's ledger follows the record: " + ", ".join(ev)
+    assert not [e for e in ev[: ev.index("testfix ledger 1")] if re.match(r"^task 1 retry", e)], "no confirmation attempt: " + ", ".join(ev)
+
+
+def test_tc199_the_same_conflict_reported_again_after_its_ruled_fix_landed_is_one_entry_and_no_second_ruling_or_fixer(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    opts = {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT}}, "rulings": {"1": [ruling("test_repair"), REQ]}, "testFix": TEST_FIX}
+    out = run(bridge, project, opts, agents=roles("haiku", ["opus"]))
+    ev = out["events"]
+    assert "land testfix1" in ev, "the ruled fix landed: " + ", ".join(ev)
+    assert arbiter_calls(ev) == ["arbiter task 1"], "no second arbiter label: " + ", ".join(ev)
+    assert len(fix_labels(ev)) == 1, "no second testfix label: " + ", ".join(ev)
+    entries = needs(out)
+    assert len(entries) == 1, json.dumps(out["result"].get("needsInput"))
+    entry_fields(entries[0], "after the landed fix")
+    assert CONFLICT["reason"] in json.dumps(entries[0].get("evidence")), "the new report is the evidence: " + json.dumps(entries[0])
+    assert "1" not in out["result"]["merged"]
+
+
+def test_tc205_a_test_repair_ruling_the_fixer_finds_correct_is_one_entry_with_the_finding_and_no_retry_or_second_ruling(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    finding = {"file": CONFLICT["file"], "test": CONFLICT["test"], "issue": "finding-tc205-the-code-prints-too-little"}
+    opts = {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT, "attempts": 1}}, "rulings": {"1": [ruling("test_repair"), REQ]},
+            "testFix": {CONFLICT["file"]: {"verdict": "test-correct", "finding": finding}}}
+    out = run(bridge, project, opts, agents=roles("haiku", ["opus"]))
+    ev = out["events"]
+    assert len(fix_labels(ev)) == 1, "the fixer ran: " + ", ".join(ev)
+    assert arbiter_calls(ev) == ["arbiter task 1"], "no second arbiter label: " + ", ".join(ev)
+    assert retry_labels(ev) == [], "no task retry after the fixer: " + ", ".join(ev)
+    entries = needs(out)
+    assert len(entries) == 1, json.dumps(out["result"].get("needsInput"))
+    entry_fields(entries[0], "test-correct")
+    assert entries[0].get("finding", {}).get("issue") == finding["issue"], "the fixer's finding: " + json.dumps(entries[0])
+    assert "1" not in out["result"]["merged"]
+
+
+def test_tc76_a_requirements_ruling_is_an_entry_with_the_recommendation_and_requirements_md_is_byte_identical(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    paths = [project.spec_dir / "requirements.md", project.target / "specs" / "demo" / "requirements.md"]
+    before = read_all(paths)
+    out = run(bridge, project, {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT}}, "rulings": {"1": [REQ]}}, agents=roles("haiku", []))
+    entries = needs(out)
+    assert len(entries) == 1, json.dumps(out["result"].get("needsInput"))
+    text = json.dumps(entries[0])
+    assert REQ["requirement"]["wording"] in text and REQ["requirement"]["reason"] in text, "the recommendation: " + text
+    assert entries[0].get("kind") == "requirements", text
+    assert read_all(paths) == before, "requirements.md is byte-identical"
+    assert "1" not in out["result"]["merged"]
+
+
+def test_tc77_a_missing_requirement_is_an_entry_with_wording_and_reason_the_task_and_dependents_wait_and_independents_continue(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    paths = [project.spec_dir / "requirements.md", project.target / "specs" / "demo" / "requirements.md"]
+    before = read_all(paths)
+    missing_req = ruling("requirements", requirement={"kind": "add", "wording": "wording-tc77-the-greeting-ends-with-a-newline", "reason": "reason-tc77-nothing-says-so"})
+    opts = {"deps": {"1": [], "2": ["1"], "3": []}, "testConflicts": {"1": {"conflict": CONFLICT}}, "rulings": {"1": [missing_req]}}
+    out = run(bridge, project, opts, agents=roles("haiku", []))
+    ev = out["events"]
+    entries = needs(out)
+    assert len(entries) == 1, json.dumps(out["result"].get("needsInput"))
+    text = json.dumps(entries[0])
+    assert "wording-tc77-the-greeting-ends-with-a-newline" in text and "reason-tc77-nothing-says-so" in text, text
+    assert entries[0].get("kind") == "missing-requirement", text
+    assert attempts(ev, "2") == [], "the dependent waits: " + ", ".join(ev)
+    assert "2" not in out["result"]["merged"] and "1" not in out["result"]["merged"], json.dumps(out["result"])
+    assert "3" in out["result"]["merged"], "the independent task continued: " + json.dumps(out["result"])
+    assert read_all(paths) == before
+
+
+def park_note(prompt):
+    m = re.search(r"<<'CK_PARK'\n(.*)\nCK_PARK", prompt, re.S)
+    assert m, "the park step's prompt carries the note:\n" + prompt
+    return m.group(1)
+
+
+def test_tc78_a_rulings_entry_is_needs_input_not_failed_does_not_halt_and_notifies_through_the_real_notify_command(bridge, tmp_path):  # noqa: F811
+    from guard_helpers import notify_script, set_notify
+
+    out_file = tmp_path / "notified.json"
+    done = set_notify(notify_script(tmp_path / "bin", "ok", out_file))
+    assert done.returncode == 0, done.stdout + done.stderr
+    project = arbiter_project(tmp_path / "proj")
+    opts = {"deps": {"1": [], "3": [], "4": ["3"]}, "testConflicts": {"1": {"conflict": CONFLICT}}, "rulings": {"1": [REQ]}}
+    out = run(bridge, project, opts, agents=roles("haiku", []), onFailure="halt")
+    result = out["result"]
+    assert arbiter_calls(out["events"]) == ["arbiter task 1"], ", ".join(out["events"])
+    assert len(needs(out)) == 1, json.dumps(result.get("needsInput"))
+    assert REQ["requirement"]["wording"] in json.dumps(needs(out)[0]), "the entry is the ruling's: " + json.dumps(needs(out)[0])
+    assert "1" not in [str(f.get("task")) for f in (result.get("failed") or [])], "not a failure: " + json.dumps(result.get("failed"))
+    assert not result.get("halted") and result.get("outcome") != "halted", "no halt on failure: " + json.dumps(result)
+    assert "3" in result["merged"] and "4" in result["merged"], "the independent task and its dependent went on: " + json.dumps(result)
+    assert "park 1" in out["prompts"], "the entry was parked: " + ", ".join(out["events"])
+    # The park step is the one that notifies: run the workflow's own park command, with its note, through the real ck.
+    sent = project.ck("worktree", "park", "demo", "1", "--json", stdin=park_note(out["prompts"]["park 1"]))
+    assert sent.returncode == 0, sent.stdout + sent.stderr
+    assert out_file.exists(), "the real notify command ran: " + sent.stdout
+    assert json.loads(sent.stdout).get("notification") == "sent", sent.stdout
+
+
+# --------------------------------------------------------------------------- TC-34, TC-90, TC-94, TC-96, TC-155 (the record and the report of rulings)
+
+STATUS_EDIT = REWIRED.replace("### Task 2: Greeting\n**Status:** Not Started", "### Task 2: Greeting\n**Status:** Done")
+
+
+def result_text(out):
+    return json.dumps(out["result"]) + "\n" + "\n".join(map(str, out.get("logs") or []))
+
+
+def test_tc34_a_serves_no_requirement_finding_lands_the_task_and_is_a_proposed_cut_in_the_result(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    opts = {"deps": {"1": []}, "reviews": {"1": [{"verdict": "changes", "finding": "serves-no-requirement"}]}}
+    out = run(bridge, project, opts, agents=roles("haiku", [], REVIEW_ON))
+    ev = out["events"]
+    assert "1" in out["result"]["merged"], "the finding alone does not block the landing: " + json.dumps(out["result"])
+    assert attempts(ev) == ["task 1"], "no revision of the code: " + ", ".join(ev)
+    assert [e for e in ev if "revise" in e] == [], "the code stays as it is: " + ", ".join(ev)
+    cuts = out["result"].get("proposedCuts")
+    assert isinstance(cuts, list) and len(cuts) == 1, "proposedCuts names the finding: " + json.dumps(out["result"])
+    assert str(cuts[0].get("task")) == "1", json.dumps(cuts)
+    assert cuts[0].get("file") == "specs/demo/tasks.md" and "serves no requirement" in cuts[0].get("issue", ""), json.dumps(cuts)
+
+
+def test_tc90_a_ruling_whose_edit_did_not_land_records_that_and_why(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    opts = {**CONFLICT_OPTS, "rulings": {"1": [SPEC_EDIT]}, "arbiterEdits": {"1": {"files": {"specs/demo/tasks.md": STATUS_EDIT}}}}
+    out = run(bridge, project, opts, agents=roles("haiku", ["opus"]))
+    ev = out["events"]
+    assert arbiter_calls(ev) == ["arbiter task 1"], ", ".join(ev)
+    assert (project.target / "specs" / "demo" / "tasks.md").read_text() != STATUS_EDIT, "a Status change never lands"
+    entries = decisions_entries(project, "target") or decisions_entries(project, "branch")
+    assert len(entries) == 1, "the ruling is recorded even though its edit did not land: " + str(entries)
+    landed = entries[0].get("Landed", "")
+    assert landed.startswith("no:") and len(landed) > len("no:") + 3, "the entry says it did not land and why: " + str(entries[0])
+    assert len(needs(out)) == 1, json.dumps(out["result"].get("needsInput"))
+    assert "1" not in out["result"]["merged"], json.dumps(out["result"])
+
+
+def test_tc94_the_report_lists_only_this_runs_rulings_not_an_earlier_runs(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    first = run(bridge, project, one_claim("alpha", [code_ruling("alpha")]), agents=roles("haiku", []))
+    assert len(first["result"].get("rulings") or []) == 1, "the first run reports its own ruling: " + json.dumps(first["result"])
+    second = run(bridge, project, one_claim("beta", [code_ruling("beta")]), agents=roles("haiku", []))
+    on_disk = decisions_entries(project)
+    assert len(on_disk) == 2, "both runs' rulings are in decisions.md: " + str(on_disk)
+    listed = second["result"].get("rulings")
+    assert isinstance(listed, list) and len(listed) == 1, "only this run's ruling is listed: " + json.dumps(second["result"])
+    assert listed[0].get("number") == on_disk[1]["number"], "this run's ruling, not the earlier one: " + json.dumps(listed)
+    assert listed[0].get("number") != on_disk[0]["number"], json.dumps(listed)
+
+
+def test_tc96_with_the_spec_folder_read_only_the_report_says_the_entry_was_not_written_and_the_claim_is_a_needs_input_entry(bridge, tmp_path):  # noqa: F811
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.fail("a read-only folder cannot be tested as root: run the suite as a normal user")
+    project = arbiter_project(tmp_path)
+    folders = [project.root / "specs" / "demo", project.target / "specs" / "demo"]
+    modes = [f.stat().st_mode & 0o777 for f in folders]
+    for folder in folders:
+        folder.chmod(0o555)
+    try:
+        out = run(bridge, project, {**CONFLICT_OPTS, "rulings": {"1": [ruling("code")]}}, agents=roles("haiku", []))
+    finally:
+        for folder, mode in zip(folders, modes):
+            folder.chmod(mode)
+    assert arbiter_calls(out["events"]) == ["arbiter task 1"], ", ".join(out["events"])
+    assert not (project.target / "specs" / "demo" / "decisions.md").exists(), "nothing was written"
+    assert re.search(r"not written", result_text(out), re.I), "the report says the entry was not written: " + result_text(out)
+    entries = needs(out)
+    assert len(entries) == 1, "the claim goes to me: " + json.dumps(out["result"].get("needsInput"))
+    assert "1" not in out["result"]["merged"], "the run did not continue as if it were recorded: " + json.dumps(out["result"])
+
+
+def test_tc155_a_spec_edit_that_landed_whose_record_then_fails_does_not_resume_the_task_and_the_entry_says_the_edit_landed(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    opts = {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT, "attempts": 1}}, "rulings": {"1": [SPEC_EDIT]},
+            "arbiterEdits": {"1": {"files": {"specs/demo/tasks.md": REWIRED}}}, "arbiterStepFailures": {"record": True}}
+    out = run(bridge, project, opts, agents=roles("haiku", ["opus"]))
+    ev = out["events"]
+    assert arbiter_calls(ev) == ["arbiter task 1"], ", ".join(ev)
+    assert (project.target / "specs" / "demo" / "tasks.md").read_text() == REWIRED, "the edit really landed"
+    assert attempts(after(ev, "arbiter task 1")) == [], "the task does not resume: " + ", ".join(ev)
+    entries = needs(out)
+    assert len(entries) == 1, json.dumps(out["result"].get("needsInput"))
+    text = json.dumps(entries[0]).lower()
+    assert "landed" in text and "not landed" not in text and "did not land" not in text, "the entry says the edit landed: " + text
+    assert "1" not in out["result"]["merged"], json.dumps(out["result"])
+
+
+# --------------------------------------------------------------------------- P-12, P-13, P-14, P-16, P-43, P-44
+# Hypothesis properties over the same real workflow under the fake runtime (W) and the decisions-block seams through
+# the bridge `call` op. Each example builds its own real repo in a temp directory (no function-scoped fixture).
+
+PROPERTIES = {
+    "P-12": "test_p12_a_spec_claim_goes_to_the_arbiter_with_nothing_between_the_report_and_the_ruling",
+    "P-13": "test_p13_the_arbiter_runs_exactly_when_every_configured_attempt_failed",
+    "P-14": "test_p14_no_worktree_failure_ever_calls_the_arbiter",
+    "P-16": "test_p16_a_failed_arbiter_call_goes_to_me_with_no_fallback",
+    "P-43": "test_p43_a_no_requirement_finding_never_blocks_a_review",
+    "P-44": "test_p44_a_settled_finding_never_blocks_again",
+    "P-11": "test_p11_a_claim_makes_at_most_two_calls_normal_then_one_risky",
+    "P-15": "test_p15_exactly_the_transitive_dependents_of_a_waiting_task_are_held",
+    "P-20": "test_p20_a_spec_edit_spends_neither_a_retry_nor_an_escalation",
+    "P-27": "test_p27_the_report_lists_only_this_runs_rulings",
+}
+
+PROP = dict(derandomize=True, max_examples=30, database=None, deadline=None)
+PROP_200 = dict(PROP, max_examples=200)
+
+LADDER = ["sonnet", "opus", "fable"]
+_escalate = st.integers(0, 3).map(lambda k: LADDER[:k])
+
+
+def fresh_project(**kw):
+    """A real git repo in a temp directory of its own; the caller cleans `keep` up after the example."""
+    keep = tempfile.TemporaryDirectory(prefix="p-arbiter-")
+    return keep, arbiter_project(Path(keep.name), **kw)
+
+
+def p12_options(stop, rounds):
+    if stop == "conflict":
+        return {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT}}, "rulings": {"1": [REQ]}}, None, None
+    if stop == "guard":
+        return {"deps": {"1": []}, "guardStops": {"1": "always"}, "rulings": {"1": [REQ]}}, None, None
+    if stop == "guard-revise":
+        return revise_opts(rulings={"1": [REQ]}), REVIEW_ON, "haiku"
+    if stop == "review":
+        return ({"deps": {"1": []}, "risk": {"1": "safety"}, "reviews": {"1": ["changes"] * 8}, "rulings": {"1": [REQ]}},
+                {**REVIEW_ON, "rounds": rounds}, "haiku")
+    flagged = {"verdict": "changes", "findings": [{"task": "1", "severity": "blocking", "file": "src/greet.py", "issue": "the greeting is never printed"}]}
+    return ({"deps": {"1": []}, "reviews": {"1": [flagged] + ["changes"] * 7}, "rulings": {"1": [REQ]}}, {**REVIEW_ON, "rounds": rounds}, None)
+
+
+# Thin ck steps (as THIN_LABEL in tests/js/fake_project.mjs) record events but are not part of the task's report sequence.
+P12_THIN = r"^(plan \d+|land |report$|park \d+|relink \d+|full gate @|re-check |final gate$|gate$|run start$|audit$|testfix ledger |testfix prove |arbiter-)"
+
+
+@settings(**PROP)
+@given(stop=st.sampled_from(["conflict", "guard", "guard-revise", "review", "batched-review"]), escalate=_escalate, rounds=st.integers(1, 3))
+def test_p12_a_spec_claim_goes_to_the_arbiter_with_nothing_between_the_report_and_the_ruling(bridge, stop, escalate, rounds):  # noqa: F811
+    """Every stop happens on the first attempt: fake_project checks testConflicts and guardStops before failUntil, and a
+    failUntil would add `task 1 retry` labels that P-12 rules out, so the attempt a claim occurs on is not varied."""
+    keep, project = fresh_project()
+    try:
+        opts, reviewer, risky = p12_options(stop, rounds)
+        out = run(bridge, project, opts, agents=roles("haiku", escalate, reviewer, risky_model=risky))
+        ev = out["events"]
+        assert arbiter_calls(ev), "the claim reached the arbiter: " + ", ".join(ev)
+        at = ev.index("arbiter task 1")
+        thin = re.compile(P12_THIN)
+        before = [e for e in ev[:at] if not thin.search(e)]
+        report = before[-1]
+        assert report.endswith(" end") and re.match(r"^(task 1|review)", report), f"the last non-thin event before the arbiter is the stopping report, not {report!r}: " + ", ".join(ev)
+        assert not any(e.startswith("task 1 retry") for e in ev), "no confirmation or further attempt anywhere: " + ", ".join(ev)
+        if stop in ("conflict", "guard"):
+            assert attempts(ev) == ["task 1"], "one attempt only: " + ", ".join(ev)
+            assert report == "task 1 end", "the first attempt's report stopped the task: " + ", ".join(ev)
+        elif stop == "batched-review":
+            assert any(e.startswith("review-wave") for e in ev), "a landing batch review ran: " + ", ".join(ev)
+        assert guard_labels(ev) == [], ", ".join(ev)
+        assert [e for e in ev if re.search(r"revise \d+ \(", e)] == [], "no escalated revision: " + ", ".join(ev)
+        assert not any(e.startswith("task 1 retry") for e in ev[at:]), ", ".join(ev)
+    finally:
+        keep.cleanup()
+
+
+@settings(**PROP)
+@given(fail_until=st.integers(0, 7), retries=st.integers(0, 3), escalate=_escalate)
+def test_p13_the_arbiter_runs_exactly_when_every_configured_attempt_failed(bridge, fail_until, retries, escalate):  # noqa: F811
+    keep, project = fresh_project()
+    try:
+        total = 1 + retries + len(escalate)
+        out = run(bridge, project, {"deps": {"1": []}, "failUntil": {"1": fail_until}, "rulings": {"1": [REQ]}}, agents=roles("haiku", escalate), maxRetries=retries)
+        ev = out["events"]
+        if fail_until >= total:
+            assert len(attempts(ev)) == total, "every configured attempt ran: " + ", ".join(ev)
+            assert arbiter_calls(ev) == ["arbiter task 1"], ", ".join(ev)
+            assert ev.index("arbiter task 1") > ev.index(attempts(ev)[-1]), ", ".join(ev)
+        else:
+            assert any_arbiter(ev) == [], "an attempt passed, so no arbiter: " + ", ".join(ev)
+            assert out["result"]["merged"] == ["1"], json.dumps(out["result"])
+    finally:
+        keep.cleanup()
+
+
+@settings(**PROP)
+@given(deps=dags(max_tasks=5, dangling=False), state=st.sampled_from(["BUSY", "ERROR"]), pick=st.integers(0, 4), two=st.booleans())
+def test_p14_no_worktree_failure_ever_calls_the_arbiter(bridge, deps, state, pick, two):  # noqa: F811
+    keep, project = fresh_project()
+    try:
+        ids = sorted(deps, key=int)
+        bad = {ids[pick % len(ids)], ids[(pick + 1) % len(ids)]} if two else {ids[pick % len(ids)]}
+        opts = {"deps": deps, "worktree": {n: {"state": state, "detail": "elsewhere"} for n in bad}}
+        out = run(bridge, project, opts, **graph_args(deps), agents=roles("haiku", ["opus"]))
+        assert any_arbiter(out["events"]) == [], ", ".join(out["events"])
+    finally:
+        keep.cleanup()
+
+
+@settings(**PROP)
+@given(form=st.sampled_from(FAILURE_FORMS), claim=st.sampled_from(["test-conflict", "guard-stop", "gate-failure"]), escalate=st.integers(0, 1).map(lambda k: LADDER[1:1 + k]))
+def test_p16_a_failed_arbiter_call_goes_to_me_with_no_fallback(bridge, form, claim, escalate):  # noqa: F811
+    keep, project = fresh_project()
+    try:
+        if claim == "test-conflict":
+            opts = {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT}}, "rulings": {"1": [form]}}
+        elif claim == "guard-stop":
+            opts = {"deps": {"1": []}, "guardStops": {"1": "always"}, "rulings": {"1": [form]}}
+        else:
+            opts = {"deps": {"1": []}, "failUntil": {"1": 99}, "rulings": {"1": [form]}}
+        out = run(bridge, project, opts, agents=roles("haiku", escalate))
+        ev = out["events"]
+        assert arbiter_calls(ev), "the arbiter was called: " + ", ".join(ev)
+        assert len(needs(out)) == 1, json.dumps(out["result"].get("needsInput"))
+        assert guard_labels(ev) == [], ", ".join(ev)
+        assert not any(e.startswith("testfix") for e in ev), ", ".join(ev)
+        if claim != "gate-failure":
+            assert attempts(ev) == ["task 1"], "no confirmation or retry follows: " + ", ".join(ev)
+        else:
+            assert not any(e.startswith("task 1 retry") for e in ev[ev.index("arbiter task 1"):]), ", ".join(ev)
+    finally:
+        keep.cleanup()
+
+
+_sev = st.sampled_from(["blocking", "minor"])
+
+
+@st.composite
+def review_mixes(draw):
+    """Severity mixes: a finding is blocking or minor, and may be flagged `noRequirement`, marked blocking or not."""
+    items = draw(st.lists(st.tuples(_sev, st.booleans(), st.integers(0, 9)), max_size=6))
+    findings = []
+    for i, (sev, no_req, n) in enumerate(items):
+        f = {"severity": sev, "file": f"src/f{n}.py", "issue": f"issue {i} about f{n}", "fix": f"fix {i}"}
+        if no_req:
+            f["noRequirement"] = True
+        findings.append(f)
+    return {"verdict": "changes" if findings else draw(st.sampled_from(["approve", "changes"])), "findings": findings, "summary": "s"}
+
+
+@settings(**PROP_200)
+@given(review=review_mixes())
+def test_p43_a_no_requirement_finding_never_blocks_a_review(bridge, review):  # noqa: F811
+    out = bridge.call("normalizeReview", json.loads(json.dumps(review)))
+    got = out["findings"]
+    assert [f["fix"] for f in got] == [f["fix"] for f in review["findings"]], "no finding is dropped or reordered: " + json.dumps(out)
+    for before, after in zip(review["findings"], got):
+        if before.get("noRequirement"):
+            assert after["severity"] == "minor", "a no-requirement finding is minor even when marked blocking: " + json.dumps(after)
+        else:
+            assert after["severity"] == before["severity"], json.dumps(after)
+    others_block = any(f["severity"] == "blocking" and not f.get("noRequirement") for f in review["findings"])
+    if review["verdict"] == "changes" and not others_block:
+        assert out["verdict"] == "approve", "nothing else blocks, so the review approves: " + json.dumps(out)
+    if others_block:
+        assert out["verdict"] != "approve", json.dumps(out)
+
+
+_words = st.lists(st.sampled_from(["the", "test", "asserts", "opposite", "of", "1.1", "greeting", "is", "never", "printed", "Rounds", "EXIT"]), min_size=2, max_size=6)
+
+
+def ident_of(file, issue):
+    return f"{file}#{' '.join(issue.lower().split())}"
+
+
+@st.composite
+def settle_cases(draw):
+    """(findings, settled identities, tags that must remain). Each finding carries a unique `fix` tag."""
+    files = ["tests/test_a.py", "src/b.py", "tests/test_c.py"]
+    settled_pairs = draw(st.lists(st.tuples(st.sampled_from(files), _words.map(" ".join)), min_size=1, max_size=3, unique=True))
+    settled = [ident_of(f, i) for f, i in settled_pairs]
+    findings, expected = [], []
+    for k in range(draw(st.integers(1, 7))):
+        kind = draw(st.sampled_from(["same", "variant", "reworded", "other-issue", "other-file"]))
+        file, issue = draw(st.sampled_from(settled_pairs))
+        f = {"severity": "blocking", "file": file, "issue": issue, "fix": f"tag {k}"}
+        removed = True
+        if kind == "variant":
+            seps = [draw(st.sampled_from([" ", "  ", "\t", "\n"])) for _ in issue.split()]
+            body = "".join(w + s for w, s in zip(issue.split(), seps))
+            f["issue"] = draw(st.sampled_from([str.upper, str.title, str.lower, lambda x: x]))(" " * draw(st.integers(0, 2)) + body)
+        elif kind == "reworded":
+            f["issue"] = "in other words: " + issue[::-1] + f" #{k}"
+            f["settledBy"] = draw(st.integers(1, 9))
+        elif kind == "other-issue":
+            f["issue"] = f"a different problem number {k} entirely"
+            removed = False
+        elif kind == "other-file":
+            f["file"] = "docs/unrelated.md"
+            removed = False
+        findings.append(f)
+        if not removed:
+            expected.append(f["fix"])
+    return findings, settled, expected
+
+
+@settings(**PROP_200)
+@given(case=settle_cases())
+def test_p44_a_settled_finding_never_blocks_again(bridge, case):  # noqa: F811
+    findings, settled, expected = case
+    review = {"verdict": "changes", "findings": findings, "summary": "s"}
+    out = bridge.call("settleFindings", review, settled)
+    assert [f["fix"] for f in out["findings"]] == expected, f"settled: {settled}\nfindings: {json.dumps(findings)}\ngot: {json.dumps(out)}"
+
+
+# --------------------------------------------------------------------------- P-11, P-15, P-20, P-27
+# A ruling's lifecycle in a run (W): the real workflow under the fake runtime, one real git repo per example.
+
+
+def p11_answer(kind):
+    if kind == "valid":
+        return ruling("code", claim=KEY)
+    if kind == "stronger":
+        return dict(STRONGER)
+    return kind  # a failure form: throw, null, {}, a number, a string, an array, a schema-invalid object
+
+
+_p11_kinds = st.sampled_from(["valid", "stronger", "stronger", "throw", None, {}, 7, "a string", [], {"status": 3, "reasoning": {"bad": True}}])
+
+
+@settings(**PROP)
+@given(runs=st.lists(st.lists(_p11_kinds, min_size=1, max_size=4), min_size=1, max_size=3), safety=st.booleans())
+def test_p11_a_claim_makes_at_most_two_calls_normal_then_one_risky(bridge, runs, safety):  # noqa: F811
+    """One run per answer list, all on one project, so a claim that comes back is a repeated claim. Whatever the answers
+    are, a run makes at most two calls: the normal one, then one risky re-run only after a needs-a-stronger-look answer."""
+    keep, project = fresh_project()
+    try:
+        for index, answers in enumerate(runs):
+            before = len(decisions_entries(project))
+            opts = {**CLAIM, "rulings": {"1": [p11_answer(k) for k in answers]}}
+            if safety:
+                opts["risk"] = {"1": "safety"}
+            out = tier_run(bridge, project, opts)
+            ev = out["events"]
+            calls = arbiter_calls(ev)
+            if index == 0:
+                assert calls, "a new claim reaches the arbiter: " + ", ".join(ev)
+            assert len(calls) <= 2, "a claim makes at most two calls: " + ", ".join(ev)
+            assert calls in ([], ["arbiter task 1"], ["arbiter task 1", "arbiter task 1 risky"]), "normal first, then at most one risky: " + ", ".join(ev)
+            if len(calls) == 2:
+                assert answers[0] == "stronger", "a re-run follows only a needs-a-stronger-look answer: " + ", ".join(ev)
+                assert not safety, "a claim that starts at the risky tier is never re-run: " + ", ".join(ev)
+                assert tier_of(out) == NORMAL_TIER and tier_of(out, "arbiter task 1 risky") == RISKY_TIER, ", ".join(ev)
+            if calls and safety:
+                assert tier_of(out) == RISKY_TIER, ", ".join(ev)
+            if calls:
+                last = answers[min(len(calls), len(answers)) - 1]
+                if last == "stronger":
+                    assert len(needs(out)) == 1, "a risky needs-a-stronger-look ends in needs-input: " + json.dumps(out["result"].get("needsInput"))
+                    assert len(decisions_entries(project)) == before, "no ruling is recorded for it"
+    finally:
+        keep.cleanup()
+
+
+P15_JS = """
+import { runWorkflow } from './load_workflow.mjs'
+import { project } from './fake_project.mjs'
+import { VirtualClock } from './virtual_clock.mjs'
+import { SCRIPT } from './load_decisions.mjs'
+const req = JSON.parse(process.env.REQ)
+const clock = new VirtualClock()
+const p = project({ ...req.project, sleep: clock.sleep, external: q => clock.external(q), execCk: req.execCk })
+// A slow arbiter: the ruling on the claimed task stays pending for 200 virtual ms before the fake answers it.
+const agent = async (prompt, opts) => {
+  if (opts.label === `arbiter task ${req.claim}`) await clock.sleep(200)
+  return p.agent(prompt, opts)
+}
+const { result } = await runWorkflow(SCRIPT, { agent, args: req.args, clock })
+console.log(JSON.stringify({ result, events: p.state.events, prompts: p.state.prompts, execLog: p.state.execLog }))
+"""
+
+
+def dependents_of(deps, task):
+    held, grew = set(), True
+    while grew:
+        grew = False
+        for n, ds in deps.items():
+            if n not in held and n != task and (task in ds or held & set(ds)):
+                held.add(n)
+                grew = True
+    return held
+
+
+@settings(**PROP)
+@given(deps=dags(max_tasks=6, dangling=False), pick=st.integers(0, 5), slots=st.integers(1, 3))
+def test_p15_exactly_the_transitive_dependents_of_a_waiting_task_are_held(deps, pick, slots):
+    keep, project = fresh_project()
+    try:
+        ids = sorted(deps, key=int)
+        claimed = ids[pick % len(ids)]
+        held = dependents_of(deps, claimed)
+        request = {
+            "project": {"deps": deps, "testConflicts": {claimed: {"conflict": CONFLICT}}, "rulings": {claimed: [REQ]}},
+            "claim": claimed, "execCk": project.exec_ck,
+            "args": run_args(project, agents=roles("haiku", []), maxConcurrent=slots, **graph_args(deps)),
+        }
+        out = run_node(P15_JS, request)
+        ev, result = out["events"], out["result"]
+        assert arbiter_calls(ev, claimed) == [f"arbiter task {claimed}"], ", ".join(ev)
+        for n in ids:
+            if n in held:
+                assert attempts(ev, n) == [], f"task {n} depends on {claimed} and is held: " + ", ".join(ev)
+                assert n not in result["merged"], json.dumps(result)
+            elif n != claimed:
+                assert n in result["merged"], f"task {n} is independent of {claimed} and finishes: " + json.dumps(result)
+        assert claimed not in result["merged"], json.dumps(result)
+        assert len(needs(out, claimed)) == 1, json.dumps(result.get("needsInput"))
+        assert not any(str(f.get("task")) == claimed for f in (result.get("failed") or [])), "the entry is needs-input, not failed: " + json.dumps(result)
+    finally:
+        keep.cleanup()
+
+
+P20_JS = """
+import { runWorkflow } from './load_workflow.mjs'
+import { project } from './fake_project.mjs'
+import { VirtualClock } from './virtual_clock.mjs'
+import { SCRIPT } from './load_decisions.mjs'
+const req = JSON.parse(process.env.REQ)
+const clock = new VirtualClock()
+const p = project({ ...req.project, sleep: clock.sleep, external: q => clock.external(q), execCk: req.execCk })
+// The k-th attempt of task 1 (once only) reports a test that can never pass; every other attempt is the fake's own.
+let seen = 0
+let fired = false
+const agent = async (prompt, opts) => {
+  if (req.conflictAt && /^task 1( |$)/.test(opts.label) && !/ revise /.test(opts.label)) {
+    seen++
+    if (seen === req.conflictAt && !fired) {
+      fired = true
+      p.state.events.push(opts.label); p.state.prompts[opts.label] = prompt; p.state.opts[opts.label] = opts
+      p.state.events.push(`${opts.label} end`)
+      return { task: '1', status: 'blocked', gatePassed: false, summary: 'a test can never pass', commits: 'abc123', blocker: 'test conflict', testConflict: req.conflict }
+    }
+  }
+  return p.agent(prompt, opts)
+}
+const { result } = await runWorkflow(SCRIPT, { agent, args: req.args, clock })
+console.log(JSON.stringify({ result, events: p.state.events, prompts: p.state.prompts, opts: p.state.opts, execLog: p.state.execLog }))
+"""
+
+
+@settings(**PROP)
+@given(retries=st.integers(0, 3), escalate=_escalate, at=st.integers(1, 7))
+def test_p20_a_spec_edit_spends_neither_a_retry_nor_an_escalation(bridge, retries, escalate, at):  # noqa: F811
+    """Metamorphic: the same run with no ruling is the base. With the conflict on attempt k, the ruled run's attempts are
+    the base's first k, then the base's again from attempt k on: the resume spent nothing."""
+    total = 1 + retries + len(escalate)
+    k = 1 + (at - 1) % total
+    keep, project = fresh_project()
+    try:
+        ruled = run_node(P20_JS, {
+            "project": {"deps": {"1": []}, "failUntil": {"1": 99}, "rulings": {"1": [SPEC_EDIT, REQ]},
+                        "arbiterEdits": {"1": {"files": {"specs/demo/tasks.md": REWIRED}}}},
+            "conflictAt": k, "conflict": CONFLICT, "execCk": project.exec_ck, "args": run_args(project, agents=roles("haiku", escalate), maxRetries=retries),
+        })
+    finally:
+        keep.cleanup()
+    keep, plain = fresh_project()
+    try:
+        base = run(bridge, plain, {"deps": {"1": []}, "failUntil": {"1": 99}, "rulings": {"1": [REQ]}}, agents=roles("haiku", escalate), maxRetries=retries)
+    finally:
+        keep.cleanup()
+    base_models = models_of(base)
+    assert len(base_models) == total, "the base run uses every configured attempt: " + ", ".join(base["events"])
+    got = models_of(ruled)
+    assert arbiter_calls(ruled["events"]), "the conflict reached the arbiter: " + ", ".join(ruled["events"])
+    assert got == base_models[:k] + base_models[k - 1:], f"conflict on attempt {k}: the ruling spent no retry and no escalation: " + ", ".join(ruled["events"])
+
+
+@settings(**PROP)
+@given(sizes=st.lists(st.integers(0, 3), min_size=1, max_size=3).filter(lambda s: sum(s) <= 3))
+def test_p27_the_report_lists_only_this_runs_rulings(bridge, sizes):  # noqa: F811
+    """Each size is how many rulings that run makes; the last run is the current one, the runs before it are earlier
+    (a task holds at most three rulings, so the sizes sum to at most three)."""
+    keep, project = fresh_project()
+    try:
+        made = 0
+        for i, size in enumerate(sizes):
+            names = [f"r{made + j}" for j in range(size)]
+            made += size
+            if names:
+                out = run(bridge, project, many_claims(names, [code_ruling(n) for n in names]), agents=roles("haiku", []))
+            else:
+                out = run(bridge, project, {"deps": {"1": []}}, agents=roles("haiku", []))
+            on_disk = decisions_entries(project)
+            assert len(on_disk) == made, f"every run's rulings are on disk: {made} vs " + str(on_disk)
+            listed = out["result"].get("rulings") or []
+            want = [e["number"] for e in on_disk[made - size:]]
+            assert [r.get("number") for r in listed] == want, f"run {i + 1} of {sizes} reports its own {size} ruling(s) only: " + json.dumps(out["result"])
+    finally:
+        keep.cleanup()

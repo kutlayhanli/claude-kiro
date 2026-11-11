@@ -503,7 +503,7 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
       const json = await runCk(argv, input)
       const res = state.execResults[before] ?? { code: 0, stdout: '', stderr: '' }
       state.arbiterSteps.push({ label: l, argv, code: res.code })
-      const step = l.slice('arbiter-'.length)
+      const step = l.slice('arbiter-'.length).split(' ')[0]  // `arbiter-record` and `arbiter-record <N>` alike
       const isLand = argv.some((w, i) => w === 'worktree' && argv[i + 1] === 'land')
       if (isLand && res.code === 0 && !(arbiterStepFailures[step] || arbiterStepFailures[l])) applyLanded()
       if (arbiterStepFailures[step] || arbiterStepFailures[l]) return { exitCode: 1, json: { error: `${step} failed (injected)` }, error: `${step} failed (injected)`, stdout: '' }

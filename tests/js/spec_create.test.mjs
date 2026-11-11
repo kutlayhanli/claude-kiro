@@ -7,7 +7,9 @@ import { stub } from './fake_create.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const SCRIPT = path.join(here, '../../plugin/workflows/spec-create.js')
-const args = mode => ({ mode, feature: 'f', projectRoot: '/p', specDir: '/p/specs/f', date: '2026-10-04' })
+// The arbiter args the create and review skills pass (as ARBITER_ARGS in tests/test_arbiter_create.py): without arbiterAgent
+// every arbiter step with subjects is lost and the result is not Ready (11.12).
+const args = mode => ({ mode, feature: 'f', projectRoot: '/p', specDir: '/p/specs/f', date: '2026-10-04', arbiterAgent: 'spec:arbiter', runnerAgent: 'spec:runner', agents: { arbiter: { model: 'sonnet', effort: 'medium', risky_model: 'opus', risky_effort: 'high' } } })
 
 async function test(name, fn) {
   try { await fn(); console.log('ok  ', name) } catch (e) { console.log('FAIL', name); console.log(e); process.exitCode = 1 }
@@ -22,6 +24,24 @@ await test('create: authoring stages, 4 lenses, refuted/decision findings routed
   assert.deepEqual(result.review.openQuestions.map(q => q.id), ['R2'])
   assert.equal(result.review.refutedCount, 1)
   assert.equal(result.files.length, 5)
+})
+
+await test('a refuted finding goes through the arbiter and its ruling is reported', async () => {
+  // The arbiter's answer is shaped like design.md's RULING schema; the ruling number is minted by `ck arbiter review`
+  // (played by the fake), which here answers 7 for R3.
+  const ruling = { claim: 'R3', status: 'ruled', outcome: 'spec_edit', reasoning: 'the finding is a style preference', verdict: 'the refutation stands' }
+  const s = stub({
+    'arbiter refuted': { rulings: [ruling] },
+    'ck arbiter review refuted': subjects => ({ results: subjects.map(x => ({ id: String(x.id), action: 'keep-refuted', reason: '', stronger: false, ruling: x.id === 'R3' ? 7 : null })), lost: false }),
+  })
+  const { result } = await runWorkflow(SCRIPT, { agent: s.agent, args: args('create') })
+  // The context step is a thin ck call, matched by its command line: design.md pins no label for it.
+  assert.ok(Object.values(s.prompts).some(p => /\bck\b[^\n]*\barbiter context\b/.test(p)), 'the arbiter context step ran')
+  assert.ok(s.calls.includes('arbiter refuted'), 'the refuted R3 is a subject of the arbiter step')
+  assert.ok(!result.review.fixed.includes('R3'))
+  assert.equal(result.review.refutedCount, 1)
+  assert.ok(result.review.arbiter.ran.includes('refuted'))
+  assert.ok(result.review.arbiter.rulings.includes(7), 'the ruling for R3 appears in review.arbiter.rulings')
 })
 
 await test('review mode skips authoring', async () => {
