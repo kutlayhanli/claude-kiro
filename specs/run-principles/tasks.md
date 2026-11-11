@@ -1850,7 +1850,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 79: Test the arbiter's steps in /spec:create
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 11.1, 11.2, 11.3, 11.4, 11.6, 11.8, 11.9, 11.11, 11.12, 1.12
 **Description:** Implement TC-97, TC-98, TC-99, TC-100, TC-102, TC-104, TC-105, TC-107, TC-108, TC-141, TC-148 and TC-158 in `tests/test_arbiter_create.py`, named `test_tc<N>_...`. TC-97: each refuted finding gets exactly one ruling in the `arbiter refuted` answer and is neither dropped nor majority-voted. TC-98: a finding ruled standing is in the revise prompt; one ruled refuted stays listed as refuted with the ruling. TC-99: with PLAN.md, `arbiter drift` runs after Revise, with fixes and with none; with no PLAN.md it does not. TC-100: each cut gets a ruling in `arbiter cuts`; a rejected cut is absent from the report and present in `decisions.md`. TC-102: a drift ruling that would change a decision is not applied and appears in review.md and the result. TC-104: an arbiter change with Revise applying no fixes still runs the consistency check. TC-105: rulings start normal, re-run once at risky, get one ruling per finding, fail validity on the same forms as TC-54, and reach `decisions.md` with commit none. TC-107: with no refuted findings and no cuts, no refuted or cuts step runs. TC-108: when the arbiter throws or returns junk, findings stay as they stood, `review.arbiter.lost` names the step and the result is not Ready. TC-141: with `specs/PRINCIPLES.md` unusable, no arbiter label runs, the findings stand as they were, review.md and the report name the file and `ck principles init`, and the result is not Ready. TC-148: each arbiter step is started with `agentType` from `args.arbiterAgent` and tier model and effort from `args.agents.arbiter`, by plain `agent` (its prompt holds no `ck progress` line), its `ck arbiter` steps run through `runnerAgent`, and with no `arbiterAgent` the steps with subjects are lost and the result is not Ready. TC-158: a drift ruling with a `requirements` item lands in Needs Your Decision and review.md's Result is `Ready after decisions`; a lost drift step sets it to `Needs work`.
@@ -1860,10 +1860,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 84 (TC-97, 98, 100, 105, 107, 108, 141, 148), Task 85 (TC-99, 102, 104, 158)
 
 **Acceptance:**
-- [ ] Each case asserts rulings per finding from the real validation (`ck arbiter review`), not from the fake's answer alone
-- [ ] Tests exercise the real boundary named in the test plan (real `spec-create.js`, real `ck`, real files)
-- [ ] Tests fail before the implementation exists for the right reason (no arbiter steps in create)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each case asserts rulings per finding from the real validation (`ck arbiter review`), not from the fake's answer alone
+- [x] Tests exercise the real boundary named in the test plan (real `spec-create.js`, real `ck`, real files)
+- [x] Tests fail before the implementation exists for the right reason (no arbiter steps in create)
+- [x] No mocks of the project's own code in integration tests
+
+**Implementation notes:** The cases extend the TC-27 driver in `tests/test_arbiter_create.py` (it now also records each agent call's options, applies `arbiter_edits` for a step, and throws on an override `{"__throw": true}`). They pin these names the design leaves open: step labels `arbiter refuted|cuts|drift` with a ` risky` suffix, one call per step answering one ruling per `claim`; result keys `review.arbiter.{ran,lost,rulings,missing}`, `review.proposedCuts`, `review.refutedCount`, `review.result`; a drift ruling's `claim` is an arbiter-given id (`D1`); a rejected cut has `verdict` other than `sound`. Answers are wrapped as `{"rulings": [...]}`; `args.agents.arbiter` may carry `risky_model` and `risky_effort` for the ` risky` steps.
 
 **Dependencies:** Task 78 (same test file)
 **Complexity:** High
