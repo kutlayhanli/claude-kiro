@@ -927,7 +927,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 44 (TC-61, 64 to 70, 138, 149, 156)
 
 **Acceptance:**
-- [ ] Every refusal case compares the target's HEAD before and after with real git
+- [x] Every refusal case compares the target's HEAD before and after with real git
 - [x] TC-138 runs two real landing processes against one integration branch, with the arbiter landing waiting on the lock the task landing holds
 - [x] Tests exercise the real boundary named in the test plan (real git, real lint, real merge queue)
 - [x] Tests fail before the implementation exists for the right reason (no `arbiter<k>` landing route)
