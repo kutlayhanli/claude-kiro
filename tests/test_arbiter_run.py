@@ -692,7 +692,7 @@ def needs_text(out):
 
 def invalid_forms():
     def spec_edit(**extra):
-        built = ruling("spec_edit", reasoning=f"marker-{extra.pop('mark')}-held")
+        built = ruling("spec_edit", claim=KEY, reasoning=f"marker-{extra.pop('mark')}-held")
         built.update(extra)
         return built
 
@@ -704,7 +704,7 @@ def invalid_forms():
         "unknown-principle": spec_edit(mark="unknown-principle", principle="project:made-up"),
         "unknown-outcome": spec_edit(mark="unknown-outcome", outcome="revert"),
         "two-outcomes": spec_edit(mark="two-outcomes", outcome=["code", "spec_edit"]),
-        "malformed": {"status": "ruled", "reasoning": ["marker-malformed-held"], "outcome": "code", "principle": PRINCIPLE},
+        "malformed": {"status": "ruled", "claim": KEY, "reasoning": "marker-malformed-held", "outcome": {"kind": "code"}, "principle": PRINCIPLE},
     }
 
 
@@ -755,8 +755,8 @@ def test_tc56_a_claim_returning_after_its_ruling_was_applied_gets_no_call_and_th
     assert len(entries) == 1, json.dumps(out["result"].get("needsInput"))
     text = json.dumps(entries[0])
     assert "reasoning-alpha-held" in text, "the entry holds the earlier ruling: " + text
-    assert "print the greeting before exiting" in text or "code" in text, text
-    assert conflict_of("alpha")["reason"] in text, "the entry holds the new evidence: " + text
+    assert "print the greeting before exiting" in text, text
+    assert conflict_of("alpha")["reason"] in json.dumps(entries[0].get("evidence")), "the entry's evidence field holds the new report: " + text
     assert REQ["requirement"]["wording"] not in text, "the second scripted answer was never asked for: " + text
 
 
