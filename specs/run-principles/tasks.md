@@ -57,7 +57,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 2: Extend the JS fake runtime and bridge for rulings
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.8, 7.1, 8.1, 8.9, 13.1
 **Description:** Build the workflow side of the test infrastructure (test-plan "What must be added", items 2-5), on `integrate/run-principles`: the fake project must follow the workflow's `thinCk`, `CK_CALL` and `agentType` handling as on master. All options default to absent so existing suites behave as before.
@@ -77,15 +77,16 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 65 (the fake runtime it runs under), Task 66 (the bridge `call` op for `testRepairEntries`), Task 67 (`arbiterEdits`, the real landing), Task 74 (`auditFindings`)
 
 **Acceptance:**
-- [ ] Every existing `tests/js/*.test.mjs` suite still passes unchanged with the extended fake project (the create-side suites migrate in Task 90, which verifies them, so this Verify filters them out: `-k "not spec_create"` is a substring match, so it also drops `spec_create_provides.test.mjs`, which Task 90 runs)
-- [ ] An `arbiter-` label with no `execCk` throws, so a scenario cannot skip the real CLI
-- [ ] `arbiterEdits` commits with real git, so a landing in a scenario is a real landing
-- [ ] `throwingDate: true` makes both `Date` and `Math.random` throw when workflow code uses them
-- [ ] Tests exercise the real boundary named in the test plan (the real workflow scripts under the fake runtime)
-- [ ] Tests fail before the implementation exists for the right reason (self-checks of workflow options name the missing label, not a broken harness)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Every existing `tests/js/*.test.mjs` suite still passes unchanged with the extended fake project (the create-side suites migrate in Task 90, which verifies them, so this Verify filters them out: `-k "not spec_create"` is a substring match, so it also drops `spec_create_provides.test.mjs`, which Task 90 runs)
+- [x] An `arbiter-` label with no `execCk` throws, so a scenario cannot skip the real CLI
+- [x] `arbiterEdits` commits with real git, so a landing in a scenario is a real landing
+- [x] `throwingDate: true` makes both `Date` and `Math.random` throw when workflow code uses them
+- [x] Tests exercise the real boundary named in the test plan (the real workflow scripts under the fake runtime)
+- [x] Tests fail before the implementation exists for the right reason (self-checks of workflow options name the missing label, not a broken harness)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** None
+**Implementation notes:** `throwingGlobals` lives in `tests/js/load_workflow.mjs` (new `scriptMath` option of `runWorkflow`); the bridge `call` op already existed. `arbiter-` steps find the arbiter checkout as the prompt's path ending `-task-arbiter<k>`. `arbiter-` steps read the command line and stdin in thinCk's shape (shellWord quoting, `<<'CK_PARK'` here-document; a fenced JSON block is the fallback), checked against the template read from `spec-implement.js`. `emit_labels.mjs` answers thin steps in the CK_CALL envelope (they had stopped its implement scenarios at `plan`), and its run-principles scenarios raise each claim trigger, make the audit due through `verifiedBy`, and answer OpenResult, SettleResult (`rerun` first), RULING and AUDIT as design.md shapes them.
 **Complexity:** High
 **Risk:** safety (the harness that proves the needs-input notifications and landings on the integration branch)
 
@@ -183,7 +184,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 7: Test the principles file and the two layers through the CLI
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.1, 1.2, 1.6, 1.8, 1.9
 **Description:** Implement TC-1, TC-3, TC-8, TC-10, TC-140 and TC-153 in `tests/test_principles.py`, each named `test_tc<N>_...`. TC-1: `ck principles init --json` creates `specs/PRINCIPLES.md` with all four defaults and `created: true`. TC-3: with an edited file, bytes and mtime stay and `created: false`. TC-8: with a plan override that has a reason and one that has none, `ck arbiter open` returns the plan's principle for the first and the project default for the second. TC-10: with a plan that grants the arbiter requirements changes, `ck arbiter settle` on an outcome-requirements ruling routes to `needs_input`. TC-140: `ck principles init --commit --json` in a checkout with no file commits it alone on that branch and reports `commit`; with the file present, no commit and `commit` null. TC-153: with `specs/PRINCIPLES.md` missing, a directory, a broken symlink, mode 000 or non-UTF-8, `ck arbiter open` returns `ask`, `missing` names the file and no worktree is made; a readable or empty file may rule.
@@ -193,10 +194,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 31 (TC-1, TC-3, TC-140), Task 37 (TC-8, TC-153), Task 38 (TC-10)
 
 **Acceptance:**
-- [ ] Each case asserts the JSON and the file on disk, through a real CLI subprocess in a real temp directory
-- [ ] Tests exercise the real boundary named in the test plan (CLI, filesystem)
-- [ ] Tests fail before the implementation exists for the right reason (no `ck principles` or `ck arbiter` command)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each case asserts the JSON and the file on disk, through a real CLI subprocess in a real temp directory
+- [x] Tests exercise the real boundary named in the test plan (CLI, filesystem)
+- [x] Tests fail before the implementation exists for the right reason (no `ck principles` or `ck arbiter` command)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (uses `arbiter_project`)
 **Complexity:** Low
@@ -499,7 +500,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 21: Red-team the prohibitions of Story 12
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 12.9, 12.10
 **Description:** Try to break each SHALL NOT clause of Story 12 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. For 12.9: a Verify with shell variables, globs, `$(...)`, an unreadable `-k`, a directory, or quoting that looks resolvable and is not. For 12.10: the same problem described in different words by an existing rule, a problem found through both `verifyCycles` and Story 12, and this spec's own tasks.md fed back in. Written from the requirements only, never from the implementation.
@@ -509,10 +510,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 24 (red team of 12.9, 12.10 through `ck lint`)
 
 **Acceptance:**
-- [ ] Each SHALL NOT clause has at least one adversarial test per listed input class that applies to it
-- [ ] Tests exercise the real boundary named in the test plan (`ck lint` through the CLI)
-- [ ] Tests fail before the implementation exists for the right reason (no `notChecked` handling or dedupe)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each SHALL NOT clause has at least one adversarial test per listed input class that applies to it
+- [x] Tests exercise the real boundary named in the test plan (`ck lint` through the CLI)
+- [x] Tests fail before the implementation exists for the right reason (no `notChecked` handling or dedupe)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (project fixture)
 **Complexity:** Medium
@@ -777,7 +778,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 33: Test the arbiter's lane through the real guard hook
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 11.5, 11.7, 11.10
 **Description:** Implement TC-79 to TC-87, TC-101, TC-103, TC-106 and TC-134 in `tests/test_arbiter_guard.py`, named `test_tc<N>_...`, through real `execute_hook("pre-tool-guard", ...)` and real `bash -c`, with the caller coming only from `arbiter_caller`. TC-79: tasks.md, design.md and test-plan.md edits allowed, changing existing text, with a task In Progress. TC-80: requirements.md denied by edit and by add-only append, under each task-status mix. TC-81: a test, a source file, PLAN.md, PRINCIPLES.md, `specs/ck.json`, another spec's tasks.md, `.claude/x`, `/etc/x`: denied. TC-82: `rm`, `mv`, `>`, `tee`, `sed -i`, `python -c`, `cp` onto requirements.md and a test: denied, and each command-substitution form (`echo "$(rm tests/x.py)"`, a backtick form of `cat`, `git commit -m "$(rm x)"`, `<(...)`, `>(...)`) denied, while `git commit -m 'text $(x)'` in single quotes is not. TC-83: a task agent with `CK_ARBITER=1`, a `ck-arbiter` argument or prompt text claiming the lane is decided as without the claim. TC-84: an input claiming the arbiter type with no agent id, or a malformed type, gets the same decision as the unclaimed input. TC-85: a task agent and a main session on requirements.md and test-plan.md, before and after implementation started: today's decisions. TC-86: a denial names the file and says it is outside the arbiter's lane. TC-87: the arbiter's `git add`, `git commit` and `ck lint` in its checkout are not denied and the commit touches only allowed files. TC-101: with a lane ticket and every task Not Started, requirements wording correction is allowed. TC-103: with a started task the create-phase arbiter is denied requirements.md and `spec_review_frozen` still governs the reviser. TC-106: PLAN.md is denied in create and in run. TC-134: the real hook and `guard_policy.decide_arbiter_edit` agree on one allowed and one denied path.
@@ -787,12 +788,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 36 (TC-79 to 87, 101, 103, 106, 134 through the real hook)
 
 **Acceptance:**
-- [ ] Every decision comes from the real hook, and shell forms run under real `bash -c`
-- [ ] Denied cases assert the file on disk is unchanged where the case writes
-- [ ] No test states the arbiter's identity except through `arbiter_caller`
-- [ ] Tests exercise the real boundary named in the test plan (real hook, real files, real git)
-- [ ] Tests fail before the implementation exists for the right reason (no arbiter lane in the guard)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Every decision comes from the real hook, and shell forms run under real `bash -c`
+- [x] Denied cases assert the file on disk is unchanged where the case writes
+- [x] No test states the arbiter's identity except through `arbiter_caller`
+- [x] Tests exercise the real boundary named in the test plan (real hook, real files, real git)
+- [x] Tests fail before the implementation exists for the right reason (no arbiter lane in the guard)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (`arbiter_project`, `arbiter_caller`, derived fixture)
 **Complexity:** High
@@ -917,7 +918,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 39: Test landing a spec edit through the merge queue
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.7, 8.1, 8.4, 8.5, 8.6, 8.7, 9.1, 9.2
 **Description:** Implement TC-61, TC-64 to TC-70, TC-138, TC-149 and TC-156 in `tests/test_arbiter_land.py`, named `test_tc<N>_...`, with real git and the real `ck worktree land demo arbiter<k> --into BRANCH --gate --json`. TC-61: a spec-edit ruling commits on a new branch made from the integration branch and lands under the merge-queue lock. TC-64: a conflicting edit gives CONFLICT, target HEAD unchanged, no re-ruling. TC-65: a red gate gives RED, HEAD unchanged. TC-66: a branch touching a refused path gives REFUSED, HEAD unchanged. TC-67: an edit creating a dependency cycle is not landed. TC-68: an edit creating a new blocking lint finding is not landed; one that leaves an existing finding as it was may land. TC-69: an edit changing a Status field, then an acceptance mark, is not landed. TC-70: an edit moving `tc3_` out of a task's Verify names that test under what changed (the `moved` field and the entry). TC-138: the task landing's gate command creates a `holding` file and then blocks reading a FIFO the test controls; once `holding` exists the test starts the arbiter landing, checks it has not finished and that `land_lock` is held, then writes to the FIFO and asserts both merged with the arbiter commit after the task commit. No sleep orders the two landings. TC-149: a branch changing a design.md the plan reserves, with a ruling that leaves `reservedBy` empty: REFUSED, HEAD unchanged. TC-156: real `ck arbiter open` returns a worktree; `arbiter_caller(checkout=that worktree)` sends an Edit of its `specs/demo/tasks.md` through the real hook (allowed) and of `requirements.md` (denied); real `git add` and `git commit` run; `ck worktree land demo arbiter<k>` merges.
@@ -927,11 +928,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 44 (TC-61, 64 to 70, 138, 149, 156)
 
 **Acceptance:**
-- [ ] Every refusal case compares the target's HEAD before and after with real git
-- [ ] TC-138 runs two real landing processes against one integration branch, with the arbiter landing waiting on the lock the task landing holds
-- [ ] Tests exercise the real boundary named in the test plan (real git, real lint, real merge queue)
-- [ ] Tests fail before the implementation exists for the right reason (no `arbiter<k>` landing route)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Every refusal case compares the target's HEAD before and after with real git
+- [x] TC-138 runs two real landing processes against one integration branch, with the arbiter landing waiting on the lock the task landing holds
+- [x] Tests exercise the real boundary named in the test plan (real git, real lint, real merge queue)
+- [x] Tests fail before the implementation exists for the right reason (no `arbiter<k>` landing route)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (project fixture)
 **Complexity:** High
@@ -2170,7 +2171,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 94: Record refused integration updates in ck's git hooks
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 14.1, 14.5
 **Description:** In `src/claude_kiro/protect.py`, add the `Refusal` dataclass and `record_refusal`, `refusal_for` and `clear_refusal` (design.md, "Landing recovery and bisection" under Data Models), keeping the latest refusal per ref in `<git common dir>/ck/refusals.json` under a file lock. `record_refusal` never raises. In `src/claude_kiro/cli/githooks.py`, `reference_transaction` records each `refs/heads/integrate/*` update it refuses (protected change without a token, or an update it cannot verify) with the update's old value and the realpath of the working directory, and `pre_merge_commit` does the same with `HEAD` when it refuses. A failed write leaves the refusal itself unchanged.
@@ -2181,9 +2182,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 93 (TC-168)
 
 **Acceptance:**
-- [ ] A refused raw merge, fast-forward or not, leaves a record naming the ref, its head and the checkout
-- [ ] An allowed or tokened update leaves no record
-- [ ] A record that cannot be written changes nothing about the refusal
+- [x] A refused raw merge, fast-forward or not, leaves a record naming the ref, its head and the checkout
+- [x] An allowed or tokened update leaves no record
+- [x] A record that cannot be written changes nothing about the refusal
 
 **Dependencies:** Task 93 (its tests are the oracle)
 **Complexity:** Low
@@ -2336,7 +2337,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 101: Red-team the prohibitions of Story 14
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 14.3, 14.4, 14.5
 **Description:** Try to break each SHALL NOT clause of Story 14 and its refusal rule with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Target a refusal record for a branch whose name is a prefix of the target's, a checkout path reached through a symlink, a main checkout that has an `integrate/*` branch checked out, a record written by hand pointing at a protected commit, untracked files with names git would stage, a dirty submodule, and a landing that runs while the hook is writing a record. Build repositories with `tests/unattended_helpers.py` (`init_repo`, `commit_all`, `hooks_repo`, `integration_worktree`) and a `protected_branch` helper defined in this file, never imported from a test module. Written from the requirements only, never from the implementation.
@@ -2346,11 +2347,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 95 (red team of 14.3, 14.4, 14.5)
 
 **Acceptance:**
-- [ ] Each SHALL NOT clause has at least one adversarial test per listed input class that applies to it
-- [ ] No case moves `integrate/demo` or lands a protected file
-- [ ] Tests exercise the real boundary named in the test plan (real git, real hooks, the `ck` CLI)
-- [ ] Tests fail before the implementation exists for the right reason (the landing refuses every dirty checkout)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each SHALL NOT clause has at least one adversarial test per listed input class that applies to it
+- [x] No case moves `integrate/demo` or lands a protected file
+- [x] Tests exercise the real boundary named in the test plan (real git, real hooks, the `ck` CLI)
+- [x] Tests fail before the implementation exists for the right reason (the landing refuses every dirty checkout)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** None
 **Complexity:** Medium
