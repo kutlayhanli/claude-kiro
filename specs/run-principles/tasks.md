@@ -1150,7 +1150,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 49: Commit this repository's principles file
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.9
 **Description:** Create `specs/PRINCIPLES.md` at the repository root with the starter text from `ck principles init`. It must be committed on `integrate/run-principles`, because the arbiter reads it from the target checkout and each claim otherwise becomes a needs-input entry. Foundation task: its Verify is a smoke check. It is the data file 1.9 reads, and the missing-file path is verified at Task 65 by Task 56 (TC-11).
@@ -1159,7 +1159,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verify:** `test -f specs/PRINCIPLES.md`
 
 **Acceptance:**
-- [ ] `specs/PRINCIPLES.md` holds the four defaults and is committed
+- [x] `specs/PRINCIPLES.md` holds the four defaults and is committed
 
 **Dependencies:** Task 31 (uses the starter text from `ck principles init`)
 **Complexity:** Low
