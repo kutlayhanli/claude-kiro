@@ -110,6 +110,12 @@ def docs(project) -> Dict[str, bytes]:
 
 # --------------------------------------------------------------------------- 4.3: a proposed cut is never applied
 
+def fixmark(marker: str) -> str:
+    """The marker carried only by the fix and evidence text. The Cut the design lists in review.md (id, story, title,
+    weakness) may show `marker`; the text a reviser would APPLY (fix, evidence) must never reach a revise prompt."""
+    return f"{marker}-FIX"
+
+
 def cut(marker: str, cid: str = "C1", story: str = "7", *, weakness: Optional[str] = None, fix: Optional[str] = None,
         severity: str = "minor", title: Optional[str] = None) -> Dict[str, Any]:
     """A cut as the should-exist lens proposes it: the Cut shape plus the finding fields every lens finding carries."""
@@ -118,8 +124,8 @@ def cut(marker: str, cid: str = "C1", story: str = "7", *, weakness: Optional[st
         "id": cid, "story": story, "title": title or f"Extras {marker}", "weakness": weakness,
         "saves": {"criteria": 2, "tasks": 1, "testCases": 3},
         "file": "requirements.md", "location": f"Story {story}", "severity": severity,
-        "problem": weakness, "evidence": f"Story {story} has a justification that does not hold {marker}",
-        "fix": fix if fix is not None else f"Remove Story {story} {marker}", "needsUserDecision": True,
+        "problem": weakness, "evidence": f"Story {story} has a justification that does not hold {fixmark(marker)}",
+        "fix": fix if fix is not None else f"Remove Story {story} {fixmark(marker)}", "needsUserDecision": True,
     }
 
 
@@ -128,7 +134,16 @@ def fidelity(problem: str, fix: str = "reword it", cid: str = "R1") -> Dict[str,
 
 
 def sound(cid: str = "C1") -> Dict[str, Any]:
-    return {"rulings": [{"claim": cid, "reasoning": "the justification is weak", "principle": "remove-first", "outcome": "spec_edit", "verdict": "sound"}]}
+    return {"rulings": [{"claim": cid, "status": "ruled", "reasoning": "the justification is weak", "principle": "project:remove-first",
+                         "outcome": "spec_edit", "verdict": "sound"}]}
+
+
+def assert_ruled_sound(out, cid: str = "C1") -> None:
+    """A malformed ruling leaves the cut `unchecked`; fail loudly so the 'ruled sound, still held back' case really runs."""
+    entries = out["result"]["review"]["proposedCuts"]
+    mine = [e for e in entries if str(e.get("id")).strip() == cid.strip()]
+    assert mine, entries
+    assert mine[0].get("status") == "sound", mine[0]
 
 
 def create_project(tmp_path):
@@ -154,12 +169,12 @@ def assert_held_back(out, project, before: Dict[str, bytes], marker: str) -> Non
     prompts = revise_prompts(out)
     assert prompts, "the workflow revised nothing, so the case proves nothing"
     for p in prompts:
-        assert marker not in p, "a proposed cut reached a revise prompt"
+        assert fixmark(marker) not in p, "a proposed cut's fix reached a revise prompt"
     assert not any(l.startswith("apply-cuts") for l in labels), labels
     assert docs(project) == before, "a spec document changed without my approval"
     result = out["result"] or {}
     for entry in (result.get("review") or {}).get("proposedCuts") or []:
-        assert not entry.get("applied"), entry
+        assert entry.get("status") in ("sound", "unchecked", "needs_stronger_look", "risky"), entry
     assert marker not in json.dumps((result.get("review") or {}).get("fixed")), "the cut was reported as fixed"
 
 
@@ -180,7 +195,7 @@ def test_a_cut_that_reads_like_a_fix_never_reaches_revise_or_a_file(tmp_path, mo
     marker = "CUTMARK-READS-LIKE-FIX"
     project = create_project(tmp_path)
     before = docs(project)
-    c = cut(marker, weakness=weakness + f" {marker}", fix=fix + f" {marker}", severity="critical")
+    c = cut(marker, weakness=weakness + f" {marker}", fix=fix + f" {fixmark(marker)}", severity="critical")
     c["needsUserDecision"] = False  # the lens calls it a plain fix
     out = run_create(project, create_args(project, mode), {
         "review: should-exist": {"findings": [c]},
@@ -190,6 +205,7 @@ def test_a_cut_that_reads_like_a_fix_never_reaches_revise_or_a_file(tmp_path, mo
     assert_proposed(out, marker)
     assert_held_back(out, project, before, marker)
     assert any("REAL-FIX-ONE" in p for p in revise_prompts(out)), "a normal confirmed finding must still reach Revise"
+    assert_ruled_sound(out)
 
 
 @pytest.mark.parametrize("colliding", ["R1", "R2", "r1", "R1 ", "R01", "R1/C1"])
@@ -208,8 +224,9 @@ def test_a_cut_whose_id_collides_with_a_finding_id_is_not_revised_or_swallowed(t
     assert_held_back(out, project, before, marker)
     joined = "\n".join(revise_prompts(out))
     assert "REAL-FIX-ONE" in joined and "REAL-FIX-TWO" in joined, "the cut's id swallowed a real finding"
+    assert_ruled_sound(out, colliding)
     if colliding in ids:
-        assert marker not in joined
+        assert fixmark(marker) not in joined
 
 
 def test_a_refuted_finding_with_the_cuts_id_does_not_unlock_the_cut(tmp_path):
@@ -225,6 +242,7 @@ def test_a_refuted_finding_with_the_cuts_id_does_not_unlock_the_cut(tmp_path):
     })
     assert_proposed(out, marker)
     assert_held_back(out, project, before, marker)
+    assert_ruled_sound(out, "R1")
 
 
 def test_a_cut_is_not_carried_through_revise_by_a_confirmed_finding_on_the_same_story(tmp_path):
@@ -241,6 +259,7 @@ def test_a_cut_is_not_carried_through_revise_by_a_confirmed_finding_on_the_same_
     })
     assert_proposed(out, marker)
     assert_held_back(out, project, before, marker)
+    assert_ruled_sound(out)
     joined = "\n".join(revise_prompts(out))
     assert "REAL-FIX-STORY-7" in joined, "the confirmed finding on the same story must still be revised"
     assert "Remove Story 7 entirely" not in joined
@@ -254,11 +273,13 @@ def test_a_reviser_that_claims_it_applied_the_cut_does_not_make_it_applied(tmp_p
     out = run_create(project, create_args(project, "create"), {
         "review: should-exist": {"findings": [cut(marker)]},
         "arbiter cuts": sound(),
-        "revise: findings": {"fixed": ["R1", "C1"], "notFixed": [], "escalated": [], "result": "Ready", "schedule": "Ready at start: Task 1."},
+        "revise spec + write review.md": {"fixed": ["R1", "C1"], "notFixed": [], "escalated": [], "result": "Ready", "schedule": "Ready at start: Task 1."},
     })
     assert_proposed(out, marker)
+    assert "C1" in out["result"]["review"]["fixed"], "the fed-back Revise answer never reached the result"
+    assert_ruled_sound(out)
     for entry in out["result"]["review"]["proposedCuts"]:
-        assert not entry.get("applied"), entry
+        assert entry.get("status") in ("sound", "unchecked"), entry
     assert docs(project) == before
     assert not any(c["label"].startswith("apply-cuts") for c in out["calls"])
 
@@ -300,7 +321,7 @@ def tasks_text(statuses: Dict[int, str], *, newline: str = "\n", status_tail: st
 
 
 def apply_args(project, **extra: Any) -> Dict[str, Any]:
-    return create_args(project, "apply-cuts", approvedCuts=[{"id": "C1", "story": "7"}], **extra)
+    return create_args(project, "apply-cuts", cuts=[{"id": "C1", "story": "7", "title": "Extras"}], **extra)
 
 
 def started_project(tmp_path, tasks: str):
@@ -317,7 +338,7 @@ def assert_frozen(out, project, before: Dict[str, bytes]) -> None:
     assert docs(project) == before, "a cut was applied after implementation started"
     text = json.dumps(out["result"]).lower()
     assert "frozen" in text, text
-    assert re.search(r"\bmine\b|\bmy to make\b|change is mine", text), text
+    assert re.search(r"\bmine\b|\bmy to make\b|\byours\b|\byou to make\b|user's to make|\buser's\b", text), text
 
 
 def assert_applies(out) -> None:
@@ -470,8 +491,10 @@ def test_the_flag_does_not_make_a_real_blocking_finding_beside_it_harmless(bridg
 def test_a_real_blocking_finding_that_survives_still_stops_the_landing_beside_a_cut(bridge):  # noqa: F811
     findings = [real("blocking", "REAL-BLOCKER breaks the build"), no_req("serves no requirement: dead branch")]
     out = run_review(bridge, {"1": [{"verdict": "changes", "findings": findings}, {"verdict": "changes", "findings": findings}]})
-    assert out["result"]["merged"] == []
-    assert [f["task"] for f in out["result"]["failed"]] == ["1"]
+    result = out["result"]
+    assert result["merged"] == [], "a surviving real blocking finding must not land"
+    assert [n["task"] for n in result["needsInput"]] == ["1"], result.get("needsInput")
+    assert any("dead branch" in c["issue"] for c in result["proposedCuts"]), result["proposedCuts"]
 
 
 def test_a_finding_that_does_not_carry_the_flag_is_not_downgraded(bridge):  # noqa: F811
