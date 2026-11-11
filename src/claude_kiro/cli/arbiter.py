@@ -17,7 +17,9 @@ from typing import Optional
 
 import click
 
-from ..arbiter import close_lane, open_lane
+from .. import worktrees as wt
+from ..arbiter import ArbiterError, claim_from_json, close_lane, open_claim, open_lane
+from ..arbiter_policy import TaskMeta
 from ..principles import STARTER_TEXT, plan_may_be_decided
 
 PRINCIPLES_REL = Path("specs") / "PRINCIPLES.md"
@@ -97,6 +99,30 @@ def check(spec: str, as_json: bool):
 @click.group()
 def arbiter():
     """The arbiter: rulings on test-conflict claims."""
+
+
+@arbiter.command("open")
+@click.argument("spec")
+@click.option("--task", "task", required=True, help="The task number the claim belongs to.")
+@click.option("--into", "into", required=True, help="The integration branch the arbiter worktree starts from.")
+@click.option("--json", "as_json", is_flag=True)
+def arbiter_open(spec: str, task: str, into: str, as_json: bool):
+    """Decide whether CLAIM may be ruled on (stdin: {"claim": Claim, "task": TaskMeta}); start the arbiter worktree when it may."""
+    try:
+        payload = json.loads(sys.stdin.read())
+        if not isinstance(payload, dict):
+            raise ArbiterError("stdin must be a JSON object with claim and task")
+        claim = claim_from_json(payload.get("claim"), task)
+        raw_task = payload.get("task") or {}
+        if not isinstance(raw_task, dict) or raw_task.get("risk") not in ("safety", "normal"):
+            raise ArbiterError("task.risk must be safety or normal")
+        task_meta = TaskMeta(risk=raw_task["risk"], complexity=str(raw_task.get("complexity", "")))
+        root = wt.main_root(_toplevel())
+        result = open_claim(root, spec, into, task, claim, task_meta)
+    except (ArbiterError, wt.WorktreeError, ValueError) as exc:
+        click.echo(f"ck arbiter open: {exc}", err=True)
+        sys.exit(2)
+    click.echo(json.dumps(result))
 
 
 @arbiter.group("lane")

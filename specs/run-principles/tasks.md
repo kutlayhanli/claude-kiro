@@ -161,7 +161,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 6: Add the arbiter and auditor role prompts and register them
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 6.8, 7.1, 8.1, 13.4
 **Description:** Create `plugin/agents/arbiter.md` (tools: Read, Grep, Glob, Edit, Write, Bash). It says what the arbiter receives (stop type, claim, evidence, task, models tried, both principle layers, spec documents), that it must answer with exactly one outcome (`spec_edit`, `test_repair`, `code`, `requirements`) or status `needs_stronger_look`, citing a principle id, and that a spec edit is committed on its own branch in the worktree it is given, with a plain `git commit -m '...'` in single quotes, because the guard denies `$(...)` and backticks in a command. Its lane is `tasks.md`, `design.md` and `test-plan.md`; it may only suggest requirements. Create `plugin/agents/auditor.md` (tools: Read, Grep, Glob only, so it cannot change a file), which reads a task's selected tests against the spec and reports problems in the `AUDIT` shape from design.md. Add `"arbiter": "arbiter"` and `"auditor": "reviewer"` to `AGENT_ROLES` in `src/claude_kiro/plugin.py`, so `ck-arbiter.md` and `ck-auditor.md` are generated and `spec:arbiter` references are rewritten when vendored. Harness Contract owner: the `ck-arbiter` agent source. Task 88 adds both agents to `tests/test_plugin.py`, and this task's Verify leaves out the tests only later work can pass: the dogfood and vendored-copy tests need the protected `.claude/` copies Task 92 regenerates, and `test_skills_use_the_plugin_root_and_namespaced_workflows` needs Task 76's guide text. 6.8 is verified at Task 65 by Task 55 (TC-50), and 13.4 at Task 74 by Task 71 (TC-123). 7.1 and 8.1 are carried by the schema and landing tasks that use this prompt.
@@ -169,13 +169,14 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - `plugin/agents/arbiter.md` - new role prompt
 - `plugin/agents/auditor.md` - new read-only role prompt
 - `src/claude_kiro/plugin.py` - two `AGENT_ROLES` entries
-**Verify:** `uv run pytest tests/test_plugin.py -q -k "not dogfood and not vendored_workflow and not skills_use_the_plugin_root"`
+**Verify:** `uv run pytest tests/test_plugin.py -q -k "not dogfood and not vendored_workflow and not skills_use_the_plugin_root and not generated_agent_types_take_their_prompts"`
+**Note:** `test_generated_agent_types_take_their_prompts_from_the_plugin_agents` compares the generated agent files with `AGENTS`, which only Task 88 extends (after Task 76), so it is red on the integration branch from this task until Task 88 lands (run of 2026-11-11).
 **Verified by:** none (Task 88 extends `tests/test_plugin.py` once this task has landed)
 
 **Acceptance:**
-- [ ] Both agent files exist, and the auditor's tool list has no write or shell tool
-- [ ] `AGENT_ROLES` holds both, with `auditor` following the `reviewer` role
-- [ ] The arbiter prompt requires one outcome, the claim key and a cited principle id, and limits edits to the three lane files
+- [x] Both agent files exist, and the auditor's tool list has no write or shell tool
+- [x] `AGENT_ROLES` holds both, with `auditor` following the `reviewer` role
+- [x] The arbiter prompt requires one outcome, the claim key and a cited principle id, and limits edits to the three lane files
 
 **Dependencies:** Task 5 (`agent_type_files` reads the arbiter role)
 **Complexity:** Medium
@@ -873,7 +874,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 37: Add ck arbiter open with the claim ledger and worktree
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.6, 1.9, 1.10, 5.3, 5.4, 6.8, 7.3, 7.8, 8.1, 7.5, 7.6
 **Description:** `ck arbiter open` splits a review deadlock per finding: findings already covered by an applied ruling become a needs-input entry with that ruling, only findings never ruled on reach the arbiter as one claim, and the ledger records the ruling under each of their identities (7.4). In `src/claude_kiro/arbiter.py`, add the per-spec ledger at `<git common dir>/ck/<spec>/arbiter-ledger.json` (`ck-arbiter-ledger/1`, written under a per-spec file lock) and the `arbiter<k>` worktree created from the integration branch, in the same naming as `fix<k>`. Add `ck arbiter open SPEC --task N --into BRANCH --json` (stdin: `{"claim": Claim, "task": TaskMeta}`, stdout: `OpenResult`), which reads both principle layers (turning each file form into a `PrinciplesRead` result), calls `claim_key`, `claim_facts` and `decide_claim`, updates the ledger, and returns `OpenResult.earlier` (the task's rulings) and `OpenResult.missing` (the unusable file) for `ask`. It records the worktree's starting commit as `base` in the ledger entry. A non-zero exit means no decision was made. Harness Contract owner: `ck arbiter decide`, which is `ck arbiter open`.
@@ -885,9 +886,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 1 (its project fixture and strategies), Task 7 (TC-8, TC-153), Task 10 (red team of 1.6, 1.9 through `ck arbiter open`), Task 25 (TC-133, TC-154)
 
 **Acceptance:**
-- [ ] A rule decision returns tier, key, both principle layers, the plan-layer state, worktree, branch and number
-- [ ] A missing or unreadable `specs/PRINCIPLES.md` returns `ask` naming the file, and no worktree is made
-- [ ] Ledger counts persist across processes and across runs of the spec
+- [x] A rule decision returns tier, key, both principle layers, the plan-layer state, worktree, branch and number
+- [x] A missing or unreadable `specs/PRINCIPLES.md` returns `ask` naming the file, and no worktree is made
+- [x] Ledger counts persist across processes and across runs of the spec
 
 **Dependencies:** Task 1 (its tests are the oracle), Task 7 (its tests are the oracle), Task 10 (its tests are the oracle), Task 25 (its tests are the oracle), Task 29 (calls `decide_claim`), Task 32 (edits `arbiter.py` and `cli/arbiter.py`)
 **Complexity:** High
@@ -968,7 +969,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 41: Decide whether a spec edit may land
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 8.4, 8.5, 8.6, 8.7, 9.1, 9.2, 9.3, 1.7
 **Description:** In `src/claude_kiro/arbiter_policy.py`, add `SpecEditFacts`, `SpecEditDecision`, `MovedTest`, and the pure `spec_text_changes(before, after)`, `moved_out_of_verify(before, after)`, `gate_scope_of_edit(before, after, done)` and `decide_spec_edit(facts)`. `decide_spec_edit` refuses any changed path outside `specs/<spec>/tasks.md`, `design.md` and `test-plan.md`, any Status or acceptance-mark change (a removed task that was not Not Started counts as a Status change), a new cycle, a new blocking lint finding other than justifications, and any changed path matching a scope in `SpecEditFacts.reserved` (1.7), whatever the ruling reported, which sends the claim down the 8.4 path. This is the second layer behind the guard. Harness Contract owner: `arbiter.spec_edit_refusals`, which is `spec_text_changes` plus `decide_spec_edit`.
@@ -978,10 +979,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 40 (P-21 at `spec_text_changes`, P-38 at `decide_spec_edit`)
 
 **Acceptance:**
-- [ ] Any Status field or acceptance-mark change is refused; a Verify, Dependencies or description change is not
-- [ ] A changed path outside the three lane files is refused, and so is a changed lane file the plan reserves, with no `reservedBy` from the ruling
-- [ ] A new cycle or new blocking finding is refused, and an existing finding left as it was is not
-- [ ] `moved_out_of_verify` names each test moved out of a task's selection, and `gate_scope_of_edit` lists only Done tasks whose verification changed
+- [x] Any Status field or acceptance-mark change is refused; a Verify, Dependencies or description change is not
+- [x] A changed path outside the three lane files is refused, and so is a changed lane file the plan reserves, with no `reservedBy` from the ruling
+- [x] A new cycle or new blocking finding is refused, and an existing finding left as it was is not
+- [x] `moved_out_of_verify` names each test moved out of a task's selection, and `gate_scope_of_edit` lists only Done tasks whose verification changed
 
 **Dependencies:** Task 30 (extends `arbiter_policy.py`), Task 40 (its tests are the oracle)
 **Complexity:** Medium
@@ -1451,7 +1452,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 62: Property tests for routing a stop to the arbiter
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.10, 4.8, 8.12
 **Description:** Implement P-12, P-13, P-14, P-16, P-43 and P-44 with Hypothesis in `tests/test_arbiter_run.py`, named `test_p<N>_...`, all (W) through the bridge. P-12: for any spec claim, across stop type, attempt, `escalate` lists, review rounds, individual or batched review, the event immediately after the report that stops is the arbiter step, with no `guard`, confirmation or `revise (model)` label. P-13: for any `failUntil`, retries and `escalate` of length 0-3, the arbiter runs exactly when every configured attempt failed. P-14: BUSY and ERROR on any task and DAG never call the arbiter. P-16: for each `arbiter_failures()` form, a needs-input entry and no fallback. P-43 at `normalizeReview` (decisions block through the bridge, `max_examples=200`): a `noRequirement` finding, even one marked blocking, is minor, and the review is `approve` exactly when no other blocking finding remains. P-44 at `settleFindings` (`max_examples=200`): a finding matching a settled one by file and issue, with case and whitespace variants, or a reworded one marked `settledBy`, is removed, and a different issue on the same file stays. Settings `@settings(derandomize=True, max_examples=30, database=None, deadline=None)`. Start the file's `PROPERTIES` map with these six.
@@ -1462,12 +1463,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 65 (P-14, P-16), Task 68 (P-13), Task 69 (P-12, P-43, P-44)
 
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the P-12, P-13, P-14, P-16, P-43 and P-44 rows
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] The tests call the workflow's decisions through the bridge, not a server
-- [ ] Tests exercise the real boundary named in the test plan (real workflow under the fake runtime, real `ck`)
-- [ ] Tests fail before the implementation exists for the right reason (no arbiter step)
-- [ ] No mocks of the project's own code in integration tests
+- [x] The generators cover every surface form and negative listed in the P-12, P-13, P-14, P-16, P-43 and P-44 rows
+- [x] Settings are deterministic (derandomized, no database)
+- [x] The tests call the workflow's decisions through the bridge, not a server
+- [x] Tests exercise the real boundary named in the test plan (real workflow under the fake runtime, real `ck`)
+- [x] Tests fail before the implementation exists for the right reason (no arbiter step)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (strategies), Task 61 (same test file)
 **Complexity:** High
@@ -1476,7 +1477,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 63: Property tests for a ruling's lifecycle in a run
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.6, 5.7, 6.9, 8.2, 8.14, 8.15, 10.7
 **Description:** Implement P-11, P-15, P-20 and P-27 with Hypothesis in `tests/test_arbiter_run.py`, named `test_p<N>_...`, all (W). P-11: for any answer sequence, a claim makes at most 2 calls, normal then at most one risky, and a risky needs-a-stronger-look ends in needs-input. P-15: for any `dags()` DAG and a claim on any task with a slow arbiter, exactly its transitive dependents are held and the entry is in `needsInput`. P-20: metamorphic, attempts and `escalations` equal the same run without the ruling, at any attempt number and retry budget. P-27: for any partition of rulings across earlier and current runs, the report's rulings equal this run's set. Settings `@settings(derandomize=True, max_examples=30, database=None, deadline=None)`. Add them to the file's `PROPERTIES` map.
@@ -1487,12 +1488,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 65 (P-11), Task 66 (P-15, P-27), Task 67 (P-20)
 
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the P-11, P-15, P-20 and P-27 rows
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] The tests call the workflow's decisions through the bridge, not a server
-- [ ] Tests exercise the real boundary named in the test plan (real workflow under the fake runtime, real `ck`)
-- [ ] Tests fail before the implementation exists for the right reason (no arbiter step)
-- [ ] No mocks of the project's own code in integration tests
+- [x] The generators cover every surface form and negative listed in the P-11, P-15, P-20 and P-27 rows
+- [x] Settings are deterministic (derandomized, no database)
+- [x] The tests call the workflow's decisions through the bridge, not a server
+- [x] Tests exercise the real boundary named in the test plan (real workflow under the fake runtime, real `ck`)
+- [x] Tests fail before the implementation exists for the right reason (no arbiter step)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (strategies), Task 62 (same test file)
 **Complexity:** High

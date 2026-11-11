@@ -12,7 +12,7 @@ const SCRIPTS = {
   plugin: path.join(here, '../../plugin/workflows/spec-create.js'),
   project: path.join(here, '../../.claude/workflows/spec-create.js'),
 }
-const args = mode => ({ mode, feature: 'f', projectRoot: '/p', specDir: '/p/specs/f', date: '2026-10-04' })
+const args = mode => ({ mode, feature: 'f', projectRoot: '/p', specDir: '/p/specs/f', date: '2026-10-04', arbiterAgent: 'spec:arbiter', runnerAgent: 'spec:runner', agents: { arbiter: { model: 'sonnet', effort: 'medium', risky_model: 'opus', risky_effort: 'high' } } })
 
 async function test(name, fn) {
   try { await fn(); console.log('ok  ', name) } catch (e) { console.log('FAIL', name); console.log(e); process.exitCode = 1 }

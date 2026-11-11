@@ -549,6 +549,8 @@ const RULING = { type: 'object', properties: {
   testRepair: { type: 'object', properties: { file: {type:'string'}, test: {type:'string'}, change: {type:'string'}, why: {type:'string'} } },
   code: { type: 'string', description: 'code: what the implementer must do' },
   requirement: { type: 'object', properties: { kind: {type:'string'}, wording: {type:'string'}, reason: {type:'string'} } },
+  // requirement.kind is add | change | remove. A `requirements` ruling with kind `add` routes as reason `missing-requirement`
+  // (needs-input kind `missing-requirement`, 8.14); any other kind routes as reason `requirements`.
   settles: { type: 'array', items: { type: 'string' }, description: 'review deadlock: the findings this ruling settles' },
   verdict: { type: 'string', description: '/spec:create only' },
 }, required: ['status', 'reasoning'] }

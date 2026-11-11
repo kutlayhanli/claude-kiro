@@ -31,7 +31,9 @@ export function thinCkDefault(prompt, opts, { implementationStarted = false, min
     if (rest[1] === 'context') return ok({ principles: [], planLayer: '', implementationStarted, missing: null, cut: implementationStarted ? 'frozen' : 'hold' })
     if (rest[1] === 'lane') return ok({ ok: true })
     if (rest[1] === 'review') {
-      return ok({ results: subjects.map((x, i) => ({ id: String((x && x.id) ?? i), action: 'spec_edit', reason: '', stronger: false, ruling: ++minted.last })), lost: false })
+      // A route action of CreateRoute (design.md), not a ruling outcome: the default ruling lets each subject stand as it was.
+      const action = { refuted: 'keep-refuted', cuts: 'reject-cut', drift: 'report' }[stepOf()] || 'keep-refuted'
+      return ok({ results: subjects.map((x, i) => ({ id: String((x && x.id) ?? i), action, reason: '', stronger: false, ruling: ++minted.last })), lost: false })
     }
   }
   if (/progress event/.test(text)) return ok({ ok: true })
