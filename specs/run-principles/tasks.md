@@ -2359,7 +2359,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 
 
 ### Task 102: Migrate the test-fixer suites to the arbiter's test-repair ruling
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.1, 8.9, 8.10
 **Description:** Task 65 removes the second-agent confirmation, and three unattended-correctness suites still start from it: `tests/js/test_fix.test.mjs` (its `run` helper: "Task 4's first two attempts (the report and the confirmation) return `conflicts`"; every case, from `tc38_ a confirmed conflict starts one test-fixer` on), `tests/js/command_deps.test.mjs` (TC-116: a missing command no task provides "becomes a test conflict through confirmation, then the test-fixer", asserting `fixer > confirm`) and `tests/js/attributed_gates.test.mjs` (TC-34: "testConflicts reach the confirmation agent"). Rewrite each confirmation step as a fake `rulings` answer for `arbiter task <n>` with outcome `test_repair` (its `testRepair.change` and `why` taken from the conflict's `fix` and `reason`), followed by the existing `testfix <k> (Task n)` labels: the conflict is reported once, then the arbiter rules, then the fixer runs. Keep each assertion's intent: the fixer, its model, its branch, its review, its proof, its landing, the retry and every `test-fix` entry assertion stay; an assertion that the prompt carries the structured conflict entries now expects the entries `testRepairEntries` builds, carrying the ruling. TC-116 asserts the arbiter step comes before the fixer, TC-34 that `testConflicts` reach the arbiter's claim and the result. Grep `tests/` for `Check that claim yourself|confirm` and leave files other tasks own (`spec_implement.test.mjs` is Task 51's, `test_unattended_smoke.py` is Task 100's). Task 2's fake throws on an `arbiter-` thin step when `execCk` is absent, so each migrated scenario that reaches the arbiter passes `execCk` and a run root pointing at a temporary git project holding `specs/PRINCIPLES.md` and the scenario's spec, as `tests/test_arbiter_run.py` does through the bridge; `ck arbiter open`, `settle` and `record` then run for real. These files run whole, so their Verify passes only once Task 66 rewires `handOffTestRepair` to `testFixFor`. Do not delete a test to get a pass.
@@ -2371,11 +2371,13 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 66 (the hand-off of a test-repair ruling to the test-fixer)
 
 **Acceptance:**
-- [ ] Every assertion about the replaced confirmation is migrated to the ruling, none deleted to get a pass
-- [ ] Every fixer-side assertion is unchanged
-- [ ] Tests exercise the real boundary named in the test plan (the real `spec-implement.js` under the fake runtime)
-- [ ] Tests fail before the implementation exists for the right reason (no `arbiter task <n>` label; the confirmation still runs)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Every assertion about the replaced confirmation is migrated to the ruling, none deleted to get a pass
+- [x] Every fixer-side assertion is unchanged
+- [x] Tests exercise the real boundary named in the test plan (the real `spec-implement.js` under the fake runtime)
+- [x] Tests fail before the implementation exists for the right reason (no `arbiter task <n>` label; the confirmation still runs)
+- [x] No mocks of the project's own code in integration tests
+
+**Implementation notes:** Shared helper `tests/js/arbiter_project.mjs` (a real temp git project with PRINCIPLES.md, the spec and an integration worktree, plus `repairRuling`) is outside the Files list. Deviation: `tc46_` (test-correct verdict) now asserts design 8.8/D27 (no retry, one `test-fix` entry carrying the finding and ruling) instead of the old retry with the finding. The three suites fail until Task 66 rewires `handOffTestRepair`.
 
 **Dependencies:** Task 2 (`rulings` answers in the fake runtime)
 **Complexity:** Medium
