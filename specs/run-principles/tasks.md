@@ -389,7 +389,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 16: Find stories with no justification
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 2.5, 3.1, 3.2, 3.3, 3.4, 3.5
 **Description:** Create `src/claude_kiro/justifications.py` with `JustificationFinding` and the pure `justification_findings(text)`. Walk the requirements text per story section, outside fenced code. A line counts only inside its own story's section. Content is the text after `**Without it:**` through its paragraph, with `*_\`~#>:-` and whitespace removed; empty counts as missing. Any non-empty content passes. `None` or text with no stories returns `[]`. Findings come out in document order. Harness Contract owner: `lint.justification_findings`, which is `justifications.justification_findings`.
@@ -399,9 +399,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 13 (P-5, P-6 at `justification_findings`)
 
 **Acceptance:**
-- [ ] A story with no line, or a line with only whitespace or markup, is reported with number and title
-- [ ] A line outside the story's section or in a fence counts for no story
-- [ ] Criteria are never required to carry a line, and `None` returns no finding
+- [x] A story with no line, or a line with only whitespace or markup, is reported with number and title
+- [x] A line outside the story's section or in a fence counts for no story
+- [x] Criteria are never required to carry a line, and `None` returns no finding
 
 **Dependencies:** Task 13 (its tests are the oracle)
 **Complexity:** Medium
