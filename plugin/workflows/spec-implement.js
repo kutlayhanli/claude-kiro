@@ -769,6 +769,8 @@ function applyPlanView(plan, mergedInRun, liveDeps) {
     done: new Set([...decisionIds(plan.done), ...decisionIds(mergedInRun)]),
     cycles: (plan.cycles || []).map(c => decisionIds(c)),
     verifyCycles: [...(plan.verifyCycles || [])],
+    // Task 94: ck plan's write-set overlap map, read by writeSetHold; holds never change deps.
+    overlaps: plan.overlaps && typeof plan.overlaps === 'object' && !Array.isArray(plan.overlaps) ? plan.overlaps : {},
   }
 }
 
@@ -831,6 +833,38 @@ function liveEdgeDecision({ task, failures, deps, done, liveDeps } = {}) {
   const cycle = refused.length ? [v, ...pathTo(refused[0], v)] : null
   if (!safe.length) return { action: 'blocked', edges: [], cycle, command, tests: [], refused }
   return { action: 'wait', edges: safe.map(p => ({ task: v, dependsOn: p })), cycle, command, tests: [], refused }
+}
+
+// Task 94 (13.1-13.3, 13.5, 13.6): write-set holds. Pure: the caller records and logs them; no dependency changes.
+//   start  the ready tasks that may start now, in the scheduler's order
+//   held   [{task, waitsOn}]: the rest, each with the first earlier task it overlaps
+// A task waits for every in-flight task it overlaps (`active`), and for every earlier ready task it overlaps, whether
+// that one starts or is itself held (13.2: the higher-priority one goes first, the others wait for it). So a task
+// that overlaps a held higher-priority task is held too, and `waitsOn` names that task.
+// `overlaps` is ck plan's map {task: [task]}. An overlap counts in both directions, so an asymmetric map still keeps
+// the pair apart; a task never overlaps itself. A task with no overlaps entry (no Files, 13.4) is never held.
+function writeSetHold({ ready, active, overlaps } = {}) {
+  const ov = overlaps && typeof overlaps === 'object' && !Array.isArray(overlaps) ? overlaps : {}
+  const partners = new Map()  // task -> Set of tasks it overlaps, both directions
+  const link = (a, b) => {
+    if (a === b) return
+    if (!partners.has(a)) partners.set(a, new Set())
+    partners.get(a).add(b)
+  }
+  for (const [a, bs] of Object.entries(ov)) {
+    for (const b of decisionIds(bs)) { link(String(a), b); link(b, String(a)) }
+  }
+  const ahead = decisionIds(active)  // in flight first, then every earlier ready task in priority order
+  const start = []
+  const held = []
+  for (const n of decisionIds(ready)) {
+    const mine = partners.get(n)
+    const blocker = mine ? ahead.find(x => x !== n && mine.has(x)) : undefined
+    if (blocker === undefined) start.push(n)
+    else held.push({ task: n, waitsOn: blocker })
+    ahead.push(n)
+  }
+  return { start, held }
 }
 
 // Whether a plan agent's copy holds together: our readiness over its view equals its ready list (minus
@@ -1314,7 +1348,7 @@ function call(kind, prompt, opts) {
 }
 
 // The scheduler's view of the plan (applyPlanView) and what runs now.
-let view = { order: [], deps: {}, done: new Set(), cycles: [], verifyCycles: [] }
+let view = { order: [], deps: {}, done: new Set(), cycles: [], verifyCycles: [], overlaps: {} }
 let current = null          // the last plan applied
 let lastPlanReady = []      // without args.deps: the ready list of the plan that just returned, used once
 let planFallbacks = []    // one entry per fallback: { planStep, trigger, source, ready }
@@ -1568,6 +1602,18 @@ function finishTask(n, rec) {
   return { n, rec }
 }
 
+// Task 94 (13.3, 13.5): write-set holds this run made, {task, waitsOn, at}; listed in the result when there are any.
+const writeSetHolds = []
+const heldOn = new Map()  // task -> the task it is currently held behind; a repeat of the same hold is not logged twice
+function noteWriteSetHold({ task, waitsOn }) {
+  const t = String(task)
+  const w = String(waitsOn)
+  if (heldOn.get(t) === w) return
+  heldOn.set(t, w)
+  writeSetHolds.push({ task: t, waitsOn: w, at: nowMs() })
+  log(`Task ${t} held: its write-set overlaps Task ${w}, which runs or is queued ahead of it; it starts once Task ${w} lands or stops`)
+}
+
 // Starts what may start now, and re-reads the plan when nothing is ready and a slot is free.
 function schedule() {
   const ctx = planContext()
@@ -1577,7 +1623,10 @@ function schedule() {
     ready = lastPlanReady.map(String).filter(n => !ctx.exclude.has(n) && !view.done.has(n))
     lastPlanReady = []
   }
-  const d = startDecision({ finishFirst: FINISH_FIRST, inFlight, slots: AGENT_SLOTS, ready, working: working.size, maxConcurrent: MAX_CONCURRENT, stopLaunching })
+  // Task 94: a ready task whose write-set overlaps an in-flight task waits; in-flight is every running task, up to its landing's end.
+  const holds = writeSetHold({ ready, active: [...running.keys()], overlaps: view.overlaps })
+  for (const h of holds.held) noteWriteSetHold(h)
+  const d = startDecision({ finishFirst: FINISH_FIRST, inFlight, slots: AGENT_SLOTS, ready: holds.start, working: working.size, maxConcurrent: MAX_CONCURRENT, stopLaunching })
   for (const n of d.start) if (!running.has(n)) startTask(n)
   if (d.start.length) deferring = false
   if (d.deferred) {
@@ -2722,6 +2771,8 @@ return {
   testFixes,
   // Task 93 (12.8): listed when the run added live edges; a run without any keeps the result's pinned key set.
   ...(liveEdges.length ? { liveEdges } : {}),
+  // Task 94 (13.3): listed when the run held a task for an overlap; a run without any keeps the pinned key set.
+  ...(writeSetHolds.length ? { writeSetHolds } : {}),
   directCk: directCkOut(), thinAgent: thinAgentOut(),
   stats: { initiallyDone, merged: merged.length, failed: failedList.length, notStarted: notStarted.length, planSteps: refills, planFailures, planFallbacks: planFallbacks.length, fixes: fixCount, landings: landings.length, bisected: landings.filter(l => l.bisected).length },
 }

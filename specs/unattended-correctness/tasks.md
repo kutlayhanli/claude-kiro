@@ -2174,20 +2174,21 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 94: Hold tasks whose write-sets overlap
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 13.1, 13.2, 13.3, 13.5, 13.6
 **Description:** In `plugin/workflows/spec-implement.js`: add `writeSetHold({ready, active, overlaps})` in the decisions block (`{start, held: [{task, waitsOn}]}`): walk the ready list in the scheduler's current priority order, start a task only if it overlaps no active or already-started task (by `ck plan`'s `overlaps`), hold the rest with the task they wait on, and keep filling free slots with non-overlapping tasks; tasks with no Files are never held. Re-evaluate holds on every `schedule()` after a task finishes, stops or merges, so a held task starts as soon as a slot is free. Log held tasks with `waitsOn` in the run's progress and list them in `writeSetHolds` (`{task, waitsOn, at}`). Holds are script state only; tasks.md and the plan's `deps` are never changed. Harness Contract owner: item 7's `writeSetStart` (design: `writeSetHold`) and result `held` (design: `writeSetHolds`).
 **Files:**
 - `plugin/workflows/spec-implement.js` - `writeSetHold`, scheduling holds, `writeSetHolds` result
+- `src/claude_kiro/graph.py` - `_norm_entry`: normalise `//` and `.` segments so the same file overlaps (13.1)
 **Verify:** `node tests/js/command_deps.test.mjs` `node tests/js/write_set_redteam.test.mjs` `uv run pytest -q tests/test_schedule_properties.py -k "tc174_p25"` `uv run pytest -q tests/test_unattended_smoke.py`
 **Verified by:** Task 88 (P-25), Task 89 (TC-114, TC-116 to TC-118, TC-120 to TC-124a; the suite needs live edges and write-set holds), Task 91 (red team of 13.1, 13.6), Task 92 (TC-176 to TC-179, TC-43b; the first task with every piece the smoke runs need)
 
 **Acceptance:**
-- [ ] Two ready tasks whose write-sets overlap never run at the same time; the higher-priority one starts first (13.1, 13.2)
-- [ ] Free slots go to non-overlapping tasks, and held tasks are shown with the task they wait on (13.3)
-- [ ] A held task starts as soon as its blocker merges or stops; the run never stalls (13.5)
-- [ ] Holds never change the task list's dependencies (13.6)
+- [x] Two ready tasks whose write-sets overlap never run at the same time; the higher-priority one starts first (13.1, 13.2)
+- [x] Free slots go to non-overlapping tasks, and held tasks are shown with the task they wait on (13.3)
+- [x] A held task starts as soon as its blocker merges or stops; the run never stalls (13.5)
+- [x] Holds never change the task list's dependencies (13.6)
 
 **Dependencies:** Task 93 (both edit spec-implement.js; Task 93 runs first), Task 53 (reads `ck plan`'s `overlaps`), Task 88 (its tests are the oracle), Task 89 (its tests are the oracle), Task 91 (its tests are the oracle), Task 92 (its tests are the oracle)
 **Complexity:** Medium
