@@ -2055,11 +2055,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 6 (the agent files and generated copies), Task 76 (the guide names both agents)
 
 **Acceptance:**
-- [ ] `AGENTS` holds both new agents with their roles
-- [ ] No assertion is loosened: the dogfood and vendored-copy tests still run on the full suite
-- [ ] Tests exercise the real boundary named in the test plan (the shipped plugin files)
-- [ ] Tests fail before the implementation exists for the right reason (the agent files do not exist)
-- [ ] No mocks of the project's own code in integration tests
+- [x] `AGENTS` holds both new agents with their roles
+- [x] No assertion is loosened: the dogfood and vendored-copy tests still run on the full suite
+- [x] Tests exercise the real boundary named in the test plan (the shipped plugin files)
+- [x] Tests fail before the implementation exists for the right reason (the agent files do not exist)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** None
 **Complexity:** Low
