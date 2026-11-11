@@ -320,7 +320,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 13: Property tests for justification lint and the launch block
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.5, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 12.5, 1.11, 12.9
 **Description:** Implement P-5, P-6, P-7, P-8 and P-41 with Hypothesis in `tests/test_justification_lint.py`, named `test_p<N>_...`. P-5: a story is reported exactly when it has no valid line in its own section outside a fence, against a brute-force oracle over the generated structure, including all near-miss marker forms and fence forms the row lists (`justifications.justification_findings`). P-6: any non-empty content gives no finding and no criterion needs a line. P-7: metamorphic, every other lint key is equal with requirements.md removed. P-8 (G, real `ck plan --json`, `max_examples=30`): `verifyScope` is non-empty exactly when a Story 12 finding exists, and a justification finding never adds to it. P-41 at `lint_scope.lint_verdict`: metamorphic, adding `warnings` or `notChecked` entries to any result never changes `exit_nonzero` or `launch_blockers`. Settings `@settings(derandomize=True, max_examples=200, database=None, deadline=None)` except P-8. The file declares `PROPERTIES = {"P-5": ..., "P-6": ..., "P-7": ..., "P-8": ..., "P-41": ...}`.
@@ -331,12 +331,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 16 (P-5, P-6 at `justification_findings`), Task 23 (P-7 through the CLI, P-41 at `lint_verdict`), Task 24 (P-8 through real `ck plan`)
 
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the P-5 to P-8 and P-41 rows, including fences with ``` and ~~~, indented, unclosed, and a story heading inside a fence
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] The tests call the decision seam, not a server (P-7 and P-8 alone run the real CLI; P-41 calls `lint_verdict`)
-- [ ] Tests exercise the real boundary named in the test plan (seam, and real CLI for P-7 and P-8)
-- [ ] Tests fail before the implementation exists for the right reason (the seam and keys do not exist)
-- [ ] No mocks of the project's own code in integration tests
+- [x] The generators cover every surface form and negative listed in the P-5 to P-8 and P-41 rows, including fences with ``` and ~~~, indented, unclosed, and a story heading inside a fence
+- [x] Settings are deterministic (derandomized, no database)
+- [x] The tests call the decision seam, not a server (P-7 and P-8 alone run the real CLI; P-41 calls `lint_verdict`)
+- [x] Tests exercise the real boundary named in the test plan (seam, and real CLI for P-7 and P-8)
+- [x] Tests fail before the implementation exists for the right reason (the seam and keys do not exist)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (strategies), Task 12 (same test file)
 **Complexity:** Medium

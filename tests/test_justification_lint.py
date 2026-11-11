@@ -8,12 +8,16 @@ entry, or the exit code that stays 0.
 """
 
 import json
+import re
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, List, Optional
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -266,3 +270,266 @@ def test_tc25_only_justification_findings_do_not_refuse_the_launch(tmp_path):
     assert started, f"no task agent started: result={json.dumps(run.result)[:600]}"
     text = json.dumps(run.result).lower()
     assert "refus" not in text, f"the launch was refused: {json.dumps(run.result)[:600]}"
+
+
+# --------------------------------------------------------------------------- properties (P-5 to P-8, P-41)
+
+PROPERTIES = {
+    "P-5": "test_p5_story_reported_exactly_when_no_valid_line_in_its_own_section",
+    "P-6": "test_p6_any_non_empty_content_gives_no_finding",
+    "P-7": "test_p7_justification_checks_never_change_another_lint_key",
+    "P-8": "test_p8_only_a_story_12_finding_blocks_launch",
+    "P-41": "test_p41_warnings_and_not_checked_never_change_the_verdict",
+}
+
+PURE = dict(derandomize=True, max_examples=200, database=None, deadline=None)
+LABEL = "**Without it:**"
+EMPTY_CONTENT = ["", " ", "   ", "\t", "**", "****", "_ _", "__", "<!-- -->", "<!--  -->", "** **"]
+NONEMPTY_CONTENT = ["the feature is missing", "n/a", "nice to have", "x", "0", "\u00e9", "\u7406\u7531",
+                    "https://example.com/a?b=1", "_italic_ reason", "**bold** reason"]
+NEAR_MISSES = ["*Without it:* x", "**without it:** x", "Without it: x", "**Without it**: x", "**Without  it:** x",
+               "some prose", "", "**Without it?** x"]
+FENCES = ["```", "~~~", "  ```", "  ~~~", "````"]
+
+
+def _line(content: str) -> str:
+    return f"{LABEL} {content}"
+
+
+@st.composite
+def item_text(draw) -> str:
+    """One chunk of lines placed in a section: a marker line (valid or empty), a near miss, a fenced chunk or an unclosed fence."""
+    kind = draw(st.sampled_from(["valid", "empty", "label_alone", "near", "fenced_valid", "fenced_heading",
+                                 "unclosed_valid", "unclosed_heading"]))
+    if kind == "valid":
+        return _line(draw(st.sampled_from(NONEMPTY_CONTENT)))
+    if kind == "empty":
+        return _line(draw(st.sampled_from(EMPTY_CONTENT)))
+    if kind == "label_alone":
+        return LABEL
+    if kind == "near":
+        return draw(st.sampled_from(NEAR_MISSES))
+    fence = draw(st.sampled_from(FENCES))
+    inner = _line("inside a fence") if kind.endswith("valid") else "### Story 99: Inside a fence"
+    if kind.startswith("unclosed"):
+        return f"{fence}\n{inner}"
+    return f"{fence}\n{inner}\n{fence.strip()}"
+
+
+ITEMS = st.lists(item_text(), max_size=4)
+
+
+@st.composite
+def requirements_doc(draw) -> str:
+    """A requirements document: preamble chunks, 0 to 4 story sections, each with chunks and an optional `## Notes` tail."""
+    out = ["# Requirements: Sim", "", "## User Stories", ""]
+    out += draw(ITEMS)
+    for n in range(1, draw(st.integers(0, 4)) + 1):
+        out += ["", f"### Story {n}: Title {n}", "", STORY_BODY.strip(), ""]
+        out += draw(ITEMS)
+        out += ["", "**Acceptance Criteria:**", "", f"- {n}.1 WHEN x, THE SYSTEM SHALL y."]
+        if draw(st.booleans()):
+            out += ["", "## Notes", ""] + draw(ITEMS)
+    return "\n".join(out) + "\n"
+
+
+_FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+_STORY = re.compile(r"^### Story (\d+): (.*)$")
+_HEADING = re.compile(r"^#{1,6} ")
+_MARKER = re.compile(r"^\*\*Without it:\*\*(.*)$")
+
+
+def _valid_line(line: str) -> bool:
+    m = _MARKER.match(line)
+    if not m:
+        return False
+    rest = re.sub(r"<!--.*?-->", "", m.group(1))
+    return bool(re.sub(r"[\s*_]", "", rest))
+
+
+def oracle(text: str) -> List[str]:
+    """Brute force: walk the lines, skip fenced ones, and name each story with no valid line before the next heading."""
+    fence = None
+    current = None
+    order: List[str] = []
+    has = {}
+    for line in text.splitlines():
+        if fence:
+            close = re.match(r"^ {0,3}(`{3,}|~{3,})\s*$", line)
+            if close and close.group(1)[0] == fence[0] and len(close.group(1)) >= len(fence):
+                fence = None
+            continue
+        opened = _FENCE_OPEN.match(line)
+        if opened:
+            fence = opened.group(1)
+            continue
+        story_heading = _STORY.match(line)
+        if story_heading:
+            current = story_heading.group(1)
+            order.append(current)
+            has[current] = False
+        elif _HEADING.match(line):
+            current = None
+        elif current is not None and _valid_line(line):
+            has[current] = True
+    return [n for n in order if not has[n]]
+
+
+@settings(**PURE)
+@given(requirements_doc())
+def test_p5_story_reported_exactly_when_no_valid_line_in_its_own_section(text):
+    from claude_kiro.justifications import justification_findings
+
+    reported = [str(f.story) for f in justification_findings(text)]
+    assert reported == oracle(text), text
+
+
+# --------------------------------------------------------------------------- P-6
+
+
+@st.composite
+def justified_doc(draw) -> str:
+    out = ["# Requirements: Sim", "", "## User Stories", ""]
+    for n in range(1, draw(st.integers(1, 4)) + 1):
+        out += ["", f"### Story {n}: Title {n}", "", STORY_BODY.strip(), "", _line(draw(st.sampled_from(NONEMPTY_CONTENT))),
+                "", "**Acceptance Criteria:**", ""]
+        for k in range(1, draw(st.integers(1, 3)) + 1):
+            out.append(f"- {n}.{k} WHEN x, THE SYSTEM SHALL y.")
+            if draw(st.booleans()):
+                out.append(_line(draw(st.sampled_from(NONEMPTY_CONTENT))))
+    return "\n".join(out) + "\n"
+
+
+@settings(**PURE)
+@given(justified_doc())
+def test_p6_any_non_empty_content_gives_no_finding(text):
+    from claude_kiro.justifications import justification_findings
+
+    assert justification_findings(text) == [], text
+
+
+# --------------------------------------------------------------------------- P-7
+
+_SRC_A = "src/mtr/a.py"
+VERIFY_CYCLE_TEST = "from mtr.runner import go\n\n\ndef test_v():\n    assert go()\n"
+
+
+def task_variant(kind: str) -> str:
+    from test_lint import block
+
+    if kind == "plain":
+        return block(1, "Core", files=[_SRC_A])
+    if kind == "cycle":
+        return block(1, "One", files=[_SRC_A], deps="Task 2") + block(2, "Two", files=["src/mtr/b.py"], deps="Task 1")
+    return (
+        block(1, "V tests", track="test", files=["tests/test_v.py"], verify="uv run pytest -q tests/test_v.py",
+              verifies="Task 2")
+        + block(2, "Core", files=[_SRC_A], vby="Task 1", deps="Task 1")
+        + block(3, "Runner", files=["src/mtr/runner.py"], deps="Task 2")
+    )
+
+
+@settings(derandomize=True, max_examples=200, database=None, deadline=None, suppress_health_check=list(HealthCheck))
+@given(st.one_of(st.none(), requirements_doc()), st.sampled_from(["plain", "cycle", "verify-cycle"]))
+def _p7_example(root: Path, requirements: Optional[str], kind: str) -> None:
+    spec = root / "specs" / SPEC
+    (spec / "tasks.md").write_text("# Implementation Tasks: Sim\n\n## Task Breakdown\n\n" + task_variant(kind))
+    req = spec / "requirements.md"
+    if requirements is None:
+        req.unlink(missing_ok=True)
+    else:
+        req.write_text(requirements)
+    with_reqs = lint(root)
+    req.unlink(missing_ok=True)
+    without = lint(root)
+    assert "justifications" in with_reqs, sorted(with_reqs)
+    for k in sorted(set(with_reqs) | set(without)):
+        if k != "justifications":
+            assert with_reqs.get(k) == without.get(k), (k, kind, with_reqs.get(k), without.get(k))
+
+
+def test_p7_justification_checks_never_change_another_lint_key(tmp_path):
+    root = project(tmp_path, None)
+    (root / "tests").mkdir(exist_ok=True)
+    (root / "tests" / "test_v.py").write_text(VERIFY_CYCLE_TEST)
+    _p7_example(root)
+
+
+# --------------------------------------------------------------------------- P-8
+
+SHARED = "tests/test_shared.py"
+RUN = f"uv run pytest -q {SHARED}"
+
+
+def scope_tasks(story12: bool) -> str:
+    """Two test tasks sharing one suite: an unfiltered Verify is a Story 12 finding, a filtered one is not."""
+    from test_lint import block
+
+    first = RUN if story12 else f"{RUN} -k test_tc1_"
+    return (
+        block(1, "Alpha tests", track="test", files=[SHARED], verify=first, verifies="Task 3")
+        + block(2, "Beta tests", track="test", files=[SHARED], verify=f"{RUN} -k test_tc2_", verifies="Task 4")
+        + block(3, "Alpha core", files=["src/mtr/a.py"], verify=first, vby="Task 1", deps="Task 1")
+        + block(4, "Beta core", files=["src/mtr/b.py"], vby="Task 2", deps="Task 2")
+    )
+
+
+def _plan(root: Path) -> dict:
+    code, obj, err = h.ck_json(root, "plan", SPEC, "--json")
+    assert obj is not None, f"ck plan --json printed no JSON (exit {code}): {err}"
+    assert "verifyScope" in obj, sorted(obj)
+    return obj
+
+
+@settings(derandomize=True, max_examples=30, database=None, deadline=None, suppress_health_check=list(HealthCheck))
+@given(st.booleans(), st.booleans())
+def _p8_example(root: Path, story12: bool, justification: bool) -> None:
+    spec = root / "specs" / SPEC
+    (spec / "tasks.md").write_text("# Implementation Tasks: Sim\n\n## Task Breakdown\n\n" + scope_tasks(story12))
+    (spec / "requirements.md").write_text(doc(story(1), story(2, line=None if justification else "**Without it:** x")))
+    plan = _plan(root)
+    assert bool(plan["verifyScope"]) == story12, plan["verifyScope"]
+    # a justification finding never adds to verifyScope: the same tasks with every story justified give the same list
+    (spec / "requirements.md").write_text(doc(story(1), story(2)))
+    assert _plan(root)["verifyScope"] == plan["verifyScope"]
+
+
+def test_p8_only_a_story_12_finding_blocks_launch(tmp_path):
+    root = h.spec_graph_project(
+        tmp_path, tasks=[{"num": 1, "title": "Core", "files": ["src/mtr/a.py"]}],
+        tests={SHARED: "def test_tc1_alpha():\n    assert True\n\n\ndef test_tc2_beta():\n    assert True\n"})
+    _p8_example(root)
+
+
+# --------------------------------------------------------------------------- P-41
+
+ENTRY = st.dictionaries(st.sampled_from(["task", "suite", "testTask", "message", "story"]), st.text(max_size=8),
+                        min_size=1, max_size=3)
+ENTRIES = st.lists(ENTRY, max_size=3)
+
+
+@st.composite
+def lint_results(draw) -> dict:
+    """A lint result: any mix of blocking keys, present or missing, possibly already carrying warnings or notChecked."""
+    result = {}
+    for k in ["cycles", "verifyCycles", "verifyScope", "justifications", "warnings", "notChecked"]:
+        if draw(st.booleans()):
+            result[k] = draw(ENTRIES)
+    return result
+
+
+@settings(**PURE)
+@given(lint_results(), ENTRIES, ENTRIES)
+def test_p41_warnings_and_not_checked_never_change_the_verdict(result, more_warnings, more_unchecked):
+    from claude_kiro.lint_scope import lint_verdict
+
+    before = lint_verdict(result)
+    after = lint_verdict({**result, "warnings": list(result.get("warnings", [])) + more_warnings,
+                          "notChecked": list(result.get("notChecked", [])) + more_unchecked})
+    assert (after.exit_nonzero, after.launch_blockers) == (before.exit_nonzero, before.launch_blockers)
+    # alone they never fail lint and never block a launch
+    alone = lint_verdict({"warnings": result.get("warnings", []) + more_warnings,
+                          "notChecked": result.get("notChecked", []) + more_unchecked})
+    assert alone.exit_nonzero is False and tuple(alone.launch_blockers) == ()
+    # a justification finding fails lint but never blocks a launch
+    assert tuple(before.launch_blockers) == tuple(result.get("verifyScope") or ())
