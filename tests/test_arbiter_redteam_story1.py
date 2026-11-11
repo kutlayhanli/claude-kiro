@@ -60,6 +60,14 @@ PLAN_CASES = [
 ]
 
 
+def _json(done: subprocess.CompletedProcess):
+    """The JSON a `ck` command printed; when there is none, fail with the command's own error text."""
+    try:
+        return json.loads(done.stdout)
+    except ValueError:
+        raise AssertionError(f"ck printed no JSON (exit {done.returncode}): {done.stderr.strip() or done.stdout!r}")
+
+
 def _write_plan(project, text: str) -> None:
     for base in (project.root, project.target):
         (base / "specs" / "demo" / "PLAN.md").write_text(text, newline="")
@@ -68,10 +76,7 @@ def _write_plan(project, text: str) -> None:
 def _check(project, text: str):
     _write_plan(project, text)
     done = project.ck("principles", "check", "demo", "--json")
-    try:
-        return done, json.loads(done.stdout)
-    except ValueError:
-        return done, None
+    return done, _json(done)
 
 
 # --------------------------------------------------------------------------- 1.4 the seam
@@ -101,7 +106,7 @@ def test_rt_1_4_plan_section_is_none_for_fenced_or_comment_only_headings():
 def test_rt_1_4_ck_principles_check(tmp_path, text, expected):
     project = arbiter_project(tmp_path)
     done, data = _check(project, text)
-    assert data is not None, f"no JSON from ck principles check: {done.stdout!r} {done.stderr!r}"
+    data = _json(done)
     assert data["ok"] is expected
     assert (done.returncode == 0) is expected, "exit is 1 exactly when the plan may not be Decided"
     assert isinstance(data["reason"], str)
@@ -176,7 +181,7 @@ def test_rt_1_6_reasonless_override_over_the_arbiter_open_cli(tmp_path, body):
     _write_plan(project, "# Plan\n\n## Principles\n\n" + body + "\n")
     done = project.ck("arbiter", "open", "demo", "--task", "2", "--into", project.into, "--json",
                       stdin=json.dumps({"claim": CLAIM, "task": TASK}))
-    data = json.loads(done.stdout)
+    data = _json(done)
     assert data["action"] == "rule", data
     ids = [p["id"] for p in data["principles"]]
     assert "project:fail-closed" in ids
@@ -266,10 +271,7 @@ if os.geteuid() != 0:
 
 def _assert_asks_and_names_file(project, before_worktrees: str):
     done = _usable_open(project)
-    try:
-        data = json.loads(done.stdout)
-    except ValueError:
-        pytest.fail(f"ck arbiter open printed no JSON: {done.stdout!r} {done.stderr!r}")
+    data = _json(done)
     assert data["action"] == "ask", data
     assert data.get("worktree") in (None, ""), "no arbiter worktree for an unusable principles file"
     assert "PRINCIPLES.md" in (data.get("missing") or ""), data
@@ -294,7 +296,7 @@ def test_rt_1_9_an_unusable_file_is_never_given_to_the_arbiter(tmp_path, how):
 
 def test_rt_1_9_file_replaced_after_a_ruling_call_is_judged_by_the_second_state(tmp_path):
     project = arbiter_project(tmp_path)
-    first = json.loads(_usable_open(project).stdout)
+    first = _json(_usable_open(project))
     assert first["action"] == "rule", first
     before = _worktree_list(project)
     _break(project, "directory")
@@ -320,12 +322,12 @@ def test_rt_1_9_a_file_restored_after_being_lost_may_rule_again(tmp_path):
     for path in _principles_paths(project):
         path.unlink()
         path.write_text(STARTER)
-    assert json.loads(_usable_open(project).stdout)["action"] == "rule"
+    assert _json(_usable_open(project))["action"] == "rule"
 
 
 def test_rt_1_9_an_empty_but_readable_file_is_not_treated_as_missing(tmp_path):
     project = arbiter_project(tmp_path, principles="")
-    data = json.loads(_usable_open(project).stdout)
+    data = _json(_usable_open(project))
     assert "PRINCIPLES.md" not in (data.get("missing") or "")
 
 
@@ -333,10 +335,7 @@ def test_rt_1_9_an_empty_but_readable_file_is_not_treated_as_missing(tmp_path):
 
 def _lint(project, *extra):
     done = project.ck("lint", "demo", "--json", *extra)
-    try:
-        return done, json.loads(done.stdout)
-    except ValueError:
-        return done, None
+    return done, _json(done)
 
 
 def _principles_warnings(data):
@@ -356,11 +355,9 @@ LINT_PLANS = [
 def test_rt_1_11_warning_is_reported_and_exit_is_unchanged(tmp_path, plan):
     project = arbiter_project(tmp_path)
     clean_done, clean = _lint(project)
-    assert clean is not None, clean_done.stdout + clean_done.stderr
     assert _principles_warnings(clean) == []
     (project.spec_dir / "PLAN.md").write_text(plan)
     done, data = _lint(project)
-    assert data is not None, done.stdout + done.stderr
     warnings = _principles_warnings(data)
     assert len(warnings) == 1, data.get("warnings")
     assert "demo" in warnings[0]["plan"] and "PLAN" in warnings[0]["plan"]
@@ -388,7 +385,6 @@ def test_rt_1_11_a_plan_with_a_real_bullet_has_no_warning(tmp_path):
 def test_rt_1_11_no_plan_file_no_warning_and_no_crash(tmp_path):
     project = arbiter_project(tmp_path, plan=None)
     done, data = _lint(project)
-    assert data is not None, done.stdout + done.stderr
     assert _principles_warnings(data) == []
 
 
