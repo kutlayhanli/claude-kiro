@@ -280,7 +280,7 @@ def open_claim(root: Path, spec: str, into: str, task: str, claim: Claim, task_m
             _discard_worktree(root, path, branch)
             raise
 
-        result.update({"worktree": str(path), "branch": branch, "number": str(number)})
+        result.update({"worktree": str(path), "branch": branch, "number": f"arbiter{number}"})  # design.md OpenResult: the `ck worktree land` label
         return result
 
 
@@ -402,6 +402,12 @@ def record_ruling(root: Path, spec: str, into: str, record: RulingRecord, lock_w
     path = checkout / decisions_rel(spec)
     rel = decisions_rel(spec).as_posix()
     with wt.land_lock(root, into, wait_s=lock_wait):
+        recovered = None
+        if into.startswith("integrate/"):
+            try:
+                recovered = wt.recover_target(root, checkout, into)
+            except wt.WorktreeError:
+                recovered = None  # refused (14.5): leave the checkout as it is and commit decisions.md alone
         existing = path.read_text(encoding="utf-8") if path.is_file() else None
         ledger_last = int(load_ledger(ledger_path(root, spec)).get("lastEntry", 0))
         number = next_number(existing, ledger_last)
@@ -421,7 +427,7 @@ def record_ruling(root: Path, spec: str, into: str, record: RulingRecord, lock_w
             else:
                 path.write_text(existing, encoding="utf-8")
             raise
-    return {"number": number, "commit": sha}
+    return {"number": number, "commit": sha, **({"recovered": recovered} if recovered else {})}
 
 
 # --------------------------------------------------------------------------- /spec:create review (Task 43)

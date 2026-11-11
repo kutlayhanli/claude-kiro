@@ -600,7 +600,13 @@ def merge_cmd(spec, tasks, into, keep, as_json):
     """
     root = _root()
     try:
-        outcomes = wt.merge(root, _spec_name(spec), list(tasks), into=into, keep=keep)
+        def say(checkout, rec):
+            if as_json:
+                return
+            tail = "; a merge was in progress" if rec["mergeInProgress"] else ""
+            click.echo(f"restored {checkout} to {rec['head']}: discarded {', '.join(rec['paths'])}{tail}")
+
+        outcomes = wt.merge(root, _spec_name(spec), list(tasks), into=into, keep=keep, on_recovered=say)
     except wt.WorktreeError as e:
         click.echo(f"❌ {e}")
         sys.exit(3)
