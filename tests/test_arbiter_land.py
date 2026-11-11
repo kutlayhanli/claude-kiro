@@ -579,7 +579,8 @@ def _count(changes) -> int:
     if dataclasses.is_dataclass(changes) and not isinstance(changes, type):
         changes = dataclasses.asdict(changes)
     if isinstance(changes, dict):
-        return sum(_count(v) for v in changes.values())
+        # design.md leaves the shape open: only collection-valued fields list changes (a name or summary string does not)
+        return sum(_count(v) for v in changes.values() if isinstance(v, (dict, list, tuple, set, frozenset)))
     if isinstance(changes, (list, tuple, set, frozenset)):
         return sum(max(_count(v), 1) if isinstance(v, (dict, list, tuple, set, frozenset)) else 1 for v in changes)
     return 1 if changes else 0
@@ -595,6 +596,8 @@ def test_p21_spec_text_changes_lists_exactly_status_and_mark_changes(case):
 
 
 _LAND_KINDS = ["conflict", "red", "refused-path", "cycle", "blocking"]
+_LAND_STATES = {"conflict": ("CONFLICT",), "red": ("RED",), "refused-path": ("PROTECTED", "REFUSED"),
+                "cycle": ("REFUSED",), "blocking": ("REFUSED",)}
 
 
 def _stage_refusal(p: ArbiterProject, kind: str, k: int, word: str) -> None:
@@ -628,7 +631,7 @@ def test_p36_a_refused_landing_never_moves_the_integration_branch(kind, k, word)
         if kind == "conflict":
             before = head(p)
         done, entry = land(p, k)
-        assert done.returncode != 0 and entry["state"] != "MERGED", (kind, entry, done.stdout, done.stderr)
+        assert done.returncode != 0 and entry["state"] in _LAND_STATES[kind], (kind, entry, done.stdout, done.stderr)
         assert_untouched(p, before)
         assert decisions_entries(p) == [], "a refused landing must not write a second ruling"
 
