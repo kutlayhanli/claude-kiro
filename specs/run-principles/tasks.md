@@ -140,7 +140,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 5: Add the arbiter role to the agents settings
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 5.1, 5.2
 **Description:** In `src/claude_kiro/agents.py`, add an `arbiter` role to `DEFAULTS` and `ROLE_KEYS` with the four keys `model`, `effort`, `risky_model`, `risky_effort`. Allow `inherit` for `arbiter.risky_model` in `_coerce`. In `resolve`, fill each unset `arbiter.*` value from `reviewer.risky_model` or `reviewer.risky_effort` and name that source in the resolved output, so `ck agents --json` shows where the value came from. An invalid value must get the same error as other roles.
