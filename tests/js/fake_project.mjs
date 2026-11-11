@@ -196,6 +196,9 @@ async function arbiterWrite(prompt, files, state, n) {
 //                                          not mechanical); a fixable+applied answer drops N's verify cycle from
 //                                          later plans, as the relinked tasks.md would
 //   worktree: {n: {state, detail}}         the first task agent of n returns that worktree outcome (default CREATED)
+//   unreproduced: {batch: [n...]}          the landing holding all of `batch` answers every task MERGED, a red batch
+//                                          gate with green halves, and an `unreproduced` key (once)
+//   landRecovered: {paths, mergeInProgress, head}   every landing answer carries it as `recovered`
 //   -- unattended-correctness additions (all optional, additive) --
 //   gateAnswers: [json | {code, stdout} | 'throw' | 'hang']   consumed in order by the gate calls: a direct `ck gate`
 //                                          argv, or (with an envelope) the thin labels `full gate @k`, `re-check k`,
@@ -226,13 +229,17 @@ async function arbiterWrite(prompt, files, state, n) {
 //   auditFindings: {n: answer}             answer of `audit task <n>` (default {problems: [], summary}: no problems)
 //   arbiterEdits: {n: {files: {path: text}}}  what the `arbiter task <n>` agent really writes and commits (real git) in
 //                                          the `...-task-arbiter<k>` checkout its prompt names
+//   landedDeps: {n: {task: [deps]}}       the wiring task n's arbiter edit writes: once a landing of that arbiter commit
+//                                          succeeds (an `arbiter-...` step running `ck ... worktree land`, or a
+//                                          `land arbiter...` label), later plans use these deps, as `ck plan` reading the
+//                                          landed tasks.md does; plans before the landing keep the old wiring
 //   arbiterStepFailures: {record: true}    the `arbiter-<step>` thin step reports a failed command (exit 1, {error}),
 //                                          after the real command has run
 //   ledgerFail: true                       `testfix ledger <k>` returns exit 1 with {error}
 //   reviews entries may carry {finding: 'serves-no-requirement'}: each finding then has noRequirement: true
 // Labels starting `arbiter-` run the one `ck ... arbiter ...` (or `ck ... worktree land ...`) line of their prompt, with
 // the prompt's one fenced JSON block as stdin, through execCkRun, and return {exitCode, json}; without execCk they throw.
-export function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [], gitReport = null, conflictRounds = {}, planDurations = {}, externalDone = null, planFail = [], worktree = {}, guardStops = {}, guardStopIn = {}, parkOutcome = null, relinkOutcome = null, testConflicts = {}, execCk = null, etaAnswer = null, sleep = realSleep, external = p => p, planSeq = null, badReady = null, risk = null, gateAnswers = [], taskFailures = {}, testConflictsList = {}, testFix = {}, priorFixes = {}, crossTest = null, fidelity = null, fixtureStatus = null, owns = null, overlaps = null, testVerifies = null, provides = null, missingCommand = null, audit = null, runStart = null, rulings = {}, auditFindings = {}, arbiterEdits = {}, arbiterStepFailures = {}, ledgerFail = false }) {
+export function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [], gitReport = null, conflictRounds = {}, planDurations = {}, externalDone = null, planFail = [], worktree = {}, guardStops = {}, guardStopIn = {}, parkOutcome = null, relinkOutcome = null, testConflicts = {}, execCk = null, etaAnswer = null, sleep = realSleep, external = p => p, planSeq = null, badReady = null, risk = null, gateAnswers = [], taskFailures = {}, testConflictsList = {}, testFix = {}, priorFixes = {}, crossTest = null, fidelity = null, fixtureStatus = null, owns = null, overlaps = null, testVerifies = null, provides = null, missingCommand = null, audit = null, runStart = null, rulings = {}, auditFindings = {}, arbiterEdits = {}, landedDeps = {}, arbiterStepFailures = {}, ledgerFail = false, unreproduced = null, landRecovered = null }) {
   let rechecksLeftRed = recheckRed
   let planCalls = 0  // plan agent invocations so far: call k consumes planSeq[k-1]
   // RED landings left per task: checkRed tasks are red on their first landing, redLands sets a count.
@@ -257,6 +264,14 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
       .filter(n => !state.done.has(n) && !exclude.includes(n) && !verifyCycles.some(v => v.task === n && !state.relinked.has(n)) && state.deps[n].every(d => state.done.has(d) || !(d in state.deps)))  // dangling ids are dropped, as `ck plan` does
       // Longest remaining chain first, then numeric id: what `ck plan` prints.
       .sort((a, b) => (chain[b] ?? 1) - (chain[a] ?? 1) || Number(a) - Number(b))
+  }
+  // landedDeps: apply the wiring of every arbiter edit made so far, once, when its landing succeeds.
+  const applyLanded = () => {
+    for (const n of Object.keys(state.arbiterEdited)) {
+      if (!landedDeps[n] || state.landedApplied?.has(n)) continue
+      ;(state.landedApplied ??= new Set()).add(n)
+      for (const [t, ds] of Object.entries(landedDeps[n])) state.deps[t] = ds.map(String)
+    }
   }
   const MODEL_RANK = { haiku: 0, sonnet: 1, opus: 2, fable: 3 }
   const guardStopFor = (n, opts) => {
@@ -391,6 +406,7 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
     if (l.startsWith('land ')) {
       // `ck worktree land`: precheck (conflicts, pairwise deferral), one gate, bisect a red batch.
       const tasks = l.slice(5).split(' ')
+      if (tasks.some(t => t.startsWith('arbiter'))) applyLanded()
       state.landings.push(tasks)
       state.merging++
       state.maxMerging = Math.max(state.maxMerging, state.merging)
@@ -416,6 +432,15 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
         else { state.done.add(n); state.merged.add(n); out.push({ task: n, state: 'MERGED', checkGreen: true, mergedAt: stamp() }) }
       }
       const answer = { tasks: out, gates, bisected: gates.length > 1, startedAt, finishedAt: stamp() }
+      if (landRecovered) answer.recovered = landRecovered
+      // unreproduced: {batch: [n...]}: the landing that holds every task of `batch` is red as a batch only (its halves
+      // are green), every task is MERGED, and the answer carries an `unreproduced` key (once).
+      if (unreproduced && !state.unreproducedDone && unreproduced.batch.every(n => landing.includes(n)) && !red.length) {
+        state.unreproducedDone = true
+        answer.gates = [{ tasks: landing, green: false }, ...landing.map(n => ({ tasks: [n], green: true }))]
+        answer.bisected = true
+        answer.unreproduced = { tasks: landing, tail: 'red as a batch', failures: [] }
+      }
       if (execCk) {
         const eta = await recordLanding(prompt, tasks, out)
         if (etaAnswer === 'null') answer.eta = null
@@ -449,8 +474,14 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
       if (!list || !list.length) throw new Error(`no ruling scripted for "${l}" (rulings: {${n}: [...]})`)
       const k = state.rulingCalls[n] = (state.rulingCalls[n] || 0) + 1
       state.events.push(`${l} end`)
-      const answer = list[Math.min(k, list.length) - 1]
+      let answer = list[Math.min(k, list.length) - 1]
       if (answer === 'throw') throw new Error('arbiter agent failed')
+      // A scripted `claim: '@key'` is copied from the prompt's `Claim key: <key>` line, as a model copies the key it was given
+      // (design.md RULING). An answer with no `claim`, or any other value, is returned as scripted, so a malformed one stays malformed.
+      if (answer && typeof answer === 'object' && answer.claim === '@key') {
+        const m = String(prompt).match(/^Claim key: (\S+)\s*$/m) || String(prompt).match(/\b\d+\|[^\s"'`,)]+/)
+        answer = { ...answer, claim: m ? (m[1] || m[0]) : '' }
+      }
       const edit = arbiterEdits[n]
       if (edit && answer !== null) await arbiterWrite(prompt, edit.files || {}, state, n)
       return answer
@@ -473,6 +504,8 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
       const res = state.execResults[before] ?? { code: 0, stdout: '', stderr: '' }
       state.arbiterSteps.push({ label: l, argv, code: res.code })
       const step = l.slice('arbiter-'.length)
+      const isLand = argv.some((w, i) => w === 'worktree' && argv[i + 1] === 'land')
+      if (isLand && res.code === 0 && !(arbiterStepFailures[step] || arbiterStepFailures[l])) applyLanded()
       if (arbiterStepFailures[step] || arbiterStepFailures[l]) return { exitCode: 1, json: { error: `${step} failed (injected)` }, error: `${step} failed (injected)`, stdout: '' }
       return { exitCode: res.code, json: json && typeof json === 'object' ? json : null, ...(res.code !== 0 ? { error: res.stderr || `ck exited ${res.code}` } : {}), stdout: res.stdout, stderr: res.stderr }
     }

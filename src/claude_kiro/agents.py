@@ -65,6 +65,9 @@ DEFAULTS: Dict[str, Dict[str, Any]] = {
     # and with design.md's data models, starting from `ck lint --contracts`. Report only.
     # Default on (7.1); set false globally or per project to turn it off (7.3).
     "reviewer": {"model": "opus", "effort": "high", "enabled": True, "rounds": 1, "risky_model": "opus", "risky_effort": "high", "cross_test": True},
+    # Decides disputed review findings. Unset values follow reviewer.risky_model and
+    # reviewer.risky_effort (resolve() fills them and names that source).
+    "arbiter": {"model": None, "effort": None, "risky_model": None, "risky_effort": None},
     # Repairs a red target branch: reads the failing gate, decides environment vs code, fixes.
     # Judgment-heavy and rare (about once a run). null = same as implementer.
     # escalate: null = the implementer's list (models not above the fixer's are skipped).
@@ -109,6 +112,7 @@ ROLE_KEYS = {
     "test_writer": {"model", "effort", "escalate"},
     "reviewer": {"model", "effort", "enabled", "rounds", "risky_model", "risky_effort", "cross_test"},
     "fixer": {"model", "effort", "escalate"},
+    "arbiter": {"model", "effort", "risky_model", "risky_effort"},
     "orchestrator": {"model", "effort"},
     "resolver": {"model", "effort"},
     "run": {"max_concurrent", "allowed_domains", "budget_usd", "budget_per_task_usd", "finish_first", "handoff", "analytics", "machine_label", "notify_command",
@@ -271,7 +275,7 @@ def _coerce(role: str, key: str, value: Any) -> Any:
         return value
     if key in ("model", "min_model", "risky_model"):
         # implementer.risky_model names a tier to start at; "inherit" is no tier.
-        inherit_ok = key == "model" or (key == "risky_model" and role == "reviewer")
+        inherit_ok = key == "model" or (key == "risky_model" and role in ("reviewer", "arbiter"))
         if not _valid_model(value, allow_inherit=inherit_ok):
             raise AgentConfigError(f"{role}.{key}: unknown model {value!r} (use {', '.join(MODELS)}, a claude-* ID{', or inherit' if inherit_ok else ''})")
         return value
@@ -322,6 +326,12 @@ def resolve(project_dir: Path, overrides: Optional[List[str]] = None) -> Dict[st
             if roles[role][key] is None:
                 roles[role][key] = roles["implementer"][key]
                 sources[f"{role}.{key}"] = f"implementer ({sources['implementer.' + key]})"
+    # The arbiter's unset values follow the reviewer's risky settings.
+    for key in ("model", "effort", "risky_model", "risky_effort"):
+        if roles["arbiter"][key] is None:
+            suffix = "model" if key.endswith("model") else "effort"
+            roles["arbiter"][key] = roles["reviewer"]["risky_" + suffix]
+            sources[f"arbiter.{key}"] = f"reviewer.risky_{suffix} ({sources['reviewer.risky_' + suffix]})"
     if roles["run"]["allowed_domains"] is None:
         roles["run"]["allowed_domains"] = list(DEFAULT_ALLOWED_DOMAINS)
     if roles["run"]["max_concurrent"] == UNLIMITED:

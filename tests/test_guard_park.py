@@ -2,6 +2,10 @@
 
 TC-37..TC-41, TC-78, TC-88 and the park half of TC-70, through the real CLI on a real git repo, with a real subprocess
 notify command. Project modules are never imported at module level, so this file collects before the code exists.
+
+Run-principles Task 50 triage (6.2, 6.10): park, resolve and the notification are the needs-input route the arbiter's
+fallback uses, so those cases stand as they are. `ck agents --guard-ladder` (TC-41) stays too: the function and its CLI
+remain, only the workflow stops climbing it, which tests/js/guard_ladder.test.mjs asserts.
 """
 from __future__ import annotations
 

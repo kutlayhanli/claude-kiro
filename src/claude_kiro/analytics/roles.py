@@ -46,6 +46,8 @@ def _c(pattern: str) -> "re.Pattern":
     return re.compile(pattern, _RX)
 
 
+_ARBITER_STEP = _c(r"arbiter (?!task )(?P<step>[A-Za-z][\w-]*)(?P<risky> risky)?")
+
 _IMPL = [
     ("task", _c(rf"task (?P<n>{_ID})(?P<t> \[test\])?"
                 rf"(?: (?P<kind>retry|revise|guard) (?P<k>{_NUM})(?: \((?P<m>{_MODEL})\))?)?")),
@@ -58,6 +60,7 @@ _IMPL = [
     ("fix", _c(rf"fix (?P<k>{_NUM}) \((?P<what>.+)\)(?: \[(?P<m>{_MODEL})\])?")),
     ("recheck", _c(rf"re-check (?P<k>{_NUM})")),
     ("full", _c(rf"full gate @{_NUM}")),
+    ("unreproduced", _c(rf"full gate @(?P<n>{_NUM}) \(unreproduced landing\)")),
     ("final", _c(r"final gate")),
     ("land", _c(rf"land (?P<ns>{_ID}(?: {_ID})*)")),
     ("merge", _c(rf"merge (?P<n>{_ID})")),
@@ -68,9 +71,13 @@ _IMPL = [
     ("testfix_writer", _c(rf"testfix (?P<k>{_NUM}) \(Task (?P<n>{_ID})\)")),
     ("testfix_review", _c(rf"testfix review (?P<k>{_NUM})")),
     ("run_start", _c(r"run start")),
+    ("audit_task", _c(rf"audit task (?P<n>{_ID})")),
     ("audit", _c(r"audit")),
+    ("arbiter_task", _c(rf"arbiter task (?P<n>{_ID})(?P<risky> risky)?")),
+    ("arbiter_step", _ARBITER_STEP),
     ("testfix_ledger", _c(rf"testfix ledger (?P<k>{_NUM})")),
     ("testfix_prove", _c(rf"testfix prove (?P<k>{_NUM})")),
+    ("testfix_record", _c(rf"testfix record (?P<k>{_NUM})")),
 ]
 
 _CREATE_FIXED = {
@@ -178,7 +185,24 @@ def _implement(label: str) -> LabelMatch:
             return LabelMatch(role="gate", matched=True, attempt=int(g["k"]), step="testfix_ledger")
         if name == "testfix_prove":
             return LabelMatch(role="gate", matched=True, attempt=int(g["k"]), step="testfix_prove")
+        if name == "testfix_record":
+            return LabelMatch(role="gate", matched=True, attempt=int(g["k"]), step="testfix_record")
+        if name == "unreproduced":
+            return LabelMatch(role="gate", matched=True, step="unreproduced")
+        if name in ("arbiter_task", "arbiter_step"):
+            return _arbiter(name, g)
+        if name == "audit_task":
+            return LabelMatch(role="reviewer", matched=True, task=_task(g["n"]), step="audit")
     return _OTHER
+
+
+def _arbiter(name: str, g: dict) -> LabelMatch:
+    """The arbiter's calls (run and create): `arbiter task <n>` rules a claim on a task, `arbiter <step>` is one of
+    its create-side steps. Both are the resolver family; `risky` marks the stronger tier (escalated_to)."""
+    risky = "risky" if g.get("risky") else None
+    if name == "arbiter_task":
+        return LabelMatch(role="resolver", matched=True, task=_task(g["n"]), step="arbiter", escalated_to=risky)
+    return LabelMatch(role="resolver", matched=True, step=g["step"], escalated_to=risky)
 
 
 def _create(label: str) -> LabelMatch:
@@ -190,6 +214,9 @@ def _create(label: str) -> LabelMatch:
         if m:
             rnd = int(m.group("p")) if step == "consistency" else None
             return LabelMatch(role=role, matched=True, step=step, round=rnd)
+    found = _ARBITER_STEP.fullmatch(label)  # the create-side arbiter steps (`arbiter refuted`, `arbiter cuts risky`)
+    if found:
+        return _arbiter("arbiter_step", found.groupdict())
     return _OTHER
 
 
@@ -215,7 +242,9 @@ def parse_label(label: object, workflow: str) -> dict:
 
 SPEC_AGENT_TYPES: FrozenSet[str] = frozenset({
     "spec:implementer", "spec:test-writer", "spec:reviewer", "spec:fixer", "spec:resolver",
+    "spec:arbiter", "spec:auditor",
     "ck-implementer", "ck-test-writer", "ck-reviewer", "ck-fixer", "ck-resolver",
+    "ck-arbiter", "ck-auditor",
 })
 _TEST_WRITER_TYPES: FrozenSet[str] = frozenset({"spec:test-writer", "ck-test-writer"})
 _TYPE_ROLE: Dict[str, str] = {
@@ -224,6 +253,9 @@ _TYPE_ROLE: Dict[str, str] = {
     "spec:reviewer": "reviewer", "ck-reviewer": "reviewer",
     "spec:fixer": "fixer", "ck-fixer": "fixer",
     "spec:resolver": "resolver", "ck-resolver": "resolver",
+    # The arbiter rules claims (the resolver family); the auditor reads tests and reports (the reviewer family).
+    "spec:arbiter": "resolver", "ck-arbiter": "resolver",
+    "spec:auditor": "reviewer", "ck-auditor": "reviewer",
 }
 
 MAX_CONSISTENCY_PASSES = 2
