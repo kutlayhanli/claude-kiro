@@ -205,7 +205,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 8: Property tests for principles layers
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.6, 1.7, 1.8, 1.9, 1.4
 **Description:** Implement P-1, P-2, P-3, P-4 and P-40 with Hypothesis in `tests/test_principles.py`, named `test_p<N>_...`. P-1: a reasoned override takes precedence, a reasonless one never does, over the listed reason forms and override targets (`principles.effective_principles` over `parse_principles`). Only `**Reason:** <text>` is a stated reason; `Why: x`, plain prose and `Reason: x` with no bold label are negatives that do not displace the default. P-2: a ruling with outcome requirements never reaches a spec-edit lane, whatever grant the plan text holds (`arbiter_policy.route_ruling`). P-3 at `route_ruling`: metamorphic, adding a reservation only moves a ruling from applied to needs-input, near-miss reservations change nothing. Reservation scopes tested here are `code` and `test repairs` (by outcome) and any scope the ruling reports in `reservedBy`; file scopes the ruling does not report are P-38 at `decide_spec_edit` (Task 40). P-4 at `claim_facts` and `decide_claim`: the read results `missing`, `directory`, `denied` and `decode-error` give action `ask` with reason `principles-missing`, and `ok` may rule. The real file forms and naming the file are TC-153 at `ck arbiter open`. P-40 at `principles.plan_may_be_decided`: true exactly when a real `## Principles` section holds a bullet, over the listed forms. Settings `@settings(derandomize=True, max_examples=200, database=None, deadline=None)`. The file declares `PROPERTIES = {"P-1": ..., "P-2": ..., "P-3": ..., "P-4": ..., "P-40": ...}`.
@@ -216,12 +216,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 11 (P-1 at `effective_principles`, P-40 at `plan_may_be_decided`), Task 29 (P-4 at `claim_facts` and `decide_claim`), Task 30 (P-2, P-3 at `route_ruling`)
 
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the P-1 to P-4 and P-40 rows
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] The tests call the decision seams, not a server
-- [ ] Tests exercise the real boundary named in the test plan (the pure seams, via `tests/arbiter_helpers.py`)
-- [ ] Tests fail before the implementation exists for the right reason (the seams do not exist)
-- [ ] No mocks of the project's own code in integration tests
+- [x] The generators cover every surface form and negative listed in the P-1 to P-4 and P-40 rows
+- [x] Settings are deterministic (derandomized, no database)
+- [x] The tests call the decision seams, not a server
+- [x] Tests exercise the real boundary named in the test plan (the pure seams, via `tests/arbiter_helpers.py`)
+- [x] Tests fail before the implementation exists for the right reason (the seams do not exist)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (strategies and interface map), Task 7 (same test file)
 **Complexity:** Medium
