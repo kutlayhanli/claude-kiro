@@ -18,7 +18,16 @@ from typing import Optional
 import click
 
 from .. import worktrees as wt
-from ..arbiter import ArbiterError, claim_from_json, close_lane, open_claim, open_lane, settle_claim
+from ..arbiter import (
+    ArbiterError,
+    claim_from_json,
+    close_lane,
+    open_claim,
+    open_lane,
+    record_ruling,
+    ruling_record_from_json,
+    settle_claim,
+)
 from ..arbiter_policy import TaskMeta
 from ..principles import STARTER_TEXT, plan_may_be_decided
 
@@ -137,6 +146,24 @@ def arbiter_settle(spec: str, key: str, tier: str, as_json: bool):
         result = settle_claim(root, spec, key, sys.stdin.read(), tier)
     except (ArbiterError, wt.WorktreeError) as exc:
         click.echo(f"ck arbiter settle: {exc}", err=True)
+        sys.exit(2)
+    click.echo(json.dumps(result))
+
+
+@arbiter.command("record")
+@click.argument("spec")
+@click.option("--into", "into", required=True, help="The integration branch whose checkout gets decisions.md.")
+@click.option("--lock-wait", "lock_wait", type=float, default=120.0, show_default=True,
+              help="Seconds to wait for the landing lock on INTO before refusing.")
+@click.option("--json", "as_json", is_flag=True)
+def arbiter_record(spec: str, into: str, lock_wait: float, as_json: bool):
+    """Append the ruling (stdin: RulingRecord) to SPEC's decisions.md on INTO and commit that file alone."""
+    try:
+        record = ruling_record_from_json(json.loads(sys.stdin.read()))
+        root = wt.main_root(_toplevel())
+        result = record_ruling(root, spec, into, record, lock_wait)
+    except (ArbiterError, wt.WorktreeError, ValueError) as exc:
+        click.echo(f"ck arbiter record: {exc}", err=True)
         sys.exit(2)
     click.echo(json.dumps(result))
 

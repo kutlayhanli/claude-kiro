@@ -977,21 +977,27 @@ def create_lock(root: Path) -> Iterator[Path]:
 
 
 @contextlib.contextmanager
-def land_lock(root: Path, into: str) -> Iterator[Path]:
+def land_lock(root: Path, into: str, wait_s: float = 0) -> Iterator[Path]:
     """One landing per target branch at a time: it may reset the target to its pre-batch commit.
 
     An flock on the lock file, which the kernel drops when the holder exits, however it
     dies. Not a recorded PID: each sandboxed command has its own PID namespace, so a PID
     from another command can't be checked. The file stays; only the flock counts.
+    `wait_s` is how long to wait for a holder to finish before refusing (0: refuse at once).
     """
     import fcntl
 
     path = _common_dir(root) / f"ck-land-{into.replace('/', '-')}.lock"
     with open(path, "a+") as f:
-        try:
-            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            raise WorktreeError(f"another process is already landing into {into}; lock {path}") from None
+        deadline = time.monotonic() + max(0.0, float(wait_s))
+        while True:
+            try:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise WorktreeError(f"another process is already landing into {into}; lock {path}") from None
+                time.sleep(0.1)
         f.truncate(0)
         f.write(f"landing since {_now()}\n")  # for a human reading it; nothing parses it
         f.flush()

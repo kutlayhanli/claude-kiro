@@ -991,7 +991,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 42: Record rulings in decisions.md
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.8, 10.9
 **Description:** In `src/claude_kiro/arbiter_policy.py`, add `RulingRecord`, `append_entry(existing, entry, number)` (output always starts with `existing`), `next_number(existing, ledger_last)` and `rulings_summary(rulings)`. Add `ck arbiter record SPEC --into BRANCH --json` (stdin: RulingRecord, stdout: `{"number", "commit"}`, option `--lock-wait`). It takes `land_lock` with a bounded wait of 120 seconds (`land_lock` gains `wait_s` for this, default 0, so concurrent records serialize instead of refusing), appends `specs/<spec>/decisions.md` in the format from design.md, and commits that file alone on the integration branch, so a landing's clean-target check still passes. The first ruling creates the file. A failed write, or a lock not acquired before the wait ends, exits non-zero and writes nothing. Harness Contract owner: `ck arbiter record`. The contract's `ck arbiter log` is not built: tests read `decisions.md` through `decisions_entries` in `tests/arbiter_helpers.py`, against the format this task writes.
@@ -1005,10 +1005,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 1 (its record reader), Task 25 (TC-88, 89, 91, 92, 93, 152), Task 28 (P-26 at `append_entry` and `ck arbiter record`)
 
 **Acceptance:**
-- [ ] One entry is appended with trigger, claim, ruling, principle, what changed and commit, and earlier bytes are unchanged
-- [ ] Numbers increase and never repeat across processes, and 16 concurrent records give 16 entries with 16 numbers
-- [ ] A ruling with no commit renders as `none`, and a failed landing renders as not landed with why
-- [ ] A spec with no rulings has no file
+- [x] One entry is appended with trigger, claim, ruling, principle, what changed and commit, and earlier bytes are unchanged
+- [x] Numbers increase and never repeat across processes, and 16 concurrent records give 16 entries with 16 numbers
+- [x] A ruling with no commit renders as `none`, and a failed landing renders as not landed with why
+- [x] A spec with no rulings has no file
 
 **Dependencies:** Task 1 (its tests are the oracle), Task 25 (its tests are the oracle), Task 28 (its tests are the oracle), Task 38 (edits `arbiter.py` and `cli/arbiter.py`), Task 41 (edits `arbiter_policy.py`)
 **Complexity:** High
