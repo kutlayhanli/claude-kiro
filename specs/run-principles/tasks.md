@@ -114,7 +114,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 4: Property test for the arbiter's role settings
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.1, 5.2
 **Description:** Implement P-9 with Hypothesis in `tests/test_arbiter_agents.py`, named `test_p9_...`: for any subset of the four settings across global, project and override layers, an unset one follows `reviewer.risky_*`, a set one wins by layer, and an invalid value exits with the reviewer's message. Generators: valid and invalid models and efforts, `inherit`, aliases, an unset reviewer. Settings `@settings(derandomize=True, max_examples=200, database=None, deadline=None)`. The file declares `PROPERTIES = {"P-9": ...}`.
@@ -125,12 +125,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 5 (P-9 at `agents.resolve`)
 
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the P-9 row
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] The tests call the decision seam (`agents.resolve`), not a server
-- [ ] Tests exercise the real boundary named in the test plan (the seam)
-- [ ] Tests fail before the implementation exists for the right reason (`arbiter` is an unknown role)
-- [ ] No mocks of the project's own code in integration tests
+- [x] The generators cover every surface form and negative listed in the P-9 row
+- [x] Settings are deterministic (derandomized, no database)
+- [x] The tests call the decision seam (`agents.resolve`), not a server
+- [x] Tests exercise the real boundary named in the test plan (the seam)
+- [x] Tests fail before the implementation exists for the right reason (`arbiter` is an unknown role)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 3 (same test file)
 **Complexity:** Medium
