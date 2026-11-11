@@ -758,7 +758,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 32: Add lane tickets for /spec:create
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 11.5, 11.7
 **Description:** Create `src/claude_kiro/arbiter.py` with lane ticket helpers: open and close write and remove `<checkout>/.ck/arbiter-lane/<spec>.json` (`{"spec", "openedAt"}`). Add `ck arbiter lane open|close SPEC --json` to the `arbiter` group in `src/claude_kiro/cli/arbiter.py`. Foundation task: its Verify is a smoke check. Lane tickets are verified at Task 36 by Task 33 (TC-101, TC-103).

@@ -17,6 +17,7 @@ from typing import Optional
 
 import click
 
+from ..arbiter import close_lane, open_lane
 from ..principles import STARTER_TEXT, plan_may_be_decided
 
 PRINCIPLES_REL = Path("specs") / "PRINCIPLES.md"
@@ -96,3 +97,32 @@ def check(spec: str, as_json: bool):
 @click.group()
 def arbiter():
     """The arbiter: rulings on test-conflict claims."""
+
+
+@arbiter.group("lane")
+def lane():
+    """The /spec:create lane ticket."""
+
+
+@lane.command("open")
+@click.argument("spec")
+@click.option("--json", "as_json", is_flag=True)
+def lane_open(spec: str, as_json: bool):
+    """Write the lane ticket for SPEC in this checkout."""
+    path = open_lane(_toplevel(), spec)
+    if as_json:
+        click.echo(json.dumps({"spec": spec, "open": True, "path": str(path)}))
+    else:
+        click.echo(f"Opened lane for {spec}: {path}")
+
+
+@lane.command("close")
+@click.argument("spec")
+@click.option("--json", "as_json", is_flag=True)
+def lane_close(spec: str, as_json: bool):
+    """Remove the lane ticket for SPEC. Succeeds when there is none."""
+    removed = close_lane(_toplevel(), spec)
+    if as_json:
+        click.echo(json.dumps({"spec": spec, "open": False, "removed": removed}))
+    else:
+        click.echo(f"Closed lane for {spec}" + ("" if removed else " (no ticket)"))
