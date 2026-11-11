@@ -131,8 +131,7 @@ def scope_findings(sim: SimInput) -> ScopeResult:
         if task.track == "test":
             for path in dict.fromkeys(_norm(f) for f in task.files):
                 owners.setdefault(path, []).append(num)
-    # A suite is shared when a test task owns it whose suite may not be due at another task's gate (12.2).
-    shared = dict(owners)
+    shared = {path: nums for path, nums in owners.items() if len(set(nums)) >= 2}
 
     found: Set[Tuple[str, str, str]] = set()
     for num, task in tasks.items():
