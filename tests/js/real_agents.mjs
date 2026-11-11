@@ -66,12 +66,21 @@ export function realAgents({ ck, scenario = {}, fallback = null, external = p =>
       if (!worktree && claim[0] === '-C') worktree = claim[1]
       await runCk(n, claim)
     }
-    // 2. write the scenario's files and commit them
+    // 2. bring in the target branch when the prompt asks for it ("merge <branch> into your branch": every task
+    // prompt, and the retry after a test fix or a live edge), then write the scenario's files and commit them
+    const into = prompt.match(/\bmerge (\S+) into your branch/)
+    if (worktree && into) {
+      const m = await exec('git', ['-C', worktree, '-c', 'user.name=scripted', '-c', 'user.email=scripted@example.com', 'merge', '--no-edit', into[1]], { env: ck.env, external })
+      runs.push({ task: n, argv: ['git', 'merge', into[1]], code: m.code })
+      if (m.code !== 0) await exec('git', ['-C', worktree, 'merge', '--abort'], { env: ck.env, external })
+    }
     const files = (scenario.files && scenario.files[n]) || {}
     if (worktree && Object.keys(files).length) {
       for (const [rel, content] of Object.entries(files)) {
-        fs.mkdirSync(path.dirname(path.join(worktree, rel)), { recursive: true })
-        fs.writeFileSync(path.join(worktree, rel), content)
+        const file = path.join(worktree, rel)
+        fs.mkdirSync(path.dirname(file), { recursive: true })
+        // a function value edits the worktree's current file (marking the task Done in tasks.md as it is now)
+        fs.writeFileSync(file, typeof content === 'function' ? content(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '') : content)
       }
       await exec('git', ['-C', worktree, 'add', '-A'], { env: ck.env, external })
       const c = await exec('git', ['-C', worktree, '-c', 'user.name=scripted', '-c', 'user.email=scripted@example.com', 'commit', '-q', '-m', scenario.message?.[n] ?? `task ${n}: scripted`], { env: ck.env, external })

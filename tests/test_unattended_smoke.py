@@ -104,6 +104,18 @@ const worktreeFor = async (prompt, name) => {
   return path.join(cfg.root, '.ck', 'worktrees', `${cfg.spec}-task-${name}`)
 }
 const tail = s => String(s || '').slice(-1500)
+// Task `n` marked Done in a tasks.md `text` (the agent's own edit of the worktree's current file, as `mark_done`).
+const markDone = (text, n) => {
+  const start = text.indexOf(`### Task ${n}:`)
+  if (start < 0) return text
+  const nxt = text.indexOf('\n### Task ', start + 1)
+  const end = nxt < 0 ? text.length : nxt
+  const block = text.slice(start, end).replace('**Status:** Not Started', '**Status:** Done').replaceAll('- [ ]', '- [x]')
+  return text.slice(0, start) + block + text.slice(end)
+}
+// A scenario file is text, or {markDone: n}: the worktree's current tasks.md with Task n marked Done.
+const scenarioFiles = n => Object.fromEntries(Object.entries((sc.files && sc.files[n]) || {}).map(([rel, v]) =>
+  [rel, v && typeof v === 'object' && v.markDone ? cur => markDone(cur, String(v.markDone)) : v]))
 
 const agent = async (prompt, opts) => {
   const label = (opts && opts.label) || ''
@@ -128,7 +140,7 @@ const agent = async (prompt, opts) => {
       return { task: n, status: 'blocked', gatePassed: false, summary: 'the conflict is real', commits: '', testConflict: conflict }
     }
     const blocked = conflict && !tr.testfixDone
-    const files = blocked ? {} : (sc.files && sc.files[n]) || {}
+    const files = blocked ? {} : scenarioFiles(n)
     const a = realAgents({ ck: ckSpec, scenario: { files: { [n]: files } } })
     const res = await a.agent(prompt, opts)
     runs.push(...a.runs.map(r => ({ ...r, attempt: tr.attempts[n] })))
@@ -271,16 +283,15 @@ def demo_project(tmp_path: Path, calc_tests: str) -> Path:
     return root
 
 
-def done_tasks_md(n: str) -> str:
-    return mark_done(h.attr_tasks_md({"1": "Done", "6": "Done"}), n)
-
-
 def calc_scenario() -> Dict[str, Any]:
+    """Each task agent marks its own task Done in the worktree's current tasks.md (`{"markDone": n}`, applied by the
+    driver), never a copy made before the run: a task that starts after another merged (Task 3 is held behind Task 2,
+    both own calc.py, 13.1) must not revert that task's Done on landing."""
     return {"files": {
-        "2": {"calc.py": BROKEN_CALC, "specs/demo/tasks.md": done_tasks_md("2")},
-        "3": {"sub_ok.py": "SUB = True\n", "specs/demo/tasks.md": done_tasks_md("3")},
-        "7": {"seven.py": "SEVEN = 7\n", "specs/demo/tasks.md": done_tasks_md("7")},
-        "8": {"eight.py": "EIGHT = 8\n", "specs/demo/tasks.md": done_tasks_md("8")},
+        "2": {"calc.py": BROKEN_CALC, "specs/demo/tasks.md": {"markDone": "2"}},
+        "3": {"sub_ok.py": "SUB = True\n", "specs/demo/tasks.md": {"markDone": "3"}},
+        "7": {"seven.py": "SEVEN = 7\n", "specs/demo/tasks.md": {"markDone": "7"}},
+        "8": {"eight.py": "EIGHT = 8\n", "specs/demo/tasks.md": {"markDone": "8"}},
     }}
 
 
@@ -390,7 +401,7 @@ def tc177_run(tmp_path_factory) -> Dict[str, Any]:
     root = demo_project(tmp, CALC_BAD)
     target = h.integration_worktree(root)
     scenario = calc_scenario()
-    scenario["files"]["2"] = {"calc.py": GOOD_CALC, "specs/demo/tasks.md": done_tasks_md("2")}
+    scenario["files"]["2"] = {"calc.py": GOOD_CALC, "specs/demo/tasks.md": {"markDone": "2"}}
     scenario["conflicts"] = {"2": CONFLICT}
     scenario["testfix"] = {"tests/test_calc_tc.py": CALC_GOOD}
     scenario["testfixChanged"] = [{"file": "tests/test_calc_tc.py", "test": "test_tc2_sub"}]
@@ -445,13 +456,27 @@ def test_tc43b_after_the_land_task_2_is_retried_and_merges_and_the_final_gate_is
 # --------------------------------------------------------------------------- TC-179
 
 SHIM = """#!/bin/sh
-# `mtr` for the smoke test: it exists only once the thesis command's source file is in the current worktree.
+# `mtr` for the smoke test: the fixture click CLI, whose `thesis` group exists only once the thesis command's source
+# file is in the current worktree. Before that it answers as click does for a command that is not registered, the
+# form `missing_command` reads (12.5).
 if [ -f "$PWD/src/mtr/thesis.py" ]; then
   PYTHONPATH="$PWD/src" exec python -c 'from mtr.cli import cli; cli()' "$@"
 fi
-echo "mtr: command not found: $*" >&2
-exit 127
+echo "Usage: mtr [OPTIONS] COMMAND [ARGS]..." >&2
+echo "Try 'mtr --help' for help." >&2
+echo "" >&2
+echo "Error: No such command '$1'." >&2
+exit 2
 """
+
+# Test task 1's test, as a test that runs a CLI reports it: the invocation and the CLI's own last line in the
+# assertion message, so the gate's failure entry carries the missing command (as `tests/test_command_deps.py` does).
+SMOKE_THESIS_TEST = (
+    "import subprocess\n\n\n"
+    "def test_thesis_new():\n"
+    '    proc = subprocess.run(["mtr", "thesis", "new"], capture_output=True, text=True)\n'
+    '    assert proc.returncode == 0, "mtr thesis new: " + proc.stderr.strip().splitlines()[-1]\n'
+)
 
 
 def command_spec(tmp_path: Path) -> Path:
@@ -459,8 +484,11 @@ def command_spec(tmp_path: Path) -> Path:
     Task 1 only. The project is a git repo with an integration worktree for spec `sim`."""
     from test_command_deps import command_project
 
-    root = command_project(tmp_path)
+    root = command_project(tmp_path, test_src=SMOKE_THESIS_TEST)
     text = (root / "specs" / "sim" / "tasks.md").read_text()
+    # test task 1's suite is its Verify: Task 2's task-scoped gate runs its oracle's suite (2.10), where the command
+    # `mtr thesis new` goes missing until Task 5 lands
+    text = text.replace("**Verifies:** Task 2", "**Verify:** `python -m pytest -q tests/test_thesis.py`\n**Verifies:** Task 2", 1)
     (root / "specs" / "sim" / "tasks.md").write_text(mark_done(text, "1"))
     h.commit_all(root, "task 1 done")
     code, _, err = h.ck_text(root, "worktree", "integration", "sim")
@@ -479,11 +507,10 @@ def shim_env(tmp_path: Path) -> Dict[str, str]:
     return {"PATH": str(bin_dir) + os.pathsep + h._ck_env(tmp_path, None)["PATH"]}
 
 
-def sim_scenario(root: Path) -> Dict[str, Any]:
-    base = (root / "specs" / "sim" / "tasks.md").read_text()
+def sim_scenario() -> Dict[str, Any]:
     return {"files": {
-        "5": {"src/mtr/thesis.py": "def new():\n    return 'new'\n", "specs/sim/tasks.md": mark_done(base, "5")},
-        "2": {"src/mtr/report.py": "def report():\n    return 'report'\n", "specs/sim/tasks.md": mark_done(base, "2")},
+        "5": {"src/mtr/thesis.py": "def new():\n    return 'new'\n", "specs/sim/tasks.md": {"markDone": "5"}},
+        "2": {"src/mtr/report.py": "def report():\n    return 'report'\n", "specs/sim/tasks.md": {"markDone": "2"}},
     }}
 
 
@@ -507,7 +534,7 @@ def test_tc179_with_the_relinked_edge_task_5_merges_before_task_2(tmp_path):
     code, _, err = h.ck_json(root, "relink", "sim", "--commands", "--apply", "--commit", "--json")
     assert code == 0, err
     h.git(h.integration_worktree(root, "sim"), "merge", "-q", "--no-edit", "main")
-    run = run_workflow(tmp_path, root, "sim", sim_scenario(root), full_gate_every=10, extra_env=shim_env(tmp_path))
+    run = run_workflow(tmp_path, root, "sim", sim_scenario(), full_gate_every=10, extra_env=shim_env(tmp_path))
     order = run.out.get("order", [])
     assert order and order[0].startswith("5"), f"Task 2 started before Task 5: {order}"
     assert not run.result.get("liveEdges"), run.result.get("liveEdges")
@@ -515,7 +542,7 @@ def test_tc179_with_the_relinked_edge_task_5_merges_before_task_2(tmp_path):
 
 def test_tc179_without_relink_the_run_adds_the_live_edge_and_task_2_merges_after_task_5(tmp_path):
     root = command_spec(tmp_path)
-    run = run_workflow(tmp_path, root, "sim", sim_scenario(root), full_gate_every=10, extra_env=shim_env(tmp_path))
+    run = run_workflow(tmp_path, root, "sim", sim_scenario(), full_gate_every=10, extra_env=shim_env(tmp_path))
     edges = run.result.get("liveEdges") or []
     assert any(str(e.get("task")) == "2" and str(e.get("dependsOn")) == "5" for e in edges), f"no live edge 2 -> 5: {edges}"
     lands = [c for c in run.ck("worktree", "land")]

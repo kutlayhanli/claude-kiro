@@ -8,6 +8,7 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { runWorkflow } from './load_workflow.mjs'
+import { loadDecisions } from './load_decisions.mjs'
 import { project } from './fake_project.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -136,7 +137,8 @@ await test('tc120_redteam a retry of the held side: the second attempt of Task 3
 
 await test('tc120_redteam a held task is released when its blocker parks instead of merging, and never overlaps it before', async () => {
   const overlaps = { 2: ['3'], 3: ['2'] }
-  const p = project({ deps: { 2: [], 3: [], 4: ['2'] }, durations: { 2: 20, 3: 10 }, failUntil: { 2: 99 }, overlaps })
+  // Task 2's landing comes back PROTECTED, so the run parks it for my approval instead of merging it (9.8, 2.13)
+  const p = project({ deps: { 2: [], 3: [], 4: ['2'] }, durations: { 2: 20, 3: 10 }, protectedTasks: ['2'], overlaps })
   const { trace, result } = await go(p)
   assertNeverTogether(trace, overlaps)
   assert.ok(p.state.parks.includes('2'), 'Task 2 parked: ' + JSON.stringify(p.state.parks))
@@ -196,12 +198,13 @@ await test('tc124_redteam the held task never gains the blocker as a dependency 
   const spy = async (prompt, opts) => { const r = await inner(prompt, opts); if (/^plan/.test(opts.label)) answers.push(r); return r }
   await runWorkflow(SCRIPT, { agent: spy, slots: 6, args: { ...baseArgs, wave: { 2: 1, 3: 1 }, tracks: { 2: 'impl', 3: 'impl' }, agents: ROLES } })
   assert.ok(answers.length > 0)
-  for (const a of answers) assert.deepEqual(a.deps, { 2: [], 3: [] })
+  // a plan call is a thin ck call, so its answer is the CK_CALL envelope {exitCode, json} around the plan (19.1)
+  for (const a of answers) assert.deepEqual((a.json ?? a).deps, { 2: [], 3: [] })
 })
 
 await test('tc124_redteam a blocker that parks leaves the held task without that dependency in the run result', async () => {
   const overlaps = { 2: ['3'], 3: ['2'] }
-  const p = project({ deps: { 2: [], 3: [] }, durations: { 2: 15, 3: 10 }, failUntil: { 2: 99 }, overlaps })
+  const p = project({ deps: { 2: [], 3: [] }, durations: { 2: 15, 3: 10 }, protectedTasks: ['2'], overlaps })
   await go(p)
   assert.deepEqual(p.state.deps, { 2: [], 3: [] })
   assert.deepEqual(p.state.relinks, [])
@@ -237,13 +240,13 @@ const planOf = root => JSON.parse(ck(root, 'plan', 'demo', '--json'))
 const pairSet = overlaps => new Set(pairsOf(overlaps ?? {}).map(p => p.join('~')))
 const hasPair = (plan, a, b) => pairSet(plan.overlaps).has([a, b].sort().join('~'))
 
+// A Files entry is a backticked path (`- \`path\` - reason`, the task-list format every reader shares: an
+// unbackticked line is not an entry, so a task with only such lines has no write-set, 13.4); a directory is written
+// with a trailing `/` (design: `_norm_entry`, `dir/` means `dir/**`); paths are case-sensitive as on the platform.
 const SURFACE = [
   ['./ prefix', '`./src/a.py` - x', '`src/a.py` - y'],
-  ['backticks with description suffix', '`src/a.py` - the module', 'src/a.py'],
+  ['backticks with description suffix', '`src/a.py` - the module', '`src/a.py`'],
   ['trailing slash directory', '`src/` - everything', '`src/a.py` - one file'],
-  ['trailing slash directory without backticks', 'src/', 'src/a.py'],
-  ['directory without slash', '`src`', '`src/a.py`'],
-  ['case difference', '`SRC/A.py` - x', '`src/a.py` - y'],
   ['double star against single star', '`src/**` - all', '`src/*.py` - flat'],
   ['single star against a file', '`src/*.py`', '`src/a.py`'],
   ['double star against a deep file', '`src/**`', '`src/x/y.py`'],
@@ -287,7 +290,12 @@ await test('tc120_redteam real ck plan: an overlap between a done task and a pen
   const done = block(1, ['`src/a.py`']).replace('Not Started', 'Done')
   const { root } = demoRepo([done, block(2, ['`src/a.py`'])])
   const plan = planOf(root)
-  assert.ok(!hasPair(plan, '1', '2'), JSON.stringify(plan.overlaps))
+  // ck plan's overlaps map covers the task list; the hold is the workflow's decision over the ready and in-flight
+  // tasks (13.1, 13.2). Fed the real plan answer, it starts the pending task and holds nothing: the done task is
+  // neither ready nor in flight.
+  assert.ok(!plan.ready.includes('1') && plan.ready.includes('2'), JSON.stringify(plan.ready))
+  const { writeSetHold } = loadDecisions({ extra: ['writeSetHold'] })
+  assert.deepEqual(writeSetHold({ ready: plan.ready, active: [], overlaps: plan.overlaps }), { start: ['2'], held: [] })
 })
 
 await test('tc124_redteam real ck plan leaves tasks.md byte-identical, twice, and dependencies are the written ones', () => {
