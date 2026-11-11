@@ -1243,7 +1243,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 53: Red-team the prohibitions of Story 7
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.2, 7.4, 7.6
 **Description:** Try to break each SHALL NOT clause of Story 7 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. For 7.2: a ruling that cites a principle quoted inside its reasoning, an id with trailing whitespace, the arbiter's earlier ruling fed back as this answer. For 7.4: the same claim returned under a reformatted test id (parameters, `./` prefix, whitespace, case). For 7.6: a 4th claim arriving by a resumed run, and by parallel tasks each near the limit. Written from the requirements only, never from the implementation.
@@ -1253,12 +1253,13 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 66 (red team of 7.2, 7.4, 7.6 in a run; needs the recording path too)
 
 **Acceptance:**
-- [ ] Each SHALL NOT clause has at least one adversarial test per listed input class that applies to it
-- [ ] Tests exercise the real boundary named in the test plan (workflow with real `ck`, real files)
-- [ ] Tests fail before the implementation exists for the right reason (no ruling validation)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each SHALL NOT clause has at least one adversarial test per listed input class that applies to it
+- [x] Tests exercise the real boundary named in the test plan (workflow with real `ck`, real files)
+- [x] Tests fail before the implementation exists for the right reason (no ruling validation)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (project fixture), Task 2 (fake runtime answers)
+**Implementation notes:** Runs the workflow through the bridge with the real `ck` behind the `arbiter-` steps. Rulings carry `claim` as `<task>|test:<file>::<test>`.
 **Complexity:** High
 **Risk:** safety (exercises the needs-input notification route)
 
