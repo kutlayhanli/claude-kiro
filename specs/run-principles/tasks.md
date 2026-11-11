@@ -389,7 +389,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 16: Find stories with no justification
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 2.5, 3.1, 3.2, 3.3, 3.4, 3.5
 **Description:** Create `src/claude_kiro/justifications.py` with `JustificationFinding` and the pure `justification_findings(text)`. Walk the requirements text per story section, outside fenced code. A line counts only inside its own story's section. Content is the text after `**Without it:**` through its paragraph, with `*_\`~#>:-` and whitespace removed; empty counts as missing. Any non-empty content passes. `None` or text with no stories returns `[]`. Findings come out in document order. Harness Contract owner: `lint.justification_findings`, which is `justifications.justification_findings`.
@@ -399,9 +399,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 13 (P-5, P-6 at `justification_findings`)
 
 **Acceptance:**
-- [ ] A story with no line, or a line with only whitespace or markup, is reported with number and title
-- [ ] A line outside the story's section or in a fence counts for no story
-- [ ] Criteria are never required to carry a line, and `None` returns no finding
+- [x] A story with no line, or a line with only whitespace or markup, is reported with number and title
+- [x] A line outside the story's section or in a fence counts for no story
+- [x] Criteria are never required to carry a line, and `None` returns no finding
 
 **Dependencies:** Task 13 (its tests are the oracle)
 **Complexity:** Medium
@@ -665,7 +665,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 28: Property test for the append-only record
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 10.4, 10.5, 10.6
 **Description:** Implement P-26 with Hypothesis in `tests/test_arbiter_cli.py`, named `test_p26_...`. Any sequence of records keeps each earlier prefix byte-identical, numbers strictly increase, and there is no file before the first record, with entry text holding `## 3`, `---`, fences, CRLF, unicode and very long lines, and runs split across real processes (G, through `ck arbiter record` and `arbiter_policy.append_entry`, `next_number`). Settings `@settings(derandomize=True, max_examples=30, database=None, deadline=None)`. Add it to the file's `PROPERTIES` map.
@@ -676,12 +676,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 42 (P-26 at `append_entry` and `ck arbiter record`)
 
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the P-26 row
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] The tests call the decision seams, plus real subprocesses for the row's process split, not a server
-- [ ] Tests exercise the real boundary named in the test plan (real files, real subprocesses)
-- [ ] Tests fail before the implementation exists for the right reason (no record command or seam)
-- [ ] No mocks of the project's own code in integration tests
+- [x] The generators cover every surface form and negative listed in the P-26 row
+- [x] Settings are deterministic (derandomized, no database)
+- [x] The tests call the decision seams, plus real subprocesses for the row's process split, not a server
+- [x] Tests exercise the real boundary named in the test plan (real files, real subprocesses)
+- [x] Tests fail before the implementation exists for the right reason (no record command or seam)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (strategies), Task 27 (same test file)
 **Complexity:** Medium
