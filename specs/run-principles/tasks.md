@@ -2045,7 +2045,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 88: Extend the plugin tests to the arbiter and auditor agents
-**Status:** Not Started
+**Status:** In Progress
 **Track:** test
 **Requirements:** 6.8, 13.4
 **Description:** In `tests/test_plugin.py`, add `arbiter` and `auditor` to `AGENTS` (`"arbiter": "arbiter"`, `"auditor": "reviewer"`), so the existing checks cover the two new agent files, their generated `ck-` copies, and the guide. Adding them also makes the guide assertion require `spec:arbiter` and `spec:auditor` in `plugin/resources/without-workflow-tool.md`, which Task 76 writes, so this suite verifies Task 76 as well as Task 6. Its Verify leaves out only the dogfood and vendored-copy tests, which need Task 92's protected `.claude/` copies.
