@@ -68,6 +68,7 @@ def make_repo(
     with_test_task: bool = True,
     log: Optional[Path] = None,
     other_bad_on_base: bool = False,
+    flaky_marker: Optional[Path] = None,
 ) -> None:
     """A repository whose `verify` runs tests/test_other.py: red as soon as `other_bad.txt` exists."""
     root.mkdir(parents=True, exist_ok=True)
@@ -83,6 +84,15 @@ def make_repo(
         f"    {logging.strip() or 'pass'}\n"
         f"    assert not (Path(__file__).resolve().parent.parent / {OTHER_BAD!r}).exists(), 'an earlier task broke me'\n"
     )
+    if flaky_marker:  # fails on its first run, keyed by a marker it writes outside the tree, then passes
+        (root / "tests/test_other.py").write_text(
+            "from pathlib import Path\n\n\n"
+            "def test_other():\n"
+            f"    marker = Path({str(flaky_marker)!r})\n"
+            "    first = not marker.exists()\n"
+            "    marker.write_text('ran')\n"
+            "    assert not first, 'fails on the first run only'\n"
+        )
     (root / "specs/demo").mkdir(parents=True)
     (root / "specs/demo/tasks.md").write_text(tasks_md(total, done, with_test_task))
     (root / "specs/ck.json").write_text(
@@ -155,6 +165,10 @@ def test_tc170_only_the_task_whose_own_gate_fails_is_red(tmp_path):
     for n in ("1", "2"):
         assert [g["green"] for g in gate_for(data, [n])] == [True]
     # The RED task carries the tail and failures of its own gate: its Verify, no other task's.
+    own = alone[0]
+    assert by["3"]["checkTail"] == own["checkTail"]
+    if "failures" in own:
+        assert by["3"].get("failures") == own["failures"]
     assert "f3.txt" in by["3"]["checkTail"]
     assert "f1.txt" not in by["3"]["checkTail"] and "f2.txt" not in by["3"]["checkTail"]
     assert "unreproduced" not in data
@@ -181,6 +195,22 @@ def test_tc171_a_batch_only_failure_blames_no_task_and_no_gate_below_widens(tmp_
     assert last["tasks"] == ["2"] and last["green"] is True
     assert log_lines(log) == 1  # `verify` ran once: the batch gate, no gate after it
     assert (root / OTHER_BAD).exists()  # the target holds what the batch gate saw
+
+
+def test_tc172_a_batch_gate_that_fails_once_blames_no_task(tmp_path):
+    """TC-172: the batch gate fails on its first run only; nothing is RED, both tasks merge, `unreproduced` is set."""
+    root, marker = tmp_path / "repo", tmp_path / "flaky.marker"
+    make_repo(root, 2, flaky_marker=marker)
+    assert ck(root, "worktree", "create", "demo", "1", "2").exit_code == 0
+    implement(root, 1)
+    implement(root, 2)
+
+    result, data, by = land(root, "1", "2")
+    assert [by[n]["state"] for n in ("1", "2")] == ["MERGED", "MERGED"], result.output
+    assert not [n for n, t in by.items() if t["state"] == "RED"]
+    assert sorted(data["gates"][0]["tasks"]) == ["1", "2"] and data["gates"][0]["green"] is False
+    assert marker.exists()
+    assert sorted(data["unreproduced"]["tasks"]) == ["1", "2"]
 
 
 @pytest.mark.parametrize(
