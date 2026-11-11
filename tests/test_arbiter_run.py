@@ -658,3 +658,160 @@ def test_tc157_a_risk_path_match_with_no_risk_tag_starts_at_the_risky_tier_and_c
         assert arbiter_calls(out["events"]) == ["arbiter task 1"], ", ".join(out["events"])
         routed.append(tier_of(out))
     assert routed[0] == routed[1] == NORMAL_TIER, "complexity routing on still never changes the arbiter tier: " + repr(routed)
+
+
+# --------------------------------------------------------------------------- TC-54 to TC-60 (validity, claim identity, limits)
+
+REWIRED = DEFAULT_TASKS.replace("**Dependencies:** Task 1", "**Dependencies:** None")
+
+
+def conflict_of(name):
+    return {**CONFLICT, "test": f"test_{name}", "reason": f"the {name} test cannot pass"}
+
+
+def key_of(name):
+    return f"1|test:{CONFLICT['file']}::test_{name}"
+
+
+def code_ruling(name):
+    return ruling("code", reasoning=f"reasoning-{name}-held", claim=key_of(name))
+
+
+def one_claim(name, answers, attempts=1, **extra):
+    return {"deps": {"1": []}, "testConflicts": {"1": {"conflict": conflict_of(name), "attempts": attempts}}, "rulings": {"1": answers}, **extra}
+
+
+def many_claims(names, answers, **extra):
+    return {"deps": {"1": []}, "testConflictsList": {"1": {"conflicts": [conflict_of(n) for n in names], "attempts": 1}},
+            "rulings": {"1": answers}, **extra}
+
+
+def needs_text(out):
+    return json.dumps(needs(out))
+
+
+def invalid_forms():
+    def spec_edit(**extra):
+        built = ruling("spec_edit", reasoning=f"marker-{extra.pop('mark')}-held")
+        built.update(extra)
+        return built
+
+    no_principle = spec_edit(mark="no-principle")
+    del no_principle["principle"]
+    return {
+        "no-principle": no_principle,
+        "empty-principle": spec_edit(mark="empty-principle", principle=""),
+        "unknown-principle": spec_edit(mark="unknown-principle", principle="project:made-up"),
+        "unknown-outcome": spec_edit(mark="unknown-outcome", outcome="revert"),
+        "two-outcomes": spec_edit(mark="two-outcomes", outcome=["code", "spec_edit"]),
+        "malformed": {"status": "ruled", "reasoning": ["marker-malformed-held"], "outcome": "code", "principle": PRINCIPLE},
+    }
+
+
+@pytest.mark.parametrize("form", list(invalid_forms()))
+def test_tc54_an_invalid_ruling_is_not_applied_not_recorded_and_goes_to_me_with_the_arbiters_output(bridge, tmp_path, form):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    answer = invalid_forms()[form]
+    opts = {**CONFLICT_OPTS, "rulings": {"1": [answer]}, "arbiterEdits": {"1": {"files": {"specs/demo/tasks.md": REWIRED}}}}
+    out = run(bridge, project, opts, agents=roles("haiku", ["opus"]))
+    ev = out["events"]
+    assert arbiter_calls(ev) == ["arbiter task 1"], ", ".join(ev)
+    assert [e for e in ev if e.startswith(("arbiter-land", "land arbiter"))] == [], "no landing ran: " + ", ".join(ev)
+    assert "worktree land demo arbiter" not in argv_text(out), argv_text(out)
+    for where in ("target", "root", "branch"):
+        assert decisions_entries(project, where) == [], f"nothing was recorded ({where})"
+    assert not (project.target / "specs" / "demo" / "decisions.md").exists(), "decisions.md is absent"
+    assert (project.target / "specs" / "demo" / "tasks.md").read_text() == DEFAULT_TASKS, "tasks.md is unchanged"
+    entries = needs(out)
+    assert len(entries) == 1, json.dumps(out["result"].get("needsInput"))
+    text = json.dumps(entries[0])
+    mark = "marker-malformed-held" if form == "malformed" else f"marker-{form}-held"
+    assert mark in text, f"the entry carries the arbiter's output ({mark!r}): " + text
+    assert out["result"].get("rulings", []) == [], "an invalid ruling is not counted as a ruling"
+
+
+def test_tc55_the_same_claim_on_attempt_two_is_the_same_claim_and_a_different_test_is_not(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    out = run(bridge, project, one_claim("alpha", [code_ruling("alpha"), REQ], attempts=2), agents=roles("haiku", []))
+    ev = out["events"]
+    assert len(attempts(ev)) >= 2, "the claim came back on a later attempt: " + ", ".join(ev)
+    assert arbiter_calls(ev) == ["arbiter task 1"], "the same claim on attempt 2 is not ruled again: " + ", ".join(ev)
+    assert len(decisions_entries(project)) == 1, decisions_entries(project)
+    again = run(bridge, project, one_claim("alpha", [REQ]), agents=roles("haiku", []))
+    assert arbiter_calls(again["events"]) == [], "the same claim in a second run on the same repo is the same claim: " + ", ".join(again["events"])
+    assert len(needs(again)) == 1, json.dumps(again["result"].get("needsInput"))
+    assert len(decisions_entries(project)) == 1, "nothing new was recorded"
+    other = run(bridge, project, one_claim("beta", [code_ruling("beta")]), agents=roles("haiku", []))
+    assert arbiter_calls(other["events"]) == ["arbiter task 1"], "a different test is a different claim: " + ", ".join(other["events"])
+    assert len(decisions_entries(project)) == 2, decisions_entries(project)
+
+
+def test_tc56_a_claim_returning_after_its_ruling_was_applied_gets_no_call_and_the_entry_holds_the_ruling_and_the_new_evidence(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    out = run(bridge, project, one_claim("alpha", [code_ruling("alpha"), REQ], attempts=2), agents=roles("haiku", []))
+    ev = out["events"]
+    assert arbiter_calls(ev) == ["arbiter task 1"], ", ".join(ev)
+    entries = needs(out)
+    assert len(entries) == 1, json.dumps(out["result"].get("needsInput"))
+    text = json.dumps(entries[0])
+    assert "reasoning-alpha-held" in text, "the entry holds the earlier ruling: " + text
+    assert "print the greeting before exiting" in text or "code" in text, text
+    assert conflict_of("alpha")["reason"] in text, "the entry holds the new evidence: " + text
+    assert REQ["requirement"]["wording"] not in text, "the second scripted answer was never asked for: " + text
+
+
+def test_tc57_a_different_claim_on_a_task_with_one_ruling_gets_its_own_ruling(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    out = run(bridge, project, many_claims(["alpha", "beta"], [code_ruling("alpha"), code_ruling("beta")]), agents=roles("haiku", []))
+    ev = out["events"]
+    assert len(arbiter_calls(ev)) == 2, "each claim got its own call: " + ", ".join(ev)
+    entries = decisions_entries(project)
+    assert len(entries) == 2, entries
+    joined = json.dumps(entries)
+    assert "reasoning-alpha-held" in joined and "reasoning-beta-held" in joined, joined
+
+
+def test_tc58_with_three_rulings_a_fourth_claim_makes_no_call_and_the_entry_lists_the_three(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    names = ["alpha", "beta", "gamma", "delta"]
+    answers = [code_ruling(n) for n in names[:3]] + [REQ]
+    out = run(bridge, project, many_claims(names, answers), agents=roles("haiku", []))
+    ev = out["events"]
+    assert len(arbiter_calls(ev)) == 3, "the fourth claim made no arbiter call: " + ", ".join(ev)
+    assert len(decisions_entries(project)) == 3, decisions_entries(project)
+    entries = needs(out)
+    assert entries, json.dumps(out["result"].get("needsInput"))
+    text = json.dumps(entries)
+    for n in names[:3]:
+        assert f"reasoning-{n}-held" in text, f"the entry lists the earlier ruling {n}: " + text
+    assert REQ["requirement"]["wording"] not in text, text
+
+
+def test_tc59_a_normal_call_plus_a_risky_re_run_counts_one_ruling(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    first = run(bridge, project, one_claim("alpha", [{**STRONGER, "claim": key_of("alpha")}, code_ruling("alpha")]), agents=tier_roles())
+    assert arbiter_calls(first["events"]) == ["arbiter task 1", "arbiter task 1 risky"], ", ".join(first["events"])
+    assert len(decisions_entries(project)) == 1, "two calls, one recorded ruling: " + str(decisions_entries(project))
+    second = run(bridge, project, one_claim("beta", [code_ruling("beta")]), agents=tier_roles())
+    assert arbiter_calls(second["events"]) == ["arbiter task 1"], ", ".join(second["events"])
+    third = run(bridge, project, one_claim("gamma", [code_ruling("gamma")]), agents=tier_roles())
+    assert arbiter_calls(third["events"]) == ["arbiter task 1"], "three claims, so far two rulings by the count of one per claim: " + ", ".join(third["events"])
+    assert len(decisions_entries(project)) == 3, decisions_entries(project)
+    fourth = run(bridge, project, one_claim("delta", [REQ]), agents=tier_roles())
+    assert arbiter_calls(fourth["events"]) == [], "the fourth claim hits the limit of 3: " + ", ".join(fourth["events"])
+    text = needs_text(fourth)
+    for n in ("alpha", "beta", "gamma"):
+        assert f"reasoning-{n}-held" in text, text
+
+
+def test_tc60_rulings_from_an_earlier_run_on_disk_count_toward_the_limits_in_a_new_run(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path)
+    earlier = run(bridge, project, many_claims(["alpha", "beta"], [code_ruling("alpha"), code_ruling("beta")]), agents=roles("haiku", []))
+    assert len(arbiter_calls(earlier["events"])) == 2, ", ".join(earlier["events"])
+    assert len(decisions_entries(project)) == 2, "the earlier run's rulings are on disk"
+    later = run(bridge, project, many_claims(["gamma", "delta"], [code_ruling("gamma"), REQ]), agents=roles("haiku", []))
+    assert len(arbiter_calls(later["events"])) == 1, "the new run's second claim was the 4th ruling: " + ", ".join(later["events"])
+    assert len(decisions_entries(project)) == 3, decisions_entries(project)
+    text = needs_text(later)
+    for n in ("alpha", "beta", "gamma"):
+        assert f"reasoning-{n}-held" in text, f"the entry lists {n}: " + text

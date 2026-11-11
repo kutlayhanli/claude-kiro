@@ -1359,7 +1359,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 58: Test ruling validity, claim identity and limits in a run
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8
 **Description:** Implement TC-54 to TC-60 in `tests/test_arbiter_run.py`, named `test_tc<N>_...`. TC-54: for each invalid form, no landing runs, `decisions.md` is absent and the entry carries the arbiter's output. TC-55: the same claim on attempt 2 and in a second run on the same repo is the same; a different test is not. TC-56: a claim returning after its ruling was applied gets no arbiter call and the entry holds the ruling and new evidence. TC-57: a second, different claim on a task with one ruling gets its own ruling. TC-58: with 3 rulings a 4th claim makes no call and the entry lists the 3. TC-59: a normal call plus a risky re-run counts one ruling. TC-60: rulings from an earlier run on disk count toward the limits in a new run.
@@ -1369,10 +1369,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 65 (TC-54), Task 66 (TC-55 to 60)
 
 **Acceptance:**
-- [ ] Cross-run cases use a real ledger and real `decisions.md` in the same repo
-- [ ] Tests exercise the real boundary named in the test plan (workflow, real `ck arbiter`, real files)
-- [ ] Tests fail before the implementation exists for the right reason (no arbiter step)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Cross-run cases use a real ledger and real `decisions.md` in the same repo
+- [x] Tests exercise the real boundary named in the test plan (workflow, real `ck arbiter`, real files)
+- [x] Tests fail before the implementation exists for the right reason (no arbiter step)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 57 (same test file)
 **Complexity:** High
