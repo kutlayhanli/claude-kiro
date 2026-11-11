@@ -2217,7 +2217,7 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 ---
 
 ### Task 96: Update the implement skill for the new args and results
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 7.1, 9.8, 19.4
 **Description:** In `plugin/skills/implement/SKILL.md`: pass `runnerAgent` (`spec:runner` in plugin mode, `ck-runner` in vendor mode, null when the vendored `.claude/agents/ck-runner.md` is missing, with a warning that thin calls will run as default subagents); describe `reviewer.cross_test` as on by default and blocking; report `gates`, `testFixes`, `audit`, `runStart`, `liveEdges` and `writeSetHolds` from the result; and tell me to approve a protected landing with `ck worktree approve <spec> <task>` in my own terminal, then resume with `/spec:implement <spec>` and the same `runId` (2.13), which is not a hand repair (20.3). Also make `ck doctor` report a vendored project that lacks `.claude/agents/ck-runner.md` (TC-162b), through the vendored-file list the doctor already checks (`plugin.VENDOR_MAP`, used as `MANAGED_FILES` in `cli/main.py`) or an equivalent check in `plugin.py`, so `cli/main.py` itself does not change.
@@ -2228,10 +2228,10 @@ Create `tests/fixtures/unattended/`: `land-json-keys.json` (every key path of to
 **Verified by:** Task 65 (TC-162b for the plugin skill and `ck doctor`)
 
 **Acceptance:**
-- [ ] The skill passes the lean agent type, or null with a warning when it is unavailable (19.4)
-- [ ] The skill says cross-test is on by default and blocking (7.1)
-- [ ] The skill tells me to approve protected landings with `ck worktree approve` (9.8)
-- [ ] `ck doctor` reports a vendored project that lacks `.claude/agents/ck-runner.md` (19.4)
+- [x] The skill passes the lean agent type, or null with a warning when it is unavailable (19.4)
+- [x] The skill says cross-test is on by default and blocking (7.1)
+- [x] The skill tells me to approve protected landings with `ck worktree approve` (9.8)
+- [x] `ck doctor` reports a vendored project that lacks `.claude/agents/ck-runner.md` (19.4)
 
 **Dependencies:** Task 94 (documents the args and result fields the workflow tasks add), Task 66 (names the runner agent type), Task 65 (its tests are the oracle)
 **Complexity:** Low
