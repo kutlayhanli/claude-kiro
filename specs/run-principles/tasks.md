@@ -917,7 +917,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 39: Test landing a spec edit through the merge queue
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.7, 8.1, 8.4, 8.5, 8.6, 8.7, 9.1, 9.2
 **Description:** Implement TC-61, TC-64 to TC-70, TC-138, TC-149 and TC-156 in `tests/test_arbiter_land.py`, named `test_tc<N>_...`, with real git and the real `ck worktree land demo arbiter<k> --into BRANCH --gate --json`. TC-61: a spec-edit ruling commits on a new branch made from the integration branch and lands under the merge-queue lock. TC-64: a conflicting edit gives CONFLICT, target HEAD unchanged, no re-ruling. TC-65: a red gate gives RED, HEAD unchanged. TC-66: a branch touching a refused path gives REFUSED, HEAD unchanged. TC-67: an edit creating a dependency cycle is not landed. TC-68: an edit creating a new blocking lint finding is not landed; one that leaves an existing finding as it was may land. TC-69: an edit changing a Status field, then an acceptance mark, is not landed. TC-70: an edit moving `tc3_` out of a task's Verify names that test under what changed (the `moved` field and the entry). TC-138: the task landing's gate command creates a `holding` file and then blocks reading a FIFO the test controls; once `holding` exists the test starts the arbiter landing, checks it has not finished and that `land_lock` is held, then writes to the FIFO and asserts both merged with the arbiter commit after the task commit. No sleep orders the two landings. TC-149: a branch changing a design.md the plan reserves, with a ruling that leaves `reservedBy` empty: REFUSED, HEAD unchanged. TC-156: real `ck arbiter open` returns a worktree; `arbiter_caller(checkout=that worktree)` sends an Edit of its `specs/demo/tasks.md` through the real hook (allowed) and of `requirements.md` (denied); real `git add` and `git commit` run; `ck worktree land demo arbiter<k>` merges.
@@ -927,11 +927,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 44 (TC-61, 64 to 70, 138, 149, 156)
 
 **Acceptance:**
-- [ ] Every refusal case compares the target's HEAD before and after with real git
-- [ ] TC-138 runs two real landing processes against one integration branch, with the arbiter landing waiting on the lock the task landing holds
-- [ ] Tests exercise the real boundary named in the test plan (real git, real lint, real merge queue)
-- [ ] Tests fail before the implementation exists for the right reason (no `arbiter<k>` landing route)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Every refusal case compares the target's HEAD before and after with real git
+- [x] TC-138 runs two real landing processes against one integration branch, with the arbiter landing waiting on the lock the task landing holds
+- [x] Tests exercise the real boundary named in the test plan (real git, real lint, real merge queue)
+- [x] Tests fail before the implementation exists for the right reason (no `arbiter<k>` landing route)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (project fixture)
 **Complexity:** High
