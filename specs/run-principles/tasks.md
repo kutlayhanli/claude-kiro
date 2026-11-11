@@ -690,7 +690,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 29: Decide whether a claim may be ruled on, and at which tier
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 1.9, 5.3, 5.4, 5.5, 7.3, 7.4, 7.5, 7.6, 7.8, 7.9
 **Description:** Create `src/claude_kiro/arbiter_policy.py` with `Tier`, `Trigger`, `Outcome`, `Step`, `Claim`, `PriorClaim`, `TaskMeta`, `PrinciplesRead`, `ClaimFacts`, `ClaimDecision`, and the pure `claim_key`, `claim_facts` and `decide_claim`. `claim_key` follows the identity table in design.md (task, `|`, subject; test names normalized; evidence and claim text ignored; a review deadlock's key is the sorted identities of its findings never ruled on, so a different finding on the same file is a different claim, and a finding already covered by an applied ruling is `ask` with reason `repeat-after-ruling`; a `command-cycle` claim's subject is `command:<provider>:<command>`, D29). `claim_facts` builds `ClaimFacts`: `safety` from `TaskMeta.risk`, `principles_readable` from the read result, `prior` by key, and rulings and calls counted for this task only, whatever the ledger's order. `decide_claim` returns `ask` with the reasons `principles-missing`, `repeat-after-ruling`, `exhausted`, `claim-call-limit`, `task-ruling-limit` or `task-call-limit`, and otherwise `rule` with a tier: risky for a safety task, a guard stop or a prior claim with status `open` or `failed`, else normal. `claim_facts` never reads Complexity. Enforce the non-functional bound: at most 6 calls per task and 2 per claim. Harness Contract owner: `arbiter.claim_id` and `arbiter.decide_call`, which are `arbiter_policy.claim_key` and `decide_claim`.
