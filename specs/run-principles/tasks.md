@@ -1166,7 +1166,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 50: Migrate the guard-ladder tests to the arbiter
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.2, 6.10
 **Description:** Triage and migrate the existing tests that encode the guard ladder the requirements' **Supersedes** list replaces: `tests/js/guard_ladder.test.mjs`, `tests/test_guard_ladder_properties.py` (including its existing P-15 cases), `tests/test_guard_park.py` and `tests/test_guard_agent_mode_docs.py`. Each assertion that a guard stop climbs the ladder is rewritten to assert the arbiter route (6.2) and needs-input fallback (6.10), keeping the assertion's intent. Tests that only use the ladder's labels are updated to the new labels. Do not delete a test to get a pass. Note the test plan keeps `bridge.ladder` and `agents.guard_ladder` as seams while design.md removes `guardLadder` from the decisions block: `tests/js/load_decisions.mjs` (`GUARD_NAMES`), `tests/js/bridge.mjs` and `tests/landing_bridge.py` follow the Link decision, in this task: design.md's removal stands, so the `guardLadder` entry and the `ladder` bridge op retire with the workflow code. The test plan's note that those seams stay valid is superseded; the `agents.guard_ladder` function and its own tests stay.
@@ -1182,12 +1182,13 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 65 (the guard-ladder routing these tests encode is replaced there)
 
 **Acceptance:**
-- [ ] Every assertion about the replaced behaviour is migrated, none deleted to get a pass
-- [ ] Assertions unrelated to the ladder are unchanged
-- [ ] Tests exercise the real boundary named in the test plan (real workflow, real hook)
-- [ ] Tests fail before the implementation exists for the right reason (the ladder still runs, the arbiter step does not)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Every assertion about the replaced behaviour is migrated, none deleted to get a pass
+- [x] Assertions unrelated to the ladder are unchanged
+- [x] Tests exercise the real boundary named in the test plan (real workflow, real hook)
+- [x] Tests fail before the implementation exists for the right reason (the ladder still runs, the arbiter step does not)
+- [x] No mocks of the project's own code in integration tests
 
+**Implementation notes:** `tests/js/guard_ladder.test.mjs` now builds a real git project per scenario (specs/PRINCIPLES.md, the spec, an integration checkout made by the real `ck`) and runs the arbiter steps through the real CLI; every guard stop is scripted with `rulings` (a valid `code` ruling, or each failed-call form for the 6.10 cases). Migrations: TC-29, TC-30, TC-31 and TC-79 assert the arbiter runs right after the stop, no `guard <k>` label, no retry or escalation spent, and a revise-call stop re-runs the revision with the ruling text; TC-33 to TC-36 assert the needs-input fallback (6.10) with the park, notification and interactive `ask` assertions unchanged; TC-32 is unchanged apart from asserting the arbiter is not called (6.6); TC-80 asserts the decision note on task, retry, revise and the attempt resumed after a ruling. `test_guard_ladder_properties.py`: P-14 keeps the `agents.guard_ladder` and CLI halves and asserts the workflow's `guardLadder` is gone; P-15 and P-16 are restated for the arbiter route. `test_guard_agent_mode_docs.py`: the manual path (`without-workflow-tool`) asserts the needs-input route with no ladder (6.12); `spawn-worktree` is not changed by this spec, so its ladder cases stay. `GUARD_NAMES` drops `guardLadder`; the bridge `ladder` op and `Bridge.ladder` retire. `test_guard_park.py` only gains a docstring (its cases are the needs-input route and `agents --guard-ladder`, both staying).
 **Dependencies:** Task 2 (`rulings` answers in the fake runtime)
 **Complexity:** Medium
 **Risk:** safety (exercises the needs-input notification route)

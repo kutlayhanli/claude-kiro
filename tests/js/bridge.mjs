@@ -1,6 +1,5 @@
 // Long-lived JSON-lines bridge: one request object per stdin line, one response object per stdout line.
 //   {op:'ready', order, deps, done, exclude, blocked} -> {ok:true, ready}
-//   {op:'ladder', model}                              -> {ok:true, ladder}
 //   {op:'run', project, args, slots, clock, execCk}   -> {ok:true, result, logs, trace, prompts, opts, optsList, events, execLog, execResults}
 //       clock: 'virtual' (a VirtualClock: sleeps and trace t are exact virtual ms) | 'real' (real timers) | unset (as before)
 //       execCk: {cmd, env, cwd, dry}: fake agents record progress events through the real CLI (see fake_project.mjs)
@@ -21,7 +20,7 @@ import { stub } from './fake_create.mjs'
 import { VirtualClock } from './virtual_clock.mjs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { loadDecisions, SCRIPT, GUARD_NAMES } from './load_decisions.mjs'
+import { loadDecisions, SCRIPT } from './load_decisions.mjs'
 
 
 // Fake agent durations run on a virtual clock, so a scenario replays identically however loaded the machine is.
@@ -50,10 +49,6 @@ async function handle(req) {
   if (req.op === 'ready') {
     const { readyTasks } = req.script ? loadDecisions(req.script) : loadDecisions()  // req.script: test hook for a script without markers
     return { ready: readyTasks({ order: req.order ?? Object.keys(req.deps), deps: req.deps, done: req.done ?? [], exclude: req.exclude ?? [], blocked: req.blocked ?? [] }) }
-  }
-  if (req.op === 'ladder') {
-    const { guardLadder } = loadDecisions({ extra: GUARD_NAMES })
-    return { ladder: guardLadder(req.model) }
   }
   if (req.op === 'call') {
     const decisions = loadDecisions({ extra: [req.name] })
