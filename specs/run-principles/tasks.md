@@ -92,7 +92,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 3: Test the arbiter's role settings
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.1, 5.2
 **Description:** Implement TC-35 and TC-36 in `tests/test_arbiter_agents.py`, named `test_tc<N>_...`, reusing `home`, `ck`, `roles` from `tests/test_agents.py`. TC-35: `ck agents set arbiter.model fable` and each of the four keys show in `ck agents --json`, and an invalid value gets the same message as `reviewer.model`. TC-36: with the four unset, resolved values equal `reviewer.risky_model` and `reviewer.risky_effort`, including after those change.
@@ -102,10 +102,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 5 (TC-35, TC-36)
 
 **Acceptance:**
-- [ ] Each case goes through the real CLI against real config files
-- [ ] Tests exercise the real boundary named in the test plan (CLI, real config)
-- [ ] Tests fail before the implementation exists for the right reason (`arbiter` is an unknown role)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each case goes through the real CLI against real config files
+- [x] Tests exercise the real boundary named in the test plan (CLI, real config)
+- [x] Tests fail before the implementation exists for the right reason (`arbiter` is an unknown role)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** None
 **Complexity:** Low
