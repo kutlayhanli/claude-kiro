@@ -254,7 +254,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 10: Red-team the prohibitions of Story 1
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 1.4, 1.6, 1.9, 1.11
 **Description:** Try to break each SHALL NOT clause of Story 1 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. Target `ck principles check` and `principles.plan_may_be_decided` for 1.4 (a `## Principles` heading in a fence, one holding only comments), `effective_principles` for 1.6 (a reason that is only markup), `ck arbiter open` for 1.9 (the file replaced between checks, non-UTF-8 bytes), and `ck lint` for 1.11 (a warning that changes the exit code). Written from the requirements only, never from the implementation.
@@ -264,10 +264,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 23 (red team of 1.11 through `ck lint`), Task 31 (red team of 1.4 through `ck principles check`), Task 37 (red team of 1.6, 1.9 through `ck arbiter open`)
 
 **Acceptance:**
-- [ ] Each SHALL NOT clause has at least one adversarial test per listed input class that applies to it
-- [ ] Tests exercise the real boundary named in the test plan (CLI, real files, the seams)
-- [ ] Tests fail before the implementation exists for the right reason (missing commands and seams)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each SHALL NOT clause has at least one adversarial test per listed input class that applies to it
+- [x] Tests exercise the real boundary named in the test plan (CLI, real files, the seams)
+- [x] Tests fail before the implementation exists for the right reason (missing commands and seams)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (uses `arbiter_project` and strategies)
 **Complexity:** Medium
