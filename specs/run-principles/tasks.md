@@ -801,7 +801,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 34: Property tests for the arbiter's lane and caller identity
-**Status:** In Progress
+**Status:** Done
 **Track:** test
 **Requirements:** 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 11.10, 11.5, 11.7
 **Description:** Implement P-22, P-23, P-24, P-25, P-39 and P-45 with Hypothesis in `tests/test_arbiter_guard.py`, named `test_p<N>_...`. P-22 (`decide_arbiter_edit`, `arbiter_block_reason`): in an arbiter worktree with no lane ticket (the ticket case is P-45), over resolved `rel` values, allowed exactly for the three canonical paths of the ruling's spec, over case variants, suffix near-misses, `specs/demo/sub/tasks.md`, another spec, requirements, PLAN, PRINCIPLES, tests, source, `.claude/`; every denial names the file and the lane. P-23 (G, `decide_arbiter_bash` through real `bash -c`, `max_examples=30`): every shell form listed over denied paths is denied, chained with `&&` and `;`, in a `cd` compound, and over command substitution in `$(...)`, backticks, `<(...)` and `>(...)`, unquoted or double-quoted. A shell write to a lane file is denied too, since the arbiter edits those with Edit or Write; reads, `git add` of lane files and `git commit -m '...'` are allowed. P-24 (`is_arbiter_caller`): any input not establishing the arbiter classifies as the unclaimed input, over env names, arguments, prompt text, tool fields and near-miss agent types. P-25: any non-arbiter caller's decisions equal an oracle restating today's `decide_edit` over `EditFacts`. P-39 (G, through the real hook with real files, `max_examples=30`): relative, absolute, `./`, `..` that re-enters or escapes, and symlinks in and out get the same decision as the resolved path. P-45 (`decide_arbiter_edit`): `requirements.md` is allowed exactly with a ticket for its own spec, not started and not in an arbiter worktree, and `PLAN.md` never. Settings `@settings(derandomize=True, max_examples=200, database=None, deadline=None)` except P-23 and P-39. The file declares `PROPERTIES = {"P-22": ..., "P-23": ..., "P-24": ..., "P-25": ..., "P-39": ..., "P-45": ...}`.
@@ -812,12 +812,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 35 (P-22, P-24, P-25, P-45 at the lane seams), Task 36 (P-23 under real `bash -c`, P-39 through the real hook)
 
 **Acceptance:**
-- [ ] The generators cover every surface form and negative listed in the P-22 to P-25, P-39 and P-45 rows
-- [ ] Settings are deterministic (derandomized, no database)
-- [ ] The tests call the decision seams, not a server
-- [ ] Tests exercise the real boundary named in the test plan (seams, real `bash -c` for P-23)
-- [ ] Tests fail before the implementation exists for the right reason (the seams do not exist)
-- [ ] No mocks of the project's own code in integration tests
+- [x] The generators cover every surface form and negative listed in the P-22 to P-25, P-39 and P-45 rows
+- [x] Settings are deterministic (derandomized, no database)
+- [x] The tests call the decision seams, not a server
+- [x] Tests exercise the real boundary named in the test plan (seams, real `bash -c` for P-23)
+- [x] Tests fail before the implementation exists for the right reason (the seams do not exist)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (strategies, `arbiter_caller`), Task 33 (same test file)
 **Complexity:** High
