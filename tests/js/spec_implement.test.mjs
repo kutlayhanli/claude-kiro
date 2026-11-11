@@ -2,6 +2,9 @@
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import fs from 'node:fs'
+import os from 'node:os'
+import { execFileSync } from 'node:child_process'
 import { runWorkflow, sleep } from './load_workflow.mjs'
 import { directCk, gateJson, project } from './fake_project.mjs'
 
@@ -98,12 +101,71 @@ await test('issue #6: a refused relink skips the task as before, and relink: fal
 
 const CONFLICT = { file: 'tests/unit/test_decay_golden.py', test: 'test_decay_printed', criterion: '14.6', reason: 'rel_tol 1e-12 on a rounded input', fix: 'rel_tol 1e-5 for the printed input' }
 
-await test('issue #8: a confirmed test conflict goes to the test-fixer; one that persists after the fix parks only that task (needs-input, kind test-fix)', async () => {
-  const p = project({ deps: { 1: [], 2: [], 3: ['2'], 4: [] }, testConflicts: { 2: { conflict: CONFLICT } } })
-  const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, onFailure: 'halt' } })
+// The arbiter's thin steps run the real `ck` in a real git project: the main checkout holds specs/PRINCIPLES.md and the
+// scenario's spec, and the integration checkout is made by `ck worktree integration`.
+const REPO = path.join(here, '../..')
+const CK_CMD = [path.join(REPO, '.venv/bin/python'), '-m', 'claude_kiro.cli']
+const PRINCIPLES = `# Principles
+
+## Principles
+
+- **test-intent:** a test states what the requirement says; repair the test, never bend the requirement to it.
+- **remove-first:** remove before you optimize.
+`
+function taskBlock(n, deps) {
+  return `### Task ${n}: Task ${n}
+**Status:** Not Started
+**Track:** impl
+**Requirements:** 1.1
+**Description:** Do ${n}.
+**Files:**
+- \`src/t${n}.py\` - code
+**Verify:** \`python -c pass\`
+**Dependencies:** ${deps.length ? deps.map(d => `Task ${d}`).join(', ') : 'None'}
+
+---
+`
+}
+function arbiterProject(deps) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'si-arbiter-'))
+  const root = path.join(tmp, 'repo')
+  const sh = (cmd, ...args) => execFileSync(cmd, args, { cwd: root, encoding: 'utf8' })
+  const git = (...args) => sh('git', ...args)
+  fs.mkdirSync(path.join(root, 'specs/demo'), { recursive: true })
+  git('init', '-q', '-b', 'main')
+  git('config', 'user.name', 'Test User')
+  git('config', 'user.email', 'test@example.com')
+  const w = (rel, text) => fs.writeFileSync(path.join(root, rel), text)
+  w('specs/ck.json', JSON.stringify({ verify: ['python -c pass'], guard: { tests: 'ask', requirements: 'ask', test_plan: 'ask' }, base: null }, null, 2) + '\n')
+  w('specs/PRINCIPLES.md', PRINCIPLES)
+  w('specs/demo/PLAN.md', '# Plan: Demo\n\n## Principles\n\n- **Nothing to add:** the project defaults apply.\n')
+  w('specs/demo/requirements.md', '# Requirements: Demo\n\n## User Stories\n\n### Story 1: Greeting\n\n**As a** user **I want** a greeting **So that** I feel welcome.\n\n**Without it:** the app is silent.\n\n**Acceptance Criteria:**\n\n- 1.1 WHEN the app starts, THE SYSTEM SHALL print a greeting.\n')
+  w('specs/demo/design.md', '# Design: Demo\n\nA greeting.\n')
+  w('specs/demo/test-plan.md', '# Test Plan: Demo\n\n| TC-1 | 1.1 | I | greeting printed | CLI | tests/test_greet.py |\n')
+  w('specs/demo/tasks.md', `# Implementation Tasks: Demo\n\n**Status:** Not Started\n\n## Task Breakdown\n\n${Object.keys(deps).map(n => taskBlock(n, deps[n])).join('\n')}`)
+  w('.gitignore', '.ck/\n.claude/worktrees/\n__pycache__/\n')
+  git('add', '-A')
+  git('commit', '-qm', 'init')
+  execFileSync(CK_CMD[0], [...CK_CMD.slice(1), 'worktree', 'integration', 'demo', '--base', 'main'], { cwd: root, encoding: 'utf8' })
+  return { root, targetDir: path.join(root, '.ck/worktrees/demo-integration'), execCk: { cmd: CK_CMD, env: {}, cwd: root } }
+}
+const repair = (c, why = 'the expected value was wrong; the test intent stands') => ({
+  status: 'ruled', outcome: 'test_repair', principle: 'project:test-intent', reasoning: `${c.reason}: the test asserts what no correct code returns`,
+  testRepair: { file: c.file, test: c.test, change: c.fix, why },
+})
+const arbiterArgs = a => ({ ...baseArgs, root: a.root, targetDir: a.targetDir, ...(a.extra || {}) })
+
+await test('issue #8: a test conflict is ruled test_repair by the arbiter (no confirmation agent), goes to the test-fixer; one that persists after the fix parks only that task (needs-input, kind test-fix)', async () => {
+  const deps = { 1: [], 2: [], 3: ['2'], 4: [] }
+  const a = arbiterProject(deps)
+  const p = project({ deps, testConflicts: { 2: { conflict: CONFLICT } }, rulings: { 2: [repair(CONFLICT)] }, execCk: a.execCk })
+  const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...arbiterArgs(a), onFailure: 'halt' } })
   const t2 = p.state.events.filter(e => /^task 2( |$)/.test(e) && !e.endsWith(' end'))
-  assert.deepEqual(t2, ['task 2', 'task 2 retry 1', 'task 2 retry 2'], 'one report, one confirmation, then one fresh attempt after the landed fix')
-  assert.match(p.state.prompts['task 2 retry 1'], /Check that claim yourself/)
+  assert.equal(t2[0], 'task 2')
+  assert.equal(t2.length, 2, `one report, then one resumed attempt after the landed fix (no confirmation attempt): ${t2.join(' | ')}`)
+  assert.ok(!Object.values(p.state.prompts).some(t => /Check that claim yourself/.test(t)), 'no confirmation prompt')
+  assert.ok(p.state.events.includes('arbiter task 2'), `the arbiter ruled: ${p.state.events.join(', ')}`)
+  assert.ok(idx(p.state, 'arbiter task 2') < idx(p.state, 'testfix 1 (Task 2)'), 'the ruling comes before the fixer')
   assert.ok(p.state.events.includes('testfix 1 (Task 2)'), 'a test-fixer ran for Task 2')
   assert.equal(result.halted, false, 'a test conflict never halts the run, even with onFailure halt')
   assert.deepEqual(result.merged.sort(), ['1', '4'])
@@ -119,18 +181,21 @@ await test('issue #8: a confirmed test conflict goes to the test-fixer; one that
   assert.ok(logs.some(l => l.startsWith('Test fixes (1)')))
 })
 
-await test('issue #8: the confirmation runs on the strongest rung, and an agent that passes the gate wins', async () => {
+await test('issue #8: no confirmation rung: the conflict goes to the arbiter, a landed fix resumes the task, and a resumed agent that passes the gate wins', async () => {
   const roles = { implementer: { model: 'sonnet', effort: 'medium', escalate: ['opus'] } }
-  const p = project({ deps: { 1: [] }, testConflicts: { 1: { conflict: CONFLICT } } })
-  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: roles } })
-  assert.ok(p.state.events.includes('task 1 retry 1 (opus)'), p.state.events.join(', '))
-  assert.equal(p.state.opts['task 1 retry 1 (opus)'].model, 'opus')
+  const a = arbiterProject({ 1: [] })
+  const p = project({ deps: { 1: [] }, testConflicts: { 1: { conflict: CONFLICT } }, rulings: { 1: [repair(CONFLICT)] }, execCk: a.execCk })
+  const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...arbiterArgs(a), agents: roles } })
+  assert.ok(p.state.events.includes('arbiter task 1'), p.state.events.join(', '))
+  assert.ok(!p.state.events.includes('task 1 retry 1 (opus)'), 'the strongest rung no longer confirms the claim')
   assert.equal(result.testFixes.length, 1)
 
-  const q = project({ deps: { 1: [] }, testConflicts: { 1: { conflict: CONFLICT, attempts: 1 } } })
-  const won = await runWorkflow(SCRIPT, { agent: q.agent, args: { ...baseArgs, agents: roles } })
-  assert.deepEqual(won.result.merged, ['1'], 'the confirming agent passed the gate: the task merges')
-  assert.deepEqual(won.result.testFixes, [])
+  const b = arbiterProject({ 1: [] })
+  const q = project({ deps: { 1: [] }, testConflicts: { 1: { conflict: CONFLICT, attempts: 1 } }, rulings: { 1: [repair(CONFLICT)] }, execCk: b.execCk })
+  const won = await runWorkflow(SCRIPT, { agent: q.agent, args: { ...arbiterArgs(b), agents: roles } })
+  assert.deepEqual(won.result.merged, ['1'], 'the resumed agent passed the gate: the task merges')
+  assert.equal(won.result.testFixes.length, 1, 'the fix the ruling asked for landed')
+  assert.ok(!Object.values(q.state.prompts).some(t => /Check that claim yourself/.test(t)), 'no confirmation prompt')
 })
 
 await test('issue #11: with a direct ck global, plan, land and relink run as ck calls, not agents', async () => {

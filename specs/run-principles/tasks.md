@@ -1195,7 +1195,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 51: Migrate the test-conflict confirmation tests to the arbiter
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.1, 6.3, 8.10
 **Description:** Triage and migrate the existing tests that encode the second-agent confirmation and the review-deadlock model ladder: the issue #8 confirmation cases of `tests/js/spec_implement.test.mjs` (around lines 101-127), and the ladder and confirmation labels used in `tests/test_stats_interruptions.py` and `tests/test_stats_submit.py`. The cases at lines 101-127 now assert the confirmation followed by `testfix`: the confirmation step becomes the arbiter's `test_repair` ruling (a fake `rulings` answer), and the fixer assertions stay (6.1, 8.10). A review deadlock no longer escalates the revision (6.3). The other unattended-correctness suites that start from a confirmed conflict migrate in Task 102 and Task 100; grep `tests/` for `Check that claim yourself|confirm` when triaging and leave those files to their owners. Task 2's fake throws on an `arbiter-` thin step when `execCk` is absent, so a migrated case that reaches the arbiter passes `execCk` and a run root pointing at a temporary git project holding `specs/PRINCIPLES.md` and the scenario's spec. Keep label-only uses meaning what they did, as labels that exist in the corpus. Do not delete a test to get a pass. `spec_implement.test.mjs` runs whole, so it must also keep every other case in that file green with the extended fake project.
@@ -1207,11 +1207,13 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 69 (confirmation and revise-ladder routing; `spec_implement.test.mjs` runs whole, so it needs every replaced path gone)
 
 **Acceptance:**
-- [ ] Every assertion about the replaced behaviour is migrated, none deleted to get a pass
-- [ ] Assertions unrelated to confirmation or the ladder are unchanged
-- [ ] Tests exercise the real boundary named in the test plan (real workflow script, real stats)
-- [ ] Tests fail before the implementation exists for the right reason (the confirmation label still runs)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Every assertion about the replaced behaviour is migrated, none deleted to get a pass
+- [x] Assertions unrelated to confirmation or the ladder are unchanged
+- [x] Tests exercise the real boundary named in the test plan (real workflow script, real stats)
+- [x] Tests fail before the implementation exists for the right reason (the confirmation label still runs)
+- [x] No mocks of the project's own code in integration tests
+
+**Implementation notes:** The two issue #8 cases now run the arbiter: a real temp git project (PRINCIPLES.md, the spec, `ck worktree integration`) with `execCk`, and a `test_repair` ruling in `rulings`. `tests/test_stats_interruptions.py` and `tests/test_stats_submit.py` hold only label-only uses (a guard-ladder agent label, a PR-confirm test), so they are unchanged. Other confirmation suites (`attributed_gates`, `command_deps`, `test_fix`) belong to Tasks 100 and 102.
 
 **Dependencies:** Task 2 (`rulings` answers in the fake runtime)
 **Complexity:** Medium
