@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import json
+import re
 import os
 from dataclasses import fields, replace
 from datetime import datetime, timezone
@@ -421,3 +422,343 @@ def record_ruling(root: Path, spec: str, into: str, record: RulingRecord, lock_w
                 path.write_text(existing, encoding="utf-8")
             raise
     return {"number": number, "commit": sha}
+
+
+# --------------------------------------------------------------------------- /spec:create review (Task 43)
+
+_RESULT_LINE = re.compile(r"^\*\*Result:\*\*.*$", re.MULTILINE)
+_DECISION_HEAD = re.compile(r"^## Needs Your Decision[ \t]*$", re.MULTILINE)
+_NEXT_HEAD = re.compile(r"^## ", re.MULTILINE)
+
+
+def implementation_started(checkout: Path, spec: str) -> bool:
+    """Any task of the spec In Progress or Done (the guard's own rule)."""
+    from .hooks._shared.spec_parser import parse_tasks
+
+    return any(t.in_progress or t.done for t in parse_tasks(Path(checkout) / "specs" / spec / "tasks.md"))
+
+
+def create_context(checkout: Path, spec: str, approved_cut: bool) -> Dict[str, Any]:
+    """`ck arbiter context` for /spec:create: both principle layers, whether implementation has started,
+    the unusable principles file when there is one, and `decide_cut` for the approval flag."""
+    from .arbiter_policy import decide_cut
+
+    state, project_text = read_principles(checkout / PRINCIPLES_REL)
+    plan_text = _plan_text(checkout, spec)
+    project = parse_principles(project_text, "project") if state == "ok" else []
+    plan = parse_principles(plan_text, "plan") if plan_text is not None else None
+    effective = effective_principles(project, plan)
+    started = implementation_started(checkout, spec)
+    return {
+        "principles": [{"id": p.id, "layer": p.layer, "text": p.text} for p in effective.citable],
+        "planLayer": effective.plan_layer,
+        "implementationStarted": started,
+        "missing": str(PRINCIPLES_REL) if state != "ok" else None,
+        "cut": decide_cut(bool(approved_cut), started),
+    }
+
+
+def _subject_id(subject: Any) -> Optional[str]:
+    if isinstance(subject, dict):
+        value = subject.get("id")
+        return str(value) if isinstance(value, (str, int)) and str(value) else None
+    if isinstance(subject, (str, int)) and str(subject):
+        return str(subject)
+    return None
+
+
+def _subject_text(subject: Any) -> str:
+    if isinstance(subject, dict):
+        for k in ("problem", "title", "text", "claim", "weakness"):
+            if isinstance(subject.get(k), str) and subject[k].strip():
+                return subject[k]
+    return str(subject if not isinstance(subject, dict) else subject.get("id", ""))
+
+
+def _entries_of(output: Any) -> Optional[List[Any]]:
+    """The list of per-subject entries in the arbiter's output, or None when there is none to read."""
+    if isinstance(output, str):
+        try:
+            output = json.loads(output)
+        except ValueError:
+            return None
+    if isinstance(output, dict) and isinstance(output.get("rulings"), list):
+        output = output["rulings"]
+    return output if isinstance(output, list) else None
+
+
+_DRIFT_HEAD = re.compile(r"^## Drift[ \t]*$", re.MULTILINE)
+_PLACEHOLDER = re.compile(r"^\(?\s*(none|n/a|nothing)\s*\)?\.?$", re.IGNORECASE)
+
+
+def _is_separator(line: str) -> bool:
+    return line.strip().startswith("|") and set(line.replace("|", "").strip()) <= set("-: ")
+
+
+def _is_header(line: str) -> bool:
+    cells = [c.strip().lower() for c in line.strip().strip("|").split("|")]
+    return line.strip().startswith("|") and bool(cells) and cells[0] == "id"
+
+
+def _add_rows(text: str, head_re: "re.Pattern[str]", title: str, header: List[str], rows: List[str]) -> str:
+    """Adds table rows under `## title`, creating the section when it is missing. An existing section keeps its
+    rows and gets a header when it has none; a `(none)` placeholder is dropped."""
+    head = head_re.search(text)
+    if head is None:
+        return text.rstrip("\n") + f"\n\n## {title}\n" + "\n".join(header + rows) + "\n"
+    nxt = _NEXT_HEAD.search(text, head.end())
+    end = nxt.start() if nxt else len(text)
+    kept = [l for l in text[head.end():end].splitlines() if l.strip() and not _PLACEHOLDER.match(l.strip())]
+    prose = [l for l in kept if not l.strip().startswith("|")]
+    table = [l for l in kept if l.strip().startswith("|")]
+    if not any(_is_header(l) for l in table):
+        table = header + [l for l in table if not _is_separator(l)]
+    section = "\n" + ("\n".join(prose) + "\n\n" if prose else "") + "\n".join(table + rows) + "\n"
+    return text[:head.end()] + section + ("\n" if nxt else "") + text[end:]
+
+
+def _append_drift(text: str, rows: List[Dict[str, Any]], decisions: List[Dict[str, Any]], result: Optional[str]) -> str:
+    """review.md with the drift rows, the `requirements` items in Needs Your Decision, and the Result line.
+    A section that is already there is extended, not repeated."""
+    def cell(s: Any) -> str:
+        return " ".join(str(s).split()).replace("|", "\\|")
+
+    if decisions:
+        lines = [
+            f"| {cell(d['id'])} | {cell(d['question'])} | (a) Change PLAN.md to match; (b) leave the spec as it is | "
+            f"{cell(d['conflicts'])} | arbiter drift check |"
+            for d in decisions
+        ]
+        text = _add_rows(text, _DECISION_HEAD, "Needs Your Decision",
+                         ["| ID | Question | Options | Conflicts with | Raised by |", "|---|---|---|---|---|"], lines)
+    if rows:
+        body = [
+            f"| {cell(r['id'])} | {cell(r['action'])} | {cell(r['outcome'])} | {cell(r['principle'])} | {cell(r['reasoning'])} |"
+            for r in rows
+        ]
+        text = _add_rows(text, _DRIFT_HEAD, "Drift",
+                         ["| ID | Action | Outcome | Principle | Reasoning |", "|---|---|---|---|---|"], body)
+    if result is not None:
+        line = f"**Result:** {result}"
+        current = _RESULT_LINE.search(text)
+        if current is not None:
+            # Only upgrade: `Needs work` is never replaced by a weaker result (design.md, 11.12).
+            if _result_rank(current.group(0)) < _result_rank(line):
+                text = text[:current.start()] + line + text[current.end():]
+        else:
+            text = _insert_result(text, line)
+    return text
+
+
+_RESULT_RANK = {"ready": 0, "ready after decisions": 1, "needs work": 2}
+
+
+def _result_rank(line: str) -> int:
+    """How strong a `**Result:**` line is; anything unrecognized (a template placeholder) counts as weakest."""
+    # Emphasis marks are dropped and the value is matched by its start, longest name first, so an annotated value such as
+    # "Needs work (2 blocking findings remain)", "Needs work." or "**Needs work**" keeps its rank.
+    value = re.sub(r"[*_`]", "", line.split("**Result:**", 1)[-1]).strip().lower()
+    for name in sorted(_RESULT_RANK, key=len, reverse=True):
+        if value.startswith(name):
+            return _RESULT_RANK[name]
+    return -1
+
+
+_H1 = re.compile(r"^# .*$", re.MULTILINE)
+_META_LINE = re.compile(r"^\*\*(Date|Mode):\*\*.*$", re.MULTILINE)
+
+
+def _insert_result(text: str, line: str) -> str:
+    """`text` with the Result line placed as in the template: after Date/Mode when present, else after the H1."""
+    h1 = _H1.search(text)
+    if h1 is None:
+        return line + "\n\n" + text
+    pos = h1.end()
+    nxt = _NEXT_HEAD.search(text, pos)
+    limit = nxt.start() if nxt else len(text)
+    for meta in _META_LINE.finditer(text, pos, limit):
+        pos = meta.end()
+    if pos == h1.end():
+        rest = text[pos:].lstrip("\n")
+        return text[:pos] + "\n\n" + line + "\n\n" + rest
+    return text[:pos] + "\n" + line + text[pos:]
+
+
+def _decision_rows(text: str) -> bool:
+    """Whether Needs Your Decision has a data row (not the header, the separator or a placeholder)."""
+    head = _DECISION_HEAD.search(text)
+    if head is None:
+        return False
+    nxt = _NEXT_HEAD.search(text, head.end())
+    body = text[head.end(): nxt.start() if nxt else len(text)]
+    return any(l.strip().startswith("|") and not _is_separator(l) and not _is_header(l) for l in body.splitlines())
+
+
+def _requirement_text(raw: Mapping[str, Any]) -> Tuple[str, str]:
+    """(what is proposed, why) from a ruling's `requirement` object; the reasoning stands in when it is absent."""
+    req = raw.get("requirement")
+    reasoning = str(raw.get("reasoning", ""))
+    if isinstance(req, dict) and any(isinstance(req.get(k), str) and req[k].strip() for k in ("kind", "wording", "reason")):
+        kind = str(req.get("kind") or "change").strip()
+        wording = str(req.get("wording") or "").strip()
+        why = str(req.get("reason") or "").strip() or reasoning
+        return (f"Proposed requirement ({kind}): {wording}" if wording else f"Proposed requirement ({kind})"), why
+    return reasoning, reasoning
+
+
+def _is_lost(r: Mapping[str, Any]) -> bool:
+    """A result whose subject went unchecked for good (a stronger-look ask still has its risky re-run)."""
+    return r["action"] == "lost" or (r["action"] == "unchecked" and not (r["stronger"] and r["reason"] != "exhausted"))
+
+
+def _recorded_text(root: Path, spec: str, into: str) -> str:
+    try:
+        checkout = wt.checkout_of(root, into)
+    except (wt.WorktreeError, OSError):
+        return ""
+    path = checkout / decisions_rel(spec) if checkout is not None else None
+    try:
+        return path.read_text(encoding="utf-8") if path is not None and path.is_file() else ""
+    except OSError:
+        return ""
+
+
+def _has_ruling(recorded: str, key: str) -> bool:
+    return re.search(rf"^- \*\*Claim:\*\* {re.escape(key)} - ", recorded, re.MULTILINE) is not None
+
+
+def review_step(root: Path, checkout: Path, spec: str, into: str, step: str, tier: str,
+                payload: Any, lock_wait: float = 120.0) -> Dict[str, Any]:
+    """`ReviewResult` for one /spec:create step. Each entry is validated and routed on its own, so a malformed
+    entry loses only its subject. Every applied ruling is recorded like a run's, with the commit as none."""
+    from .arbiter_policy import route_create_ruling, validate_ruling
+
+    if step not in ("refuted", "cuts", "drift"):
+        raise ArbiterError("step must be refuted, cuts or drift")
+    if tier not in ("normal", "risky"):
+        raise ArbiterError("tier must be normal or risky")
+    if not isinstance(payload, dict):
+        raise ArbiterError("stdin must be a JSON object with subjects, output and lostSteps")
+    subjects = payload.get("subjects") or []
+    lost_steps = payload.get("lostSteps") or []
+    if not isinstance(subjects, list) or not isinstance(lost_steps, list):
+        raise ArbiterError("subjects and lostSteps must be lists")
+
+    state, project_text = read_principles(checkout / PRINCIPLES_REL)
+    plan_text = _plan_text(checkout, spec)
+    project = parse_principles(project_text, "project") if state == "ok" else []
+    plan = parse_principles(plan_text, "plan") if plan_text is not None else None
+    effective = effective_principles(project, plan)
+    citable = {p.id: p for p in effective.citable}
+    started = implementation_started(checkout, spec)
+
+    # A principles file that cannot be read means the arbiter was never usable: nothing is ruled (1.12).
+    entries = _entries_of(payload.get("output")) if state == "ok" else None
+
+    by_id: Dict[str, Tuple[Any, Any]] = {}
+    unkeyed = 0  # entries with no usable claim/id: each loses its (unknown) finding
+    if entries is not None:
+        for entry in entries:
+            ident = entry.get("claim", entry.get("id")) if isinstance(entry, dict) else None
+            if isinstance(ident, (str, int)) and not isinstance(ident, bool) and str(ident).strip():
+                if str(ident) not in by_id:
+                    by_id[str(ident)] = entry
+            else:
+                unkeyed += 1
+    # With no subjects named (the drift step), the arbiter names its own items.
+    items: List[Tuple[str, Any]] = []
+    for s in subjects:
+        ident = _subject_id(s)
+        if ident is not None:
+            items.append((ident, s))
+    named = bool(items)
+    if not items:
+        items = [(i, {"id": i}) for i in by_id]
+        # Contract for the workflow (Task 84): the risky re-run passes the stronger-look ids as `subjects`. When it
+        # sends the whole output instead, an item whose claim key already has a ruling in decisions.md was settled
+        # at the normal tier and is not recorded or appended again.
+        if tier == "risky":
+            recorded = _recorded_text(root, spec, into)
+            items = [(i, s) for i, s in items if not _has_ruling(recorded, f"{spec}|{step}:{i}")]
+
+    results: List[Dict[str, Any]] = []
+    if not named:
+        for n in range(unkeyed):
+            results.append({"id": f"entry-{n + 1}", "action": "unchecked", "reason": "invalid-ruling",
+                            "stronger": False, "ruling": None})
+    drift_rows: List[Dict[str, Any]] = []
+    decisions: List[Dict[str, Any]] = []
+    for ident, subject in items:
+        entry = by_id.get(ident)
+        key = f"{spec}|{step}:{ident}"
+        if entry is None:
+            results.append({"id": ident, "action": "unchecked", "reason": "no-ruling", "stronger": False, "ruling": None})
+            continue
+        raw = dict(entry)
+        raw["claim"] = key
+        check = validate_ruling(raw, key, citable, "create")
+        route = route_create_ruling(check, step, started)  # type: ignore[arg-type]
+        action, reason = route.action, route.reason
+        # A stronger-look ask is re-run once at the risky tier. When it asks again here it is not recorded
+        # (the run path records it as needs-input; /spec:create has no needs-input entry), and it is lost.
+        if reason == "stronger-look" and tier == "risky":
+            reason = "exhausted"
+        ruling_no: Optional[int] = None
+        if action != "unchecked":
+            principle = citable[check.principle] if check.principle else None
+            changed = "nothing"
+            if action == "apply":
+                changed = str(entry.get("changed") or "requirements.md wording")
+            record = RulingRecord(
+                trigger=f"create-{step}", claim_key=key, claim_text=_subject_text(subject), task=None, tier=tier,  # type: ignore[arg-type]
+                outcome=check.outcome or "spec_edit", reasoning=str(raw.get("reasoning", "")),
+                principle_id=check.principle or "", principle_text=principle.text if principle else "",
+                plan_layer=effective.plan_layer, changed=changed, moved=(), commit=None, landed=None,
+            )
+            try:
+                ruling_no = int(record_ruling(root, spec, into, record, lock_wait)["number"])
+            except (ArbiterError, wt.WorktreeError, OSError) as exc:
+                action, reason, ruling_no = "unchecked", f"record-failed: {exc}", None
+        results.append({
+            "id": ident, "action": action, "reason": reason,
+            "stronger": check.stronger_look, "ruling": ruling_no,
+        })
+        if step == "drift" and action in ("apply", "report"):
+            reasoning = str(raw.get("reasoning", ""))
+            if check.outcome == "requirements":
+                question, why = _requirement_text(raw)
+                reasoning = f"{question}. Why: {why}" if question != reasoning else reasoning
+                decisions.append({"id": ident, "question": question, "conflicts": f"PLAN.md: {why}"})
+            drift_rows.append({"id": ident, "action": action, "outcome": check.outcome or "",
+                               "principle": check.principle or "", "reasoning": reasoning})
+
+    lost = (not items and step != "drift") or any(_is_lost(r) for r in results)
+    if payload.get("output") is None or entries is None:
+        lost = True
+
+    if step == "drift":
+        review = checkout / "specs" / spec / "review.md"
+        text = review.read_text(encoding="utf-8") if review.is_file() else f"# Spec Review: {spec}\n\n"
+        if state != "ok":
+            drift_rows.append({"id": "principles", "action": "lost", "outcome": "", "principle": "",
+                               "reasoning": f"{PRINCIPLES_REL} is missing or unreadable; run `ck principles init`. The check did not run."})
+        else:
+            for r in results:
+                if r["action"] == "unchecked" and _is_lost(r):
+                    drift_rows.append({"id": r["id"], "action": "lost", "outcome": "", "principle": "",
+                                       "reasoning": f"not checked ({r['reason']}); the drift check did not run for this item"})
+            if lost and not drift_rows:
+                drift_rows.append({"id": "drift", "action": "lost", "outcome": "", "principle": "",
+                                   "reasoning": "the drift check did not run or returned nothing valid"})
+        new_text = _append_drift(text, drift_rows, decisions, None)
+        if lost or lost_steps:
+            result = "Needs work"
+        elif _decision_rows(new_text):
+            result = "Ready after decisions"
+        else:
+            result = None
+        new_text = _append_drift(new_text, [], [], result) if result else new_text
+        review.parent.mkdir(parents=True, exist_ok=True)
+        review.write_text(new_text, encoding="utf-8")
+
+    return {"results": results, "lost": lost}

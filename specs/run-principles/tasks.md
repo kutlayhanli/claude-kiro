@@ -1017,7 +1017,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 43: Add the /spec:create arbiter commands
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 4.3, 4.4, 4.5, 11.2, 11.4, 11.5, 11.6, 11.7, 11.9, 11.10, 11.12, 1.12
 **Description:** In `src/claude_kiro/arbiter_policy.py`, add `CreateRoute`, `route_create_ruling(check, step, started)` and `decide_cut(approved, started)`. Add `ck arbiter context SPEC [--approved-cut] --json` (principles, plan layer, implementation started, `missing` naming an unusable principles file, and `cut`, the result of `decide_cut` with `approved` from the flag) and `ck arbiter review SPEC --step refuted|cuts|drift --tier normal|risky --json` (stdin: `{"subjects", "output", "lostSteps"}`, stdout: `ReviewResult`). Validate each entry on its own, so one malformed entry loses only that finding; report entries needing a stronger look; record each ruling through the same path as Task 42 with the commit as none; and for `--step drift` append the drift rows to `review.md`, add each `requirements` item to Needs Your Decision, and set its `**Result:**` line (`Needs work` when this or a step in `lostSteps` was lost, including when `output` is null; else `Ready after decisions` when Needs Your Decision has a row). Anything that adds, removes or changes what PLAN.md decided routes to `report`. Foundation task: its Verify is a smoke check. Its commands and rules are verified at Task 84 by Task 78 and Task 79, and `decide_cut` at Task 86 by Task 80 (P-42) and by Task 78, where `apply-cuts` branches on the `cut` field.
@@ -1029,9 +1029,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Provides:** `ck arbiter context`, `ck arbiter review`
 
 **Acceptance:**
-- [ ] `decide_cut` returns `apply` only when approved and not started, `frozen` when approved and started, else `hold`
-- [ ] A malformed entry returns `lost` for that entry and leaves the others settled
-- [ ] A plan-changing ruling routes to `report`, and a wording correction is allowed only while implementation has not started
+- [x] `decide_cut` returns `apply` only when approved and not started, `frozen` when approved and started, else `hold`
+- [x] A malformed entry returns `lost` for that entry and leaves the others settled
+- [x] A plan-changing ruling routes to `report`, and a wording correction is allowed only while implementation has not started
 
 **Dependencies:** Task 42 (edits `arbiter_policy.py`, `arbiter.py` and `cli/arbiter.py`, and calls the record path)
 **Complexity:** High
