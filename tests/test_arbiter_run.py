@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from arbiter_helpers import DEFAULT_TASKS, FAILURE_FORMS, arbiter_project
+from arbiter_helpers import DEFAULT_TASKS, FAILURE_FORMS, arbiter_project, decisions_entries
 from landing_bridge import bridge  # noqa: F401  (module-scoped fixture)
 
 JS = Path(__file__).parent / "js"
@@ -440,3 +440,82 @@ def test_tc207_a_test_repair_ruling_on_a_guard_stopped_revision_goes_through_the
     source = "\n".join(line for line in SCRIPT.read_text().splitlines() if not line.lstrip().startswith("//"))
     sites = re.findall(r"(?<!function )handOffTestRepair\(", source)
     assert len(sites) == 1, f"handOffTestRepair has one call site, found {len(sites)}"
+
+
+# --------------------------------------------------------------------------- TC-7, TC-9, TC-11, TC-12 (the principle layers)
+
+PLAN_TEXT = "# Plan: Demo\n\n## Principles\n\n- **small-steps:** ship the change in small steps.\n"
+RESERVES_PLAN = "# Plan: Demo\n\n## Principles\n\n- **Reserves design.md:** interface changes are mine to approve.\n"
+CONFLICT_OPTS = {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT}}}
+
+
+def test_tc7_the_arbiter_prompt_holds_the_text_of_both_layers(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path, plan=PLAN_TEXT)
+    out = run(bridge, project, {**CONFLICT_OPTS, "rulings": {"1": [REQ]}}, agents=roles("haiku", ["opus"]))
+    assert arbiter_calls(out["events"]) == ["arbiter task 1"], ", ".join(out["events"])
+    prompt = out["prompts"]["arbiter task 1"]
+    for needle in ("a test states what the requirement says", "remove before you optimize", "ship the change in small steps"):
+        assert needle in prompt, f"the arbiter prompt lacks {needle!r}:\n{prompt}"
+
+
+def test_tc9_a_ruling_naming_a_reservation_that_needs_a_design_edit_is_a_needs_input_entry_with_no_landing(bridge, tmp_path):  # noqa: F811
+    project = arbiter_project(tmp_path, plan=RESERVES_PLAN)
+    edited = "# Design: Demo\n\nA greeting, with a changed interface.\n"
+    answer = ruling("spec_edit", reservedBy="plan:reserves", changed="design.md: the interface changed")
+    opts = {**CONFLICT_OPTS, "rulings": {"1": [answer]}, "arbiterEdits": {"1": {"files": {"specs/demo/design.md": edited}}}}
+    out = run(bridge, project, opts, agents=roles("haiku", ["opus"]))
+    ev = out["events"]
+    assert arbiter_calls(ev) == ["arbiter task 1"], ", ".join(ev)
+    assert len(needs(out)) == 1, json.dumps(out["result"].get("needsInput"))
+    assert [e for e in ev if e.startswith("arbiter-land")] == [], "no landing ran: " + ", ".join(ev)
+    assert "interface" in json.dumps(needs(out)[0]) or "design.md" in json.dumps(needs(out)[0]), json.dumps(needs(out)[0])
+
+
+def make_unreadable(path):
+    path.chmod(0)
+
+
+def make_directory(path):
+    path.unlink()
+    path.mkdir()
+
+
+def make_missing(path):
+    path.unlink()
+
+
+@pytest.mark.parametrize("damage", [make_missing, make_directory, make_unreadable], ids=lambda f: f.__name__)
+def test_tc11_a_principles_file_that_is_missing_a_directory_or_unreadable_stops_the_call_and_names_the_file(bridge, tmp_path, damage):  # noqa: F811
+    if damage is make_unreadable and hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.fail("mode 000 cannot be tested as root: run the suite as a normal user")
+    project = arbiter_project(tmp_path)
+    for checkout in (project.root, project.target):
+        damage(checkout / "specs" / "PRINCIPLES.md")
+    try:
+        out = run(bridge, project, {**CONFLICT_OPTS, "rulings": {"1": [REQ]}}, agents=roles("haiku", ["opus"]))
+    finally:
+        for checkout in (project.root, project.target):
+            path = checkout / "specs" / "PRINCIPLES.md"
+            if path.exists() and not path.is_dir():
+                path.chmod(0o644)
+    ev = out["events"]
+    assert any_arbiter(ev) == [], "no arbiter label ran: " + ", ".join(ev)
+    entries = needs(out)
+    assert len(entries) == 1, json.dumps(out["result"].get("needsInput"))
+    assert "PRINCIPLES.md" in json.dumps(entries[0]), json.dumps(entries[0])
+
+
+def plan_layer_of(project):
+    entries = decisions_entries(project, "target") or decisions_entries(project, "branch")
+    assert entries, "the ruling was recorded in decisions.md"
+    return entries[-1].get("Plan layer", "")
+
+
+@pytest.mark.parametrize("plan", [None, "# Plan: Demo\n\n## Goals\n\nSay hello.\n"], ids=["no-plan", "no-section"])
+def test_tc12_without_a_plan_principles_section_the_arbiter_rules_and_the_entry_records_the_plan_layer_absent(bridge, tmp_path, plan):  # noqa: F811
+    project = arbiter_project(tmp_path, plan=plan)
+    out = run(bridge, project, {**CONFLICT_OPTS, "rulings": {"1": [ruling("code")]}}, agents=roles("haiku", ["opus"]))
+    ev = out["events"]
+    assert arbiter_calls(ev) == ["arbiter task 1"], "the arbiter ran: " + ", ".join(ev)
+    assert "a test states what the requirement says" in out["prompts"]["arbiter task 1"], "the project layer alone"
+    assert "absent" in plan_layer_of(project), decisions_entries(project, "target")
