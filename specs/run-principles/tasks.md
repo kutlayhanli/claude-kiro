@@ -2081,7 +2081,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 90: Migrate the /spec:create workflow suites to the arbiter steps
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 4.1, 11.1, 11.9, 11.12
 **Description:** Migrate `tests/js/spec_create.test.mjs`, `tests/js/spec_review_frozen.test.mjs` and `tests/js/spec_create_provides.test.mjs`, which run the real `spec-create.js` through `fake_create.mjs`. Its stub throws on any unknown label, and its default run has a refuted finding (R3), so Task 84's new steps would throw or lose the check. Give `fake_create.mjs` default answers for `ck arbiter context`, `ck arbiter lane open` and `close`, `arbiter refuted`, `arbiter cuts`, `arbiter drift` and the `should-exist` lens, kept out of what Task 2's `overrides` scenarios assert. Migrate the assertions on refuted findings to the arbiter route (a refuted finding gets a ruling and the result stays Ready or Ready after decisions, as those suites expect). Keep each assertion's intent, and do not delete one to get a pass.
@@ -2094,11 +2094,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 83 (the lens in both suites), Task 84 (the refuted and cuts steps), Task 85 (the drift step)
 
 **Acceptance:**
-- [ ] Every assertion about the replaced behaviour is migrated, none deleted to get a pass
-- [ ] Assertions unrelated to the arbiter are unchanged
-- [ ] Tests exercise the real boundary named in the test plan (the real `spec-create.js` under the fake runtime)
-- [ ] Tests fail before the implementation exists for the right reason (the arbiter steps do not run)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Every assertion about the replaced behaviour is migrated, none deleted to get a pass
+- [x] Assertions unrelated to the arbiter are unchanged
+- [x] Tests exercise the real boundary named in the test plan (the real `spec-create.js` under the fake runtime)
+- [x] Tests fail before the implementation exists for the right reason (the arbiter steps do not run)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 2 (`fake_create` options)
 **Complexity:** Medium
