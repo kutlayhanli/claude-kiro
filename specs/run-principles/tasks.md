@@ -367,7 +367,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 15: Red-team the prohibitions of Story 3
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 3.4, 3.7
 **Description:** Try to break each SHALL NOT clause of Story 3 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. For 3.4: a marker inside nested fences, a fence opened with a longer run than it is closed with, a marker in an HTML comment, a `### Story` heading inside a fence that would capture a later marker, CRLF line endings. For 3.7: launch through the real workflow with many justification findings and with the justification findings mixed into text output. Written from the requirements only, never from the implementation.
@@ -377,10 +377,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 23 (red team of 3.4 through `ck lint`), Task 70 (red team of 3.7 at launch)
 
 **Acceptance:**
-- [ ] Each SHALL NOT clause has at least one adversarial test per listed input class that applies to it
-- [ ] Tests exercise the real boundary named in the test plan (CLI, real workflow start)
-- [ ] Tests fail before the implementation exists for the right reason (no justification check)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each SHALL NOT clause has at least one adversarial test per listed input class that applies to it
+- [x] Tests exercise the real boundary named in the test plan (CLI, real workflow start)
+- [x] Tests fail before the implementation exists for the right reason (no justification check)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (project fixture), Task 2 (workflow through the bridge)
 **Complexity:** Medium
