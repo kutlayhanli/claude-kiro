@@ -10,8 +10,9 @@ export const START_MARKER = '// --- decisions (pure; loaded by tests) ---'
 export const END_MARKER = '// --- end decisions ---'
 export const NAMES = ['readyTasks', 'chainLengths', 'applyPlanView', 'planConsistent', 'planDecision', 'queuedAgents', 'startDecision', 'worktreeOutcome']
 
-// Guard-ladder decisions: loaded only when asked, so the suite stays green before the workflow gains them.
-export const GUARD_NAMES = ['guardLadder', 'guardStopOf', 'parkAction']
+// Guard-stop decisions: loaded only when asked, so the suite stays green before the workflow gains them.
+// `guardLadder` is gone (run-principles design.md removes it with `climbGuard`; a guard stop goes to the arbiter, 6.2).
+export const GUARD_NAMES = ['guardStopOf', 'parkAction']
 
 // Decisions of the unattended-correctness spec: loaded only through `extra`, so existing suites stay green
 // before the workflow gains the seams.
