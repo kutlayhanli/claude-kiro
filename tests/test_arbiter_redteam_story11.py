@@ -13,6 +13,7 @@ a workflow that never calls the arbiter, cannot satisfy it. Project modules are 
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -62,15 +63,16 @@ def bash(caller: dict, command: str):
 
 
 def start_task(checkout: Path, status: str = "In Progress", which: int = 1) -> None:
-    """Flip one task's `**Status:**` line (task `which`) so implementation has started."""
+    """Set task `which`'s `**Status:**` line to `status`, whatever it was before."""
     path = checkout / "specs" / "demo" / "tasks.md"
     text = path.read_text()
     head, _, rest = text.partition("### Task 1")
     first, _, second = rest.partition("### Task 2")
+    pattern = r"\*\*Status:\*\*[^\n]*"
     if which == 1:
-        first = first.replace("**Status:** Not Started", f"**Status:** {status}", 1)
+        first = re.sub(pattern, lambda _: f"**Status:** {status}", first, count=1)
     else:
-        second = second.replace("**Status:** Not Started", f"**Status:** {status}", 1)
+        second = re.sub(pattern, lambda _: f"**Status:** {status}", second, count=1)
     path.write_text(head + "### Task 1" + first + "### Task 2" + second)
 
 
@@ -179,9 +181,12 @@ def test_1110_a_ticket_for_another_spec_does_not_open_this_specs_plan(project):
     root = Path(caller["cwd"])
     for name in ("other", "demo-other", "demox"):
         (root / "specs" / name).mkdir()
-        (root / "specs" / name / "PLAN.md").write_text("# Plan: Other\n")
-        assert denied(write(caller, str(root / "specs" / name / "PLAN.md"), "pwned\n")), name
-        assert (root / "specs" / name / "PLAN.md").read_text() == "# Plan: Other\n"
+        for doc in ("PLAN.md", "tasks.md", "requirements.md", "design.md"):
+            target = root / "specs" / name / doc
+            target.write_text("# Other\n")
+            assert denied(write(caller, str(target), "pwned\n")), (name, doc)
+            assert denied(edit(caller, str(target), "# Other", "pwned")), (name, doc)
+            assert target.read_text() == "# Other\n"
 
 
 @pytest.mark.parametrize("command", [
@@ -326,6 +331,8 @@ def test_117_the_reviser_stays_frozen_on_a_started_spec_for_rewording(project):
 
 # --------------------------------------------------------------------------- workflow helpers (11.6, 11.11, 11.12)
 
+DECIDED = "retries are capped at 3"
+
 ARBITER_ARGS = {
     "arbiterAgent": "spec:arbiter",
     "runnerAgent": "spec:runner",
@@ -348,8 +355,25 @@ def refuting(*refuted_ids: str, ids=("R1", "R2", "R3")) -> dict:
     }
 
 
-def run_create(bridge, overrides: dict, args: dict | None = None) -> dict:  # noqa: F811
-    return bridge.create({**ARBITER_ARGS, **(args or {})}, overrides)
+def paths_of(proj) -> dict:
+    return {"feature": "demo", "projectRoot": str(proj.root), "specDir": str(proj.spec_dir)}
+
+
+def run_create(bridge, proj, overrides: dict, args: dict | None = None) -> dict:  # noqa: F811
+    """The real create workflow over a real project (real files, real `ck` through exec_ck)."""
+    return bridge.create({**ARBITER_ARGS, **paths_of(proj), **(args or {})}, overrides, exec_ck=proj.exec_ck)
+
+
+@pytest.fixture
+def wf(tmp_path):
+    """A real project with specs/PRINCIPLES.md and no PLAN.md (no drift subject)."""
+    return ah.arbiter_project(tmp_path, plan=None)
+
+
+@pytest.fixture
+def wf_plan(tmp_path):
+    """A real project whose PLAN.md records DECIDED."""
+    return ah.arbiter_project(tmp_path, plan=f"# Plan: Demo\n\n## Decisions\n\n- {DECIDED}\n")
 
 
 def started(out: dict) -> list:
@@ -377,16 +401,16 @@ CUT = {"id": "C1", "story": "5", "title": "Story five", "weakness": "nothing bre
 
 
 @NODE
-def test_1111_positive_control_a_refuted_finding_reaches_the_arbiter(bridge):  # noqa: F811
-    out = run_create(bridge, refuting("R3"))
+def test_1111_positive_control_a_refuted_finding_reaches_the_arbiter(bridge, wf):  # noqa: F811
+    out = run_create(bridge, wf, refuting("R3"))
     assert arbiter_labels(out, "refuted"), started(out)
 
 
 @NODE
-def test_1111_all_findings_confirmed_with_an_empty_refutation_record_calls_no_arbiter(bridge):  # noqa: F811
+def test_1111_all_findings_confirmed_with_an_empty_refutation_record_calls_no_arbiter(bridge, wf):  # noqa: F811
     over = refuting()
     over["refute: fidelity"] = {"verdicts": []}
-    out = run_create(bridge, over)
+    out = run_create(bridge, wf, over)
     assert arbiter_labels(out, "refuted") == [] and arbiter_labels(out, "cuts") == [], started(out)
     assert out["result"]["review"]["arbiter"]["lost"] == [], "a step with no subjects is not lost"
 
@@ -399,43 +423,43 @@ def test_1111_all_findings_confirmed_with_an_empty_refutation_record_calls_no_ar
     pytest.param([{"id": "R9", "refuted": True, "reason": "unknown id"}], id="verdict-for-a-finding-that-does-not-exist"),
     pytest.param([{"id": "R1", "refuted": False, "reason": "real"}], id="partial-record"),
 ])
-def test_1111_near_miss_refutation_records_make_no_refuted_call(bridge, verdicts):  # noqa: F811
+def test_1111_near_miss_refutation_records_make_no_refuted_call(bridge, wf, verdicts):  # noqa: F811
     over = refuting()
     over["refute: fidelity"] = {"verdicts": verdicts}
-    out = run_create(bridge, over)
+    out = run_create(bridge, wf, over)
     assert arbiter_labels(out, "refuted") == [], started(out)
 
 
 @NODE
-def test_1111_no_finding_at_all_calls_neither_step(bridge):  # noqa: F811
+def test_1111_no_finding_at_all_calls_neither_step(bridge, wf):  # noqa: F811
     over = {"review: fidelity": {"findings": []}, "review: should-exist": {"findings": []}}
-    out = run_create(bridge, over)
+    out = run_create(bridge, wf, over)
     assert arbiter_labels(out, "refuted") == [] and arbiter_labels(out, "cuts") == []
 
 
 @NODE
-def test_1111_each_step_is_skipped_on_its_own_subjects(bridge):  # noqa: F811
+def test_1111_each_step_is_skipped_on_its_own_subjects(bridge, wf):  # noqa: F811
     cuts_only = {**refuting(), "review: should-exist": {"findings": [CUT]}, "refute: fidelity": {"verdicts": []}}
-    out = run_create(bridge, cuts_only)
+    out = run_create(bridge, wf, cuts_only)
     assert arbiter_labels(out, "refuted") == [], started(out)
     assert arbiter_labels(out, "cuts"), started(out)
     refuted_only = {**refuting("R3"), "review: should-exist": {"findings": []}}
-    out = run_create(bridge, refuted_only)
+    out = run_create(bridge, wf, refuted_only)
     assert arbiter_labels(out, "cuts") == [], started(out)
     assert arbiter_labels(out, "refuted"), started(out)
 
 
 @NODE
-def test_1111_an_empty_cut_list_in_odd_shapes_is_no_subject(bridge):  # noqa: F811
+def test_1111_an_empty_cut_list_in_odd_shapes_is_no_subject(bridge, wf):  # noqa: F811
     for odd in ({"findings": []}, {"findings": None}, {}):
-        out = run_create(bridge, {**refuting(), "review: should-exist": odd})
+        out = run_create(bridge, wf, {**refuting(), "review: should-exist": odd})
         assert arbiter_labels(out, "cuts") == [], (odd, started(out))
 
 
 @NODE
-def test_1111_the_arbiters_own_earlier_empty_answer_does_not_become_a_subject(bridge):  # noqa: F811
+def test_1111_the_arbiters_own_earlier_empty_answer_does_not_become_a_subject(bridge, wf):  # noqa: F811
     over = {**refuting(), "arbiter refuted": {"rulings": []}, "arbiter cuts": {"rulings": []}, "arbiter drift": {"rulings": []}}
-    out = run_create(bridge, over)
+    out = run_create(bridge, wf, over)
     assert arbiter_labels(out, "refuted") == [] and arbiter_labels(out, "cuts") == [] and arbiter_labels(out, "drift") == []
 
 
@@ -447,8 +471,8 @@ JUNK = [None, {}, 7, "a string", [], {"rulings": "not a list"}, {"rulings": [Non
 
 @NODE
 @pytest.mark.parametrize("junk", JUNK, ids=[json.dumps(j)[:28] for j in JUNK])
-def test_1112_junk_from_the_arbiter_is_not_ready_and_the_check_is_reported_not_run(bridge, junk):  # noqa: F811
-    out = run_create(bridge, {**refuting("R3"), "arbiter refuted": junk})
+def test_1112_junk_from_the_arbiter_is_not_ready_and_the_check_is_reported_not_run(bridge, wf, junk):  # noqa: F811
+    out = run_create(bridge, wf, {**refuting("R3"), "arbiter refuted": junk})
     review = out["result"]["review"]
     assert review["result"] != "Ready", review["result"]
     assert "refuted" in json.dumps(review["arbiter"]["lost"]), review["arbiter"]
@@ -457,22 +481,22 @@ def test_1112_junk_from_the_arbiter_is_not_ready_and_the_check_is_reported_not_r
 
 
 @NODE
-def test_1112_no_arbiter_agent_means_not_ready_even_when_revise_says_ready(bridge):  # noqa: F811
-    out = bridge.create({**ARBITER_ARGS, "arbiterAgent": None}, refuting("R3"))
+def test_1112_no_arbiter_agent_means_not_ready_even_when_revise_says_ready(bridge, wf):  # noqa: F811
+    out = run_create(bridge, wf, refuting("R3"), {"arbiterAgent": None})
     review = out["result"]["review"]
     assert review["result"] != "Ready"
     assert "refuted" in json.dumps(review["arbiter"]["lost"])
     assert arbiter_labels(out, "refuted") == []
     for blank in ("", 0, False):
-        out = bridge.create({**ARBITER_ARGS, "arbiterAgent": blank}, refuting("R3"))
+        out = run_create(bridge, wf, refuting("R3"), {"arbiterAgent": blank})
         assert out["result"]["review"]["result"] != "Ready", blank
 
 
 @NODE
-def test_1112_one_malformed_entry_among_good_ones_loses_only_that_finding(bridge):  # noqa: F811
+def test_1112_one_malformed_entry_among_good_ones_loses_only_that_finding(bridge, wf):  # noqa: F811
     bad = {"claim": "R2", "status": 3, "reasoning": {"bad": True}, "outcome": ["spec_edit"]}
     answer = {"rulings": [ruling("R1"), bad, ruling("R3")]}
-    out = run_create(bridge, {**refuting("R1", "R2", "R3"), "arbiter refuted": answer})
+    out = run_create(bridge, wf, {**refuting("R1", "R2", "R3"), "arbiter refuted": answer})
     review = out["result"]["review"]
     assert review["result"] != "Ready"
     assert len(review["arbiter"]["rulings"]) == 2, "the two good entries are kept and recorded"
@@ -488,30 +512,30 @@ def test_1112_one_malformed_entry_among_good_ones_loses_only_that_finding(bridge
     pytest.param({"claim": "R9", "status": "ruled", "reasoning": "r", "outcome": "spec_edit", "principle": "project:test-intent"}, id="claim-of-no-finding"),
     pytest.param({"status": "ruled", "reasoning": "r", "outcome": "spec_edit", "principle": "project:test-intent"}, id="no-claim"),
 ])
-def test_1112_a_malformed_entry_never_counts_as_a_ruling_for_its_finding(bridge, bad):  # noqa: F811
-    out = run_create(bridge, {**refuting("R1", "R2"), "arbiter refuted": {"rulings": [ruling("R1"), bad]}})
+def test_1112_a_malformed_entry_never_counts_as_a_ruling_for_its_finding(bridge, wf, bad):  # noqa: F811
+    out = run_create(bridge, wf, {**refuting("R1", "R2"), "arbiter refuted": {"rulings": [ruling("R1"), bad]}})
     review = out["result"]["review"]
     assert len(review["arbiter"]["rulings"]) == 1, review["arbiter"]
     assert review["result"] != "Ready"
 
 
 @NODE
-def test_1112_the_arbiters_own_earlier_output_fed_back_is_not_a_second_ruling(bridge):  # noqa: F811
+def test_1112_the_arbiters_own_earlier_output_fed_back_is_not_a_second_ruling(bridge, wf):  # noqa: F811
     """A step's answer repeated (the same entries twice, and a ruling copied into another step) gives one ruling per finding."""
     r1 = ruling("R1")
     answer = {"rulings": [r1, r1, ruling("R2"), r1]}
-    out = run_create(bridge, {**refuting("R1", "R2"), "arbiter refuted": answer})
+    out = run_create(bridge, wf, {**refuting("R1", "R2"), "arbiter refuted": answer})
     assert len(out["result"]["review"]["arbiter"]["rulings"]) == 2
-    out = run_create(bridge, {**refuting("R1", "R2"), "arbiter refuted": answer, "arbiter cuts": {"rulings": [r1]},
+    out = run_create(bridge, wf, {**refuting("R1", "R2"), "arbiter refuted": answer, "arbiter cuts": {"rulings": [r1]},
                               "review: should-exist": {"findings": [CUT]}})
     assert len(out["result"]["review"]["arbiter"]["rulings"]) <= 3, "a ruling for R1 in the cuts step is not a ruling on cut C1"
 
 
 @NODE
-def test_1112_a_lost_step_does_not_hide_the_steps_that_ran(bridge):  # noqa: F811
+def test_1112_a_lost_step_does_not_hide_the_steps_that_ran(bridge, wf):  # noqa: F811
     over = {**refuting("R3"), "review: should-exist": {"findings": [CUT]}, "arbiter refuted": {"rulings": [ruling("R3")]},
             "arbiter cuts": 7}
-    out = run_create(bridge, over)
+    out = run_create(bridge, wf, over)
     arb = out["result"]["review"]["arbiter"]
     assert "cuts" in json.dumps(arb["lost"]) and "refuted" not in json.dumps(arb["lost"]), arb
     assert "refuted" in json.dumps(arb["ran"]), arb
@@ -520,28 +544,15 @@ def test_1112_a_lost_step_does_not_hide_the_steps_that_ran(bridge):  # noqa: F81
 
 
 @NODE
-def test_1112_a_lost_drift_step_with_a_plan_present_is_not_ready(bridge, tmp_path):  # noqa: F811
-    spec = tmp_path / "specs" / "f"
-    spec.mkdir(parents=True)
-    (spec / "PLAN.md").write_text("# Plan: F\n\n## Decisions\n\n- retries are capped at 3\n")
+def test_1112_a_lost_drift_step_with_a_plan_present_is_not_ready(bridge, wf_plan):  # noqa: F811
     over = {**refuting(), "arbiter drift": None}
-    out = bridge.create({**ARBITER_ARGS, "projectRoot": str(tmp_path), "specDir": str(spec)}, over)
+    out = run_create(bridge, wf_plan, over)
     assert arbiter_labels(out, "drift"), started(out)
     assert out["result"]["review"]["result"] != "Ready"
     assert "drift" in json.dumps(out["result"]["review"]["arbiter"]["lost"])
 
 
 # --------------------------------------------------------------------------- 11.6: a decision is never changed, only reported
-
-DECIDED = "retries are capped at 3"
-
-
-def plan_project(tmp_path: Path) -> dict:
-    spec = tmp_path / "specs" / "f"
-    spec.mkdir(parents=True)
-    (spec / "PLAN.md").write_text(f"# Plan: F\n\n## Decisions\n\n- {DECIDED}\n")
-    return {"projectRoot": str(tmp_path), "specDir": str(spec)}
-
 
 def wording_fix(outcome: str, **extra) -> dict:
     """A drift ruling framed as a wording fix, whose content changes a decision."""
@@ -565,64 +576,57 @@ SMUGGLED = [
 
 @NODE
 @pytest.mark.parametrize("answer", SMUGGLED)
-def test_116_a_drift_ruling_that_changes_a_decision_is_reported_and_not_ready(bridge, tmp_path, answer):  # noqa: F811
-    paths = plan_project(tmp_path)
+def test_116_a_drift_ruling_that_changes_a_decision_is_reported_and_not_ready(bridge, wf_plan, answer):  # noqa: F811
     over = {**refuting(), "arbiter drift": {"rulings": [answer]}}
-    out = bridge.create({**ARBITER_ARGS, **paths}, over)
+    out = run_create(bridge, wf_plan, over)
     review = out["result"]["review"]
     assert review["result"] != "Ready", review["result"]
     wording = answer["requirement"]["wording"]
     reported = json.dumps(review["openQuestions"]) + json.dumps(review["arbiter"])
     assert wording in reported, "the change is reported to me in the workflow's report"
-    assert (tmp_path / "specs/f/PLAN.md").read_text().count(DECIDED) == 1, "PLAN.md is untouched"
+    assert (wf_plan.spec_dir / "PLAN.md").read_text().count(DECIDED) == 1, "PLAN.md is untouched"
 
 
 @NODE
-def test_116_a_drift_ruling_that_only_corrects_wording_is_not_reported_as_a_decision_change(bridge, tmp_path):  # noqa: F811
+def test_116_a_drift_ruling_that_only_corrects_wording_is_not_reported_as_a_decision_change(bridge, wf_plan):  # noqa: F811
     """Control: a plain wording correction (no requirement item) does not land in Needs Your Decision."""
-    paths = plan_project(tmp_path)
     over = {**refuting(), "arbiter drift": {"rulings": [wording_fix("spec_edit", changed="fixed a typo in 1.3")]}}
-    out = bridge.create({**ARBITER_ARGS, **paths}, over)
+    out = run_create(bridge, wf_plan, over)
     assert out["result"]["review"]["openQuestions"] == []
     assert out["result"]["review"]["arbiter"]["lost"] == []
 
 
 @NODE
-def test_116_outcome_spelling_does_not_hide_a_requirement_item(bridge, tmp_path):  # noqa: F811
-    paths = plan_project(tmp_path)
+def test_116_outcome_spelling_does_not_hide_a_requirement_item(bridge, wf_plan):  # noqa: F811
     for spelling in ("SPEC_EDIT", "Spec_Edit", " spec_edit", "spec_edit "):
         answer = wording_fix(spelling, requirement={"kind": "change", "wording": "retries are capped at 9", "reason": "r"})
-        out = bridge.create({**ARBITER_ARGS, **paths}, {**refuting(), "arbiter drift": {"rulings": [answer]}})
+        out = run_create(bridge, wf_plan, {**refuting(), "arbiter drift": {"rulings": [answer]}})
         review = out["result"]["review"]
         assert review["result"] != "Ready", spelling
-        assert "retries are capped at 9" not in (tmp_path / "specs/f/PLAN.md").read_text()
+        assert "retries are capped at 9" not in (wf_plan.spec_dir / "PLAN.md").read_text()
 
 
 @NODE
-def test_116_the_arbiters_own_drift_ruling_fed_back_as_a_finding_is_still_not_applied(bridge, tmp_path):  # noqa: F811
+def test_116_the_arbiters_own_drift_ruling_fed_back_as_a_finding_is_still_not_applied(bridge, wf_plan):  # noqa: F811
     """The system's own output as input: the reported change returns as a review finding whose fix is that change."""
-    paths = plan_project(tmp_path)
     change = "retries are capped at 5"
     fed_back = finding("R1", fix=f"Apply: {change}", problem="drift report: " + change)
     over = {**refuting(ids=("R1",)), "review: fidelity": {"findings": [fed_back]},
             "arbiter drift": {"rulings": [wording_fix("requirements", requirement={"kind": "change", "wording": change, "reason": "r"})]}}
-    out = bridge.create({**ARBITER_ARGS, **paths}, over)
-    assert (tmp_path / "specs/f/PLAN.md").read_text().count(DECIDED) == 1
+    out = run_create(bridge, wf_plan, over)
+    assert (wf_plan.spec_dir / "PLAN.md").read_text().count(DECIDED) == 1
     assert "arbiter drift" in " ".join(started(out)) or arbiter_labels(out, "drift")
     assert out["result"]["review"]["result"] != "Ready"
 
 
 @NODE
-def test_116_a_cut_that_removes_a_plan_item_is_reported_not_applied(bridge, tmp_path):
+def test_116_a_cut_that_removes_a_plan_item_is_reported_not_applied(bridge, wf_plan):
     """A sound cut removes something PLAN.md decided: it is shown to me and never applied without my approval."""
-    paths = plan_project(tmp_path)
     cut = {**CUT, "story": "1", "title": "Retries cap", "weakness": "no one notices a missing cap"}
     over = {**refuting(), "review: should-exist": {"findings": [cut]},
             "arbiter cuts": {"rulings": [{"claim": "C1", "status": "ruled", "outcome": "requirements", "reasoning": "sound",
                                           "principle": "project:remove-first", "verdict": "sound",
                                           "requirement": {"kind": "remove", "wording": DECIDED, "reason": "cut"}}]}}
-    out = bridge.create({**ARBITER_ARGS, **paths}, over)
-    labels = started(out)
-    assert not [l for l in labels if l.startswith("apply-cuts")], labels
-    assert (tmp_path / "specs/f/PLAN.md").read_text().count(DECIDED) == 1
+    out = run_create(bridge, wf_plan, over)
+    assert (wf_plan.spec_dir / "PLAN.md").read_text().count(DECIDED) == 1
     assert any(c["id"] == "C1" for c in out["result"]["review"]["proposedCuts"])
