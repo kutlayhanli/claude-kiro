@@ -723,10 +723,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 8 (P-2, P-3 at `route_ruling`), Task 27 (P-17, P-37 at `validate_ruling` and `route_ruling`)
 
 **Acceptance:**
-- [ ] Each invalid form (no principle, uncited principle, unknown or several outcomes, malformed) is invalid with a named problem and `record: false`
-- [ ] Each outcome goes to exactly one lane
-- [ ] A stronger-look answer reruns once at the normal tier and goes to `needs_input` at the risky tier
-- [ ] A reservation only moves a ruling toward `needs_input`, and a requirements ruling is never a spec edit
+- [x] Each invalid form (no principle, uncited principle, unknown or several outcomes, malformed) is invalid with a named problem and `record: false`
+- [x] Each outcome goes to exactly one lane
+- [x] A stronger-look answer reruns once at the normal tier and goes to `needs_input` at the risky tier
+- [x] A reservation only moves a ruling toward `needs_input`, and a requirements ruling is never a spec edit
 
 **Dependencies:** Task 8 (its tests are the oracle), Task 11 (reads `EffectivePrinciples`), Task 27 (its tests are the oracle), Task 29 (extends `arbiter_policy.py`)
 **Complexity:** Medium
