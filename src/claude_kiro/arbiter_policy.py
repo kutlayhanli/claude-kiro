@@ -521,31 +521,37 @@ def rulings_summary(rulings: Sequence[Mapping]) -> Mapping:
 
 @dataclass(frozen=True)
 class CreateRoute:
-    """What `/spec:create` does with one checked ruling. `action` is `settled` (the finding or cut is handled as
-    the ruling says, nothing in the spec changes), `edit` (a wording correction, not-started specs only),
-    `report` (goes to me, never applied), `rerun` (one re-run at the risky tier) or `lost` (the check did not run)."""
+    """What `/spec:create` does with one checked ruling (design.md). `confirm` and `keep-refuted` are the
+    refuted step (a finding that stands, a refutation that stands); `show-cut` and `reject-cut` are the cuts
+    step (a sound cut, an unsound one); `apply` is an allowed drift wording correction; `report` goes to me and
+    is never applied; `unchecked` means the check did not run or did not hold. Every route but `unchecked` is
+    recorded as a numbered ruling. `reason` is "" | "invalid-ruling" | "stronger-look" | "requirements" |
+    "frozen" | "not-a-create-outcome"."""
 
-    action: Literal["settled", "edit", "report", "rerun", "lost"]
-    reason: str  # "" | "invalid-ruling" | "requirements" | "frozen" | "not-a-create-outcome"
-    record: bool  # whether this answer becomes a numbered ruling
+    action: Literal["confirm", "keep-refuted", "show-cut", "reject-cut", "apply", "report", "unchecked"]
+    reason: str
 
 
 def route_create_ruling(check: RulingCheck, step: Step, started: bool) -> CreateRoute:
     """Sends a checked `/spec:create` ruling to one action. Anything that adds, removes or changes what PLAN.md
     decided is `requirements` and is reported, never applied (11.6, 11.10). A wording correction is allowed only
-    while implementation has not started (11.5, 11.7)."""
+    while implementation has not started (11.5, 11.7). A ruling that asks for a stronger look is `unchecked`
+    with reason `stronger-look`; the caller re-runs it once at the risky tier."""
     if not check.valid:
-        return CreateRoute("lost", "invalid-ruling", False)
+        return CreateRoute("unchecked", "invalid-ruling")
     if check.stronger_look:
-        return CreateRoute("rerun", "", False)
+        return CreateRoute("unchecked", "stronger-look")
     if check.outcome == "requirements":
-        return CreateRoute("report", "requirements", True)
+        return CreateRoute("report", "requirements")
     if check.outcome == "spec_edit":
-        if step == "drift" and started:
-            return CreateRoute("report", "frozen", True)
-        return CreateRoute("edit" if step == "drift" else "settled", "", True)
+        verdict = str(check.raw.get("verdict", "")).strip().lower() if isinstance(check.raw, Mapping) else ""
+        if step == "drift":
+            return CreateRoute("report", "frozen") if started else CreateRoute("apply", "")
+        if step == "cuts":
+            return CreateRoute("show-cut" if verdict == "sound" else "reject-cut", "")
+        return CreateRoute("confirm" if verdict == "finding stands" else "keep-refuted", "")
     # code and test_repair do not exist during /spec:create: nothing is applied
-    return CreateRoute("report", "not-a-create-outcome", True)
+    return CreateRoute("report", "not-a-create-outcome")
 
 
 def decide_cut(approved: bool, started: bool) -> Literal["apply", "hold", "frozen"]:
