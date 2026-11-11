@@ -592,7 +592,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 25: Test the ck arbiter CLI and the record of rulings
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 5.3, 7.1, 7.2, 8.8, 10.1, 10.2, 10.4, 10.5, 10.6, 5.6, 7.5, 7.6, 10.9
 **Description:** Implement TC-53, TC-88, TC-89, TC-91, TC-92, TC-93, TC-133, TC-135, TC-150, TC-152 and TC-154 in `tests/test_arbiter_cli.py`, named `test_tc<N>_...`. TC-53: a ruling with each outcome, and one asking for a stronger look, pass `ck arbiter settle`; each lacking claim, reasoning or principle fails. TC-88: `ck arbiter record` appends one numbered entry with trigger, claim, ruling, principle, what changed and commit (read through `decisions_entries`). TC-89: with no file changed and with a `/spec:create` ruling, commit is none. TC-91: earlier entries stay byte-identical and numbers keep rising in a second process. TC-92: 16 concurrent `ck arbiter record` processes wait on the landing lock and give 16 entries and 16 distinct numbers. TC-93: no file before the first ruling, and a workflow run with no rulings leaves none. TC-133: `ck arbiter open` equals `arbiter_policy.decide_claim` on one fixture where only a recorded history changes the answer. TC-135: `ck arbiter settle` equals `validate_ruling` plus `route_ruling` for one valid and one invalid ruling. TC-150: on route `rerun`, `ck arbiter settle` keeps the worktree and resets its branch to the starting commit, removing a partial commit; on `test_repair`, `code` and `needs_input` it removes the worktree and branch; on `spec_edit` it keeps them. TC-152: with the landing lock held past `--lock-wait`, `ck arbiter record` exits non-zero and writes nothing. TC-154: with 3 rulings on a task in a seeded ledger, `ck arbiter open` asks with `earlier` listing the 3; 3 rulings on another task do not count.
@@ -602,11 +602,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 37 (TC-133, TC-154), Task 38 (TC-53, TC-135, TC-150), Task 42 (TC-88, 89, 91, 92, 93, 152)
 
 **Acceptance:**
-- [ ] TC-92 starts 16 real subprocesses at once and counts entries and numbers from the real file
-- [ ] TC-133 and TC-135 compare the real CLI with the real seam on the same input
-- [ ] Tests exercise the real boundary named in the test plan (CLI, real files, real subprocesses)
-- [ ] Tests fail before the implementation exists for the right reason (no `ck arbiter` command)
-- [ ] No mocks of the project's own code in integration tests
+- [x] TC-92 starts 16 real subprocesses at once and counts entries and numbers from the real file
+- [x] TC-133 and TC-135 compare the real CLI with the real seam on the same input
+- [x] Tests exercise the real boundary named in the test plan (CLI, real files, real subprocesses)
+- [x] Tests fail before the implementation exists for the right reason (no `ck arbiter` command)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (project fixture, record reader), Task 2 (TC-93's workflow run)
 **Complexity:** High
