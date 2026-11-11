@@ -556,11 +556,12 @@ def test_tc105_rulings_start_normal_rerun_once_at_risky_one_per_finding_and_reac
     assert "R3" in sent_for(out, "arbiter refuted risky")[0]["prompt"]
     assert "RISKY-R3" not in sent_for(out, "arbiter refuted risky")[0]["prompt"]
     tiers = [c["argv"][c["argv"].index("--tier") + 1] for c in review_calls(out, "refuted") if "--tier" in c["argv"]]
-    assert tiers[:1] == ["normal"] and tiers.count("risky") == 1, tiers
+    assert tiers[:1] == ["normal"] and [t for t in tiers if t == "risky"] == ["risky"], tiers
     arb = arbiter_of(out)
-    assert len(arb["rulings"]) == 3, f"one ruling per finding, the stronger-look entry not counted twice: {arb}"
+    refuted = ["R1", "R2", "R3"]
+    assert len(arb["rulings"]) == len(refuted), f"one ruling per finding, the stronger-look entry not counted twice: {arb}"
     entries = entries_of(project)
-    assert len(entries) == 3 and all(e.get("Commit") == "none" for e in entries), entries
+    assert len(entries) == len(refuted) and all(e.get("Commit") == "none" for e in entries), entries
 
 
 BAD_ENTRIES = [
@@ -585,8 +586,9 @@ def test_tc105_an_entry_invalid_in_the_same_forms_as_tc54_is_not_a_ruling_and_is
 def test_tc105_two_entries_for_one_finding_are_one_ruling(tmp_path):
     project = plan_project(tmp_path)
     out = create(project, {**refuting("R1", "R2"), "arbiter refuted": {"rulings": [ruling("R1"), ruling("R1", verdict="finding stands"), ruling("R2")]}})
-    assert len(arbiter_of(out)["rulings"]) == 2
-    assert len(entries_of(project)) == 2
+    refuted = ["R1", "R2"]
+    assert len(arbiter_of(out)["rulings"]) == len(refuted)
+    assert len(entries_of(project)) == len(refuted)
 
 
 def test_tc107_with_no_refuted_finding_and_no_cut_neither_step_runs(tmp_path):
