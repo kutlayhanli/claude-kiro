@@ -12,12 +12,15 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from arbiter_helpers import DEFAULT_TASKS, FAILURE_FORMS, arbiter_project, decisions_entries, seam
-from landing_bridge import bridge  # noqa: F401  (module-scoped fixture)
+from landing_bridge import bridge, dags  # noqa: F401  (bridge is a module-scoped fixture)
 
 JS = Path(__file__).parent / "js"
 SCRIPT = Path(__file__).parent.parent / "plugin" / "workflows" / "spec-implement.js"
@@ -1270,3 +1273,215 @@ def test_tc155_a_spec_edit_that_landed_whose_record_then_fails_does_not_resume_t
     text = json.dumps(entries[0]).lower()
     assert "landed" in text and "not landed" not in text and "did not land" not in text, "the entry says the edit landed: " + text
     assert "1" not in out["result"]["merged"], json.dumps(out["result"])
+
+
+# --------------------------------------------------------------------------- P-12, P-13, P-14, P-16, P-43, P-44
+# Hypothesis properties over the same real workflow under the fake runtime (W) and the decisions-block seams through
+# the bridge `call` op. Each example builds its own real repo in a temp directory (no function-scoped fixture).
+
+PROPERTIES = {
+    "P-12": "test_p12_a_spec_claim_goes_to_the_arbiter_with_nothing_between_the_report_and_the_ruling",
+    "P-13": "test_p13_the_arbiter_runs_exactly_when_every_configured_attempt_failed",
+    "P-14": "test_p14_no_worktree_failure_ever_calls_the_arbiter",
+    "P-16": "test_p16_a_failed_arbiter_call_goes_to_me_with_no_fallback",
+    "P-43": "test_p43_a_no_requirement_finding_never_blocks_a_review",
+    "P-44": "test_p44_a_settled_finding_never_blocks_again",
+}
+
+PROP = dict(derandomize=True, max_examples=30, database=None, deadline=None)
+PROP_200 = dict(PROP, max_examples=200)
+
+LADDER = ["sonnet", "opus", "fable"]
+_escalate = st.integers(0, 3).map(lambda k: LADDER[:k])
+
+
+def fresh_project(**kw):
+    """A real git repo in a temp directory of its own; the caller cleans `keep` up after the example."""
+    keep = tempfile.TemporaryDirectory(prefix="p-arbiter-")
+    return keep, arbiter_project(Path(keep.name), **kw)
+
+
+def p12_options(stop, rounds):
+    if stop == "conflict":
+        return {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT}}, "rulings": {"1": [REQ]}}, None, None
+    if stop == "guard":
+        return {"deps": {"1": []}, "guardStops": {"1": "always"}, "rulings": {"1": [REQ]}}, None, None
+    if stop == "guard-revise":
+        return revise_opts(rulings={"1": [REQ]}), REVIEW_ON, "haiku"
+    if stop == "review":
+        return ({"deps": {"1": []}, "risk": {"1": "safety"}, "reviews": {"1": ["changes"] * 8}, "rulings": {"1": [REQ]}},
+                {**REVIEW_ON, "rounds": rounds}, "haiku")
+    flagged = {"verdict": "changes", "findings": [{"task": "1", "severity": "blocking", "file": "src/greet.py", "issue": "the greeting is never printed"}]}
+    return ({"deps": {"1": []}, "reviews": {"1": [flagged] + ["changes"] * 7}, "rulings": {"1": [REQ]}}, {**REVIEW_ON, "rounds": rounds}, None)
+
+
+# Thin ck steps (as THIN_LABEL in tests/js/fake_project.mjs) record events but are not part of the task's report sequence.
+P12_THIN = r"^(plan \d+|land |report$|park \d+|relink \d+|full gate @|re-check |final gate$|gate$|run start$|audit$|testfix ledger |testfix prove |arbiter-)"
+
+
+@settings(**PROP)
+@given(stop=st.sampled_from(["conflict", "guard", "guard-revise", "review", "batched-review"]), escalate=_escalate, rounds=st.integers(1, 3))
+def test_p12_a_spec_claim_goes_to_the_arbiter_with_nothing_between_the_report_and_the_ruling(bridge, stop, escalate, rounds):  # noqa: F811
+    """Every stop happens on the first attempt: fake_project checks testConflicts and guardStops before failUntil, and a
+    failUntil would add `task 1 retry` labels that P-12 rules out, so the attempt a claim occurs on is not varied."""
+    keep, project = fresh_project()
+    try:
+        opts, reviewer, risky = p12_options(stop, rounds)
+        out = run(bridge, project, opts, agents=roles("haiku", escalate, reviewer, risky_model=risky))
+        ev = out["events"]
+        assert arbiter_calls(ev), "the claim reached the arbiter: " + ", ".join(ev)
+        at = ev.index("arbiter task 1")
+        thin = re.compile(P12_THIN)
+        before = [e for e in ev[:at] if not thin.search(e)]
+        report = before[-1]
+        assert report.endswith(" end") and re.match(r"^(task 1|review)", report), f"the last non-thin event before the arbiter is the stopping report, not {report!r}: " + ", ".join(ev)
+        assert not any(e.startswith("task 1 retry") for e in ev), "no confirmation or further attempt anywhere: " + ", ".join(ev)
+        if stop in ("conflict", "guard"):
+            assert attempts(ev) == ["task 1"], "one attempt only: " + ", ".join(ev)
+            assert report == "task 1 end", "the first attempt's report stopped the task: " + ", ".join(ev)
+        elif stop == "batched-review":
+            assert any(e.startswith("review-wave") for e in ev), "a landing batch review ran: " + ", ".join(ev)
+        assert guard_labels(ev) == [], ", ".join(ev)
+        assert [e for e in ev if re.search(r"revise \d+ \(", e)] == [], "no escalated revision: " + ", ".join(ev)
+        assert not any(e.startswith("task 1 retry") for e in ev[at:]), ", ".join(ev)
+    finally:
+        keep.cleanup()
+
+
+@settings(**PROP)
+@given(fail_until=st.integers(0, 7), retries=st.integers(0, 3), escalate=_escalate)
+def test_p13_the_arbiter_runs_exactly_when_every_configured_attempt_failed(bridge, fail_until, retries, escalate):  # noqa: F811
+    keep, project = fresh_project()
+    try:
+        total = 1 + retries + len(escalate)
+        out = run(bridge, project, {"deps": {"1": []}, "failUntil": {"1": fail_until}, "rulings": {"1": [REQ]}}, agents=roles("haiku", escalate), maxRetries=retries)
+        ev = out["events"]
+        if fail_until >= total:
+            assert len(attempts(ev)) == total, "every configured attempt ran: " + ", ".join(ev)
+            assert arbiter_calls(ev) == ["arbiter task 1"], ", ".join(ev)
+            assert ev.index("arbiter task 1") > ev.index(attempts(ev)[-1]), ", ".join(ev)
+        else:
+            assert any_arbiter(ev) == [], "an attempt passed, so no arbiter: " + ", ".join(ev)
+            assert out["result"]["merged"] == ["1"], json.dumps(out["result"])
+    finally:
+        keep.cleanup()
+
+
+@settings(**PROP)
+@given(deps=dags(max_tasks=5, dangling=False), state=st.sampled_from(["BUSY", "ERROR"]), pick=st.integers(0, 4), two=st.booleans())
+def test_p14_no_worktree_failure_ever_calls_the_arbiter(bridge, deps, state, pick, two):  # noqa: F811
+    keep, project = fresh_project()
+    try:
+        ids = sorted(deps, key=int)
+        bad = {ids[pick % len(ids)], ids[(pick + 1) % len(ids)]} if two else {ids[pick % len(ids)]}
+        opts = {"deps": deps, "worktree": {n: {"state": state, "detail": "elsewhere"} for n in bad}}
+        out = run(bridge, project, opts, **graph_args(deps), agents=roles("haiku", ["opus"]))
+        assert any_arbiter(out["events"]) == [], ", ".join(out["events"])
+    finally:
+        keep.cleanup()
+
+
+@settings(**PROP)
+@given(form=st.sampled_from(FAILURE_FORMS), claim=st.sampled_from(["test-conflict", "guard-stop", "gate-failure"]), escalate=st.integers(0, 1).map(lambda k: LADDER[1:1 + k]))
+def test_p16_a_failed_arbiter_call_goes_to_me_with_no_fallback(bridge, form, claim, escalate):  # noqa: F811
+    keep, project = fresh_project()
+    try:
+        if claim == "test-conflict":
+            opts = {"deps": {"1": []}, "testConflicts": {"1": {"conflict": CONFLICT}}, "rulings": {"1": [form]}}
+        elif claim == "guard-stop":
+            opts = {"deps": {"1": []}, "guardStops": {"1": "always"}, "rulings": {"1": [form]}}
+        else:
+            opts = {"deps": {"1": []}, "failUntil": {"1": 99}, "rulings": {"1": [form]}}
+        out = run(bridge, project, opts, agents=roles("haiku", escalate))
+        ev = out["events"]
+        assert arbiter_calls(ev), "the arbiter was called: " + ", ".join(ev)
+        assert len(needs(out)) == 1, json.dumps(out["result"].get("needsInput"))
+        assert guard_labels(ev) == [], ", ".join(ev)
+        assert not any(e.startswith("testfix") for e in ev), ", ".join(ev)
+        if claim != "gate-failure":
+            assert attempts(ev) == ["task 1"], "no confirmation or retry follows: " + ", ".join(ev)
+        else:
+            assert not any(e.startswith("task 1 retry") for e in ev[ev.index("arbiter task 1"):]), ", ".join(ev)
+    finally:
+        keep.cleanup()
+
+
+_sev = st.sampled_from(["blocking", "minor"])
+
+
+@st.composite
+def review_mixes(draw):
+    """Severity mixes: a finding is blocking or minor, and may be flagged `noRequirement`, marked blocking or not."""
+    items = draw(st.lists(st.tuples(_sev, st.booleans(), st.integers(0, 9)), max_size=6))
+    findings = []
+    for i, (sev, no_req, n) in enumerate(items):
+        f = {"severity": sev, "file": f"src/f{n}.py", "issue": f"issue {i} about f{n}", "fix": f"fix {i}"}
+        if no_req:
+            f["noRequirement"] = True
+        findings.append(f)
+    return {"verdict": "changes" if findings else draw(st.sampled_from(["approve", "changes"])), "findings": findings, "summary": "s"}
+
+
+@settings(**PROP_200)
+@given(review=review_mixes())
+def test_p43_a_no_requirement_finding_never_blocks_a_review(bridge, review):  # noqa: F811
+    out = bridge.call("normalizeReview", json.loads(json.dumps(review)))
+    got = out["findings"]
+    assert [f["fix"] for f in got] == [f["fix"] for f in review["findings"]], "no finding is dropped or reordered: " + json.dumps(out)
+    for before, after in zip(review["findings"], got):
+        if before.get("noRequirement"):
+            assert after["severity"] == "minor", "a no-requirement finding is minor even when marked blocking: " + json.dumps(after)
+        else:
+            assert after["severity"] == before["severity"], json.dumps(after)
+    others_block = any(f["severity"] == "blocking" and not f.get("noRequirement") for f in review["findings"])
+    if review["verdict"] == "changes" and not others_block:
+        assert out["verdict"] == "approve", "nothing else blocks, so the review approves: " + json.dumps(out)
+    if others_block:
+        assert out["verdict"] != "approve", json.dumps(out)
+
+
+_words = st.lists(st.sampled_from(["the", "test", "asserts", "opposite", "of", "1.1", "greeting", "is", "never", "printed", "Rounds", "EXIT"]), min_size=2, max_size=6)
+
+
+def ident_of(file, issue):
+    return f"{file}#{' '.join(issue.lower().split())}"
+
+
+@st.composite
+def settle_cases(draw):
+    """(findings, settled identities, tags that must remain). Each finding carries a unique `fix` tag."""
+    files = ["tests/test_a.py", "src/b.py", "tests/test_c.py"]
+    settled_pairs = draw(st.lists(st.tuples(st.sampled_from(files), _words.map(" ".join)), min_size=1, max_size=3, unique=True))
+    settled = [ident_of(f, i) for f, i in settled_pairs]
+    findings, expected = [], []
+    for k in range(draw(st.integers(1, 7))):
+        kind = draw(st.sampled_from(["same", "variant", "reworded", "other-issue", "other-file"]))
+        file, issue = draw(st.sampled_from(settled_pairs))
+        f = {"severity": "blocking", "file": file, "issue": issue, "fix": f"tag {k}"}
+        removed = True
+        if kind == "variant":
+            seps = [draw(st.sampled_from([" ", "  ", "\t", "\n"])) for _ in issue.split()]
+            body = "".join(w + s for w, s in zip(issue.split(), seps))
+            f["issue"] = draw(st.sampled_from([str.upper, str.title, str.lower, lambda x: x]))(" " * draw(st.integers(0, 2)) + body)
+        elif kind == "reworded":
+            f["issue"] = "in other words: " + issue[::-1] + f" #{k}"
+            f["settledBy"] = draw(st.integers(1, 9))
+        elif kind == "other-issue":
+            f["issue"] = f"a different problem number {k} entirely"
+            removed = False
+        elif kind == "other-file":
+            f["file"] = "docs/unrelated.md"
+            removed = False
+        findings.append(f)
+        if not removed:
+            expected.append(f["fix"])
+    return findings, settled, expected
+
+
+@settings(**PROP_200)
+@given(case=settle_cases())
+def test_p44_a_settled_finding_never_blocks_again(bridge, case):  # noqa: F811
+    findings, settled, expected = case
+    review = {"verdict": "changes", "findings": findings, "summary": "s"}
+    out = bridge.call("settleFindings", review, settled)
+    assert [f["fix"] for f in out["findings"]] == expected, f"settled: {settled}\nfindings: {json.dumps(findings)}\ngot: {json.dumps(out)}"
