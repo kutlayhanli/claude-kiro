@@ -161,7 +161,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 6: Add the arbiter and auditor role prompts and register them
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 6.8, 7.1, 8.1, 13.4
 **Description:** Create `plugin/agents/arbiter.md` (tools: Read, Grep, Glob, Edit, Write, Bash). It says what the arbiter receives (stop type, claim, evidence, task, models tried, both principle layers, spec documents), that it must answer with exactly one outcome (`spec_edit`, `test_repair`, `code`, `requirements`) or status `needs_stronger_look`, citing a principle id, and that a spec edit is committed on its own branch in the worktree it is given, with a plain `git commit -m '...'` in single quotes, because the guard denies `$(...)` and backticks in a command. Its lane is `tasks.md`, `design.md` and `test-plan.md`; it may only suggest requirements. Create `plugin/agents/auditor.md` (tools: Read, Grep, Glob only, so it cannot change a file), which reads a task's selected tests against the spec and reports problems in the `AUDIT` shape from design.md. Add `"arbiter": "arbiter"` and `"auditor": "reviewer"` to `AGENT_ROLES` in `src/claude_kiro/plugin.py`, so `ck-arbiter.md` and `ck-auditor.md` are generated and `spec:arbiter` references are rewritten when vendored. Harness Contract owner: the `ck-arbiter` agent source. Task 88 adds both agents to `tests/test_plugin.py`, and this task's Verify leaves out the tests only later work can pass: the dogfood and vendored-copy tests need the protected `.claude/` copies Task 92 regenerates, and `test_skills_use_the_plugin_root_and_namespaced_workflows` needs Task 76's guide text. 6.8 is verified at Task 65 by Task 55 (TC-50), and 13.4 at Task 74 by Task 71 (TC-123). 7.1 and 8.1 are carried by the schema and landing tasks that use this prompt.
@@ -174,9 +174,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** none (Task 88 extends `tests/test_plugin.py` once this task has landed)
 
 **Acceptance:**
-- [ ] Both agent files exist, and the auditor's tool list has no write or shell tool
-- [ ] `AGENT_ROLES` holds both, with `auditor` following the `reviewer` role
-- [ ] The arbiter prompt requires one outcome, the claim key and a cited principle id, and limits edits to the three lane files
+- [x] Both agent files exist, and the auditor's tool list has no write or shell tool
+- [x] `AGENT_ROLES` holds both, with `auditor` following the `reviewer` role
+- [x] The arbiter prompt requires one outcome, the claim key and a cited principle id, and limits edits to the three lane files
 
 **Dependencies:** Task 5 (`agent_type_files` reads the arbiter role)
 **Complexity:** Medium
