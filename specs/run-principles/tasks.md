@@ -1799,7 +1799,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 77: Test the requirements prompt and the should-this-exist lens
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 2.3, 2.4, 4.1, 4.6, 4.7
 **Description:** Implement TC-16, TC-17, TC-26, TC-32 and TC-33 in `tests/test_arbiter_create.py`, named `test_tc<N>_...`, under the real `spec-create.js`. TC-16: in create mode the Requirements prompt tells the writer to put a `**Without it:**` line on every story, carrying the plan item's reason. TC-17: it tells the writer a story no plan item covers gets its own line. TC-26: in create and review modes `review: should-exist` runs and its prompt attacks each story's justification. TC-32: when the lens finds nothing, review.md says so. TC-33: when the lens throws, `lensesLost` is counted and the log says coverage is partial.
@@ -1809,10 +1809,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 83 (TC-16, 17, 26, 32, 33)
 
 **Acceptance:**
-- [ ] Prompt cases read the real prompts the workflow sends
-- [ ] Tests exercise the real boundary named in the test plan (real `spec-create.js`, real files)
-- [ ] Tests fail before the implementation exists for the right reason (no lens or prompt text)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Prompt cases read the real prompts the workflow sends
+- [x] Tests exercise the real boundary named in the test plan (real `spec-create.js`, real files)
+- [x] Tests fail before the implementation exists for the right reason (no lens or prompt text)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (project fixture), Task 2 (`fake_create` answers)
 **Complexity:** Medium
