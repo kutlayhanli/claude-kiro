@@ -2216,7 +2216,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 96: Test that bisection blames only a task whose own gate fails
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 15.1, 15.2, 15.3
 **Description:** Create `tests/test_land_bisect.py` with TC-170, TC-171, TC-172, TC-175, TC-198 and P-48 (test-plan.md). TC-170 to TC-172 and TC-175 run the real `ck worktree land --gate --json` on a real repository with a spec whose task branches each commit their own files and their own `**Status:** Done` in `tasks.md`, as real implementers do, so a gate after an earlier half has MERGED sees those tasks Done on the target; TC-171's `specs/ck.json` `verify` runs a test file no task's Verify selects, and it asserts that the gate on the last single task, which sees the spec complete, ran task-scoped. P-48 calls `worktrees.land` with an in-process gate function over real task branches, at `max_examples=30`, and carries a `PROPERTIES` map; its gate function models `gate.py`'s scope rule (full suite when called with `whole` true and the tasks Done on the target plus its group cover the spec), so it fails on a design that lets a sub-batch gate widen. Migrate `tests/test_worktree_land.py::test_red_batch_bisects_to_the_culprit`: its `len(data["gates"]) < 5` and the comment "a green left half proves the right half red without re-gating it" encode the behaviour 15.1 replaces; assert the 2n-1 bound and the right half's own gate instead, keeping its other assertions.
@@ -2227,12 +2227,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 97 (bisection without inference and `unreproduced`)
 
 **Acceptance:**
-- [ ] TC-171 reproduces the observed case: a spec-completing batch red only under the full suite, with task branches that mark themselves Done, and the last task is not RED
-- [ ] The migrated test keeps every assertion not about the gate count
-- [ ] P-48 generates every combination its row lists
-- [ ] Tests exercise the real boundary named in the test plan (real git, real `ck gate`, the `ck` CLI)
-- [ ] Tests fail before the implementation exists for the right reason (the right half is inferred red and a task is blamed by elimination)
-- [ ] No mocks of the project's own code in integration tests
+- [x] TC-171 reproduces the observed case: a spec-completing batch red only under the full suite, with task branches that mark themselves Done, and the last task is not RED
+- [x] The migrated test keeps every assertion not about the gate count
+- [x] P-48 generates every combination its row lists
+- [x] Tests exercise the real boundary named in the test plan (real git, real `ck gate`, the `ck` CLI)
+- [x] Tests fail before the implementation exists for the right reason (the right half is inferred red and a task is blamed by elimination)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** None
 **Complexity:** Medium
