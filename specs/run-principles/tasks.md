@@ -522,7 +522,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 22: Simulate each task's gate and report Verify-scope findings
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 12.1, 12.2, 12.3, 12.4, 12.9, 12.10
 **Description:** In `src/claude_kiro/lint_scope.py`, add `SimTest`, `SimInput`, `ScopeFinding`, `ScopeResult`, `load_sim_input` (from tasks.md and test files, with `ast` and text only, parsing each test file once), `scope_findings(sim)` and `dedupe_scope(result, existing)`. For each not-Done task, simulate which suites are due and what they select. Report `unfiltered-shared-suite` findings, the only kind: a selected test that calls a later task's command gives no finding, since live command edges handle it at run time (D30, 12.3). Report nothing when a suite is not due, its filter excludes the tests, or the task depends directly or transitively on the tasks those tests are for. A bare `pytest`, a directory, a glob, a shell variable, an unreadable `-k` or a selected file not yet on disk (`not on disk yet`) goes to `not_checked`. Sort findings by (int task, kind, suite, testTask). Import no project code and use no network. Harness Contract owner: `lint.verify_scope`, which is `lint_scope.scope_findings` and `dedupe_scope`.
