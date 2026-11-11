@@ -500,7 +500,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 21: Red-team the prohibitions of Story 12
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 12.9, 12.10
 **Description:** Try to break each SHALL NOT clause of Story 12 with adversarial inputs: unusual surface forms, near-miss values from the real data, the system's own outputs fed back as inputs, boundary and encoding tricks. Every way you find to break it becomes a test. For 12.9: a Verify with shell variables, globs, `$(...)`, an unreadable `-k`, a directory, or quoting that looks resolvable and is not. For 12.10: the same problem described in different words by an existing rule, a problem found through both `verifyCycles` and Story 12, and this spec's own tasks.md fed back in. Written from the requirements only, never from the implementation.
@@ -510,10 +510,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** Task 24 (red team of 12.9, 12.10 through `ck lint`)
 
 **Acceptance:**
-- [ ] Each SHALL NOT clause has at least one adversarial test per listed input class that applies to it
-- [ ] Tests exercise the real boundary named in the test plan (`ck lint` through the CLI)
-- [ ] Tests fail before the implementation exists for the right reason (no `notChecked` handling or dedupe)
-- [ ] No mocks of the project's own code in integration tests
+- [x] Each SHALL NOT clause has at least one adversarial test per listed input class that applies to it
+- [x] Tests exercise the real boundary named in the test plan (`ck lint` through the CLI)
+- [x] Tests fail before the implementation exists for the right reason (no `notChecked` handling or dedupe)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 1 (project fixture)
 **Complexity:** Medium
