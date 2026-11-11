@@ -14,32 +14,33 @@ PLAN.md decisions that shape it:
 
 | Decision | Effect on the design |
 |---|---|
-| D1, D18 | The arbiter never edits tests. A test-repair ruling goes through one function, `handOffTestRepair`, which creates a needs-input entry until the test-fixer exists. |
+| D1, D18 | The arbiter never edits tests. A test-repair ruling goes through one function, `handOffTestRepair`, which maps it to conflict entries and calls the built test-fixer (`testFixFor`), as D18 says once unattended-correctness Tasks 57 and 86 land (they have). A needs-input entry comes only when the fixer cannot take the repair or does not land it, and a `test-correct` verdict is a fix not landed (8.8, D27). A landed fix resumes the task with no retry spent (8.16). |
 | D2, D11, D15 | The guard gives the arbiter its own lane, which `guard_policy.decide_arbiter_edit` defines. Requirements are never in the lane during a run. |
 | D5 | Two layers, parsed by `principles.py`. The project file is plain text in the repository, so changing defaults does not change `ck`. |
 | D6, D7 | `justifications.py` for lint, a fifth review lens, and skill text at planning. Cuts are only ever proposals. |
-| D8 | `claimTrigger` sends spec claims straight to the arbiter. `confirmConflictPrompt`, `climbGuard` and the revise ladder are removed. |
+| D8, D29 | `claimTrigger` sends spec claims straight to the arbiter, a command cycle among them (`command-cycle`). `confirmConflictPrompt`, `climbGuard` (all three of its call sites) and the revise ladder are removed. |
 | D9 | The `arbiter` role in `agents.py`, with tier chosen by `decide_claim`. |
 | D10 | A per-spec ledger in the git common directory, so limits survive resume. |
 | D12 | `specs/<spec>/decisions.md`, written only by `ck arbiter record`. |
 | D14 | Three arbiter steps in `spec-create.js`. |
-| D16 | `lint_scope.py` simulates each gate; an `auditor` agent reads the tests. |
-| D17 | Built on `integrate/run-principles`. See "Branch dependencies". |
+| D16, D30 | `lint_scope.py` simulates each gate and reports unfiltered shared suites only; a test calling a later task's command is left to live command edges. An `auditor` agent reads the tests. |
+| D17 | Built on `integrate/run-principles`, now branched from `master`, which holds unattended-correctness since a4ac212. See "Existing code this relies on". |
 | D23 | ck's git hook records each refused `integrate/*` update; `land` and `merge` restore a managed integration checkout only against such a record, with the tokened reset to its own head. |
 | D24 | `land_group` gates every half and never infers RED; a batch whose failure no task reproduces is `unreproduced`, and the workflow sends it to the attributed full gate and fixer. |
+| D27, D31-D33 | One claim loop, `settleClaims`, settles every trigger's claims, and its `handOffTestRepair` call is the one point a test-repair ruling goes through. |
+| D28 | Cross-test findings keep their direct route to the test-fixer; the audit skips a task whose verifying test tasks a cross-test check already passed. |
 
-### Branch dependencies (D17)
+### Existing code this relies on (on master since a4ac212)
 
-These exist only on `integrate/unattended-correctness`, and this design relies on them:
+unattended-correctness has landed on `master`, so `integrate/run-principles` branches from `master` and nothing is merged in between runs. This design relies on:
 
 - `src/claude_kiro/graph.py` (`build_graph`, `invoked_commands`, `provides` and `invokes` edges) and `src/claude_kiro/cli/graph.py`.
-- `SpecTask.provides` in `hooks/_shared/spec_parser.py`.
+- `SpecTask.provides` in `hooks/_shared/spec_parser.py`, and `ck plan --json`'s `provides` and `testVerifies` keys.
 - `ck gate --json` `failures[]` with `missingCommand`, and the three-value `GateFn` in `worktrees.py`.
 - `lint_spec`'s `commandEdges` and related keys.
-- In `spec-implement.js`: `thinCk`, `CK_CALL`, `RUNNER_AGENT`, `agentType` on agent calls, `testConflictsOf`.
-- `plugin/agents/runner.md` and the `None` role in `plugin.AGENT_ROLES`.
-
-The test-fixer (`src/claude_kiro/testfix.py`, `ck testfix`, unattended-correctness Tasks 57 and 86) does not exist on any branch yet.
+- In `spec-implement.js`: `thinCk` and the generic `CK_CALL` envelope (every `ck` call returns `{exitCode, json, error}` with an untyped `json`), `RUNNER_AGENT`, `agentType` on agent calls, `testConflictsOf`, `liveEdgeDecision` with `liveOf`, `liveConflicts` and `recordLiveWait` (live command edges, UC Task 93), `writeSetHold` (UC Task 94), `heldByCrossTest` and the cross-test blocking route (UC Task 87), and the test-fix loop: `testFixFor`, `runTestFix`, `parkTestFix`, `conflictEntry`, `testFixPrompt`, `afterFixNote` and the `budgetBase` reset in `runTask` (UC Tasks 57 and 86).
+- `src/claude_kiro/testfix.py` and `ck testfix check` / `prove` (the test-fix ledger, one fix per test).
+- `ck worktree approve` (landing protected files from a real terminal), `ck worktree start`, the run-start hooks, and `plugin/agents/runner.md` with the `None` role in `plugin.AGENT_ROLES`.
 
 ## Components
 
@@ -47,7 +48,7 @@ The test-fixer (`src/claude_kiro/testfix.py`, `ck testfix`, unattended-correctne
 
 - `src/claude_kiro/agents.py` - add the `arbiter` role to `DEFAULTS` and `ROLE_KEYS`; allow `inherit` for `arbiter.risky_model` in `_coerce`; in `resolve`, fill each unset `arbiter.*` value from `reviewer.risky_model` or `reviewer.risky_effort` and name that source (5.1, 5.2).
 - `src/claude_kiro/plugin.py` - add `"arbiter": "arbiter"` and `"auditor": "reviewer"` to `AGENT_ROLES`, so `ck-arbiter.md` and `ck-auditor.md` are generated for vendored projects and `spec:arbiter` references are rewritten (D11, 13.4).
-- `src/claude_kiro/analytics/roles.py` - add both agent types to `SPEC_AGENT_TYPES` and its role map, and labels `arbiter task <n>`, `arbiter task <n> risky`, `arbiter <step>` and `audit task <n>`. The integration branch already uses a bare `audit` label, so these carry `task`.
+- `src/claude_kiro/analytics/roles.py` - add both agent types to `SPEC_AGENT_TYPES` and its role map, and labels `arbiter task <n>`, `arbiter task <n> risky`, `arbiter <step>` and `audit task <n>`. Master already uses a bare `audit` label (the run-end audit), so these carry `task`. Also the pattern `full gate @N (unreproduced landing)`, mapped to the `full` role (Story 15).
 - `src/claude_kiro/analytics/collect.py` and `src/claude_kiro/analytics/show.py` - read `rulings` from the workflow result and report counts by trigger, outcome and tier (10.8).
 - `src/claude_kiro/hooks/_shared/guard_policy.py` - add `ArbiterEditFacts`, `is_arbiter_caller`, `decide_arbiter_edit`, `decide_arbiter_bash` and `arbiter_block_reason`. `classify_caller`, `Caller` and every existing decision stay unchanged, so existing property P-11 keeps holding (9.5-9.8).
 - `src/claude_kiro/hooks/pre_tool_guard.py` - in `_hook`, check `is_arbiter_caller` first and send that caller only through the lane. An exception on that path denies, where other callers fail open (9.1-9.4, 9.8).
@@ -58,7 +59,7 @@ The test-fixer (`src/claude_kiro/testfix.py`, `ck testfix`, unattended-correctne
 - `src/claude_kiro/protect.py` - add `Refusal`, `record_refusal`, `refusal_for` and `clear_refusal`, kept in `<git common dir>/ck/refusals.json` (14.1, 14.5).
 - `src/claude_kiro/cli/githooks.py` - `reference-transaction` and `pre-merge-commit` call `protect.record_refusal` for each `integrate/*` update they refuse (14.1).
 - `src/claude_kiro/cli/main.py` - register the `arbiter` and `principles` groups.
-- `plugin/workflows/spec-implement.js` - the run integration described under "Data Flow": new args, schemas, prompts, decisions-block functions, removal of `confirmConflictPrompt`, `climbGuard`, `guardLadder` and the revise escalation loop; arbiter landing in the queue; launch handling; audit; `rulings` and `proposedCuts` in the result. The landing step keeps `recovered` on its landing entry and sends an `unreproduced` landing to the attributed full gate and fixer (Stories 14, 15).
+- `plugin/workflows/spec-implement.js` - the run integration described under "Data Flow": new args, the `RULING` and `AUDIT` agent schemas, validity checks for the `ck arbiter` and `ck plan` fields read from `out.json`, prompts, decisions-block functions, removal of `confirmConflictPrompt`, `climbGuard`, `guardLadder` and the revise escalation loop; the confirmed-conflict block of `runTask` (today ~2303-2346) rewired so a test conflict goes to the arbiter and a test-repair ruling to `testFixFor` through `handOffTestRepair`; `conflictEntry` keeps an optional `ruling`; arbiter landing in the queue; launch handling; audit; `rulings` and `proposedCuts` in the result. The landing step keeps `recovered` on its landing entry and sends an `unreproduced` landing to the attributed full gate and fixer (Stories 14, 15).
 - `plugin/workflows/spec-create.js` - `**Without it:**` in the requirements template; a `should-exist` lens that the refute loop skips; a `thinCk` helper; the new args; three arbiter steps started with plain `agent`; an `apply-cuts` mode that branches only on the `cut` field of `ck arbiter context --approved-cut`; `review.proposedCuts` and `review.arbiter` in the result; the not-Ready rule (Stories 2, 4, 11).
 - `plugin/skills/plan/SKILL.md` - create the principles file, ask for principles and overrides, ask what breaks without each In-scope item and offer the cut, add `## Principles` and `*Without it:*` to the PLAN.md template, record each override with its reason as `**Reason:** <text>`, and run `ck principles check` before Status `Decided` (1.1-1.5, 2.1, 2.2).
 - `plugin/skills/create/SKILL.md` - run `ck principles init` and tell me when it created the file; run `ck agents --json` and pass `arbiterAgent`, `runnerAgent` and `agents.arbiter`; report proposed cuts and launch the `apply-cuts` mode for the ones I approve; say the frozen message it returns after implementation has started (1.1, 4.2, 4.4, 4.5, 11.9).
@@ -116,7 +117,7 @@ New `ck lint --json` keys (existing keys keep their names and meaning):
 | `notChecked` | `[{"task": str, "command": str, "reason": str}]` |
 | `warnings` | `[{"kind": "principles", "plan": str, "message": str}]` |
 
-`ck lint` text output prints one line per finding, naming the task, the suite or test, and the provider where one applies (12.8).
+`ck lint` text output prints one line per finding, naming the task and the suite (12.8).
 
 ### Agent types and the role setting
 
@@ -126,11 +127,11 @@ New `ck lint --json` keys (existing keys keep their names and meaning):
 
 `spec-implement` gains these args: `arbiterAgent` and `auditorAgent` (agent type names), `verifiedBy` (`{task: [test tasks]}`), and `agents.arbiter`. An absent `arbiterAgent` means the arbiter cannot be called (6.10). `verifiedBy` from the args is used only until the first plan; after that the workflow reads the current plan's `verifiedBy`.
 
-`spec-create` gains these args: `arbiterAgent` and `runnerAgent` (agent type names), and `agents.arbiter` (the resolved `arbiter` role). The create and review skills run `ck agents --json` and pass them. An absent `arbiterAgent` means the arbiter cannot be called, which is 11.12 for each step with subjects: the check did not run and the result is not Ready. A step with no subjects makes no call and is not lost (11.11). Without an agent type the arbiter is not `is_arbiter_caller`, so the lane rules would not apply. `spec-create.js` gains a `thinCk` helper in the shape of the integration branch's (one `CK_CALL` agent per command, with `agentType: runnerAgent` when present, else a low-effort default agent). It runs every `ck arbiter context`, `lane open`, `review` and `lane close` step.
+`spec-create` gains these args: `arbiterAgent` and `runnerAgent` (agent type names), and `agents.arbiter` (the resolved `arbiter` role). The create and review skills run `ck agents --json` and pass them. An absent `arbiterAgent` means the arbiter cannot be called, which is 11.12 for each step with subjects: the check did not run and the result is not Ready. A step with no subjects makes no call and is not lost (11.11). Without an agent type the arbiter is not `is_arbiter_caller`, so the lane rules would not apply. `spec-create.js` gains a `thinCk` helper in the shape of `spec-implement.js`'s (one `CK_CALL` agent per command, with `agentType: runnerAgent` when present, else a low-effort default agent). It runs every `ck arbiter context`, `lane open`, `review` and `lane close` step.
 
 Arbiter steps in `spec-create.js` use plain `agent`, not `pagent`, so their prompts hold no `ck progress` command that `decide_arbiter_bash` would deny. The workflow keeps their time in the ETA with its own `thinCk` calls to `ck progress event ... phase-start` and `step-end`, phase `Arbiter`, around them.
 
-The `spec-implement` result gains `rulings: [RunRuling]` (this run only), `proposedCuts: [{task, file, issue}]` and `missedAudits: [task]`. When launch is refused for Verify scope, it carries `verifyScope` and `proposals`. Needs-input entries keep their existing fields and add `kind` values `arbiter`, `test-repair`, `requirements`, `missing-requirement`, with `ruling` (the number or null).
+The `spec-implement` result gains `rulings: [RunRuling]` (this run only), `proposedCuts: [{task, file, issue}]` and `missedAudits: [task]`. When launch is refused for Verify scope, it carries `verifyScope` and `proposals`. Needs-input entries keep their existing fields and add `kind` values `arbiter`, `requirements`, `missing-requirement`, with `ruling` (the number or null). A test repair the fixer does not land uses the existing kind `test-fix`, with `ruling` (the number) and `testRepair` (the ruling's `{file, test, change, why}`) added, because `parkTestFix`'s `fixes` are empty when the ledger refuses and 8.8 needs the exact change and why on the entry. When the fixer answered `test-correct`, the entry also carries its `finding` (`{file, test, issue}`) (D27). A claim that returns after its fix landed adds the new report as `evidence` (7.4).
 
 The `spec-create` result gains `review.proposedCuts: [Cut]` and `review.arbiter: {ran: [step], lost: [step], rulings: [number], missing: string | null}`, where `missing` names an unusable principles file (1.12).
 
@@ -246,12 +247,14 @@ Every seam is pure: no I/O, clock or network, and all inputs are arguments.
 
 | Seam | Input -> output | Criteria |
 |---|---|---|
-| `claimTrigger({ result, guardStop, testConflict, worktreeKind, retryNo, maxRetries, rungsLeft, reviewDeadlock })` | `-> 'test-conflict' \| 'guard-stop' \| 'review-deadlock' \| 'gate-failure' \| null` | 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.11 |
-| `scopeClaims(findings)` | `ScopeFinding[] -> [{ task, rule, subject, tests, provider, messages }]`, one entry per (task, kind, suite or command), the identity `claim_key` uses | 12.6, 12.11 |
+| `claimTrigger({ result, guardStop, testConflict, live, worktreeKind, retryNo, maxRetries, rungsLeft, reviewDeadlock })` | `-> 'test-conflict' \| 'guard-stop' \| 'review-deadlock' \| 'command-cycle' \| 'gate-failure' \| null`. `live` is `liveEdgeDecision`'s result for the attempt (`action` and `refused`). A `blocked` action, or any non-empty `refused`, is a `command-cycle` (D29); a `wait` with nothing refused returns null, so today's `recordLiveWait` runs and spends no retry; `conflict` is a `test-conflict` (its invoking tests have joined `testConflicts` through `liveConflicts`) | 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.11, 6.13, Compatibility |
+| `testRepairEntries(rulings)` | `[{ claim, ruling }] -> ConflictEntry[]`, one per `test_repair` ruling: `{ file, test, criterion, reason, fix, ruling }` with `file` and `test` from `ruling.testRepair` (else the claim's), `criterion` from the claim, `reason` = `ruling.testRepair.why`, `fix` = `ruling.testRepair.change`, and `ruling` the settled ruling object, unchanged, with its `decisions.md` number | 8.9, 8.10 |
+| `scopeClaims(findings)` | `ScopeFinding[] -> [{ task, rule, subject, tests, messages }]`, one entry per (task, kind, suite), the identity `claim_key` uses; `tests` lists the `testTask` of each grouped finding | 12.6, 12.11 |
 | `settleFindings(review, settled)` | `(Review, string[]) -> Review` | 8.12 |
 | `normalizeReview(review)` | `Review -> Review` (a `noRequirement` finding is minor; a review left with no blocking finding is `approve`) | 4.8 |
 | `nextLandingBatch(queue, window)` | `(Entry[], number) -> Entry[]` (a spec edit lands alone) | 8.1 |
-| `auditDue({ track, verifiedBy, done, audited })` | `-> boolean`. `verifiedBy` is the current plan's entry. | 8.3, 13.1, 13.6, 13.7 |
+| `crossPassedOf({ checks, testVerifies })` | `-> Set<string>`: the test tasks a cross-test check in this run passed. A check that returned a result passes the test tasks it covered, less those that `testVerifies` maps from a file a blocking finding names; a check that returned nothing, or a finding naming a file `testVerifies` lacks, passes none of that check's tasks | 13.9 |
+| `auditDue({ track, verifiedBy, done, audited, crossPassed })` | `-> boolean`. `verifiedBy` is the current plan's entry. False when every test task in it is in `crossPassed` | 8.3, 13.1, 13.6, 13.7, 13.9 |
 | `auditAction(audit)` | `-> { start: boolean, problems: [], missed: boolean }` | 13.2, 13.3, 13.5 |
 
 Existing `flaggedOf` and `parkAction` stay, and receive normalized reviews and arbiter entries.
@@ -262,7 +265,7 @@ Existing `flaggedOf` and `parkAction` stay, and receive normalized reviews and a
 
 ```python
 Tier = Literal["normal", "risky"]
-Trigger = Literal["test-conflict", "guard-stop", "review-deadlock", "gate-failure", "audit", "lint"]
+Trigger = Literal["test-conflict", "guard-stop", "review-deadlock", "command-cycle", "gate-failure", "audit", "lint"]
 Outcome = Literal["spec_edit", "test_repair", "code", "requirements"]
 Step = Literal["refuted", "cuts", "drift"]
 
@@ -310,14 +313,11 @@ class SimInput:                    # lint_scope; built by load_sim_input from ta
     programs: Sequence[str]
 
 @dataclass(frozen=True)
-class ScopeFinding:                # lint_scope. Sorted by (int task, kind, suite, test, command)
-    kind: Literal["unfiltered-shared-suite", "later-command"]
+class ScopeFinding:                # lint_scope. Sorted by (int task, kind, suite, testTask)
+    kind: Literal["unfiltered-shared-suite"]   # the only kind (D30)
     task: str                      # the task whose gate is simulated
-    suite: Optional[str]           # the test file
-    testTask: Optional[str]        # the test task that makes the suite shared
-    test: Optional[str]            # the selected test that calls the command
-    command: Optional[str]         # command path or flag
-    provider: Optional[str]        # the task that provides it
+    suite: str                     # the test file
+    testTask: str                  # the test task that makes the suite shared
     message: str
 
 @dataclass(frozen=True)
@@ -341,8 +341,11 @@ class Claim:                       # arbiter_policy; built from the workflow's J
     findings: Tuple[Tuple[str, str], ...] = ()   # review-deadlock: (file, issue) of each blocking finding
     failing: Tuple[str, ...] = ()         # gate-failure: failing test ids, else the failing commands
     rule: str = ""                        # lint: the ScopeFinding kind
-    subject: str = ""                     # lint: suite, or command
-    tests: Tuple[str, ...] = ()           # lint: every test the grouped findings name; not part of the key
+    subject: str = ""                     # lint: the suite
+    tests: Tuple[str, ...] = ()           # lint: the test task of each grouped finding; not part of the key
+    command: str = ""                     # command-cycle: the command the gate failed on
+    provider: str = ""                    # command-cycle: the provider whose edge would close the cycle (first of `refused`)
+    cycle: Tuple[str, ...] = ()           # command-cycle: the cycle, as `liveEdgeDecision` names it; not part of the key
     models_tried: Tuple[str, ...] = ()
     evidence: str = ""
 
@@ -446,6 +449,7 @@ Claim identity (the design's answer to 7.3), produced by `claim_key`. The key is
 | review deadlock | `review:<sorted identities of the findings never ruled on>` |
 | gate failure | `gate:<sorted failing ids>` |
 | lint finding | `lint:<rule>:<subject>` |
+| command cycle | `command:<provider>:<command>` |
 | names a test | `test:<file>::<test>` |
 | names a file only | `file:<file>:<criterion>` |
 
@@ -517,14 +521,16 @@ A RED task's `checkTail` and `failures` come from the gate in `gates` whose `tas
 
 ### Workflow schemas (JavaScript)
 
+`spec-implement.js` has no per-command schema for `ck` output: every `ck` call goes through `thinCk` with the generic `CK_CALL` envelope (`{exitCode, json, error}`, `json` an untyped object), and a per-command schema cannot be passed through it. So `OpenResult`, `SettleResult`, the arbiter landing entry and the new plan fields below are shapes the workflow reads from `out.json`, each guarded by a small JS validity check in the decisions block (`openResultOf`, `settleResultOf`, `landEntryOf`), the way `heldByCrossTest` reads `current.testVerifies`. A missing or wrong-typed required field makes that call a failed `ck arbiter` call (6.10), never a guessed default. `RULING` and `AUDIT` are agent schemas, passed as `schema` on the agent call as `RESULT` and `REVIEW_SCHEMA` are today.
+
 ```js
-// OpenResult (ck arbiter open)
+// OpenResult (ck arbiter open, read from out.json)
 { action: 'rule' | 'ask', key: string, tier: 'normal' | 'risky' | null, reason: string,
   principles: [{ id, layer, text }], planLayer: 'present' | 'absent',
   worktree: string | null, branch: string | null, number: string | null,   // arbiter<k>
   earlier: [{ ruling, claim, outcome, reasoning }], missing: string | null }
 
-// The arbiter's answer. outcome is an unconstrained string so that a malformed answer
+// The arbiter's answer (agent schema). outcome is an unconstrained string so that a malformed answer
 // reaches validate_ruling and my needs-input entry instead of failing in the agent tool (7.2).
 const RULING = { type: 'object', properties: {
   claim: { type: 'string', description: 'the claim key you were given, copied' },
@@ -543,9 +549,20 @@ const RULING = { type: 'object', properties: {
   verdict: { type: 'string', description: '/spec:create only' },
 }, required: ['status', 'reasoning'] }
 
-// SettleResult (ck arbiter settle)
+// SettleResult (ck arbiter settle, read from out.json)
 { route: 'spec_edit' | 'test_repair' | 'code' | 'needs_input' | 'rerun', reason: string,
   record: boolean, principle: { id, text } | null, problems: [string] }
+
+// Arbiter landing entry (ck worktree land SPEC arbiter<k> --json, read from out.json): today's land entry fields plus
+{ state: 'MERGED' | 'CONFLICT' | 'RED' | 'REFUSED' | 'ERROR', commit: string | null,
+  moved: [{ task, test }], recovered?: { paths, mergeInProgress, head } }
+// Task landings gain `recovered` and `unreproduced` (see "Landing recovery and bisection"), read the same way.
+
+// Plan fields (ck plan --json, read from out.json): `verifyScope: [ScopeFinding]` and `verifiedBy: {task: [test tasks]}`.
+// applyPlanView gains `verifyScope` and `verifiedBy` keys beside order, deps, done, cycles, verifyCycles and overlaps;
+// a missing key reads as [] / {}. `ck plan` already outputs `testVerifies` (test file -> test tasks), which the
+// cross-test hold uses; `verifiedBy` is still needed because auditDue asks, per impl task, which test tasks verify it
+// (Verified by and Verifies), which a file-keyed map cannot answer when a test file is shared or not yet on disk.
 
 // RunRuling (one per entry in the workflow's rulings)
 { number: number | null, task: string, trigger: string, outcome: string, tier: 'normal' | 'risky',
@@ -556,14 +573,14 @@ const RULING = { type: 'object', properties: {
   saves: { criteria: number, tasks: number, testCases: number },
   status: 'sound' | 'unchecked', ruling: number | null }
 
-// AUDIT (the auditor's answer)
+// AUDIT (the auditor's answer, agent schema)
 { problems: [{ file: string, test: string, criterion: string, reason: string, needs: string }], summary: string }
 
-// ReviewResult (ck arbiter review)
+// ReviewResult (ck arbiter review, read from out.json)
 { results: [{ id: string, action: string, reason: string, stronger: boolean, ruling: number | null }], lost: boolean }
 ```
 
-`REVIEW_SCHEMA` findings gain `noRequirement` (boolean) and `settledBy` (number). `LAND` gains `REFUSED`, `commit` and `moved`. `PLAN` gains `verifyScope` and `verifiedBy`, and `applyPlanView` keeps both.
+`REVIEW_SCHEMA` findings gain `noRequirement` (boolean) and `settledBy` (number). `conflictEntry` keeps an optional `ruling` field unchanged, so the test-fixer's prompt and its review carry the ruling (8.9); `testFixPrompt` says the `fix` of an entry with a `ruling` is the arbiter's ruled change, not a first agent's proposal.
 
 ## Data Flow
 
@@ -603,7 +620,12 @@ sequenceDiagram
             W->>W: back to the implementer with the ruling
         else test_repair
             W->>A: record
-            W->>M: handOffTestRepair (D18)
+            W->>W: settleClaims -> handOffTestRepair -> testFixFor (testfix<k>, D18)
+            alt landed
+                W->>W: resume where the claim arose (no retry spent, 8.16)
+            else test-correct, or the fixer cannot take it or does not land it
+                W->>M: needs-input kind test-fix, with the ruling and any finding (8.8)
+            end
         else requirements, or needs_input
             W->>M: needs-input with recommendation
         end
@@ -612,11 +634,34 @@ sequenceDiagram
 
 Details the diagram leaves out:
 
-**The task loop.** `runTask` keeps today's retry and escalation loops for plain failures. After them, one loop asks `claimTrigger`. A trigger calls `arbitrate(n, rec, claim)`, which returns `{ exit: rec }` or `{ resumed: true }`. A resumed attempt uses a prompt that merges `INTO` first and carries the ruling, and adds to `arbiterK`, which `retryNo()` subtracts, so it spends no retry or escalation (8.2). The task stays in `running` while a ruling is pending, so dependents wait and independent tasks continue (6.9). The slot is released first, and `'arbiter'` joins `UNBLOCKER_KINDS`.
+**The task loop.** `runTask` keeps today's retry and escalation loops (`ladder()`) for plain failures, and today's live-edge handling after them: `liveOf(r)` is computed first, and a `wait` with nothing refused goes to `recordLiveWait`, which spends no retry and never calls the arbiter (`claimTrigger` returns null). A `blocked` action, or a refused provider beside a safe one, no longer ends the task: it is a `command-cycle` claim on the task, keyed `<task>|command:<provider>:<command>`, carrying the command, the refused provider and the cycle, and no live edge is recorded for it (6.13, D29). The ladder's loops already stop on any live action, so the claim spends no retry. A live `conflict` joins its invoking tests to `testConflicts` through `liveConflicts`, as today, so it reaches the arbiter as a `test-conflict` claim. The attempt's claims then go to `settleClaims` (below). `arbitrate(n, rec, claim)` opens, rules, settles and records one claim, and lands a spec edit; it returns `{ exit: rec }` when the claim went to me, else `{ route, ruling }` for a landed `spec_edit`, a `code` or a `test_repair` ruling. A resumed attempt uses a prompt that merges `INTO` first and carries the rulings, and adds to `arbiterK`, which `retryNo()` subtracts, so it spends no retry or escalation (8.2). The task stays in `running` while a ruling is pending, so dependents wait and independent tasks continue (6.9). The slot is released first, and `'arbiter'` joins `UNBLOCKER_KINDS`.
 
-**Spec claims on integration.** `testConflictsOf` can return several conflicts. Each gets its own claim, in order, and the first `exit` ends the task.
+**One claim loop (D31-D33).** `settleClaims(n, rec, claims, next)` is the one place claims are settled, whatever raised them: an attempt's claims after each `ladder()` pass (`next` `retry`), a guard stop in `revised()` (`revise`), the Story 13 audit's problems (`start`), a review deadlock (`re-review`), and `lint` claims at launch and after it (`replan`; `n` is the task the finding names, not yet started, and its park holds it, 6.9). It calls `arbitrate` for each claim in order. A `spec_edit` lands as it settles and a `code` ruling's text is kept; `test_repair` rulings are gathered. The first `exit` stops it raising the claims after it. Then, whether or not a claim exited, the gathered `test_repair` rulings go to `handOffTestRepair`, whose one call site is here (8.9), so a recorded ruling always reaches the fixer or me (D32, D33). Only when every claim has settled, none exited and the hand-off sent nothing to me does the caller go on, once, carrying every ruling's text (and `afterFixNote` when a fix landed), with no retry or escalation spent (8.2, 8.16):
 
-**Review deadlock.** `reviewLoop` keeps its configured revision rounds and drops the model ladder. When blocking findings remain, it calls `arbitrate`. The claim carries each blocking finding's file and issue. On resume, the re-review prompt carries the ruling, and `settleFindings` removes findings that the ruling settled: those whose file and issue text match, and those the reviewer marks `settledBy` (8.12).
+- `retry`: the task retries (through `arbiterK`, or `budgetBase = retryNo()` after a landed fix, as today), then `ladder()` runs again and its result comes back to `settleClaims`;
+- `revise`: the same revision runs again, and the review continues (D31);
+- `start`: the task's first attempt starts, its prompt carrying the rulings (13.3);
+- `re-review`: the task is reviewed again, with the ruling (8.12);
+- `replan`: the workflow re-plans and drops findings that have gone (12.6, 12.11).
+
+The retry, with its budget reset, applies only where there was an attempt. When a claim exited, or the hand-off sent an entry to me, the task waits on those needs-input entries and does not go on; a fix that landed stays landed.
+
+**Guard stops, wherever they occur.** `climbGuard` has three callers today: the first-attempt `ladder()` pass, the `ladder()` pass that runs again after a landed test fix, and `revised()` in `reviewLoop`. All three go. `ladder()` leaves its loops on a guard stop (`stop` set) and returns, and the claims that follow each `ladder()` pass, a `guard-stop` claim among them, go to `settleClaims` (6.2). In `revised()`, a guard stop does not call `climbGuard`: `revised()` returns the `guard-stop` claim, `reviewLoop` returns it to `runTask` as `{ claim }`, and `runTask` sends it to `settleClaims` with `next` `revise`, so a `test_repair` ruling on it goes through the same single `handOffTestRepair` call site (D31). A `code` ruling, a landed `spec_edit` or a landed test fix re-runs the same revision after merging `INTO`, with the ruling text in its prompt (no attempt counted, through `arbiterK`), and the review then continues with the next re-review; any other outcome waits on its needs-input entry, never `needInput()`'s empty `escalatedTo`. The old `needInput()` closure goes with `climbGuard`.
+
+**Spec claims on integration.** `testConflictsOf` can return several conflicts. Each is its own claim, and `settleClaims` takes them in order, as above: a later claim's `exit` does not drop a `test_repair` ruling gathered from an earlier one, which still goes to the fixer, with no task retry, since the task waits on my entry; and the task goes on only once every claim has settled (D32). Handing the gathered rulings off together means one `testFixFor` call plans one test-fixer per file, as today.
+
+**A test-repair ruling (D18, D27, 8.8-8.10, 8.16).** `handOffTestRepair(n, rec, rulings)` is the single point a test-repair ruling goes through, with one call site, in `settleClaims`. It takes the gathered `test_repair` rulings, builds conflict entries with the pure `testRepairEntries(rulings)` (file and test from `ruling.testRepair`, `criterion` from the claim, `reason` = `testRepair.why`, `fix` = `testRepair.change`, and the settled ruling attached unchanged as `ruling`), and calls `testFixFor(n, entries)`. The ruling is the confirmation the fixer starts on (8.10); no second agent confirms. Today's post-fix code from the confirmed-conflict branch of `runTask` (~2318-2346) moves under it and under `settleClaims`'s `retry`:
+
+- a landed fix: `rec.testConflictFixed` is set and the caller goes on as `next` says, spending no retry (8.16). For `retry` this is today's code: `budgetBase = retryNo()`, the slot is re-acquired, and the task retries with `retryPrompt` plus `afterFixNote(fixed.fixed, [])`; then `ladder()` runs again, and its result goes through `settleClaims` again (a guard stop there is a `guard-stop` claim, above);
+- a `test-correct` verdict on a ruled test: the fixer disagrees with the ruling. The task does not retry and the arbiter is not called again: `parkTestFix` makes one needs-input entry of kind `test-fix` carrying the ruling (`ruling`, `testRepair`) and the fixer's `finding`, for me to settle (8.8: the fixer did not land the fix; D27). This replaces the old retry with the finding in `afterFixNote`;
+- `toMe` (the ledger already lists the test, the ledger cannot be read, or the fix did not prove or was not approved): `parkTestFix(n, rec, fixed.toMe, fixed.records)`, needs-input kind `test-fix`, with the ruling's number as the entry's `ruling` field and its exact change and why as `testRepair` (8.8). There is no separate `test-repair` kind;
+- the same conflict reported again after its fix landed: today's park `the task still reports a test that can never pass after its test fix` (kind `test-fix`, with `ruling`, `testRepair` and the new report as `evidence`, 7.4). It goes straight to `parkTestFix`, not through `claimTrigger`, so it makes no second arbiter call and no second fixer, and I get one entry (7.4, P-18's `repeat-after-ruling` holds in the ledger too).
+
+A `testfix<k>` landing goes through the existing `runTestFix` route under `withLandingLock`, not through `landQueue`.
+
+**Cross-test findings (D28).** `routeCrossFindings` is unchanged. A blocking cross-test finding names tests, not a claim on a task, and goes straight to `testFixFor(null, ...)` as unattended-correctness 4.1 built it. The arbiter does not rule on it, so it never reaches `settleClaims` or `handOffTestRepair` (8.9 is about rulings), and its `test-correct` verdict and needs-input entries keep today's handling. What the check read feeds the audit instead: `crossPassedOf` turns this run's checks into the test tasks they passed, and `auditDue` skips an impl task whose verifying test tasks are all among them (13.9). The cross-test window already holds the wave's dependents until the check returns, so the set is known when `auditDue` runs.
+
+**Review deadlock.** `reviewLoop` keeps its configured revision rounds and drops the model ladder. When blocking findings remain, it returns the deadlock claim to `runTask`, which sends it to `settleClaims` with `next` `re-review`; a `test_repair` ruling goes to the fixer, and a landed fix re-reviews too (D33). The claim carries each blocking finding's file and issue. On resume, the re-review prompt carries the ruling, and `settleFindings` removes findings that the ruling settled: those whose file and issue text match, and those the reviewer marks `settledBy` (8.12). A guard stop during a revision is handled as above.
 
 **A spec edit in the queue.** `nextLandingBatch` takes an arbiter entry alone. `landBatch` skips review and task-list bookkeeping for it and calls `ck worktree land SPEC arbiter<k>`. `worktrees.land_spec_edit`, under `land_lock`:
 
@@ -633,11 +678,11 @@ The arbiter's worktree comes from `ck arbiter open`, which records its starting 
 
 **Records.** `ck arbiter record` runs inside the workflow's `withLandingLock`, as relink does, and takes `land_lock` with a bounded wait (120 seconds, or `--lock-wait`), so concurrent records serialize. If the wait runs out it exits non-zero and writes nothing, which is the 10.9 path. `land_lock` gains `wait_s` for this, defaulting to 0, so task landings refuse rather than wait, as today: inside one run `withLandingLock` is what serializes them with arbiter landings. It appends and commits `decisions.md` on `INTO` alone, so a landing's clean-target check still passes. A spec edit records after landing, so the entry can carry the commit and result. Other outcomes record before acting.
 
-**Launch (D16).** If the start plan has `verifyScope` findings, `scopeClaims` groups them by claim identity, and each group goes through `arbitrate` as one `lint` claim that lists every test it covers. Groups go one at a time. After each landed fix the workflow re-plans, drops findings that have gone, and rules only on what remains, so a fix that clears several findings costs one ruling and no needs-input entry (12.6). Any remaining finding refuses the launch with the remaining findings and the arbiter's proposed fixes (12.7). Cycles refuse as today.
+**Launch (D16).** If the start plan has `verifyScope` findings, `scopeClaims` groups them by claim identity, and each group goes through `settleClaims` (`next` `replan`) as one `lint` claim that lists every test task it covers. Groups go one at a time. A `test_repair` ruling goes to the fixer like any other (D33). After each landed fix, spec edit or test fix, the workflow re-plans, drops findings that have gone, and rules only on what remains, so a fix that clears several findings costs one ruling and no needs-input entry (12.6). Any remaining finding refuses the launch with the remaining findings and the arbiter's proposed fixes (12.7). Cycles refuse as today.
 
-**Findings after launch (D16, 12.11).** In a test-first run the test files exist only once test tasks merge, so the `later-command` rule mostly fires after launch. `applyLint` on a non-start plan sends a `verifyScope` finding for a task not yet started to `arbitrate` as a `lint` claim, grouped the same way, and holds that task until the claim settles (6.9). `claim_key` and the ledger rule a finding once, and `lintClaimed` keeps the next plan from reopening a key this run already sent. A finding for a task already started is left to that task's gate.
+**Findings after launch (D16, 12.11).** In a test-first run the test files exist only once test tasks merge, so a selection that could not be resolved at launch (12.9) can first give a finding after it. `applyLint` on a non-start plan sends a `verifyScope` finding for a task not yet started to `settleClaims` (`next` `replan`) as a `lint` claim, grouped the same way, and holds that task until the claim settles (6.9). `claim_key` and the ledger rule a finding once, and `lintClaimed` keeps the next plan from reopening a key this run already sent. A finding for a task already started is left to that task's gate.
 
-**Audit (13).** At the start of `runTask`, if `auditDue`, a thin call gets `ck lint --simulate --task N --json`, then one `spec:auditor` agent reads the selected tests against the spec. Each problem is an `audit` claim. A failure of either step notes a missed audit and the task starts. So does an arbiter call on an `audit` claim that failed or returned nothing usable, or `ask` with reason `principles-missing` (13.8). A malformed ruling on an `audit` claim is a needs-input entry with the arbiter's output (7.2), and the task does not start. A `code` ruling goes into the first attempt's prompt. `auditDue` reads the current plan's `verifiedBy`, so a landed spec edit that rewires Verified by also changes the audit decision (8.3).
+**Audit (13).** At the start of `runTask`, if `auditDue`, a thin call gets `ck lint --simulate --task N --json`, then one `spec:auditor` agent reads the selected tests against the spec. `auditDue` is false when a cross-test check in this run passed every test task that verifies the task (`crossPassedOf`, 13.9, D28). Each problem is an `audit` claim, settled through `settleClaims` with `next` `start`. A failure of either step notes a missed audit and the task starts. So does an arbiter call on an `audit` claim that failed or returned nothing usable, or `ask` with reason `principles-missing` (13.8). A malformed ruling on an `audit` claim is a needs-input entry with the arbiter's output (7.2), and the task does not start. A `code` ruling goes into the first attempt's prompt. A `test_repair` ruling goes to the fixer, and once the fix lands the task starts its first attempt, with no retry spent; a fix not landed is a `test-fix` entry and the task does not start (8.8, D33). `auditDue` reads the current plan's `verifiedBy`, so a landed spec edit that rewires Verified by also changes the audit decision (8.3).
 
 **`/spec:create`.**
 
@@ -708,6 +753,7 @@ Each node of the bisection tree runs one gate, so a batch of n runs at most 2n-1
 | 5.7 | `route_ruling` returns `needs_input`, reason `exhausted`. The ledger status becomes `exhausted`, so later runs also ask. The entry carries `established`. |
 | 6.7 | `claimTrigger` returns null when the worktree outcome is busy or error. |
 | 6.11 | After the retry and escalation loops, `claimTrigger` returns `gate-failure` and `arbitrate` takes the failure as a claim. |
+| 6.13 | `claimTrigger` returns `command-cycle` for a `blocked` live decision or a non-empty `refused`; no live edge is recorded and no retry is spent. An `ask` or failed arbiter call is a needs-input entry (6.10), as for any spec claim. |
 | 6.12 | A single-task run and the manual path never call `ck arbiter`. Each claim, including an audit problem, is a needs-input entry, with no ladder and no confirmation agent. Both still run the read-only audit before the first attempt (13.1). |
 | 6.10 | No `arbiterAgent`, a thrown or empty agent call, or a failed `ck arbiter` call: needs-input with the claim. Ledger status `failed`. No ladder and no confirmation agent. |
 | 7.2 | `validate_ruling` reports each problem. `route_ruling` returns `needs_input`, `record: false`. The entry includes the raw output. |
@@ -716,6 +762,7 @@ Each node of the bisection tree runs one gate, so a batch of n runs at most 2n-1
 | 7.9 | `ask`, reason `task-call-limit`, once the task has 6 arbiter calls, however many produced rulings. |
 | 1.7 | A file scope reserved and changed: `decide_spec_edit` refuses with state `REFUSED`, handled as 8.4. `code` and `test repairs`: `route_ruling` returns `needs_input`, reason `reserved`. |
 | 8.4 | Target reset. Workflow records `landed: false`, and sends needs-input with the ruling and the landing result. No new ruling. |
+| 8.8 | `testFixFor` returns `toMe` (the test-fix ledger refuses a second fix to the test, cannot be read, or the fix did not prove or was not approved), or the fixer answers `test-correct` on a ruled test: `parkTestFix`, needs-input kind `test-fix` carrying the ruling's number as `ruling`, its exact change and why as `testRepair`, and for `test-correct` the fixer's `finding`. No task retry, no second ruling, and no further agent edits the test (D27). |
 | 8.5 | `decide_spec_edit` refuses on a new cycle or blocking finding. State `REFUSED`, handled as 8.4. |
 | 8.6 | `spec_text_changes` feeds `decide_spec_edit`. A removed task that was not Not Started counts as a Status change. State `REFUSED`. |
 | 9.2, 9.3, 9.4 | `decide_arbiter_edit` or `decide_arbiter_bash` denies. An exception on the arbiter path denies. |
@@ -756,9 +803,10 @@ Gating every bisection half adds at most one gate per level against today's shor
 
 - Specs written before this feature fail `ck lint` on justifications but still launch (3.7). Adding justifications to them is out of scope.
 - A project gets `specs/PRINCIPLES.md` from whichever of `/spec:plan`, `/spec:create`, `/spec:review` or a whole-spec launch runs first there (1.1). A launch creates and commits it on the target checkout, since the arbiter reads it there. If that fails, each claim becomes a needs-input entry (1.9). This repository also commits the file on `integrate/run-principles` (Task 49).
-- Vendored copies are protected files. After the plugin files change, `.claude/commands/spec/*.md`, `.claude/workflows/*` and `.claude/agents/ck-*.md` must be regenerated with `ck vendor` and landed by hand (Task 92).
-- Tests that assert the replaced behaviour need test-track changes: `tests/js/guard_ladder.test.mjs`, `tests/test_guard_ladder_properties.py`, the issue #8 confirmation cases in `tests/js/spec_implement.test.mjs`, and `tests/js/spec_create.test.mjs` and `tests/js/spec_review_frozen.test.mjs`, whose stubs throw on the new arbiter steps.
-- When unattended-correctness Task 86 lands, its "confirmed conflict" trigger becomes the test-repair ruling. Only `handOffTestRepair` changes (8.9, 8.10).
+- Vendored copies are protected files: ck's reference-transaction hook refuses an untokened update of `integrate/*` that changes `.claude/**`. After the plugin files change, Task 92 regenerates `.claude/workflows/spec-implement.js`, `spec-create.js`, `spec-implement-brief.md` and `without-workflow-tool.md`, `.claude/commands/spec/plan.md`, `create.md`, `implement.md` and `review.md`, the new `.claude/agents/ck-arbiter.md` and `ck-auditor.md`, and `.claude/ck-manifest.json`, with `CK_CONFIG_HOME=$(mktemp -d) uv run ck vendor` and `ck agents sync` (so no personal role setting leaks into the agent files), commits them in its own worktree and lands them with `ck worktree approve`.
+- Tests that assert the replaced behaviour need test-track changes: `tests/js/guard_ladder.test.mjs`, `tests/test_guard_ladder_properties.py`, the issue #8 confirmation cases in `tests/js/spec_implement.test.mjs` (which now assert the confirmation followed by `testfix`), and `tests/js/spec_create.test.mjs`, `tests/js/spec_review_frozen.test.mjs` and `tests/js/spec_create_provides.test.mjs`, whose `fake_create` stub throws on the new arbiter steps (Tasks 50, 51, 90).
+- The unattended-correctness test-fixer suites start from a confirmed conflict and must move to the ruling: `tests/js/test_fix.test.mjs` (every case runs the report and the confirmation first), `tests/js/command_deps.test.mjs` (TC-116: a missing command no task provides becomes a conflict through confirmation, then the fixer), `tests/js/attributed_gates.test.mjs` (TC-34: `testConflicts` reach the confirmation agent) (Task 102), and `tests/test_unattended_smoke.py` (TC-177 and TC-43b on `tc177_run`, whose scripted agent answers the conflict only on a confirm prompt and has no answer for `audit task <n>` or `arbiter task <n>`) (Task 100). Each confirmation step becomes the arbiter's `test_repair` ruling; the fixer-side assertions stay.
+- The confirmed-conflict block of `runTask` (~2303-2346: `confirmConflictPrompt`, then `testFixFor`, `parkTestFix`, the `budgetBase` reset, the post-fix retry and `ladder()` re-run, and the "still reports a test that can never pass" park) is rewired, not just `handOffTestRepair`: Task 65 removes the confirmation and sends the conflict to the arbiter, and Task 66 moves the post-fix code under `handOffTestRepair` and `settleClaims`, unchanged except that a `test-correct` verdict on a ruled test now parks instead of retrying (8.8-8.10, 8.16, D27).
 - `tests/test_worktree_land.py::test_red_batch_bisects_to_the_culprit` asserts fewer than 5 gates because the right half is not re-gated. It moves to the 2n-1 bound and asserts the right half's own gate (Task 96).
 - TC-178's scripted agent in `tests/test_unattended_smoke.py` keeps its cleanup on the shared `tc176_run` fixture, so the existing TC-176 and TC-178 tests stay green throughout. TC-169 runs on its own `tc169_run` fixture, the same scenario with the raw merge and no cleanup, so the run exercises the recovery (Task 100).
 
@@ -806,9 +854,9 @@ Gating every bisection half adds at most one gate per level against today's shor
 | 5.6 | `route_ruling` (`rerun`); workflow |
 | 5.7 | `route_ruling`; ledger `exhausted` |
 | 6.1 | `claimTrigger`; `confirmConflictPrompt` removed |
-| 6.2 | `claimTrigger`; `climbGuard` removed |
+| 6.2 | `claimTrigger`; `climbGuard` removed from `ladder()`, the post-fix `ladder()` pass and `revised()`, each guard stop going to `settleClaims` |
 | 6.3 | `claimTrigger`; revise ladder removed |
-| 6.4 | `claimTrigger` |
+| 6.4 | `claimTrigger` (a `live` `wait` with nothing refused returns null, so a live wait spends no attempt and never reaches the arbiter) |
 | 6.5 | `claimTrigger` (`rungsLeft` 0) |
 | 6.6 | `claimTrigger` |
 | 6.7 | `claimTrigger` |
@@ -817,6 +865,7 @@ Gating every bisection half adds at most one gate per level against today's shor
 | 6.10 | `arbitrate` failure path |
 | 6.11 | `claimTrigger` (`gate-failure`), `arbitrate` |
 | 6.12 | `plugin/skills/implement/SKILL.md`, `plugin/resources/without-workflow-tool.md` |
+| 6.13 | `claimTrigger` (`command-cycle`), `Claim.command` and `provider`, `claim_key` (`command:<provider>:<command>`), `settleClaims` |
 | 7.1 | `validate_ruling` |
 | 7.2 | `validate_ruling`, `route_ruling` |
 | 7.3 | `claim_key`, `Claim.findings`, ledger |
@@ -833,14 +882,15 @@ Gating every bisection half adds at most one gate per level against today's shor
 | 8.5 | `decide_spec_edit` |
 | 8.6 | `spec_text_changes`, `decide_spec_edit` |
 | 8.7 | `moved_out_of_verify`, `Landed.moved`, `RulingRecord.moved` |
-| 8.8 | `handOffTestRepair` |
-| 8.9 | `handOffTestRepair` |
-| 8.10 | `handOffTestRepair` |
+| 8.8 | `handOffTestRepair`, `testFixFor`'s `toMe` and a `test-correct` verdict, `parkTestFix` (kind `test-fix`, `ruling`, `testRepair`, `finding`) |
+| 8.9 | `handOffTestRepair` (one call site, in `settleClaims`, for every trigger), `testRepairEntries`, `conflictEntry` keeping `ruling` |
+| 8.10 | `handOffTestRepair` calls `testFixFor` on the ruling; `confirmConflictPrompt` removed |
 | 8.11 | `route_ruling`, resume prompt |
 | 8.12 | `settleFindings`, review prompt, `settledBy` |
 | 8.13 | `route_ruling` |
 | 8.14 | `route_ruling`, `requirement` field, needs-input kind `missing-requirement` |
 | 8.15 | `arbitrate` uses `parkAction` and the park path |
+| 8.16 | `settleClaims`'s `next` after a landed fix (`budgetBase` reset for `retry`; `revise`, `start`, `re-review`, `replan` spend no attempt) |
 | 9.1 | `decide_arbiter_edit` |
 | 9.2 | `decide_arbiter_edit` |
 | 9.3 | `decide_arbiter_edit`, `decide_spec_edit` |
@@ -872,12 +922,12 @@ Gating every bisection half adds at most one gate per level against today's shor
 | 11.12 | `review.arbiter.lost`, result rule, `ck arbiter review --step drift` Result line |
 | 12.1 | `done_at_gate`, `suite_due`, `scope_findings` |
 | 12.2 | `scope_findings` |
-| 12.3 | `scope_findings`, `graph.invoked_commands` (integration branch) |
+| 12.3 | `scope_findings` (no command kind; `ScopeFinding.kind` is only `unfiltered-shared-suite`) |
 | 12.4 | `scope_findings` |
 | 12.5 | `lint_verdict`, workflow start |
 | 12.6 | Workflow start, `scopeClaims`, `lint` claim, re-plan after each landing |
 | 12.7 | Workflow start |
-| 12.8 | `ck lint` output; lint never calls the arbiter |
+| 12.8 | `ck lint` output naming task and suite; lint never calls the arbiter |
 | 12.9 | `scope_findings` `not_checked` |
 | 12.10 | `dedupe_scope` |
 | 12.11 | `applyLint` on non-start plans, `scopeClaims`, `claim_key` |
@@ -890,10 +940,11 @@ Gating every bisection half adds at most one gate per level against today's shor
 | 13.6 | `auditDue` (`audited`) |
 | 13.7 | `auditDue` |
 | 13.8 | `arbitrate` on an `audit` claim, `auditAction`, `missedAudits` |
+| 13.9 | `crossPassedOf`, `auditDue` (`crossPassed`) |
 | Bounded arbiter cost | `decide_claim` limits |
 | Runtime compatibility | No clock or randomness in new workflow code; timestamps come from `ck` |
 | Lint performance and safety | `lint_scope.py`, shared parsing |
-| Compatibility | Claims, findings and the Story 13 audit steps are the only new paths |
+| Compatibility | Claims, findings and the Story 13 audit steps are the only new paths; live waits keep today's route, and a command cycle is a claim (6.13) |
 | 14.1 | `record_refusal` in `githooks.py`, `recover_target` in `land_spec_edit` and `ck arbiter record`; `recover_target` in `land` and `merge` |
 | 14.2 | `recover_target` result, `ck worktree land --json` `recovered` (task and `arbiter<k>` landings), `ck arbiter record` output `recovered`, `ck worktree merge` output |
 | 14.3 | `decide_recovery` (`managed`), `git reset --hard` leaves untracked files |

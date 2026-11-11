@@ -8,7 +8,7 @@ needed real judgment. The rest had a clear right answer that no agent was allowe
 shows up earlier: requirements nobody justified get specified, tested and built.
 
 This feature makes runs stop only for decisions that are really mine, and makes every requirement say why it
-exists. See [PLAN.md](PLAN.md) (Status: Decided, D1-D24), the source of truth for scope and decisions.
+exists. See [PLAN.md](PLAN.md) (Status: Decided, D1-D33), the source of truth for scope and decisions.
 
 1. **Principles (D5).** A project-wide file holds defaults; each plan adds tie-breakers or overrides.
 2. **Justifications (D6, D7).** Every user story carries a `**Without it:**` line. Planning asks for it, lint
@@ -25,7 +25,8 @@ exists. See [PLAN.md](PLAN.md) (Status: Decided, D1-D24), the source of truth fo
 
 Terms used below:
 
-- **Spec claim**: a test conflict, a guard stop, or a review deadlock reported on a task.
+- **Spec claim**: a test conflict, a guard stop, a review deadlock, or a refused live command edge (a command cycle) reported
+  on a task.
 - **Claim**: anything the arbiter is asked to rule on: a spec claim, a gate failure after the top model failed, an audit
   problem, or a Story 12 lint finding.
 - **Safety-tagged task**: a task `ck plan`'s `risk` map marks `safety`, which is a `**Risk:** safety` tag or a file matching
@@ -218,6 +219,8 @@ that** runs stop paying for escalations that cannot fix a wrong test or a bad Ve
   claim.
 - 6.12 WHEN a claim arises in a single-task `/spec:implement` run or a run without the Workflow tool, THE SYSTEM SHALL send
   it to me as a needs-input entry and SHALL NOT climb the guard ladder or run a confirmation agent.
+- 6.13 WHEN a task's gate fails on a command whose live edge to its provider would close a dependency cycle (a command cycle),
+  THE SYSTEM SHALL send it to the arbiter as a wiring claim instead of ending the task blocked, and SHALL spend no retry on it.
 
 ### Story 7: Rulings are checkable and cannot loop (D9, D10, plan principles)
 
@@ -270,8 +273,9 @@ editing and collisions are prevented by what already prevents them.
   treat it as in 8.4.
 - 8.7 WHEN a spec edit moves a test out of a task's Verify selection, THE SYSTEM SHALL name that test in the ruling's
   record under what changed.
-- 8.8 WHEN a ruling's outcome is a test repair and the test-fixer is not available, THE SYSTEM SHALL create a needs-input
-  entry carrying the exact test change and why, for me to apply or approve, and no agent SHALL edit the test.
+- 8.8 WHEN a ruling's outcome is a test repair and the test-fixer cannot take it (the test-fix ledger refuses a second fix to
+  that test, or cannot be read) or does not land the fix, THE SYSTEM SHALL create a needs-input entry carrying the exact test
+  change and why, for me to apply or approve, and no further agent SHALL edit the test.
 - 8.9 WHEN a ruling's outcome is a test repair, THE SYSTEM SHALL send it through one hand-off point, so that the
   test-fixer's arrival changes only that point and the ruling reaches the fixer attached and unchanged.
 - 8.10 WHEN a test-repair ruling is issued for a test conflict, THE SYSTEM SHALL treat the ruling as the confirmation the
@@ -287,6 +291,8 @@ editing and collisions are prevented by what already prevents them.
   independent tasks SHALL continue.
 - 8.15 WHEN a ruling produces a needs-input entry, THE SYSTEM SHALL route it as needs-input entries are routed today:
   listed apart from failures, not triggering a halt on failure, and notifying me where notification is configured.
+- 8.16 WHEN the test-fixer lands the fix a test-repair ruling asked for, THE SYSTEM SHALL resume the task from where the claim
+  arose, and neither the ruling nor the fix SHALL use up the task's retry or escalation attempts, as in 8.2.
 
 ### Story 9: The arbiter's lane in the guard (D2, D11)
 
@@ -387,9 +393,9 @@ bad.
 - 12.2 WHEN a task's due suite is a shared suite with no filter, so that it selects tests for tasks that are not yet Done at
   that point, THE SYSTEM SHALL report a finding.
 - 12.3 WHEN a test selected by a task's gate calls a CLI command or flag that only a later task provides, THE SYSTEM SHALL
-  report a finding.
+  NOT report a finding of this story for it; the run's live command edges handle it.
 - 12.4 WHEN a suite is not due at that task's gate, or its filter excludes the tests in question, or the task depends directly
-  or transitively on the task that provides the command or flag, THE SYSTEM SHALL report no finding for it.
+  or transitively on the tasks those tests are for, THE SYSTEM SHALL report no finding for it.
 - 12.5 WHEN a finding of this story exists, THE SYSTEM SHALL make `ck lint` exit non-zero, and SHALL block a `/spec:implement`
   launch the same way a verify-order cycle does.
 - 12.6 WHEN a launch is blocked by such findings, THE SYSTEM SHALL send them to the arbiter as one claim per distinct problem,
@@ -398,8 +404,8 @@ bad.
   ruling.
 - 12.7 WHEN the arbiter has applied a fix to such a finding, THE SYSTEM SHALL re-run lint before launching, and SHALL keep the
   launch blocked and show me the remaining findings with the arbiter's proposed fix if any finding remains.
-- 12.8 WHEN `ck lint` is run directly, THE SYSTEM SHALL report findings without calling the arbiter, each naming the task, the
-  suite or test, and where it applies the task providing the command or flag, in text and JSON output.
+- 12.8 WHEN `ck lint` is run directly, THE SYSTEM SHALL report findings without calling the arbiter, each naming the task and the
+  suite, in text and JSON output.
 - 12.9 WHEN a Verify command's selection cannot be resolved statically, including a selected test file that is not on disk yet,
   THE SYSTEM SHALL report that task as not checked and SHALL NOT block on it.
 - 12.10 WHEN a problem is already reported by an existing lint rule, THE SYSTEM SHALL NOT report it a second time.
@@ -429,6 +435,8 @@ static check cannot prove are caught before an attempt is spent.
 - 13.7 WHEN an impl task has no verifying tests, or a task is on the test track, THE SYSTEM SHALL NOT run the audit for it.
 - 13.8 WHEN the arbiter cannot be called or returns nothing usable for an audit problem, THE SYSTEM SHALL start the task and note the
   missed audit, as in 13.5. A malformed ruling on an audit problem follows 7.2.
+- 13.9 WHEN a cross-test check in the run has already read every test task that verifies an impl task and raised no blocking finding
+  on their tests, THE SYSTEM SHALL NOT run the audit for that task.
 
 ### Story 14: An integration checkout survives a refused raw merge (D23)
 
@@ -483,12 +491,13 @@ specs/prompt-free-runs.
 
 **Preserves:** the needs-input and park path; the merge queue; today's retries and escalation for plain gate failures; the guard
 rules for every caller other than the arbiter; the frozen-spec rule for the reviser once implementation has started; the
-test-fixer's proof step and review (unattended-correctness Story 4).
+test-fixer's proof step and review (unattended-correctness Story 4); cross-test findings keep going straight to the test-fixer
+(unattended-correctness 4.1); the arbiter does not rule on them.
 
 **Supersedes:** the second-agent confirmation of a test conflict; the guard ladder for guard stops; the model-ladder escalation of
 a review deadlock; bisection's inference that a green left half proves the right half red; the refusal to land into an
-integration checkout that only a refused ref update made dirty. unattended-correctness 4.1 starts the test-fixer on a conflict "confirmed by a second agent"; here the arbiter's
-ruling takes that role (D8, 8.10).
+integration checkout that only a refused ref update made dirty. unattended-correctness 4.1 starts the test-fixer on a task's conflict "confirmed by a second agent"; here the arbiter's
+ruling takes that role (D8, 8.10). A command cycle that ended a task blocked is now a wiring claim (D29, 6.13).
 
 **Evolution Reason:** a stronger implementer cannot fix a wrong test or a bad Verify line, and most spec-level stops had a clear
 answer no agent was allowed to act on.
@@ -509,12 +518,11 @@ answer no agent was allowed to act on.
 
 ## Constraints
 
-- Built on `integrate/run-principles`, branched from `integrate/unattended-correctness` and merged from it periodically. It lands
-  only after unattended-correctness does (D17).
-- The spec graph (`ck graph`, invokes and provides edges) and the structured failures from `ck gate --json` (`failures[]` with
-  `missingCommand`) exist only on `integrate/unattended-correctness`. Any reference to them depends on that branch.
-- The test-fixer (unattended-correctness Tasks 57 and 86) is not built yet. D18's interim route applies until it is.
-- unattended-correctness's later tasks still edit the implement workflow, so conflicts must be merged in small steps.
+- Built on `integrate/run-principles` from `master`, which contains unattended-correctness (landed at a4ac212; D17 named
+  `integrate/unattended-correctness` as the base before then). The spec graph, `failures[]` with `missingCommand`, live command
+  edges, cross-test blocking and the test-fixer are all on `master`.
+- The test-fixer (unattended-correctness Tasks 57 and 86) is built, so a test-repair ruling goes to it (D18); 8.8 covers what the
+  fixer cannot take or does not land.
 - The workflow runtime has no wall clock.
 - Vendored copies under `.claude/` are protected files that an agent cannot land. Any change to them is landed by hand, or through
   the vendoring command.
@@ -524,7 +532,7 @@ answer no agent was allowed to act on.
 ## Out of Scope
 
 - The arbiter changing requirements on its own. It may find missing requirements and suggest them.
-- The arbiter editing tests, or building the test-fixer. The fixer belongs to unattended-correctness Tasks 57 and 86.
+- The arbiter editing tests, or building the test-fixer. The fixer is unattended-correctness Tasks 57 and 86, already built.
 - The arbiter in a single-task `/spec:implement` run or a run without the Workflow tool (6.12, 12.12).
 - Applying a proposed cut with an undo, or without my approval.
 - A per-spec setting for how far the arbiter may go.
@@ -535,6 +543,9 @@ answer no agent was allowed to act on.
 - A justification per acceptance criterion.
 - Retroactively adding justifications to specs written before this feature.
 - Restoring a checkout left mid-rebase, mid-cherry-pick or mid-revert, or a task worktree.
+- The arbiter ruling on cross-test findings. They keep going straight to the test-fixer, as unattended-correctness 4.1 built them
+  (D28).
+- A lint finding for a test that calls a later task's command. Live command edges handle it at run time (D30, 12.3).
 - Telling a refused merge's residue apart from edits made in the same checkout after the refusal, at the same head.
 - Naming more than one culprit for a failure that appears only when several tasks land together. The first task whose own
   gate fails with it is the one blamed.

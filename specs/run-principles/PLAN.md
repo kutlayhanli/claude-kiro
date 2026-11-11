@@ -140,7 +140,7 @@ if every requirement can say why it exists.
 **Decided by:** user
 
 ### D17: Which branch is it built on?
-**Choice:** `integrate/run-principles`, branched from `integrate/unattended-correctness`, which is merged in periodically.
+**Choice:** `integrate/run-principles`, branched from master (`ck worktree integration run-principles --base master`). Updated 2026-11-10: unattended-correctness landed on master (a4ac212), so the earlier base, `integrate/unattended-correctness` merged in periodically, no longer applies.
 **Why:** It needs the spec graph, structured failures and the #15/#16 fixes, and conflicts in `spec-implement.js` surface early and small. It lands only after unattended-correctness does.
 **Rejected:** Off fix/open-issues - misses what the lint and arbiter need, and faces one large merge later.
 **Decided by:** user
@@ -197,6 +197,48 @@ if every requirement can say why it exists.
 **Choice:** Yes. It leaves the checkout unchanged (14.5) and commits `decisions.md` alone, as before; it takes the 10.9 path only when git cannot make that commit, such as while a merge is in progress. Raised by the review's consistency check (C2.1).
 **Why:** Follows 10.1: every ruling is recorded. 14.5's refusal is about landings; a hand edit should not also block the record of rulings.
 **Rejected:** Refusing like a landing - a hand edit would block rulings as well as landings.
+**Decided by:** user
+
+### D27: When the arbiter rules a test wrong and the test-fixer finds it correct, what happens?
+**Choice:** One `test-fix` needs-input entry carrying both the ruling and the fixer's finding. The task does not retry and the arbiter does not rule again. 8.8 stands as written: a `test-correct` verdict is a fix that did not land. A fix that does land resumes the task without spending retries, as a landed spec edit does (8.16). Raised by the review (R2, C1.1).
+**Why:** Two agents disagree about one test, and only I can settle that. A retry puts the implementer against a test the arbiter called wrong, and a second ruling is the loop D10 forbids.
+**Rejected:** Keep today's retry with the fixer's finding in `afterFixNote` - the implementer works against a ruled-wrong test and 8.8 would need rewording. Retry once, then send the entry - spends an attempt on a disagreement no retry can settle.
+**Decided by:** user
+
+### D28: Do blocking cross-test findings go through the arbiter, and does the audit re-read tests a cross-test check passed?
+**Choice:** Cross-test findings keep going straight to the test-fixer, as unattended-correctness 4.1 built them; the arbiter does not rule on them. This is an explicit exception to D1's route for test repairs. The Story 13 audit skips an impl task when a cross-test check in this run already passed every test task that verifies it (13.9). Raised by the review (R3, D9).
+**Why:** The cross-test check is already a second reading of the tests against the spec, and its fixer has its own proof and review. An arbiter step there adds a ruling per finding to a route that works, and auditing the same tests again pays twice for one reading.
+**Rejected:** Making each cross-test finding an arbiter claim with no task - more cost and a new claim shape for no new protection. Running the audit anyway - a second reading of tests already passed.
+**Decided by:** user
+
+### D29: Is a task blocked by a live command-edge cycle a claim for the arbiter?
+**Choice:** Yes. A refused live command edge (a command cycle) is a spec claim, sent to the arbiter as a wiring claim keyed `<task>|command:<provider>:<command>` (6.13). It spends no retry. Raised by the review (R4).
+**Why:** A command cycle means the task wiring is wrong, which is inside the arbiter's lane (tasks.md). Ending the task blocked sends me a question that usually has a clear answer.
+**Rejected:** Keeping it a plain blocked failure for me - one more stop D8 set out to remove.
+**Decided by:** user
+
+### D30: Does lint still block a launch on a test that calls a later task's command?
+**Choice:** No. The `later-command` Verify-scope kind is dropped; the lint keeps only `unfiltered-shared-suite`. 12.3 now says lint reports no finding for such a test. Raised by the review (D8).
+**Why:** Remove before you optimize. unattended-correctness's live command edges make the task wait on its provider at run time without spending attempts, so blocking the launch for it costs a ruling on something the run already handles.
+**Rejected:** Keeping `later-command` as a launch blocker, with dedupe keeping it over `commandEdges` - a second mechanism for the same case.
+**Decided by:** user
+
+### D31: Where does a test-repair ruling on a guard stop during a review revision go?
+**Choice:** `revised()` hands the ruling back to `runTask`'s claim loop, which keeps the single `handOffTestRepair` call site (8.9). A landed fix re-runs the revision. Raised by the review (C1.2).
+**Why:** Follows 8.8 and 8.9 as written: every test-repair ruling goes through one hand-off point, and I hear about it only when the fixer cannot take it or does not land it.
+**Rejected:** Treating a test repair during a revision as needs-input - an exception to 8.8. Ending the review loop and re-reviewing from the start after the fix - repeats review rounds already passed.
+**Decided by:** user
+
+### D32: What happens to gathered test-repair rulings when a later claim in the same attempt exits?
+**Choice:** Before the task exits on a later claim, the test-repair rulings gathered from earlier claims go to the test-fixer, with no task retry, since the task waits on my entry. Every claim settles before any resume. Raised by the review (C2.1).
+**Why:** Follows 8.8 and 8.9: a recorded ruling must reach either the fixer or me, never neither.
+**Rejected:** Acting on each claim as it settles - interleaves fixes and retries, and raises later claims on stale results. Putting the gathered rulings into the exiting entry - an exception to 8.8.
+**Decided by:** user
+
+### D33: Where does a test-repair ruling from an audit, lint or review-deadlock claim go?
+**Choice:** Every test-repair ruling, whatever its trigger, goes to `handOffTestRepair` and `testFixFor`. After a landed fix, an audit claim starts the task, a lint claim re-plans, and a review deadlock re-reviews. The retry with its budget reset applies only where there was an attempt. Raised by the review (C2.2).
+**Why:** Follows 8.9 as written: one hand-off point for every test repair.
+**Rejected:** Sending those triggers' test repairs to me as needs-input - an exception to 8.8. Forbidding a test repair on those triggers - a valid ruling would be refused for where it came from.
 **Decided by:** user
 
 ## Delegated to Spec
