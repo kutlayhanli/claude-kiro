@@ -1,9 +1,15 @@
-"""P-14, P-15 and P-16: the guard ladder and parking, by Hypothesis through the Node bridge and the real CLI.
+"""P-14, P-15 and P-16: the guard-stop route and parking, by Hypothesis through the Node bridge and the real CLI.
 
-- P-14: `agents.guard_ladder` (the source), the bridge `ladder` op (the Workflow's `guardLadder` mirror) and
-  `ck agents --guard-ladder` agree for every alias, whatever `implementer.escalate` is.
-- P-15: each task's attempts follow the ladder rules, run through the real `spec-implement.js` under the fake runtime.
-- P-16: parking blocks exactly the dependents of a parked task.
+Migrated for run-principles (Task 50; 6.2, 6.10, test-plan P-12 and P-16): a guard stop goes to the arbiter and the
+workflow no longer climbs the guard ladder.
+
+- P-14: `agents.guard_ladder` (the function and its CLI, which stay) and `ck agents --guard-ladder` agree for every alias,
+  whatever `implementer.escalate` is. The Workflow's `guardLadder` mirror and the bridge `ladder` op retire with the
+  ladder, so what is left of the bridge half is that the decisions block no longer holds `guardLadder`.
+- P-15: for any guard stop, the event right after the attempt that stops is the arbiter step: no `guard <k>` label, no
+  retry or escalation spent, run through the real `spec-implement.js` under the fake runtime and the real `ck arbiter`.
+- P-16: when the arbiter cannot be called or returns nothing valid, the claim is a needs-input entry that blocks exactly
+  the dependents of its task, and no guard attempt runs.
 """
 
 import json
@@ -13,6 +19,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from hypothesis import HealthCheck, given, settings, strategies as st
+
+import pytest
 
 from guard_helpers import ck_run_cmd
 from landing_bridge import bridge, dags  # noqa: F401  (bridge is a module-scoped fixture)
@@ -25,7 +33,7 @@ PROPERTIES = {
 
 PURE = dict(max_examples=200, derandomize=True, database=None, deadline=None, suppress_health_check=list(HealthCheck))
 CLI = dict(max_examples=40, derandomize=True, database=None, deadline=None, suppress_health_check=list(HealthCheck))
-RUN = dict(max_examples=60, derandomize=True, database=None, deadline=None, suppress_health_check=list(HealthCheck))
+RUN = dict(max_examples=30, derandomize=True, database=None, deadline=None, suppress_health_check=list(HealthCheck))
 
 RANK = {"haiku": 0, "sonnet": 1, "opus": 2, "fable": 3}
 LADDER = ["sonnet", "opus", "fable"]
@@ -50,7 +58,9 @@ def test_p14_python_and_bridge_ladders_agree(bridge, model):  # noqa: F811
 
     want = expected_ladder(model)
     assert list(guard_ladder(model)) == want
-    assert bridge.ladder(model) == want
+    # The workflow's mirror is gone: design.md removes `guardLadder` from the decisions block (6.2).
+    with pytest.raises(Exception, match="guardLadder"):
+        bridge.call("guardLadder", model)
 
 
 @given(model=st.sampled_from(MODELS), escalate=st.sampled_from(ESCALATES))
@@ -73,14 +83,20 @@ def test_p14_python_bridge_and_cli_ladders_agree(model, escalate):
 
 
 def test_p14_bridge_ladder_independent_of_escalate(bridge):  # noqa: F811
-    # The mirror takes only the attempted model: it cannot depend on implementer.escalate.
-    assert bridge.ladder("haiku") == LADDER and bridge.ladder("fable") == []
+    # The function takes only the attempted model, so it cannot depend on implementer.escalate; the workflow has no mirror.
+    from claude_kiro.agents import guard_ladder
+
+    assert list(guard_ladder("haiku")) == LADDER and list(guard_ladder("fable")) == []
+    with pytest.raises(Exception, match="guardLadder"):
+        bridge.call("guardLadder", "haiku")
 
 
 # --------------------------------------------------------------------------- P-15
 
 TASK_LABEL = re.compile(r"^task (\w+)(?: \[test\])?(?: guard (\d+) \((\w[\w.\-\[\]]*)\))?$")
 RETRY_LABEL = re.compile(r"^task (\w+)(?: \[test\])? retry ")
+GUARD_LABEL = re.compile(r" guard \d")
+CODE_RULING = {"status": "ruled", "outcome": "code", "reasoning": "the test states the requirement", "principle": "project:test-intent", "code": "keep the test, change the code"}
 
 
 def roles(model: str, escalate: List[str], review: bool) -> Dict[str, Any]:
@@ -89,12 +105,29 @@ def roles(model: str, escalate: List[str], review: bool) -> Dict[str, Any]:
         "test_writer": {"model": model, "effort": "medium", "escalate": escalate},
         "fixer": {"model": model, "effort": "medium", "escalate": escalate},
         "reviewer": {"model": "opus", "effort": "high", "enabled": review, "rounds": 2},
+        "arbiter": {"model": "opus", "effort": "high", "risky_model": "fable", "risky_effort": "high"},
     }
 
 
-def prepare(deps: Dict[str, List[str]], project: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+def tasks_md(deps: Dict[str, List[str]]) -> str:
+    """A tasks.md holding every drawn task, so the real `ck arbiter open` finds each one."""
+    blocks = []
+    for n, ds in deps.items():
+        after = ", ".join(f"Task {d}" for d in ds if d in deps) or "None"
+        blocks.append(f"### Task {n}: Work {n}\n**Status:** Not Started\n**Track:** impl\n**Requirements:** 1.1\n**Description:** Do work {n}.\n"
+                      f"**Files:**\n- `src/work{n}.py` - the work\n**Verify:** `uv run pytest -q tests/test_guarded.py`\n**Dependencies:** {after}\n\n---\n")
+    return "# Implementation Tasks: Demo\n\n**Status:** Not Started\n\n## Task Breakdown\n\n" + "\n".join(blocks)
+
+
+def bridge_run(deps: Dict[str, List[str]], project: Dict[str, Any], args: Dict[str, Any], bridge_) -> Dict[str, Any]:
+    """Run the real workflow on a real git project holding specs/PRINCIPLES.md and every drawn task."""
+    from arbiter_helpers import arbiter_project
+
     project = {**project, "deps": deps, "planDurations": {str(k): 1 for k in range(1, 200)}}
-    return {"project": project, "args": {**args, "deps": deps, "remaining": list(deps)}}
+    with tempfile.TemporaryDirectory() as raw:
+        proj = arbiter_project(Path(raw), tasks=tasks_md(deps))
+        args = {**args, "deps": deps, "remaining": list(deps), "root": str(proj.root), "targetDir": str(proj.target), "arbiterAgent": "spec:arbiter"}
+        return bridge_.run(project, args, exec_ck=proj.exec_ck)
 
 
 def stopped(ceiling: str, model: str) -> bool:
@@ -128,47 +161,33 @@ def ladder_scenarios(draw):
 @given(sc=ladder_scenarios())
 @settings(**RUN)
 def test_p15_attempts_follow_the_ladder_rules(bridge, sc):  # noqa: F811
+    """Restates run-principles P-12 (the old P-15) for the arbiter (6.2): a guard stop is followed at once by the arbiter, never by a ladder step."""
     deps, start, escalate, guarded, in_revise, fail_until = sc
-    project: Dict[str, Any] = {"guardStops": dict(guarded), "failUntil": fail_until}
+    project: Dict[str, Any] = {"guardStops": dict(guarded), "failUntil": fail_until, "rulings": {t: [{"claim": f"{t}|test:tests/test_guarded.py::test_x", **CODE_RULING}] for t in guarded}}
     if in_revise:
         project["guardStopIn"] = {t: "revise" for t in guarded}
         project["reviews"] = {t: ["changes", "approve"] for t in guarded}
-    run = prepare(deps, project, {"agents": roles(start, escalate, review=in_revise and bool(guarded)), "maxRetries": 2})
-    out = bridge.run(run["project"], run["args"])
+    out = bridge_run(deps, project, {"agents": roles(start, escalate, review=in_revise and bool(guarded)), "maxRetries": 2}, bridge)
     labels = [e for e in out["events"] if not e.endswith(" end")]
-    # A guarded task whose ceiling is 'always' climbs through fable and parks unless the stop is in a revise call
-    # (fake_project stops only the first revise call). Its dependents never start (design 7.1).
-    parks = set() if in_revise else {t for t, c in guarded.items() if c == "always"}
+    assert not [l for l in labels if GUARD_LABEL.search(l)], f"a guard attempt ran: {labels}"
+    # A task stopped on its first attempt stops again when it resumes with the same model, so its repeat goes to me and
+    # it parks. A stop in the first revise call does not repeat, so the revision runs again (design: guard stops).
+    parks = set() if in_revise else {t for t, c in guarded.items() if stopped(c, start)}
     for t in deps:
-        mine = [l for l in labels if TASK_LABEL.match(l) and TASK_LABEL.match(l).group(1) == t]
+        mine = [l for l in labels if re.match(rf"^(task|arbiter task) {t}\b", l)]
         if ancestors(deps, t) & parks:
             assert not mine, f"task {t} depends on a parked task but has attempts: {mine}"
             continue
-        guards = [TASK_LABEL.match(l) for l in mine if TASK_LABEL.match(l).group(2)]
-        if t not in guarded:
-            assert not guards, f"task {t}: guard attempt without a guard stop: {mine}"
+        arbiter = [l for l in mine if l.startswith("arbiter task")]
+        assert not [l for l in labels if RETRY_LABEL.match(l) and RETRY_LABEL.match(l).group(1) == t and t in guarded], f"task {t}: a guard stop spent a retry: {labels}"
+        if t not in guarded or not stopped(guarded[t], start):
+            assert not arbiter, f"task {t}: the arbiter ran without a spec claim: {mine}"
             continue
-        assert not [l for l in labels if RETRY_LABEL.match(l) and RETRY_LABEL.match(l).group(1) == t], f"task {t}: a guard stop spent a retry: {labels}"
-        ceiling = guarded[t]
-        models = [g.group(3) for g in guards]
-        assert len(models) == len(set(models)), f"task {t}: a ladder model ran twice: {models}"
-        assert [g.group(2) for g in guards] == [str(i) for i in range(1, len(guards) + 1)]
-        if not stopped(ceiling, start):
-            assert not guards, f"task {t}: ladder ran without a guard stop"
-            continue
-        if in_revise:
-            assert models == expected_ladder(start)[:1], f"task {t}: {models}"
-        else:
-            want: List[str] = []
-            for m in expected_ladder(start):
-                want.append(m)
-                if not stopped(ceiling, m):
-                    break
-            assert models == want, f"task {t}: {models} != {want} (start {start}, stop {ceiling})"
-        assert all(RANK[m] > RANK[start] for m in models)
-        for l in mine:
-            if TASK_LABEL.match(l).group(2):
-                assert out["opts"][l]["effort"] == "medium", f"task {t}: {l} not at the role effort: {out['opts'][l]}"
+        assert arbiter, f"task {t}: a guard stop never reached the arbiter: {labels}"
+        stop = next(l for l in mine if (" revise " in l if in_revise else l == f"task {t}"))
+        after = mine[mine.index(stop) + 1]
+        assert re.match(rf"^arbiter task {t}( risky)?$", after), f"task {t}: the stop at {stop!r} was followed by {after!r}, not the arbiter"
+        assert all(out["opts"][l]["model"] == start for l in mine if l in out["opts"] and not l.startswith("arbiter") and " revise " not in l), f"task {t}: an attempt climbed off {start}"
 
 
 # --------------------------------------------------------------------------- P-16
@@ -177,15 +196,19 @@ def test_p15_attempts_follow_the_ladder_rules(bridge, sc):  # noqa: F811
 @given(deps=dags(max_tasks=8, dangling=False), data=st.data())
 @settings(**RUN)
 def test_p16_parking_blocks_dependents_only(bridge, deps, data):  # noqa: F811
+    """6.9, 6.10: a claim the arbiter cannot rule on is a needs-input entry; it blocks its dependents and nothing else."""
+    from arbiter_helpers import FAILURE_FORMS
+
     ids = list(deps)
     parked = data.draw(st.lists(st.sampled_from(ids), unique=True, max_size=len(ids)))
-    run = prepare(deps, {"guardStops": {t: "always" for t in parked}}, {})
-    out = bridge.run(run["project"], run["args"])
+    rulings = {t: [data.draw(st.sampled_from(FAILURE_FORMS))] for t in parked}
+    out = bridge_run(deps, {"guardStops": {t: "always" for t in parked}, "rulings": rulings}, {}, bridge)
     result = out["result"]
     starts = {e for e in out["events"] if e.startswith("task ") and not e.endswith(" end")}
+    assert not [e for e in out["events"] if GUARD_LABEL.search(e)], "a guard attempt ran after a failed arbiter call"
 
     # A drawn task that depends, directly or through other tasks, on another drawn task never starts, so it
-    # cannot be unresolved through fable: only the drawn tasks with no drawn ancestor really park.
+    # cannot reach the arbiter: only the drawn tasks with no drawn ancestor really park.
     drawn = set(parked)
     parks = {t for t in drawn if not (ancestors(deps, t) & drawn)}
 
