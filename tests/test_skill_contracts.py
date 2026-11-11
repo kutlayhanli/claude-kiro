@@ -28,6 +28,12 @@ def split_fences(text: str):
     return prose, template
 
 
+def strip_frontmatter(text: str) -> str:
+    """Drop a leading `---` YAML frontmatter block, so `allowed-tools` entries are not read as instructions."""
+    m = re.match(r"\A---\n.*?\n---[ \t]*\n", text, flags=re.S)
+    return text[m.end():] if m else text
+
+
 def first(pattern: str, text: str, start: int = 0) -> Optional[int]:
     m = re.compile(pattern, re.I | re.S).search(text, start)
     return m.start() if m else None
@@ -47,15 +53,18 @@ def para_with(text: str, *patterns: str) -> Optional[str]:
 
 def test_tc2_init_runs_before_recording_and_reports_creation():
     text = skill_text()
-    prose, _ = split_fences(text)
-    init = first(r"ck principles init", prose)
-    assert init is not None, "the plan skill never runs `ck principles init`"
+    prose, _ = split_fences(strip_frontmatter(text))
+    # The instruction itself (not an `allowed-tools` entry): a paragraph that runs init and reports creation.
+    para = para_with(prose, r"ck principles init", r"\bcreated\b", r"\b(tell|say|let) me\b|\btell\b")
+    assert para, "the skill must tell me when `ck principles init` created the file"
+    init = prose.find(para)
     # Decisions are first recorded in PLAN.md: the first draft (Step 2) and each decision (Step 3).
     record = first(r"create the first draft of `?specs/\[feature-name\]/PLAN\.md", prose)
     assert record is not None, "cannot locate where the skill first records into PLAN.md"
     assert init < record, "`ck principles init` must come before any decision is recorded in PLAN.md"
-    para = para_with(prose, r"ck principles init", r"\bcreated\b", r"\b(tell|say|let) me\b|\btell\b")
-    assert para, "the skill must tell me when `ck principles init` created the file"
+    step3 = first(r"Record the outcome in PLAN\.md right away", prose)
+    assert step3 is not None, "cannot locate the Step 3 recording point"
+    assert init < step3, "`ck principles init` must come before the Step 3 recording point"
 
 
 def test_tc4_asks_tiebreakers_overrides_and_template_has_principles_section():
@@ -68,7 +77,7 @@ def test_tc4_asks_tiebreakers_overrides_and_template_has_principles_section():
     assert ask, "tie-breakers must be asked for directly"
     ask = para_with(prose, r"overrides?", r"\bask\b|AskUserQuestion")
     assert ask, "overrides must be asked for directly"
-    ask = para_with(prose, r"without asking", r"\bask\b|AskUserQuestion|what")
+    ask = para_with(prose, r"without asking", r"\bask\b|AskUserQuestion")
     assert ask, "what may change without asking must be asked for directly"
     assert re.search(r"^## Principles\s*$", template, re.M), "PLAN.md template lacks a `## Principles` section"
 
