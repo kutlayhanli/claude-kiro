@@ -1315,9 +1315,15 @@ def p12_options(stop, rounds):
     return ({"deps": {"1": []}, "reviews": {"1": [flagged] + ["changes"] * 7}, "rulings": {"1": [REQ]}}, {**REVIEW_ON, "rounds": rounds}, None)
 
 
+# Thin ck steps (as THIN_LABEL in tests/js/fake_project.mjs) record events but are not part of the task's report sequence.
+P12_THIN = r"^(plan \d+|land |report$|park \d+|relink \d+|full gate @|re-check |final gate$|gate$|run start$|audit$|testfix ledger |testfix prove |arbiter-)"
+
+
 @settings(**PROP)
 @given(stop=st.sampled_from(["conflict", "guard", "guard-revise", "review", "batched-review"]), escalate=_escalate, rounds=st.integers(1, 3))
 def test_p12_a_spec_claim_goes_to_the_arbiter_with_nothing_between_the_report_and_the_ruling(bridge, stop, escalate, rounds):  # noqa: F811
+    """Every stop happens on the first attempt: fake_project checks testConflicts and guardStops before failUntil, and a
+    failUntil would add `task 1 retry` labels that P-12 rules out, so the attempt a claim occurs on is not varied."""
     keep, project = fresh_project()
     try:
         opts, reviewer, risky = p12_options(stop, rounds)
@@ -1325,8 +1331,16 @@ def test_p12_a_spec_claim_goes_to_the_arbiter_with_nothing_between_the_report_an
         ev = out["events"]
         assert arbiter_calls(ev), "the claim reached the arbiter: " + ", ".join(ev)
         at = ev.index("arbiter task 1")
-        report = ev[at - 1]
-        assert report.endswith(" end") and re.match(r"^(task 1|review)", report), f"the event before the arbiter is the stopping report, not {report!r}: " + ", ".join(ev)
+        thin = re.compile(P12_THIN)
+        before = [e for e in ev[:at] if not thin.search(e)]
+        report = before[-1]
+        assert report.endswith(" end") and re.match(r"^(task 1|review)", report), f"the last non-thin event before the arbiter is the stopping report, not {report!r}: " + ", ".join(ev)
+        assert not any(e.startswith("task 1 retry") for e in ev), "no confirmation or further attempt anywhere: " + ", ".join(ev)
+        if stop in ("conflict", "guard"):
+            assert attempts(ev) == ["task 1"], "one attempt only: " + ", ".join(ev)
+            assert report == "task 1 end", "the first attempt's report stopped the task: " + ", ".join(ev)
+        elif stop == "batched-review":
+            assert any(e.startswith("review-wave") for e in ev), "a landing batch review ran: " + ", ".join(ev)
         assert guard_labels(ev) == [], ", ".join(ev)
         assert [e for e in ev if re.search(r"revise \d+ \(", e)] == [], "no escalated revision: " + ", ".join(ev)
         assert not any(e.startswith("task 1 retry") for e in ev[at:]), ", ".join(ev)
