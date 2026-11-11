@@ -569,7 +569,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 24: Report Verify scope from ck lint and ck plan
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 12.1, 12.5, 12.8, 12.9, 12.10
 **Description:** `lint_spec` adds `verifyScope` and `notChecked`, built through `load_sim_input`, `scope_findings` and `dedupe_scope`. In `src/claude_kiro/cli/worktree.py`, `ck lint` text output prints one line per finding, naming the task and the suite; `lint` gains `--simulate --task N --json`, returning `{"task", "suites", "selected"}`; `_plan` adds `verifyScope`, `justifications` and `verifiedBy`. `ck lint` never calls the arbiter. Keep `ck lint` under 10 seconds on a 108-task spec by parsing each test file once per command. Harness Contract owner: `ck lint --json` `verifyScope` and `notChecked`, `ck lint --simulate` (the contract's `verifyScope.checked`), and `ck plan --json` `verifyScope`.
@@ -581,11 +581,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 13 (P-8 through real `ck plan`), Task 18 (TC-109 to 113, 117 to 119, 136, 145), Task 20 (P-34 through the CLI), Task 21 (red team of 12.9, 12.10 through `ck lint`), Task 87 (TC-129, 130, 132)
 
 **Acceptance:**
-- [ ] A finding makes `ck lint` exit non-zero and appears in `ck plan --json` `verifyScope`
-- [ ] Text and JSON each name the task and the suite
-- [ ] `ck lint --simulate --task N --json` returns due suites and selections for that task
-- [ ] Two runs on the same tree give byte-identical output, and lint imports no project code and opens no connection
-- [ ] A generated 108-task spec lints in under 10 seconds
+- [x] A finding makes `ck lint` exit non-zero and appears in `ck plan --json` `verifyScope`
+- [x] Text and JSON each name the task and the suite
+- [x] `ck lint --simulate --task N --json` returns due suites and selections for that task
+- [x] Two runs on the same tree give byte-identical output, and lint imports no project code and opens no connection
+- [x] A generated 108-task spec lints in under 10 seconds
 
 **Dependencies:** Task 13 (its tests are the oracle), Task 18 (its tests are the oracle), Task 20 (its tests are the oracle), Task 21 (its tests are the oracle), Task 22 (calls `scope_findings` and `load_sim_input`), Task 23 (edits the same code in `lint.py` and `cli/worktree.py`), Task 87 (its tests are the oracle)
 **Complexity:** High

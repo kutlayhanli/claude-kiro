@@ -135,7 +135,8 @@ def scope_findings(sim: SimInput) -> ScopeResult:
 
     found: Set[Tuple[str, str, str]] = set()
     for num, task in tasks.items():
-        if task.done or not shared:
+        # A task with an unresolvable Verify is not checked (12.9): no finding from its selection.
+        if task.done or not shared or sim.unresolved.get(num):
             continue
         assumed = done_at_gate(tasks, num)
         ran: List[Mapping[str, Any]] = []
@@ -158,7 +159,10 @@ def scope_findings(sim: SimInput) -> ScopeResult:
             for test_num in test_nums:
                 if suite_due(tasks[test_num], tasks, assumed):
                     continue
-                mine = _selection(_norm_runs(sim.runs.get(test_num, {})), path, tests)
+                # A test task whose Verify does not run this file (or has no entry) owns the file whole: its
+                # tests are not selected apart, so an unfiltered run of the file reaches them.
+                own = _norm_runs(sim.runs.get(test_num, {}))
+                mine = _selection(own if path in own else {path: None}, path, tests)
                 if chosen & mine:
                     found.add((num, path, test_num))
 
@@ -173,7 +177,7 @@ def scope_findings(sim: SimInput) -> ScopeResult:
                 f"at Task {num}'s gate. Narrow Task {num}'s Verify to its own tests in {path}."
             ),
         )
-        for num, path, test_num in sorted(found, key=lambda f: (_num_key(f[0]), "unfiltered-shared-suite", f[1], f[2]))
+        for num, path, test_num in sorted(found, key=lambda f: (_num_key(f[0]), "unfiltered-shared-suite", f[1], _num_key(f[2])))
     )
 
     not_checked = tuple(
@@ -263,9 +267,13 @@ def _unresolved_reason(command: str, project_dir: Path, config: dict) -> Optiona
         words = command.split()
     pytest_at = next((i for i, w in enumerate(words) if PurePosixPath(w).name == "pytest"), None)
     if pytest_at is None:
+        # A shell script or a task runner decides its own selection; lint does not read it.
+        if words and (words[0] in ("bash", "sh", "make", "npm", "yarn", "pnpm")
+                      or any(w.endswith(".sh") for w in words)):
+            return "script or task runner"
         return None
     for i, w in enumerate(words):
-        if w == "-k" and i + 1 < len(words) and _k_selector(words[i + 1]) is None:
+        if w == "-k" and (i + 1 >= len(words) or _k_selector(words[i + 1]) is None):
             return "unreadable -k"
     for i, w in enumerate(words[pytest_at + 1:], start=pytest_at + 1):
         if w.startswith("-") or words[i - 1] == "-k":
