@@ -1286,6 +1286,10 @@ PROPERTIES = {
     "P-16": "test_p16_a_failed_arbiter_call_goes_to_me_with_no_fallback",
     "P-43": "test_p43_a_no_requirement_finding_never_blocks_a_review",
     "P-44": "test_p44_a_settled_finding_never_blocks_again",
+    "P-11": "test_p11_a_claim_makes_at_most_two_calls_normal_then_one_risky",
+    "P-15": "test_p15_exactly_the_transitive_dependents_of_a_waiting_task_are_held",
+    "P-20": "test_p20_a_spec_edit_spends_neither_a_retry_nor_an_escalation",
+    "P-27": "test_p27_the_report_lists_only_this_runs_rulings",
 }
 
 PROP = dict(derandomize=True, max_examples=30, database=None, deadline=None)
@@ -1485,3 +1489,190 @@ def test_p44_a_settled_finding_never_blocks_again(bridge, case):  # noqa: F811
     review = {"verdict": "changes", "findings": findings, "summary": "s"}
     out = bridge.call("settleFindings", review, settled)
     assert [f["fix"] for f in out["findings"]] == expected, f"settled: {settled}\nfindings: {json.dumps(findings)}\ngot: {json.dumps(out)}"
+
+
+# --------------------------------------------------------------------------- P-11, P-15, P-20, P-27
+# A ruling's lifecycle in a run (W): the real workflow under the fake runtime, one real git repo per example.
+
+
+def p11_answer(kind):
+    if kind == "valid":
+        return ruling("code", claim=KEY)
+    if kind == "stronger":
+        return dict(STRONGER)
+    return kind  # a failure form: throw, null, {}, a number, a string, an array, a schema-invalid object
+
+
+_p11_kinds = st.sampled_from(["valid", "stronger", "stronger", "throw", None, {}, 7, "a string", [], {"status": 3, "reasoning": {"bad": True}}])
+
+
+@settings(**PROP)
+@given(runs=st.lists(st.lists(_p11_kinds, min_size=1, max_size=4), min_size=1, max_size=3), safety=st.booleans())
+def test_p11_a_claim_makes_at_most_two_calls_normal_then_one_risky(bridge, runs, safety):  # noqa: F811
+    """One run per answer list, all on one project, so a claim that comes back is a repeated claim. Whatever the answers
+    are, a run makes at most two calls: the normal one, then one risky re-run only after a needs-a-stronger-look answer."""
+    keep, project = fresh_project()
+    try:
+        for index, answers in enumerate(runs):
+            before = len(decisions_entries(project))
+            opts = {**CLAIM, "rulings": {"1": [p11_answer(k) for k in answers]}}
+            if safety:
+                opts["risk"] = {"1": "safety"}
+            out = tier_run(bridge, project, opts)
+            ev = out["events"]
+            calls = arbiter_calls(ev)
+            if index == 0:
+                assert calls, "a new claim reaches the arbiter: " + ", ".join(ev)
+            assert len(calls) <= 2, "a claim makes at most two calls: " + ", ".join(ev)
+            assert calls in ([], ["arbiter task 1"], ["arbiter task 1", "arbiter task 1 risky"]), "normal first, then at most one risky: " + ", ".join(ev)
+            if len(calls) == 2:
+                assert answers[0] == "stronger", "a re-run follows only a needs-a-stronger-look answer: " + ", ".join(ev)
+                assert not safety, "a claim that starts at the risky tier is never re-run: " + ", ".join(ev)
+                assert tier_of(out) == NORMAL_TIER and tier_of(out, "arbiter task 1 risky") == RISKY_TIER, ", ".join(ev)
+            if calls and safety:
+                assert tier_of(out) == RISKY_TIER, ", ".join(ev)
+            if calls:
+                last = answers[min(len(calls), len(answers)) - 1]
+                if last == "stronger":
+                    assert len(needs(out)) == 1, "a risky needs-a-stronger-look ends in needs-input: " + json.dumps(out["result"].get("needsInput"))
+                    assert len(decisions_entries(project)) == before, "no ruling is recorded for it"
+    finally:
+        keep.cleanup()
+
+
+P15_JS = """
+import { runWorkflow } from './load_workflow.mjs'
+import { project } from './fake_project.mjs'
+import { VirtualClock } from './virtual_clock.mjs'
+import { SCRIPT } from './load_decisions.mjs'
+const req = JSON.parse(process.env.REQ)
+const clock = new VirtualClock()
+const p = project({ ...req.project, sleep: clock.sleep, external: q => clock.external(q), execCk: req.execCk })
+// A slow arbiter: the ruling on the claimed task stays pending for 200 virtual ms before the fake answers it.
+const agent = async (prompt, opts) => {
+  if (opts.label === `arbiter task ${req.claim}`) await clock.sleep(200)
+  return p.agent(prompt, opts)
+}
+const { result } = await runWorkflow(SCRIPT, { agent, args: req.args, clock })
+console.log(JSON.stringify({ result, events: p.state.events, prompts: p.state.prompts, execLog: p.state.execLog }))
+"""
+
+
+def dependents_of(deps, task):
+    held, grew = set(), True
+    while grew:
+        grew = False
+        for n, ds in deps.items():
+            if n not in held and n != task and (task in ds or held & set(ds)):
+                held.add(n)
+                grew = True
+    return held
+
+
+@settings(**PROP)
+@given(deps=dags(max_tasks=6, dangling=False), pick=st.integers(0, 5), slots=st.integers(1, 3))
+def test_p15_exactly_the_transitive_dependents_of_a_waiting_task_are_held(deps, pick, slots):
+    keep, project = fresh_project()
+    try:
+        ids = sorted(deps, key=int)
+        claimed = ids[pick % len(ids)]
+        held = dependents_of(deps, claimed)
+        request = {
+            "project": {"deps": deps, "testConflicts": {claimed: {"conflict": CONFLICT}}, "rulings": {claimed: [REQ]}},
+            "claim": claimed, "execCk": project.exec_ck,
+            "args": run_args(project, agents=roles("haiku", []), maxConcurrent=slots, **graph_args(deps)),
+        }
+        out = run_node(P15_JS, request)
+        ev, result = out["events"], out["result"]
+        assert arbiter_calls(ev, claimed) == [f"arbiter task {claimed}"], ", ".join(ev)
+        for n in ids:
+            if n in held:
+                assert attempts(ev, n) == [], f"task {n} depends on {claimed} and is held: " + ", ".join(ev)
+                assert n not in result["merged"], json.dumps(result)
+            elif n != claimed:
+                assert n in result["merged"], f"task {n} is independent of {claimed} and finishes: " + json.dumps(result)
+        assert claimed not in result["merged"], json.dumps(result)
+        assert len(needs(out, claimed)) == 1, json.dumps(result.get("needsInput"))
+        assert not any(str(f.get("task")) == claimed for f in (result.get("failed") or [])), "the entry is needs-input, not failed: " + json.dumps(result)
+    finally:
+        keep.cleanup()
+
+
+P20_JS = """
+import { runWorkflow } from './load_workflow.mjs'
+import { project } from './fake_project.mjs'
+import { VirtualClock } from './virtual_clock.mjs'
+import { SCRIPT } from './load_decisions.mjs'
+const req = JSON.parse(process.env.REQ)
+const clock = new VirtualClock()
+const p = project({ ...req.project, sleep: clock.sleep, external: q => clock.external(q), execCk: req.execCk })
+// The k-th attempt of task 1 (once only) reports a test that can never pass; every other attempt is the fake's own.
+let seen = 0
+let fired = false
+const agent = async (prompt, opts) => {
+  if (req.conflictAt && /^task 1( |$)/.test(opts.label) && !/ revise /.test(opts.label)) {
+    seen++
+    if (seen === req.conflictAt && !fired) {
+      fired = true
+      p.state.events.push(opts.label); p.state.prompts[opts.label] = prompt; p.state.opts[opts.label] = opts
+      p.state.events.push(`${opts.label} end`)
+      return { task: '1', status: 'blocked', gatePassed: false, summary: 'a test can never pass', commits: 'abc123', blocker: 'test conflict', testConflict: req.conflict }
+    }
+  }
+  return p.agent(prompt, opts)
+}
+const { result } = await runWorkflow(SCRIPT, { agent, args: req.args, clock })
+console.log(JSON.stringify({ result, events: p.state.events, prompts: p.state.prompts, opts: p.state.opts, execLog: p.state.execLog }))
+"""
+
+
+@settings(**PROP)
+@given(retries=st.integers(0, 3), escalate=_escalate, at=st.integers(1, 7))
+def test_p20_a_spec_edit_spends_neither_a_retry_nor_an_escalation(bridge, retries, escalate, at):  # noqa: F811
+    """Metamorphic: the same run with no ruling is the base. With the conflict on attempt k, the ruled run's attempts are
+    the base's first k, then the base's again from attempt k on: the resume spent nothing."""
+    total = 1 + retries + len(escalate)
+    k = 1 + (at - 1) % total
+    keep, project = fresh_project()
+    try:
+        ruled = run_node(P20_JS, {
+            "project": {"deps": {"1": []}, "failUntil": {"1": 99}, "rulings": {"1": [SPEC_EDIT, REQ]},
+                        "arbiterEdits": {"1": {"files": {"specs/demo/tasks.md": REWIRED}}}},
+            "conflictAt": k, "conflict": CONFLICT, "execCk": project.exec_ck, "args": run_args(project, agents=roles("haiku", escalate), maxRetries=retries),
+        })
+    finally:
+        keep.cleanup()
+    keep, plain = fresh_project()
+    try:
+        base = run(bridge, plain, {"deps": {"1": []}, "failUntil": {"1": 99}, "rulings": {"1": [REQ]}}, agents=roles("haiku", escalate), maxRetries=retries)
+    finally:
+        keep.cleanup()
+    base_models = models_of(base)
+    assert len(base_models) == total, "the base run uses every configured attempt: " + ", ".join(base["events"])
+    got = models_of(ruled)
+    assert arbiter_calls(ruled["events"]), "the conflict reached the arbiter: " + ", ".join(ruled["events"])
+    assert got == base_models[:k] + base_models[k - 1:], f"conflict on attempt {k}: the ruling spent no retry and no escalation: " + ", ".join(ruled["events"])
+
+
+@settings(**PROP)
+@given(sizes=st.lists(st.integers(0, 3), min_size=1, max_size=3).filter(lambda s: sum(s) <= 3))
+def test_p27_the_report_lists_only_this_runs_rulings(bridge, sizes):  # noqa: F811
+    """Each size is how many rulings that run makes; the last run is the current one, the runs before it are earlier
+    (a task holds at most three rulings, so the sizes sum to at most three)."""
+    keep, project = fresh_project()
+    try:
+        made = 0
+        for i, size in enumerate(sizes):
+            names = [f"r{made + j}" for j in range(size)]
+            made += size
+            if names:
+                out = run(bridge, project, many_claims(names, [code_ruling(n) for n in names]), agents=roles("haiku", []))
+            else:
+                out = run(bridge, project, {"deps": {"1": []}}, agents=roles("haiku", []))
+            on_disk = decisions_entries(project)
+            assert len(on_disk) == made, f"every run's rulings are on disk: {made} vs " + str(on_disk)
+            listed = out["result"].get("rulings") or []
+            want = [e["number"] for e in on_disk[made - size:]]
+            assert [r.get("number") for r in listed] == want, f"run {i + 1} of {sizes} reports its own {size} ruling(s) only: " + json.dumps(out["result"])
+    finally:
+        keep.cleanup()
