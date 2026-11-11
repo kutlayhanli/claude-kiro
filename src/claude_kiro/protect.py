@@ -364,6 +364,86 @@ def consume_token(root: Path, token_id: str, update: RefUpdate) -> bool:
     return True
 
 
+# --------------------------------------------------------------------------- refused integration updates
+
+@dataclass(frozen=True)
+class Refusal:
+    ref: str       # "refs/heads/integrate/<x>"
+    head: str      # the ref's value when the update was refused
+    checkout: str  # realpath of the worktree the refused command ran in
+    at: str        # ISO-8601, UTC
+
+
+def _refusals_path(root: Path) -> Path:
+    return ck_dir(root) / "refusals.json"
+
+
+def _read_refusals(path: Path) -> Dict[str, Dict[str, str]]:
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, dict)}
+
+
+def _locked_update(root: Path, change: Any) -> None:
+    import fcntl
+
+    path = _refusals_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path.with_name("refusals.lock"), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            data = _read_refusals(path)
+            if change(data):
+                _write_json(path, data)
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def record_refusal(root: Path, refusal: Refusal) -> None:
+    """Keep `refusal` as the latest one for its ref. Never raises: a failed write changes nothing else."""
+    try:
+        def put(data: Dict[str, Dict[str, str]]) -> bool:
+            data[refusal.ref] = {"head": refusal.head, "checkout": refusal.checkout, "at": refusal.at}
+            return True
+
+        _locked_update(root, put)
+    except Exception:
+        pass
+
+
+def refusal_for(root: Path, ref: str) -> Optional[Refusal]:
+    """The recorded refusal of `ref`, or None when absent or unreadable."""
+    try:
+        entry = _read_refusals(_refusals_path(root)).get(ref)
+        if not entry:
+            return None
+        head, checkout, at = entry.get("head"), entry.get("checkout"), entry.get("at")
+        if not (isinstance(head, str) and isinstance(checkout, str) and isinstance(at, str)):
+            return None
+        return Refusal(ref, head, checkout, at)
+    except Exception:
+        return None
+
+
+def clear_refusal(root: Path, ref: str, head: str) -> None:
+    """Remove the refusal of `ref` only while it still names `head`."""
+    try:
+        def drop(data: Dict[str, Dict[str, str]]) -> bool:
+            entry = data.get(ref)
+            if entry and entry.get("head") == head:
+                del data[ref]
+                return True
+            return False
+
+        _locked_update(root, drop)
+    except Exception:
+        pass
+
+
 # --------------------------------------------------------------------------- approved state
 
 def _spec_dir(root: Path, spec: str) -> Path:

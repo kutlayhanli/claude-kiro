@@ -22,7 +22,7 @@ function hookDump() {
 // like the runtime queue. `trace` records request/start/end per call (performance.now()).
 // `scriptDate` (optional) replaces the script's Date outright, e.g. one whose reads throw like
 // Claude Code's Workflow runtime, which has no wall clock (scripts replay for resume).
-export async function runWorkflow(scriptPath, { agent, args, slots, clock, ck, scriptDate }) {
+export async function runWorkflow(scriptPath, { agent, args, slots, clock, ck, scriptDate, scriptMath }) {
   hookDump()
   const nowT = clock ? () => clock.now() : () => performance.now()  // a clock replaces the trace's real time
   const workflow = path.basename(scriptPath).replace(/\.js$/, '')
@@ -69,12 +69,21 @@ export async function runWorkflow(scriptPath, { agent, args, slots, clock, ck, s
       }
     : Date
   // `ck` (optional): the OpenCode runner's direct ck global; absent, as in Claude Code's Workflow runtime.
-  const fn = new Function('agent', 'pipeline', 'parallel', 'phase', 'log', 'args', 'Date', 'ck', `return (async () => {${src}})()`)
-  const running = fn(recordingAgent, pipeline, parallel, () => {}, m => logs.push(m), args, ScriptDate, ck)
+  const fn = new Function('agent', 'pipeline', 'parallel', 'phase', 'log', 'args', 'Date', 'ck', 'Math', `return (async () => {${src}})()`)
+  const running = fn(recordingAgent, pipeline, parallel, () => {}, m => logs.push(m), args, ScriptDate, ck, scriptMath !== undefined ? scriptMath : Math)
   const result = await (clock ? clock.drive(running) : running)
   return { result, logs, trace }
 }
 
+// A Date and a Math whose clock and randomness throw when workflow code uses them.
+export function throwingGlobals() {
+  const ScriptDate = class extends Date {
+    constructor(...a) { if (!a.length) throw new Error('Date is not available in the workflow runtime'); super(...a) }
+    static now() { throw new Error('Date.now is not available in the workflow runtime') }
+  }
+  const scriptMath = Object.create(Math, { random: { value() { throw new Error('Math.random is not available in the workflow runtime') } } })
+  return { scriptDate: ScriptDate, scriptMath }
+}
 // Extract a top-level `function <name>(...) {...}` declaration by brace matching and evaluate it alone.
 export function loadFunction(scriptPath, name) {
   const src = fs.readFileSync(scriptPath, 'utf8')

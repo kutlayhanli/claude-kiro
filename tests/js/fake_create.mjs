@@ -9,6 +9,11 @@ export function stub(overrides = {}) {
     if (opts.label in overrides) return overrides[opts.label]
     const l = opts.label
     if (l.startsWith('write') || l.startsWith('link')) return { path: 'x', summary: 's', assumptions: [], concerns: [] }
+    // run-principles: one call per arbiter step (a ` risky` suffix re-runs at the risky tier), answering one ruling per subject
+    // (none by default); `review: should-exist` finds no cut; `apply-cuts` applies none.
+    if (/^arbiter (refuted|cuts|drift)( risky)?$/.test(l)) return { rulings: [] }
+    if (l === 'review: should-exist') return { findings: [] }
+    if (l.startsWith('apply-cuts')) return { applied: [], summary: 'no cuts applied' }
     if (l === 'review: fidelity') return { findings: [
       { id: 'R1', file: 'requirements.md', location: '1', severity: 'major', problem: 'p', evidence: 'e', fix: 'f', needsUserDecision: false },
       { id: 'R2', file: 'requirements.md', location: '2', severity: 'minor', problem: 'p2', evidence: 'e', fix: 'f', needsUserDecision: true, question: 'q?' },
