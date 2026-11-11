@@ -35,7 +35,7 @@ const REQUIREMENTS = `# Requirements: Demo
 
 - 1.1 WHEN the app starts, THE SYSTEM SHALL print a greeting.
 `
-const taskBlock = n => `### Task ${n}: Work ${n}
+const taskBlock = (n, deps = []) => `### Task ${n}: Work ${n}
 **Status:** Not Started
 **Track:** impl
 **Requirements:** 1.1
@@ -43,14 +43,15 @@ const taskBlock = n => `### Task ${n}: Work ${n}
 **Files:**
 - \`src/work${n}.py\` - the work
 **Verify:** \`uv run pytest -q tests/test_work${n}.py\`
-**Dependencies:** None
+**Dependencies:** ${deps.length ? deps.map(d => `Task ${d}`).join(', ') : 'None'}
 
 ---
 `
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' })
 
-// `tasks`: how many task blocks tasks.md holds (numbered from 1). Returns {root, target, execCk, args}.
-export function arbiterProject({ spec = 'demo', tasks = 6 } = {}) {
+// `tasks`: how many task blocks tasks.md holds (numbered from 1). `deps` ({n: [dep, ...]}), when given, replaces it:
+// one task block per key, with those dependencies. Returns {root, target, execCk, args}.
+export function arbiterProject({ spec = 'demo', tasks = 6, deps = null } = {}) {
   const root = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ck-arbiter-js-')), 'repo')
   const specs = path.join(root, 'specs')
   const dir = path.join(specs, spec)
@@ -65,7 +66,7 @@ export function arbiterProject({ spec = 'demo', tasks = 6 } = {}) {
   fs.writeFileSync(path.join(dir, 'requirements.md'), REQUIREMENTS)
   fs.writeFileSync(path.join(dir, 'design.md'), '# Design: Demo\n\nA greeting.\n')
   fs.writeFileSync(path.join(dir, 'test-plan.md'), '# Test Plan: Demo\n\n| TC-1 | 1.1 | I | greeting printed | CLI | tests/test_greet.py |\n')
-  const blocks = Array.from({ length: tasks }, (_, i) => taskBlock(i + 1)).join('\n')
+  const blocks = (deps ? Object.entries(deps).map(([n, d]) => taskBlock(n, d)) : Array.from({ length: tasks }, (_, i) => taskBlock(i + 1))).join('\n')
   fs.writeFileSync(path.join(dir, 'tasks.md'), `# Implementation Tasks: Demo\n\n**Status:** Not Started\n\n## Task Breakdown\n\n${blocks}`)
   fs.writeFileSync(path.join(root, '.gitignore'), '.ck/\n.claude/worktrees/\n__pycache__/\n')
   git(root, 'add', '-A')

@@ -3,10 +3,9 @@ import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs'
-import os from 'node:os'
-import { execFileSync } from 'node:child_process'
 import { runWorkflow, sleep } from './load_workflow.mjs'
 import { directCk, gateJson, project } from './fake_project.mjs'
+import { arbiterProject as sharedArbiterProject, repairRuling } from './arbiter_project.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const SCRIPT = path.join(here, '../../plugin/workflows/spec-implement.js')
@@ -101,68 +100,22 @@ await test('issue #6: a refused relink skips the task as before, and relink: fal
 
 const CONFLICT = { file: 'tests/unit/test_decay_golden.py', test: 'test_decay_printed', criterion: '14.6', reason: 'rel_tol 1e-12 on a rounded input', fix: 'rel_tol 1e-5 for the printed input' }
 
-// The arbiter's thin steps run the real `ck` in a real git project: the main checkout holds specs/PRINCIPLES.md and the
-// scenario's spec, and the integration checkout is made by `ck worktree integration`.
-const REPO = path.join(here, '../..')
-const CK_PYTHON = fs.existsSync(path.join(REPO, '.venv/bin/python')) ? path.join(REPO, '.venv/bin/python') : 'python3'
-const CK_CMD = [CK_PYTHON, '-m', 'claude_kiro.cli']
+// The arbiter's thin steps run the real `ck` in a real git project (tests/js/arbiter_project.mjs, shared with the other
+// arbiter suites): the main checkout holds specs/PRINCIPLES.md and the scenario's spec, and the integration checkout is
+// made by `ck worktree integration`. Each scripted ruling carries the claim key it answers (7.1).
 const tempRepos = []
 process.on('exit', () => { for (const d of tempRepos) fs.rmSync(d, { recursive: true, force: true }) })
-const PRINCIPLES = `# Principles
-
-## Principles
-
-- **test-intent:** a test states what the requirement says; repair the test, never bend the requirement to it.
-- **remove-first:** remove before you optimize.
-`
-function taskBlock(n, deps) {
-  return `### Task ${n}: Task ${n}
-**Status:** Not Started
-**Track:** impl
-**Requirements:** 1.1
-**Description:** Do ${n}.
-**Files:**
-- \`src/t${n}.py\` - code
-**Verify:** \`python -c pass\`
-**Dependencies:** ${deps.length ? deps.map(d => `Task ${d}`).join(', ') : 'None'}
-
----
-`
-}
 function arbiterProject(deps) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'si-arbiter-'))
-  tempRepos.push(tmp)
-  const root = path.join(tmp, 'repo')
-  const sh = (cmd, ...args) => execFileSync(cmd, args, { cwd: root, encoding: 'utf8' })
-  const git = (...args) => sh('git', ...args)
-  fs.mkdirSync(path.join(root, 'specs/demo'), { recursive: true })
-  git('init', '-q', '-b', 'main')
-  git('config', 'user.name', 'Test User')
-  git('config', 'user.email', 'test@example.com')
-  const w = (rel, text) => fs.writeFileSync(path.join(root, rel), text)
-  w('specs/ck.json', JSON.stringify({ verify: ['python -c pass'], guard: { tests: 'ask', requirements: 'ask', test_plan: 'ask' }, base: null }, null, 2) + '\n')
-  w('specs/PRINCIPLES.md', PRINCIPLES)
-  w('specs/demo/PLAN.md', '# Plan: Demo\n\n## Principles\n\n- **Nothing to add:** the project defaults apply.\n')
-  w('specs/demo/requirements.md', '# Requirements: Demo\n\n## User Stories\n\n### Story 1: Greeting\n\n**As a** user **I want** a greeting **So that** I feel welcome.\n\n**Without it:** the app is silent.\n\n**Acceptance Criteria:**\n\n- 1.1 WHEN the app starts, THE SYSTEM SHALL print a greeting.\n')
-  w('specs/demo/design.md', '# Design: Demo\n\nA greeting.\n')
-  w('specs/demo/test-plan.md', '# Test Plan: Demo\n\n| TC-1 | 1.1 | I | greeting printed | CLI | tests/test_greet.py |\n')
-  w('specs/demo/tasks.md', `# Implementation Tasks: Demo\n\n**Status:** Not Started\n\n## Task Breakdown\n\n${Object.keys(deps).map(n => taskBlock(n, deps[n])).join('\n')}`)
-  w('.gitignore', '.ck/\n.claude/worktrees/\n__pycache__/\n')
-  git('add', '-A')
-  git('commit', '-qm', 'init')
-  execFileSync(CK_CMD[0], [...CK_CMD.slice(1), 'worktree', 'integration', 'demo', '--base', 'main'], { cwd: root, encoding: 'utf8' })
-  return { root, targetDir: path.join(root, '.ck/worktrees/demo-integration'), execCk: { cmd: CK_CMD, env: {}, cwd: root } }
+  const a = sharedArbiterProject({ deps })
+  tempRepos.push(path.dirname(a.root))
+  return { root: a.root, targetDir: a.target, execCk: a.execCk }
 }
-const repair = (c, why = 'the expected value was wrong; the test intent stands') => ({
-  status: 'ruled', outcome: 'test_repair', principle: 'project:test-intent', reasoning: `${c.reason}: the test asserts what no correct code returns`,
-  testRepair: { file: c.file, test: c.test, change: c.fix, why },
-})
 const arbiterArgs = a => ({ ...baseArgs, root: a.root, targetDir: a.targetDir, ...(a.extra || {}) })
 
 await test('issue #8: a test conflict is ruled test_repair by the arbiter (no confirmation agent), goes to the test-fixer; one that persists after the fix parks only that task (needs-input, kind test-fix)', async () => {
   const deps = { 1: [], 2: [], 3: ['2'], 4: [] }
   const a = arbiterProject(deps)
-  const p = project({ deps, testConflicts: { 2: { conflict: CONFLICT } }, rulings: { 2: [repair(CONFLICT)] }, execCk: a.execCk })
+  const p = project({ deps, testConflicts: { 2: { conflict: CONFLICT } }, rulings: { 2: [repairRuling(2, CONFLICT)] }, execCk: a.execCk })
   const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...arbiterArgs(a), onFailure: 'halt' } })
   const t2 = p.state.events.filter(e => /^task 2( |$)/.test(e) && !e.endsWith(' end'))
   assert.equal(t2[0], 'task 2')
@@ -188,14 +141,14 @@ await test('issue #8: a test conflict is ruled test_repair by the arbiter (no co
 await test('issue #8: no confirmation rung: the conflict goes to the arbiter, a landed fix resumes the task, and a resumed agent that passes the gate wins', async () => {
   const roles = { implementer: { model: 'sonnet', effort: 'medium', escalate: ['opus'] } }
   const a = arbiterProject({ 1: [] })
-  const p = project({ deps: { 1: [] }, testConflicts: { 1: { conflict: CONFLICT } }, rulings: { 1: [repair(CONFLICT)] }, execCk: a.execCk })
+  const p = project({ deps: { 1: [] }, testConflicts: { 1: { conflict: CONFLICT } }, rulings: { 1: [repairRuling(1, CONFLICT)] }, execCk: a.execCk })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...arbiterArgs(a), agents: roles } })
   assert.ok(p.state.events.includes('arbiter task 1'), p.state.events.join(', '))
   assert.ok(!p.state.events.includes('task 1 retry 1 (opus)'), 'the strongest rung no longer confirms the claim')
   assert.equal(result.testFixes.length, 1)
 
   const b = arbiterProject({ 1: [] })
-  const q = project({ deps: { 1: [] }, testConflicts: { 1: { conflict: CONFLICT, attempts: 1 } }, rulings: { 1: [repair(CONFLICT)] }, execCk: b.execCk })
+  const q = project({ deps: { 1: [] }, testConflicts: { 1: { conflict: CONFLICT, attempts: 1 } }, rulings: { 1: [repairRuling(1, CONFLICT)] }, execCk: b.execCk })
   const won = await runWorkflow(SCRIPT, { agent: q.agent, args: { ...arbiterArgs(b), agents: roles } })
   assert.deepEqual(won.result.merged, ['1'], 'the resumed agent passed the gate: the task merges')
   assert.equal(won.result.testFixes.length, 1, 'the fix the ruling asked for landed')
@@ -535,8 +488,17 @@ await test('escalation: off by default, so a failing task just fails', async () 
 
 await test('escalation: blocking review findings that survive the rounds go to the arbiter, not up the model ladder (6.3)', async () => {
   const a = arbiterProject({ 1: [] })
-  const ruling = { status: 'ruled', outcome: 'code', principle: 'project:test-intent', reasoning: 'the findings are real: the code must change, the revision stays on its model' }
-  const p = project({ deps: { 1: [] }, reviews: { 1: ['changes', 'changes', 'approve'] }, rulings: { 1: [ruling] }, execCk: a.execCk })
+  // One explicit blocking finding, so the deadlock's claim key is knowable: the task, then `review:` and the sorted
+  // `<file>#<issue>` identities of the findings never ruled on (issue lowercased, whitespace collapsed).
+  const finding = { severity: 'blocking', file: 'src/work1.py', issue: 'Greeting is printed to stderr, not stdout', fix: 'print the greeting to stdout' }
+  const changes = { verdict: 'changes', findings: [finding], summary: 'changes' }
+  const identity = `${finding.file}#${finding.issue.toLowerCase().replace(/\s+/g, ' ')}`
+  const ruling = {
+    claim: `1|review:${identity}`, status: 'ruled', outcome: 'code', principle: 'project:test-intent',
+    reasoning: 'the finding is real: the code must change, the revision stays on its model',
+    code: 'print the greeting to stdout, as requirement 1.1 and the finding say', settles: [identity],
+  }
+  const p = project({ deps: { 1: [] }, reviews: { 1: [changes, changes, 'approve'] }, rulings: { 1: [ruling] }, execCk: a.execCk })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...arbiterArgs(a), agents: HAIKU(['opus']) } })
   assert.ok(p.state.events.includes('arbiter task 1'), `the deadlock reached the arbiter: ${p.state.events.join(', ')}`)
   assert.ok(!p.state.events.some(e => /^task 1 revise \(opus\)/.test(e)), 'no revise (opus) escalation label runs')
