@@ -546,7 +546,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 23: Report justifications and plan-principle warnings from ck lint
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.11, 3.1, 3.6, 3.7
 **Description:** `lint_spec` in `src/claude_kiro/lint.py` adds `justifications` (story, title, message) and `warnings` (`{"kind": "principles", "plan", "message"}` when PLAN.md exists with a missing or empty `## Principles`), keeping every existing key unchanged. The `lint` command in `src/claude_kiro/cli/worktree.py` prints one line per finding and exits by `lint_verdict`. Harness Contract owner: `ck lint --json` `justifications` and `warnings` of kind `principles` (the contract's `planPrinciples`).
@@ -557,9 +557,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 10 (red team of 1.11 through `ck lint`), Task 12 (TC-13, TC-18 to TC-24), Task 13 (P-7 through the CLI, P-41 at `lint_verdict`), Task 14 (red team of 2.5 through `ck lint`), Task 15 (red team of 3.4 through `ck lint`)
 
 **Acceptance:**
-- [ ] `ck lint` exits non-zero and names the story number and title for a missing justification
-- [ ] JSON output keeps every existing key with the same value, and lists findings under `justifications`
-- [ ] An empty `## Principles` gives a warning naming the plan, and exit 0 when nothing else is wrong
+- [x] `ck lint` exits non-zero and names the story number and title for a missing justification
+- [x] JSON output keeps every existing key with the same value, and lists findings under `justifications`
+- [x] An empty `## Principles` gives a warning naming the plan, and exit 0 when nothing else is wrong
 
 **Dependencies:** Task 10 (its tests are the oracle), Task 11 (calls `plan_section`), Task 12 (its tests are the oracle), Task 13 (its tests are the oracle), Task 14 (its tests are the oracle), Task 15 (its tests are the oracle), Task 16 (calls `justification_findings`), Task 17 (calls `lint_verdict`)
 **Complexity:** Medium
