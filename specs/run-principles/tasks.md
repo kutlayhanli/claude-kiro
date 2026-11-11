@@ -1947,7 +1947,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 83: Require justifications in drafts and add the should-exist lens
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 2.3, 2.4, 4.1, 4.2, 4.6, 4.7
 **Description:** In `plugin/workflows/spec-create.js`, add a `**Without it:**` line to the requirements template: every story carries the reason from its plan item, and a story with no plan item gets its own. Add a `should-exist` entry to `LENSES`, which attacks each story's justification and proposes cuts in the `Cut` shape (story, title, weakness, saves counts). A lens that fails is counted in `lensesLost` like the others. The refute loop skips `should-exist`: its cuts go to the arbiter directly (Task 84). The Revise prompt tells the reviser to say so in review.md when the lens found nothing to cut. Harness Contract owner: the `review: should-exist` label.
@@ -1957,14 +1957,15 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 77 (TC-16, 17, 26, 32, 33), Task 90 (the migrated create-side suites)
 
 **Acceptance:**
-- [ ] The Requirements prompt requires the line on every story and covers a story with no plan item
-- [ ] `review: should-exist` runs in create and review modes and attacks each justification
-- [ ] A lens that throws counts in `lensesLost`
-- [ ] review.md says so when no cut is proposed
+- [x] The Requirements prompt requires the line on every story and covers a story with no plan item
+- [x] `review: should-exist` runs in create and review modes and attacks each justification
+- [x] A lens that throws counts in `lensesLost`
+- [x] review.md says so when no cut is proposed
 
 **Dependencies:** Task 77 (its tests are the oracle), Task 90 (its tests are the oracle), Task 31 (provides `cmd:ck principles init`), Task 43 (provides `cmd:ck arbiter context`)
 **Complexity:** Medium
 **Risk:** normal
+**Implementation notes:** TC-33 reads `lensesLost` at the top level of the workflow result, so the return object now carries `lensesLost` beside `review.lensesLost` (the existing `spec_create.test.mjs` reads the `review` copy; both hold the same count). The `should-exist` lens returns `{ cuts }` and is kept out of the refute loop; its cuts are collected in `proposedCuts` and are not yet on the result (Task 84 adds `review.proposedCuts`). The Revise prompt names the lens only when it found nothing to cut and did not lose.
 
 ---
 

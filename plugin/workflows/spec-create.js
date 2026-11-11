@@ -130,6 +130,8 @@ What it does and why. Link to PLAN.md if it exists.
 ### Story N: [Title]
 **As a** [user type] **I want** [goal] **So that** [benefit]
 
+**Without it:** [the reason this story exists, from its PLAN.md item; for a story with no plan item, its own reason]
+
 **Acceptance Criteria:**
 - N.1 WHEN [condition/event], THE SYSTEM SHALL [observable behavior]
 - N.2 WHEN [error condition], THE SYSTEM SHALL [error handling]
@@ -151,6 +153,7 @@ Explicit list, including everything PLAN.md excludes.
 Rules:
 - Every criterion uses EARS and is testable by an automated or a clearly described manual check.
 - Cover the happy path, error paths, boundaries, and invalid input.
+- Every story carries its **Without it:** line, stating the reason from its plan item (what is lost without the story). A story with no plan item gets its own **Without it:** line, stating why it should exist.
 - Describe WHAT, not HOW. No file names or class names.
 ${A.evolvesFrom ? `- Evolution: read ${A.evolvesFrom}. Add the Heritage section. Then, in the OLD spec, set the tasks.md status line to "EVOLVED - See: ${A.feature}", mark superseded tasks EVOLVED, and write ${A.evolvesFrom}/evolution.md (what changed, why, lessons, what remains valid).` : ''}
 
@@ -451,6 +454,39 @@ const FINDINGS = {
   required: ['findings'],
 }
 
+// The should-exist lens proposes cuts, not defects: each one names the story, its title, why its
+// justification fails, and what cutting it saves. Cuts never enter the refute loop (Task 84 rules on them).
+const CUTS = {
+  type: 'object',
+  properties: {
+    findings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'short unique id, C1, C2' },
+          story: { type: 'string', description: 'the story number, e.g. 2' },
+          title: { type: 'string', description: 'the story title' },
+          weakness: { type: 'string', description: 'why its Without-it justification fails' },
+          saves: {
+            type: 'object',
+            description: 'what cutting the story removes',
+            properties: {
+              criteria: { type: 'number' },
+              tasks: { type: 'number' },
+              testCases: { type: 'number' },
+            },
+            required: ['criteria', 'tasks', 'testCases'],
+          },
+        },
+        required: ['id', 'story', 'title', 'weakness', 'saves'],
+      },
+    },
+    eta: ETA,
+  },
+  required: ['findings'],
+}
+
 const VERDICTS = {
   type: 'object',
   properties: {
@@ -482,6 +518,16 @@ const LENSES = [
 - Is every acceptance criterion EARS, observable, and testable? Flag vague words ("fast", "secure", "user-friendly") with no target.
 - Missing error paths, boundaries, invalid input, concurrency, empty states?
 - Criteria that contradict each other, or implementation detail leaking into requirements?`,
+  },
+  {
+    key: 'should-exist',
+    prefix: 'C',
+    cuts: true,
+    focus: `SHOULD EACH STORY EXIST.
+- For each story in ${REQ}, attack its **Without it:** line, the justification for the story.
+- Is the stated reason real, or a nice-to-have the spec would survive without? Does it trace to a PLAN.md item${A.planPath ? ` (${A.planPath})` : ''} that actually needs the story?
+- Propose a cut only where the justification fails and cutting the story removes real work. For each cut give the story number, its title, the weakness (why the justification fails), and what the cut saves in criteria, tasks and test cases.
+- Propose no cut when every story is justified. Do not propose cuts for wording or style.`,
   },
   {
     key: 'grounding',
@@ -543,10 +589,12 @@ Rules:
 - Report real defects, not style preferences or rewording. Fewer, solid findings beat many weak ones.
 - Give each finding an id starting with "${lens.prefix}" and a concrete fix.
 - Set needsUserDecision only when the fix requires a product or scope choice the spec and PLAN.md cannot settle.
-- Do not edit any file.`, { label: `review: ${lens.key}`, phase: 'Adversarial Review', schema: FINDINGS }),
+- Do not edit any file.`, { label: `review: ${lens.key}`, phase: 'Adversarial Review', schema: lens.cuts ? CUTS : FINDINGS }),
   (review, lens) => {
     if (!review) return null // reviewer died; counted as a lost lens below
     const findings = review.findings || []
+    // Cuts skip the refute loop: they go to the arbiter directly (Task 84).
+    if (lens.cuts) return { lens: lens.key, cuts: findings }
     if (!findings.length) return { lens: lens.key, findings: [], verdicts: [] }
     return pagent(`
 You are a skeptic. A reviewer raised the findings below against a spec. Try to REFUTE each one.
@@ -572,7 +620,12 @@ Do not edit any file.`, { label: `refute: ${lens.key}`, phase: 'Adversarial Revi
 const confirmed = []
 const refuted = []
 const unverified = []
+const proposedCuts = []
 for (const r of reviewed.filter(Boolean)) {
+  if (r.cuts) {
+    proposedCuts.push(...r.cuts)
+    continue
+  }
   if (r.verdicts === null) {
     // Refuter died; keep the findings visible but do not auto-apply them.
     unverified.push(...r.findings)
@@ -588,6 +641,8 @@ for (const r of reviewed.filter(Boolean)) {
 const lensesLost = LENSES.length - reviewed.filter(Boolean).length
 if (lensesLost) log(`${lensesLost} review lens(es) failed to return; coverage is partial.`)
 if (unverified.length) log(`${unverified.length} finding(s) could not be verified and will not be auto-applied.`)
+const shouldExistLost = reviewed.some((r, i) => !r && LENSES[i].cuts)
+log(`should-exist: ${proposedCuts.length} proposed cut(s).`)
 
 const toFix = confirmed.filter(f => !f.needsUserDecision)
 const forUser = confirmed.filter(f => f.needsUserDecision)
@@ -642,6 +697,11 @@ const GOVERNING_RULE = `**Fixes that change behaviour.** A fix changes behaviour
 
 const FROZEN_RULE = `**Frozen spec.** First read the Status line of every task in ${DIR}/tasks.md. If any task is not Not Started, implementation has started and requirements.md and test-plan.md are the contract it is checked against. Then a fix that changes or removes existing text in requirements.md or test-plan.md (rewording, renumbering, narrowing, weakening or deleting an existing requirement, criterion, test case or property) is one you do NOT apply, whatever the finding says. Return it under "escalated" instead: the finding id, the question (for example "Change <id> although implementation has started?"), and 2-3 options: one with the proposed text verbatim, and one "leave the spec as is". It goes in "escalated" only, not in "fixed" or "notFixed". Fixes that only add (a new requirement or criterion, a new test case or property, a new task, design or tasks.md edits) are add-only and are applied as usual. When every task is Not Started, this rule does not apply.`
 
+// Only the lens's silence is reported here; proposed cuts never reach this prompt (Task 84 routes them to the arbiter).
+const shouldExistNote = shouldExistLost || proposedCuts.length
+  ? ''
+  : '\n## Should-exist\nThe should-exist lens found nothing to cut. Say so in one sentence under this heading.\n'
+
 const revision = await pagent(`
 You are revising a spec after adversarial review.
 
@@ -680,7 +740,7 @@ ${JSON.stringify(refuted.map(f => ({ id: f.id, problem: f.problem, why: f.refuta
 
 ## Unverified
 ${unverified.length ? JSON.stringify(unverified.map(f => ({ id: f.id, problem: f.problem })), null, 2) : 'None'}
-
+${shouldExistNote}
 ## Schedule
 Re-run \`ck lint ${A.feature}\` from ${ROOT} after your fixes. Update the Schedule section of tasks.md from its "critical path" and "ready now" lines, and copy those two lines here.
 ${snapshot ? `\nDo not touch ${SNAP}/; it is the pre-revision snapshot a later check diffs against.\n` : ''}
@@ -846,6 +906,7 @@ return {
   authored: MODE === 'create'
     ? Object.fromEntries(Object.entries(authored).map(([k, v]) => [k, { summary: v.summary, assumptions: v.assumptions, concerns: v.concerns }]))
     : null,
+  lensesLost,
   review: {
     result,
     fixed: revision ? revision.fixed : [],
