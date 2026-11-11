@@ -276,7 +276,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 11: Parse the two principle layers
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.4, 1.6, 1.8, 1.10
 **Description:** Create `src/claude_kiro/principles.py` with the starter text from design.md and the pure seams `parse_principles`, `plan_section`, `effective_principles` and `plan_may_be_decided`, plus the `Principle` and `EffectivePrinciples` dataclasses. A principle is a top-level `-` bullet with its continuation lines; its id is `<layer>:<slug>` or `<layer>:<position>`. Handle `**Overrides <slug>:**`, `**Reason:**`, `**Reserves <scope>:**` and `**Nothing to add:**`. An override with no reason text is not citable and does not displace the default. A plan text that claims to grant requirements changes has no effect, because nothing here takes a grant as input. Harness Contract owner: `arbiter.effective_principles`, which is `principles.effective_principles` over `parse_principles`.
@@ -287,10 +287,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 8 (P-1 at `effective_principles`, P-40 at `plan_may_be_decided`)
 
 **Acceptance:**
-- [ ] A reasoned override displaces its default in `effective_principles`, and a reasonless one lands in `ignored` and does not
-- [ ] `plan_section` returns `None` for an absent or empty section, and `plan_layer` is `absent` for both
-- [ ] `plan_may_be_decided` refuses a missing or empty section and accepts one saying there is nothing to add
-- [ ] Reserves scopes are unioned into `reserved`
+- [x] A reasoned override displaces its default in `effective_principles`, and a reasonless one lands in `ignored` and does not
+- [x] `plan_section` returns `None` for an absent or empty section, and `plan_layer` is `absent` for both
+- [x] `plan_may_be_decided` refuses a missing or empty section and accepts one saying there is nothing to add
+- [x] Reserves scopes are unioned into `reserved`
 
 **Dependencies:** Task 8 (its tests are the oracle)
 **Complexity:** Medium
@@ -735,7 +735,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 31: Add ck principles init and check
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 1.1, 1.2, 1.4
 **Description:** Create `src/claude_kiro/cli/arbiter.py` with the `principles` group: `ck principles init [--commit]` (creates `specs/PRINCIPLES.md` from the starter text if missing, leaves an existing file untouched, prints `{"created", "path", "commit"}`; `--commit` also commits that file alone on the checkout's branch when it created it, so a launch gets it onto the target checkout) and `ck principles check SPEC --json` (`{"ok", "reason"}`, exit 1 when the plan may not be Decided). Create an empty `arbiter` group in the same file. Register both in `src/claude_kiro/cli/main.py`. Harness Contract owner: `ck principles init`.
@@ -747,9 +747,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 7 (TC-1, TC-3, TC-140), Task 10 (red team of 1.4 through `ck principles check`)
 
 **Acceptance:**
-- [ ] `init` creates the file with all four defaults and reports `created: true`
-- [ ] `init` on an existing file leaves bytes and mtime unchanged and reports `created: false`
-- [ ] `check` exits 1 for a plan with a missing or empty section
+- [x] `init` creates the file with all four defaults and reports `created: true`
+- [x] `init` on an existing file leaves bytes and mtime unchanged and reports `created: false`
+- [x] `check` exits 1 for a plan with a missing or empty section
 
 **Dependencies:** Task 7 (its tests are the oracle), Task 10 (its tests are the oracle), Task 11 (calls the starter text and `plan_may_be_decided`)
 **Complexity:** Low
