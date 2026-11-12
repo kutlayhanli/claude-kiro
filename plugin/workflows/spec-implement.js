@@ -2396,7 +2396,7 @@ async function arbitrate(n, rec, r, claim) {
         'missing-requirement': 'a requirement is missing',
       }[res.reason] || res.reason
       let number = null
-      if (res.record) {
+      if (res.record && res.reason !== 'exhausted') {   // a needs-a-stronger-look answer at the risky tier is no ruling
         const rec1 = await recordRuling(n, { claim, answer, res, open, tier })
         if (rec1.error) return await toMe('record-failed', `${rec1.error}. ${why}.`, { open, ruling: answer })
         number = rec1.number
