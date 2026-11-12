@@ -2149,11 +2149,12 @@ async function testFixFor(n, conflicts, { held = [] } = {}) {
 }
 
 // A task whose test fix goes to me: needs-input kind "test-fix" with the findings, parked (unattended) or asked (interactive).
+const repairText = x => { const l = x.testRepairs || (x.testRepair ? [{ ruling: x.ruling, testRepair: x.testRepair }] : []); return l.length ? ` Ruled test change${l.length > 1 ? 's' : ''}: ${l.map(p => `${p.ruling != null ? `ruling ${p.ruling}, ` : ''}${p.testRepair.file}${p.testRepair.test ? `::${p.testRepair.test}` : ''}: ${trim(p.testRepair.change, 300)} (why: ${trim(p.testRepair.why, 200)})`).join(' | ')}.` : '' }
 async function parkTestFix(n, rec, reasons, records, extra = {}) {
   const action = parkAction({ interactive: INTERACTIVE })
   const tests = [...new Set(records.flatMap(x => x.tests))]
   const files = [...new Set(tests.map(t => t.split('::')[0]))]
-  const decision = `Task ${n} is blocked on tests that can never pass, and the automatic test fix did not land: ${reasons.join(' | ')}. Fix the tests yourself on ${INTO} (a test-track change: you decide), or tell the agent how to proceed; then resume the run${RUN_ID ? ` with the same runId ${RUN_ID}` : ''}.`
+  const decision = `Task ${n} is blocked on tests that can never pass, and the automatic test fix did not land: ${reasons.join(' | ')}.${repairText(extra)} Fix the tests yourself on ${INTO} (a test-track change: you decide), or tell the agent how to proceed; then resume the run${RUN_ID ? ` with the same runId ${RUN_ID}` : ''}.`
   const entry = {
     task: n, file: files.join(', '), files, kind: 'test-fix', test: tests.join(', '), requirement: '', decision,
     findings: reasons, fixes: records.map(x => x.fix).filter(Boolean), runId: RUN_ID || null, action, notification: null, escalatedTo: [], ...extra,
@@ -2333,6 +2334,10 @@ async function recordRuling(n, { claim, answer, res, open, tier }) {
     log(`Task ${n}: ${error}`)
     runWarnings.push(`Task ${n}: ${error}`)
     return { error }
+  }
+  if (j.warning) {
+    log(`Task ${n}: ck arbiter record: ${trim(String(j.warning), 300)}`)
+    runWarnings.push(`Task ${n}: ck arbiter record: ${trim(String(j.warning), 300)}`)
   }
   return { number: j.number }
 }
@@ -2563,19 +2568,26 @@ async function runTask(n) {
         rec.finishedAt = r && r.finishedAt
         const h = await handOffTestRepair(n, rec, repairs)
         fixed = h.fixed
-        const first = repairs[0]
-        const t = (first.ruling && first.ruling.testRepair) || {}
-        lastRepair = { records: fixed.records, ruling: first.rulingNo, testRepair: { file: String(t.file || first.claim.file || ''), test: String(t.test || first.claim.test || ''), change: String(t.change || ''), why: String(t.why || '') } }
+        // Every ruling whose repair did not land, matched to its fixer record by test node: the entry carries each one's number and exact change (8.8).
+        const landedNodes = new Set(fixed.records.filter(x => x.outcome === 'landed').flatMap(x => x.tests))
+        const pending = repairs.map(x => {
+          const e = testRepairEntries([x])[0]
+          const t = (x.ruling && x.ruling.testRepair) || {}
+          return { x, e, testRepair: { file: String(t.file || x.claim.file || ''), test: String(t.test || x.claim.test || ''), change: String(t.change || ''), why: String(t.why || '') }, ruling: x.rulingNo ?? null }
+        }).filter(p => !p.e || !landedNodes.has(conflictNode(p.e)))
+        const shown = pending.length ? pending : repairs.map(x => { const t = (x.ruling && x.ruling.testRepair) || {}; return { x, testRepair: { file: String(t.file || x.claim.file || ''), test: String(t.test || x.claim.test || ''), change: String(t.change || ''), why: String(t.why || '') }, ruling: x.rulingNo ?? null } })
+        const lastOne = shown[0]
+        lastRepair = { records: fixed.records, ruling: lastOne.ruling, testRepair: lastOne.testRepair, all: shown.map(p => ({ ruling: p.ruling, testRepair: p.testRepair })) }
         const finding = (fixed.records.find(x => x.outcome === 'test-correct' && x.finding) || {}).finding
         const reasons = [...fixed.toMe, ...fixed.findings.map(f => `the test-fixer found the test correct, so it is not changed: ${trim(String(f.message || f.issue || ''), 300)}`)]
         if (reasons.length) {
           if (exit) {
             runWarnings.push(`Task ${n}: the test repair did not land (${reasons.join(' | ')}) and a claim went to needs-input first`)
             // The task has one needs-input entry: the repair that did not land rides along in it, so its exact change reaches me (8.8, 10.9).
-            if (exit.needsInput) exit.needsInput.alsoPending = [...(exit.needsInput.alsoPending || []), { ruling: lastRepair.ruling ?? null, testRepair: lastRepair.testRepair, reasons }]
+            if (exit.needsInput) exit.needsInput.alsoPending = [...(exit.needsInput.alsoPending || []), { ruling: lastRepair.ruling ?? null, testRepair: lastRepair.testRepair, ...(lastRepair.all.length > 1 ? { testRepairs: lastRepair.all } : {}), reasons }]
             return { exit }
           }
-          return { exit: await parkTestFix(n, rec, reasons, fixed.records, { ruling: lastRepair.ruling ?? null, testRepair: lastRepair.testRepair, ...(finding ? { finding } : {}) }) }
+          return { exit: await parkTestFix(n, rec, reasons, fixed.records, { ruling: lastRepair.ruling ?? null, testRepair: lastRepair.testRepair, ...(lastRepair.all.length > 1 ? { testRepairs: lastRepair.all } : {}), ...(finding ? { finding } : {}) }) }
         }
       }
       if (exit) return { exit }
@@ -2608,7 +2620,7 @@ async function runTask(n) {
           rec.result = r
           rec.finishedAt = r && r.finishedAt
           releaseSlot(n)
-          return await parkTestFix(n, rec, [`the task still reports a test that can never pass after its test fix: ${trim(again.file, 120)}: ${trim(again.reason, 300)}`], lastRepair ? lastRepair.records : [], { ruling: lastRepair ? lastRepair.ruling ?? null : null, testRepair: lastRepair ? lastRepair.testRepair : null, evidence: { file: String(again.file || ''), test: String(again.test || ''), reason: String(again.reason || '') } })
+          return await parkTestFix(n, rec, [`the task still reports a test that can never pass after its test fix: ${trim(again.file, 120)}: ${trim(again.reason, 300)}`], lastRepair ? lastRepair.records : [], { ruling: lastRepair ? lastRepair.ruling ?? null : null, testRepair: lastRepair ? lastRepair.testRepair : null, ...(lastRepair && lastRepair.all.length > 1 ? { testRepairs: lastRepair.all } : {}), evidence: { file: String(again.file || ''), test: String(again.test || ''), reason: String(again.reason || '') } })
         }
       }
       const live = liveOf(r)

@@ -1580,13 +1580,13 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Risk:** safety (sends needs-input notifications and starts the test-fixer, which lands test changes on the integration branch)
 
 **Implementation notes:**
-- A test-repair ruling is recorded by `settleClaims` just before the hand-off (after every claim of the attempt has settled), not as each claim settles, so the task's ruling limit never cuts a group of conflicts short (tc48: four conflicts, four rulings). Code, requirements and missing-requirement rulings are recorded as they settle.
+- A test-repair ruling is recorded in `arbitrate` as it settles, like every other non-spec-edit ruling (commit 23886aa). The needs-input entry carries every ruling that did not land (`ruling`/`testRepair`, and `testRepairs` when several), matched to its fixer record by test node.
 - `ck arbiter record` now also marks the claim `ruled` in the arbiter ledger with the ruling number and sets `lastEntry` (`src/claude_kiro/arbiter.py`, `_mark_ruled`): the limits and the repeat-after-ruling check read the ledger and nothing wrote it. `validate_ruling` now requires `status` (`src/claude_kiro/arbiter_policy.py`): an answer with no status was valid and got recorded (red-team story 7).
 - A risky-tier call that is not the task's first call in the run carries the `risky` label, so the calls of a task have distinct labels (TC-201).
 - `rec.reportedConflicts` keeps the conflicts an attempt reported, so the result's `testConflicts` still lists them after a landed fix (TC-34).
 - `tests/test_unattended_smoke.py` TC-177/TC-43b hang, on the base branch as well. This is a defect in the test's Node driver, not the sandbox: its direct `ck` global (`const ck = async argv => ...`) drops the `{cwd, stdin}` option the workflow passes, and `exec` never closes the child's stdin, so `ck arbiter open` (stdin `{claim, task}`, design.md) blocks forever. With a driver copy that passes `stdin` and closes the pipe, the whole scenario runs green in about 3 minutes (order 2#1, 7#1, 8#1, 2#2, 3#1). The fix belongs to the test track (Task 100's file).
 - `tests/js/command_deps.test.mjs` TC-117 and TC-123 were corrected in e46c80b (they now expect a needs-input entry when no arbiter is given); no conflict remains there.
-- `tests/js/test_fix.test.mjs` tc48 (four conflicts on one task, four rulings) contradicts 7.6: the 4th ruling on a task is a needs-input entry, not a ruling. The test track should use at most 3 conflicts per task, or expect the 4th to become a needs-input entry.
+- `tests/js/test_fix.test.mjs` tc48 once contradicted 7.6 (four conflicts, four rulings); commit 46946da changed it to stay within three rulings per task.
 
 ---
 
