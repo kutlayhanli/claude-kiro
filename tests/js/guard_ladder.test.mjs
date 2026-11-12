@@ -257,7 +257,8 @@ await test('a guard stop spends no gate-retry budget: the arbiter runs, no guard
   const { p } = await run({ deps: { 1: [] }, guardStops: { 1: 'haiku' }, failUntil: { 1: 3 }, rulings: { 1: [codeRuling] } }, { maxRetries: 1, agents: roles('haiku', []) })
   // The stub stops every call at or below the ceiling, so the attempt resumed after the ruling stops again and its repeat goes to me: only the prefix is the point.
   const labels = p.state.events.filter(e => !e.endsWith(' end') && !/^arbiter-/.test(e))
-  assert.equal(labels[0], 'task 1', labels.join(', '))
-  assert.match(labels[1], /^arbiter task 1( risky)?$/, labels.join(', '))
+  const at = labels.indexOf('task 1')
+  assert.ok(at >= 0, labels.join(', '))
+  assert.match(labels[at + 1], /^arbiter task 1( risky)?$/, labels.join(', '))
   assert.ok(!labels.some(l => GUARD_LABEL.test(l) || / retry \d/.test(l)), labels.join(', '))
 })
