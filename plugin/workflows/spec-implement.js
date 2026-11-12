@@ -2229,6 +2229,7 @@ async function routeCrossFindings(w, findings, replan, entry0 = null) {
 
 // --- the arbiter (run-principles Story 6) ---
 const ruledKeys = new Set()   // claim keys ruled on in this run
+const runRulings = []   // RunRuling, one per ruling this run settled (10.7); Task 66 adds the decisions.md number from `ck arbiter record`
 
 // A guard stop as a claim (6.2): the test or file the hook protected, and the requirement it verifies.
 function guardClaim(n, stop, tried) {
@@ -2348,12 +2349,18 @@ async function arbitrate(n, rec, r, claim) {
     }
     const out = { route: res.route, ruling: answer, claim, key: open.key, number: open.number, tier }
     ruledKeys.add(open.key)
+    const runRuling = { number: null, task: String(n), trigger: String(claim.trigger || ''), outcome: String(res.route), tier: tier === 'risky' ? 'risky' : 'normal', principle: String((answer && answer.principle) || ''), commit: null, landed: res.route === 'spec_edit' ? false : null }
+    runRulings.push(runRuling)
     if (res.route === 'spec_edit') {
       // The arbiter's commit lands on INTO alone (Task 67 moves this into the merge queue); a landing that fails is an entry for me.
-      const landed = await withLandingLock(() => thinCk('arbiter-land', ['-C', ROOT, 'worktree', 'land', SPEC, `arbiter${open.number}`, '--into', INTO, '--json'], { label: `arbiter-land ${n}`, phase, cwd: ROOT, what: `Landing step for the arbiter's spec edit of spec ${SPEC}: it merges the edit into ${INTO}` }))
-      const items = landed.json && Array.isArray(landed.json.tasks) ? landed.json.tasks : []
-      const item = items.find(t => String(t.task) === `arbiter${open.number}`) || items[0] || null
+      const landed = await withLandingLock(() => thinCk('arbiter-land', ['-C', ROOT, 'worktree', 'land', SPEC, open.number, '--into', INTO, '--json'], { label: `arbiter-land ${n}`, phase, cwd: ROOT, what: `Landing step for the arbiter's spec edit of spec ${SPEC}: it merges the edit into ${INTO}` }))
+      // `ck worktree land SPEC arbiter<k> --json` prints the one landing entry (state, commit, moved); a refused call prints {error, tasks}.
+      const lj = landed.json && typeof landed.json === 'object' ? landed.json : null
+      const items = lj && Array.isArray(lj.tasks) ? lj.tasks : []
+      const item = lj && isText(lj.state) ? lj : (items.find(t => String(t.task) === open.number) || items[0] || null)
       if (!item || item.state !== 'MERGED') return await toMe('landing-failed', `the arbiter's spec edit did not land (${item ? `${item.state}${item.detail ? `: ${trim(item.detail, 200)}` : ''}` : ckError(landed)})`, { open, ruling: answer })
+      runRuling.landed = true
+      runRuling.commit = isText(item.commit) && item.commit ? item.commit : null
       requestPlan('landing')   // new wiring applies to tasks not yet started (8.3)
     }
     return out
@@ -2952,6 +2959,8 @@ return {
   overhead,
   relinks,
   testFixes,
+  // Task 65 (10.7): the rulings this run settled, listed when there are any, so a run without any keeps the pinned key set.
+  ...(runRulings.length ? { rulings: runRulings } : {}),
   // Task 93 (12.8): listed when the run added live edges; a run without any keeps the result's pinned key set.
   ...(liveEdges.length ? { liveEdges } : {}),
   // Task 94 (13.3): listed when the run held a task for an overlap; a run without any keeps the pinned key set.
