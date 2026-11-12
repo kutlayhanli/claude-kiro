@@ -834,7 +834,8 @@ async function ruleStep(step, subjects, ctx) {
 }
 
 const arb = { ran: [], lost: [], rulings: [], missing: null }
-const shownCuts = []     // proposed cuts the arbiter found sound: the only cuts that reach the report
+const shownCuts = []     // proposed cuts not rejected by the arbiter (sound, reported, or lost): they reach the report
+const cutOutcome = new Map()  // proposed cut id -> the arbiter's outcome for it, when it ruled
 const standing = []      // refuted findings the arbiter ruled standing: they join the confirmed set
 const refutedBefore = refuted.length
 if (refuted.length || proposedCuts.length) {
@@ -869,14 +870,20 @@ if (refuted.length || proposedCuts.length) {
           else if (o.action === 'keep-refuted') f.arbiter = { ruling: o.ruling, reasoning: o.reasoning }
         }
       } else {
-        for (const c of proposedCuts) {
-          const o = out.outcome.get(String(c.id))
-          if (o && o.action === 'show-cut') shownCuts.push({ id: String(c.id), story: c.story, title: c.title, weakness: c.weakness, saves: c.saves, ruling: o.ruling, reasoning: o.reasoning })
-        }
+        for (const [id, o] of out.outcome) cutOutcome.set(id, o)
       }
     })
     const standingIds = new Set(standing.map(f => String(f.id)))
     refuted.splice(0, refuted.length, ...refuted.filter(f => !standingIds.has(String(f.id))))
+  }
+  // A cut is listed unless the arbiter rejected it: a reported cut (it removes something PLAN.md decided) and a lost
+  // one (the step did not rule, so it stands as it was, 11.12, 1.12) are both shown to me and never applied.
+  for (const c of proposedCuts) {
+    const o = cutOutcome.get(String(c.id))
+    if (o && o.action === 'reject-cut') continue
+    const ruled = !!o && o.action !== 'unchecked'
+    shownCuts.push({ id: String(c.id), story: c.story, title: c.title, weakness: c.weakness, saves: c.saves,
+      status: ruled ? 'sound' : 'unchecked', ruling: o ? o.ruling : null, reasoning: o ? o.reasoning : '' })
   }
   if (shownCuts.length) log(`${shownCuts.length} proposed cut(s) listed in review.md, not applied; awaiting your approval.`)
   if (arb.lost.length) log(`Arbiter: no usable ruling for ${arb.lost.join(', ')}; those stand as they were and the result is Needs work.`)
