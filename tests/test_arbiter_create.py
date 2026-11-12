@@ -666,7 +666,7 @@ def test_tc148_each_arbiter_step_starts_with_the_arbiter_agent_type_and_tier_opt
     assert all(s["opts"].get("agentType") == "spec:runner" for s in thin), [(s["label"], s["opts"]) for s in thin]
 
 
-def test_arbiter_drift_step_starts_with_the_arbiter_agent_type_and_tier_options_by_plain_agent(tmp_path):
+def test_tc148b_the_drift_step_starts_with_the_arbiter_agent_type_and_tier_options_by_plain_agent(tmp_path):
     out, steps = _tc148_run(tmp_path)
     assert "arbiter drift" in {s["label"] for s in steps}, out["labels"]
     _tc148_check_steps([s for s in steps if s["label"] == "arbiter drift"])
