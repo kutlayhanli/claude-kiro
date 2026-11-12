@@ -2264,7 +2264,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 97: Gate every bisection half and report an unreproduced batch
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 15.1, 15.2, 15.3
 **Description:** In `src/claude_kiro/worktrees.py`, rewrite `land_group` inside `land` as design.md's "Bisection" shows: drop `known_red`, gate every group it merges, report RED only for a single task whose own gate failed, with that gate's tail and failures, and recurse into both halves otherwise. Each `gates` entry gains `checkTail` and `failures`, that gate's failing output and failure entries (`""` and `[]` when green), so a RED task's `checkTail` and `failures` equal those of its own gate entry (design.md, `ck worktree land --json` keys; 15.2). Only the batch gate may widen to the full suite: `GateFn` gains a keyword `whole: bool = True`, `land` calls every gate below the batch gate with `whole=False`, `_gate_fn` in `src/claude_kiro/cli/worktree.py` passes it to `run_gate` as `escalate_complete`, and `run_gate` in `src/claude_kiro/gate.py` gains `escalate_complete: bool = True`, which when false takes `spec_complete` as false (design.md, "Gate scope below the batch"; 15.1, 15.2). After `land_group(batch)`, when the batch gate was red and no task is RED, add `unreproduced: {tasks, tail, failures}` from the batch gate to the result; the tasks whose own gates passed stay MERGED (15.3). A batch in which only one task merges is gated with `whole=False` too, so a lone task is never gated with the full suite at landing (D25, TC-198).
@@ -2276,10 +2276,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 96 (TC-170 to TC-172, TC-175, P-48), Task 100 (TC-174, in a full run)
 
 **Acceptance:**
-- [ ] No RED task without a red gate on exactly that task
-- [ ] No gate below the batch gate runs the full suite, however complete the spec is on the target
-- [ ] A batch-only failure gives `unreproduced` and no RED task
-- [ ] At most 2n-1 gates for a batch of n
+- [x] No RED task without a red gate on exactly that task
+- [x] No gate below the batch gate runs the full suite, however complete the spec is on the target
+- [x] A batch-only failure gives `unreproduced` and no RED task
+- [x] At most 2n-1 gates for a batch of n
 
 **Dependencies:** Task 96 (its tests are the oracle), Task 100 (its tests are the oracle), Task 95 (edits the same `worktrees.py`)
 **Complexity:** Medium
