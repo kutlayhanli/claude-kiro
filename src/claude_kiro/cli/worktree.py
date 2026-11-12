@@ -634,7 +634,7 @@ def _gate_fn(spec: str, scopes: dict = None):
     """
     from ..gate import run_gate
 
-    def gate(target: Path, nums):
+    def gate(target: Path, nums, whole: bool = True):
         spec_dir = next((r / spec for r in spec_roots(target) if (r / spec / "tasks.md").exists()), None)
         if spec_dir is None:
             return False, f"no tasks.md for {spec} in {target}", []
@@ -649,7 +649,7 @@ def _gate_fn(spec: str, scopes: dict = None):
             if not scope:
                 return False, f"✗ test fix {num} changes no file a test task owns", []
             tasks.extend(scope)
-        result = run_gate(target, spec_dir, list(dict.fromkeys(tasks)))
+        result = run_gate(target, spec_dir, list(dict.fromkeys(tasks)), escalate_complete=whole)
         if result.ok:
             return True, "", []
         lines = []
@@ -705,7 +705,7 @@ def _verify_gate_fn(spec: str):
     """
     import subprocess
 
-    def gate(target: Path, nums):
+    def gate(target: Path, nums, whole: bool = True):
         spec_dir = next((r / spec for r in spec_roots(target) if (r / spec / "tasks.md").exists()), None)
         if spec_dir is None:
             return False, f"no tasks.md for {spec} in {target}", []

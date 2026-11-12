@@ -1186,7 +1186,8 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - `tests/js/load_decisions.mjs` - `GUARD_NAMES` after the ladder seam decision
 - `tests/js/bridge.mjs` - `ladder` op after the seam decision
 - `tests/landing_bridge.py` - `bridge.ladder` after the seam decision
-**Verify:** `uv run pytest -q tests/test_guard_ladder_properties.py tests/test_guard_park.py tests/test_guard_agent_mode_docs.py` `node tests/js/guard_ladder.test.mjs`
+**Verify:** `uv run pytest -q tests/test_guard_ladder_properties.py tests/test_guard_park.py` `uv run pytest -q tests/test_guard_agent_mode_docs.py -k "not without-workflow-tool and not tc87_vendored_workflow"` `node tests/js/guard_ladder.test.mjs`
+**Note:** the `without-workflow-tool` cases of `tests/test_guard_agent_mode_docs.py` check the guide Task 76 writes and `test_tc87_vendored_workflow_equals_its_source` checks the copy Task 92 regenerates, so they run in those tasks' Verify, not here (run of 2026-11-11: they held Task 65).
 **Verifies:** Task 65 (the guard-ladder routing these tests encode is replaced there)
 
 **Acceptance:**
@@ -1800,7 +1801,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - `plugin/skills/implement/SKILL.md` - new args, launch handling, reporting
 - `plugin/resources/spec-implement-brief.md` - arbiter route
 - `plugin/resources/without-workflow-tool.md` - manual path
-**Verify:** `uv run pytest tests/test_implement_skill_args.py -q` `uv run pytest tests/test_arbiter_skill_contracts.py -q -k "implement_skill"`
+**Verify:** `uv run pytest tests/test_implement_skill_args.py -q` `uv run pytest tests/test_arbiter_skill_contracts.py -q -k "implement_skill"` `uv run pytest tests/test_guard_agent_mode_docs.py -q -k "without-workflow-tool"`
 **Verified by:** Task 75 (the implement skill text)
 
 **Acceptance:**
@@ -1977,7 +1978,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 84: Have the arbiter rule on refuted findings and proposed cuts
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 4.2, 4.3, 11.1, 11.2, 11.4, 11.9, 11.11, 11.12, 1.12
 **Description:** In `plugin/workflows/spec-create.js`, add the `arbiterAgent`, `runnerAgent` and `agents.arbiter` args and a `thinCk` helper in the shape of `spec-implement.js`'s, which runs every `ck arbiter` step through `runnerAgent`. An absent `arbiterAgent` is 11.12: the steps with subjects are lost and the result is `Needs work`. Arbiter steps use plain `agent`, with `agentType` from `arbiterAgent` and the tier's model and effort from `agents.arbiter`, not `pagent`, whose `ck progress` lines the arbiter's lane denies; `thinCk` calls to `ck progress event ... phase-start` and `step-end`, phase `Arbiter`, keep their time in the ETA. After the refuter, call `ck arbiter context` and `ck arbiter lane open`. When `context` returns `missing`, make no arbiter call, leave the findings and cuts as they stood, and name the file and `ck principles init` in review.md and the report (1.12). Otherwise run one arbiter call each for refuted findings and for cuts, in parallel, with `ck arbiter review --step refuted|cuts` validating each entry. A step with no subjects makes no call. Entries asking for a stronger look go to one re-run at the risky tier. Findings ruled standing join the confirmed set. Cuts stay out of `toFix`, and only cuts the arbiter finds sound reach the report. A lost step leaves its findings or cuts as they stood, is named in `review.arbiter.lost`, and sets the result to `Needs work`, and the Revise prompt names any lost step so review.md's Result says the same. Add `review.proposedCuts` and `review.arbiter` to the result. Harness Contract owner: the `arbiter refuted` and `arbiter cuts` steps with their ` risky` suffix, `review.proposedCuts`, and `review.arbiter` (the contract's `arbiterChecks`).
@@ -1987,11 +1988,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 45 (TC-137, the arbiter step labels of `spec-create.js`), Task 78 (TC-27, TC-28), Task 79 (TC-97, 98, 100, 105, 107, 108, 141, 148), Task 80 (P-28, P-30, P-46), Task 81 (red team of 4.3), Task 90 (the migrated create-side suites)
 
 **Acceptance:**
-- [ ] A refuted finding gets one ruling and is neither dropped nor majority-voted
-- [ ] A finding ruled standing is in the revise prompt, and one ruled refuted stays listed with the ruling
-- [ ] No proposed cut reaches a revise prompt, and a rejected cut stays in the record of rulings only
-- [ ] With no refuted findings and no cuts, no arbiter call runs
-- [ ] A failed call leaves its subjects as they stood and the result is not Ready
+- [x] A refuted finding gets one ruling and is neither dropped nor majority-voted
+- [x] A finding ruled standing is in the revise prompt, and one ruled refuted stays listed with the ruling
+- [x] No proposed cut reaches a revise prompt, and a rejected cut stays in the record of rulings only
+- [x] With no refuted findings and no cuts, no arbiter call runs
+- [x] A failed call leaves its subjects as they stood and the result is not Ready
 
 **Dependencies:** Task 6 (runs the `spec:arbiter` agent), Task 90 (its tests are the oracle), Task 43 (calls `ck arbiter context` and `review`), Task 45 (its tests are the oracle), Task 78 (its tests are the oracle), Task 79 (its tests are the oracle), Task 80 (its tests are the oracle), Task 81 (its tests are the oracle), Task 83 (edits `spec-create.js` and reads the lens's cuts)
 **Complexity:** High
@@ -2006,7 +2007,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Description:** In `plugin/workflows/spec-create.js`, after Revise, when a PLAN.md exists, run one arbiter call to compare the spec with its decisions and principles and validate it with `ck arbiter review --step drift`, which also updates review.md's Needs Your Decision and `**Result:**` line. A lost drift step still makes that call, with `output` null and `lostSteps`, so review.md matches the workflow's `result`. Corrections to draft wording are allowed only while every task is Not Started. Anything that adds, removes or changes what PLAN.md decided is reported in review.md and the result, and never applied. The Consistency Check runs when Revise fixed something or the arbiter edited a spec document. `ck arbiter lane close` ends the step. Harness Contract owner: the `arbiter drift` step.
 **Files:**
 - `plugin/workflows/spec-create.js` - drift step, Consistency Check condition, lane close
-**Verify:** `uv run pytest tests/test_arbiter_create.py -q -n auto -k "tc99_ or tc102_ or tc104_ or tc158_ or p29_"`
+**Verify:** `uv run pytest tests/test_arbiter_create.py -q -n auto -k "tc99_ or tc102_ or tc104_ or tc158_ or p29_ or tc148b_"`
 **Verified by:** Task 79 (TC-99, 102, 104, 158), Task 80 (P-29), Task 82 (red team of 11.6, 11.11, 11.12; the last `/spec:create` arbiter step), Task 87 (the create half of TC-128), Task 90 (the migrated create-side suites)
 
 **Acceptance:**
@@ -2153,7 +2154,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - `.claude/agents/ck-arbiter.md` - new, generated by `ck agents sync`
 - `.claude/agents/ck-auditor.md` - new, generated by `ck agents sync`
 - `.claude/ck-manifest.json` - updated hashes
-**Verify:** `CK_CONFIG_HOME=$(mktemp -d) uv run pytest tests/test_plugin.py -q`
+**Verify:** `CK_CONFIG_HOME=$(mktemp -d) uv run pytest tests/test_plugin.py -q` `uv run pytest tests/test_guard_agent_mode_docs.py -q -k "tc87_vendored_workflow"`
 
 **Acceptance:**
 - [ ] `tests/test_plugin.py` passes in full, including the dogfood and vendored-copy tests
@@ -2265,7 +2266,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 97: Gate every bisection half and report an unreproduced batch
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 15.1, 15.2, 15.3
 **Description:** In `src/claude_kiro/worktrees.py`, rewrite `land_group` inside `land` as design.md's "Bisection" shows: drop `known_red`, gate every group it merges, report RED only for a single task whose own gate failed, with that gate's tail and failures, and recurse into both halves otherwise. Each `gates` entry gains `checkTail` and `failures`, that gate's failing output and failure entries (`""` and `[]` when green), so a RED task's `checkTail` and `failures` equal those of its own gate entry (design.md, `ck worktree land --json` keys; 15.2). Only the batch gate may widen to the full suite: `GateFn` gains a keyword `whole: bool = True`, `land` calls every gate below the batch gate with `whole=False`, `_gate_fn` in `src/claude_kiro/cli/worktree.py` passes it to `run_gate` as `escalate_complete`, and `run_gate` in `src/claude_kiro/gate.py` gains `escalate_complete: bool = True`, which when false takes `spec_complete` as false (design.md, "Gate scope below the batch"; 15.1, 15.2). After `land_group(batch)`, when the batch gate was red and no task is RED, add `unreproduced: {tasks, tail, failures}` from the batch gate to the result; the tasks whose own gates passed stay MERGED (15.3). A batch in which only one task merges is gated with `whole=False` too, so a lone task is never gated with the full suite at landing (D25, TC-198).
@@ -2277,10 +2278,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 96 (TC-170 to TC-172, TC-175, P-48), Task 100 (TC-174, in a full run)
 
 **Acceptance:**
-- [ ] No RED task without a red gate on exactly that task
-- [ ] No gate below the batch gate runs the full suite, however complete the spec is on the target
-- [ ] A batch-only failure gives `unreproduced` and no RED task
-- [ ] At most 2n-1 gates for a batch of n
+- [x] No RED task without a red gate on exactly that task
+- [x] No gate below the batch gate runs the full suite, however complete the spec is on the target
+- [x] A batch-only failure gives `unreproduced` and no RED task
+- [x] At most 2n-1 gates for a batch of n
 
 **Dependencies:** Task 96 (its tests are the oracle), Task 100 (its tests are the oracle), Task 95 (edits the same `worktrees.py`)
 **Complexity:** Medium

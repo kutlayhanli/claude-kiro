@@ -1036,7 +1036,7 @@ class Landed:
 
 
 # gate(target checkout, task numbers) -> (green, failing output, failure entries)
-GateFn = Callable[[Path, List[str]], Tuple[bool, str, List[Dict]]]
+GateFn = Callable[..., Tuple[bool, str, List[Dict]]]  # gate(target, tasks, *, whole=True)
 
 
 def _now() -> str:
@@ -1307,7 +1307,7 @@ def land(
                 merged.append(num)
             return merged
 
-        def check(group: List[str]) -> Tuple[bool, str, List[Dict]]:
+        def check(group: List[str], whole: bool = False) -> Tuple[bool, str, List[Dict]]:
             t0 = datetime.datetime.now()
             ok, tail, failures = True, "", []
             if install:
@@ -1317,8 +1317,11 @@ def land(
                     ok, tail = False, f"install step failed: `{install}`\n{out}"
                 _ensure_hooks(root, target, hook_notes)  # an install step may move core.hooksPath (husky prepare)
             if ok:
-                ok, tail, failures = gate(target, group)
-            gates.append({"tasks": list(group), "green": ok, "seconds": int((datetime.datetime.now() - t0).total_seconds())})
+                ok, tail, failures = gate(target, group) if whole else gate(target, group, whole=False)
+            gates.append({
+                "tasks": list(group), "green": ok, "seconds": int((datetime.datetime.now() - t0).total_seconds()),
+                "checkTail": "" if ok else tail, "failures": [] if ok else list(failures or []),
+            })
             return ok, tail, failures
 
         def mark_merged(group: List[str], green: Optional[bool]) -> None:
@@ -1326,35 +1329,38 @@ def land(
             for num in group:
                 results[num] = Landed(num, "MERGED", f"into {into}", task_branch(spec, num), [], green, "", at)
 
-        def land_group(group: List[str], known_red: bool = False, red_tail: str = "", red_failures: Optional[List[Dict]] = None) -> bool:
-            """Land `group` on the current target head; True if all of it landed green."""
-            red_failures = red_failures or []
-            if not known_red:
-                start = head()
-                merged = merge_all(group)
-                if not merged:
-                    return False
-                if gate is None:
-                    mark_merged(merged, None)
-                    return len(merged) == len(group)
-                ok, tail, failures = check(merged)
-                if ok:
-                    mark_merged(merged, True)
-                    return len(merged) == len(group)
-                _git_reset(root, target, into, start)
-                group, red_tail, red_failures = merged, tail, failures
-            if len(group) == 1:
-                num = group[0]
-                results[num] = Landed(num, "RED", f"the gate on {into} fails with this task; it was not landed", task_branch(spec, num), [], False, red_tail, failures=red_failures)
+        batch_gate: Dict = {}
+
+        def land_group(group: List[str], whole: bool = False) -> bool:
+            """Land `group` on the current target head, gating exactly what merged; True if all of it landed green."""
+            start = head()
+            merged = merge_all(group)
+            if not merged:
                 return False
-            half = len(group) // 2
-            left_green = land_group(group[:half])
-            # A green left half on the same base proves the right half red: skip re-gating it whole.
-            land_group(group[half:], known_red=left_green, red_tail=red_tail, red_failures=red_failures)
+            if gate is None:
+                mark_merged(merged, None)
+                return len(merged) == len(group)
+            ok, tail, failures = check(merged, whole and len(merged) > 1)
+            if whole:
+                batch_gate.update(green=ok, tasks=list(merged), tail=tail, failures=list(failures or []))
+            if ok:
+                mark_merged(merged, True)
+                return len(merged) == len(group)
+            _git_reset(root, target, into, start)
+            if len(merged) == 1:
+                num = merged[0]
+                results[num] = Landed(num, "RED", f"the gate on {into} fails with this task; it was not landed", task_branch(spec, num), [], False, tail, failures=list(failures or []))
+                return False
+            half = len(merged) // 2
+            land_group(merged[:half])
+            land_group(merged[half:])
             return False
 
         if batch:
-            land_group(batch)
+            land_group(batch, True)
+        unreproduced = None
+        if batch_gate and not batch_gate["green"] and not any(o.state == "RED" for o in results.values()):
+            unreproduced = {"tasks": batch_gate["tasks"], "tail": batch_gate["tail"], "failures": batch_gate["failures"]}
 
         _record_landed(
             root, spec, into,
@@ -1382,6 +1388,7 @@ def land(
             "tasks": [asdict(results[n]) for n in order if n in results],
             "gates": gates,
             "bisected": len(gates) > 1,
+            **({"unreproduced": unreproduced} if unreproduced else {}),
             **({"recovered": recovered} if recovered else {}),
             **({"hooks": hook_notes[-1]} if hook_notes else {}),
             **({"fixtureError": fixture_error} if fixture_error else {}),

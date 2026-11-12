@@ -923,6 +923,7 @@ def run_gate(
     stamp_by: str = "ck gate",
     attribute: bool = False,
     install: Optional[str] = None,
+    escalate_complete: bool = True,
 ) -> GateResult:
     """Verify the given tasks (default: every Done task in the spec).
 
@@ -940,7 +941,7 @@ def run_gate(
     errors: List[str] = []
     with tempfile.TemporaryDirectory(prefix="ck-gate-") as report_dir, xdist.gate_slot(registry, errors) as slot:
         result = _run_gate(project_dir, spec_dir, task_nums, config, reuse and not attribute, stamp_by,
-                           registry if slot else None, errors, Path(report_dir), attribute, install)
+                           registry if slot else None, errors, Path(report_dir), attribute, install, escalate_complete)
     result.duration_s = time.monotonic() - started
     return result
 
@@ -957,6 +958,7 @@ def _run_gate(
     report_dir: Path,
     attribute: bool = False,
     install: Optional[str] = None,
+    escalate_complete: bool = True,
 ) -> GateResult:
     config = config or load_config(project_dir)
     tasks = {t.num: t for t in parse_tasks(spec_dir / "tasks.md")}
@@ -1002,7 +1004,7 @@ def _run_gate(
         return lint_scope.suite_due(test_task, tasks, assumed_done)
 
     has_test_track = any(t.track == "test" for t in tasks.values())
-    spec_complete = all(n in assumed_done for n in tasks)
+    spec_complete = escalate_complete and all(n in assumed_done for n in tasks)
     green_only = str(config.get("verify_mode", "auto")).lower() == "auto" and has_test_track and not spec_complete
 
     # A test-track gate reads the project's validation command first; an invalid value is a Config check and no

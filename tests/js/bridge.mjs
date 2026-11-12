@@ -15,7 +15,7 @@
 import readline from 'node:readline'
 import { execFile } from 'node:child_process'
 import { runWorkflow, useVirtualTime, throwingGlobals } from './load_workflow.mjs'
-import { project, writtenCommands, execCkRun } from './fake_project.mjs'
+import { project, writtenCommands, execCkRun, isCkCall, arbiterArgv, arbiterStdin } from './fake_project.mjs'
 import { stub } from './fake_create.mjs'
 import { VirtualClock } from './virtual_clock.mjs'
 import { fileURLToPath } from 'node:url'
@@ -81,6 +81,22 @@ async function handle(req) {
         for (const argv of writtenCommands(prompt).filter(a => a[0] === 'progress')) {
           const out = await execCkRun(req.execCk, argv, { log: execLog, results: execResults, external: p => clock.external(p) })
           if (argv[3] === 'step-end' && argv.includes('--json') && out && typeof out === 'object' && 'eta' in out) eta = out.eta
+        }
+      }
+      // With execCk, the thin `ck arbiter context|lane|review` steps run the real CLI (as run_create promises), with the
+      // step's stdin; an explicit `ck ...` override still answers its step in place of the CLI.
+      if (req.execCk && isCkCall(opts)) {
+        const argv = arbiterArgv(String(prompt))
+        const rest = argv && argv[0] === '-C' ? argv.slice(2) : argv
+        if (rest && rest[0] === 'arbiter') {
+          const si = rest.indexOf('--step')
+          const key = rest[1] === 'review' ? `ck arbiter review ${si >= 0 ? rest[si + 1] : undefined}` : `ck arbiter ${rest[1]}`
+          if (!(req.overrides && key in req.overrides)) {
+            const before = execResults.length
+            const out = await execCkRun(req.execCk, argv, { log: execLog, results: execResults, external: p => clock.external(p), input: arbiterStdin(String(prompt)) })
+            const res = execResults[before] ?? { code: 0, stdout: '', stderr: '' }
+            return { exitCode: res.code, json: out && typeof out === 'object' ? out : {}, ...(res.code !== 0 && !(out && typeof out === 'object') ? { error: res.stderr } : {}) }
+          }
         }
       }
       const answer = await s.agent(prompt, opts)
