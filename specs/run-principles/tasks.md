@@ -2129,7 +2129,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 91: Capture the arbiter's real hook input (lands by hand)
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 9.5, 9.6
 **Description:** I run this task myself, outside any sandbox: it starts paid `claude -p` sessions, which a sandboxed task agent cannot do. Extend `tests/fixtures/hook_inputs/capture.sh` with a Workflow agent started with `agentType` `spec:arbiter`, and a variant with the vendored `ck-arbiter`. Run it, replace `arbiter-agent-pretooluse.json` with the real capture (removing `_derivedFrom`), and add `tests/test_arbiter_capture.py` (TC-160). capture.sh starts its own Workflow agent, so this needs only the agent file, not the lane or the run. Before launch, step 4 already checked the same question with the shipped `spec:runner` and `ck-runner` agent types; this capture confirms it for the arbiter itself. If the capture shows anything other than `spec:arbiter` or `ck-arbiter`, `is_arbiter_caller` in design.md must change before the rest of this feature ships, because every guard test takes its identity from `arbiter_caller` and would stay green.
