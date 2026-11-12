@@ -111,7 +111,7 @@ def claim_key(claim: Claim) -> str:
     if t == "review-deadlock":
         subject = "review:" + ",".join(sorted({_finding_identity(f, i) for f, i in claim.findings}))
     elif t == "gate-failure":
-        subject = "gate:" + ",".join(sorted(claim.failing))
+        subject = "gate:" + ",".join(sorted(_test_name(f) for f in claim.failing))
     elif t == "lint":
         subject = f"lint:{claim.rule}:{claim.subject}"
     elif t == "command-cycle":
