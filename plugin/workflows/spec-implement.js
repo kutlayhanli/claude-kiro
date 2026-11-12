@@ -1940,6 +1940,11 @@ async function reviewBatch(batch) {
   }
   for (const n of ids) pendingReview.get(n).reviewed = true
   review = attributeFindings(review, ids)
+  // Task 69 (4.8): a serves-no-requirement finding of a batched review is a proposed cut of the task it names.
+  if (((review && review.findings) || []).length) reviewedFindings = true
+  for (const f of (review && review.findings) || []) {
+    if (f && f.noRequirement && (f.task != null || ids.length === 1)) recordCut(ids.length === 1 ? ids[0] : f.task, f)
+  }
   const flagged = flaggedOf(review, ids)
   if (review && review.verdict === 'changes' && ids.length > 1 && flagged.length === ids.length && !(review.findings || []).some(f => f && f.severity !== 'minor' && f.task != null)) {
     log(`Review wave ${waveNo}: its blocking findings name no covered task, so all of Tasks ${ids.join(', ')} revise`)
@@ -2310,11 +2315,14 @@ const ruledAnswers = new Map()   // claim key -> the arbiter's answer, for the e
 const runRulings = []   // RunRuling, one per ruling this run settled (10.7); Task 66 adds the decisions.md number from `ck arbiter record`
 const proposedCuts = []   // Task 69 (4.8): each serves-no-requirement finding a review named, for the result's proposedCuts
 const cutKeys = new Set()
+let reviewedFindings = false   // a review named at least one finding (Task 69): proposedCuts is listed then
 const recordCut = (n, f) => {
-  const key = `${n}|${f.file || ''}|${f.issue || ''}`
+  // A batched review can name the task a finding belongs to; that task owns the cut.
+  const task = String(f.task || n)
+  const key = `${task}|${f.file || ''}|${f.issue || ''}`
   if (cutKeys.has(key)) return
   cutKeys.add(key)
-  proposedCuts.push({ task: String(n), file: String(f.file || ''), issue: String(f.issue || ''), fix: String(f.fix || '') })
+  proposedCuts.push({ task, file: String(f.file || ''), issue: String(f.issue || ''), fix: String(f.fix || '') })
 }
 
 // A guard stop as a claim (6.2): the test or file the hook protected, and the requirement it verifies.
@@ -2769,6 +2777,7 @@ async function runTask(n) {
       const reviewed = raw => {
         if (!raw) return raw
         const v = normalizeReview(raw)
+        if ((v.findings || []).length) reviewedFindings = true
         for (const f of v.findings || []) if (f && f.noRequirement) recordCut(n, f)
         return normalizeReview(settleFindings(v, settledIds))
       }
@@ -3201,8 +3210,8 @@ return {
   overhead,
   relinks,
   testFixes,
-  // Task 69 (4.8): the serves-no-requirement findings, listed when there are any, so a run without any keeps the pinned key set.
-  ...(proposedCuts.length ? { proposedCuts } : {}),
+  // Task 69 (4.8): the serves-no-requirement findings a review named. Listed when a review named any finding, so a run whose reviews are clean keeps the pinned key set.
+  ...(proposedCuts.length || reviewedFindings ? { proposedCuts } : {}),
   // Task 65 (10.7): the rulings this run settled, listed when there are any, so a run without any keeps the pinned key set.
   ...(runRulings.length ? { rulings: runRulings } : {}),
   // Task 93 (12.8): listed when the run added live edges; a run without any keeps the result's pinned key set.
