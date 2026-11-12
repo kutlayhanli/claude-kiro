@@ -1166,9 +1166,11 @@ def park_note(prompt):
     return m.group(1)
 
 
-def test_tc78_a_rulings_entry_is_needs_input_not_failed_does_not_halt_and_notifies_through_the_real_notify_command(bridge, tmp_path):  # noqa: F811
+def test_tc78_a_rulings_entry_is_needs_input_not_failed_does_not_halt_and_notifies_through_the_real_notify_command(bridge, tmp_path, monkeypatch):  # noqa: F811
     from guard_helpers import notify_script, set_notify
 
+    # set_notify writes ck's global preferences: keep them in this test's own config home, never the user's.
+    monkeypatch.setenv("CK_CONFIG_HOME", str(tmp_path / "ck-config"))
     out_file = tmp_path / "notified.json"
     done = set_notify(notify_script(tmp_path / "bin", "ok", out_file))
     assert done.returncode == 0, done.stdout + done.stderr

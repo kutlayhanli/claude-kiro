@@ -8,6 +8,7 @@ export const meta = {
     { title: 'Task Tracks', detail: 'implementation and test task lists in parallel' },
     { title: 'Link', detail: 'merge tracks into tasks.md, wire Verified by, lint the dependency graph' },
     { title: 'Adversarial Review', detail: '4 lenses, each finding challenged by a refuter' },
+    { title: 'Arbiter', detail: 'rules on refuted findings and proposed cuts' },
     { title: 'Revise', detail: 'snapshot the spec, apply confirmed fixes, write review.md' },
     { title: 'Consistency Check', detail: 'diff the revision against the snapshot and check it against the criteria and properties' },
   ],
@@ -15,7 +16,7 @@ export const meta = {
 
 // args (passed by the slash command):
 // {
-//   mode: 'create' | 'review',
+//   mode: 'create' | 'review' | 'apply-cuts',   // apply-cuts also takes cuts: [{id, story, title, weakness}]
 //   feature: 'user-auth',                 // kebab-case spec name
 //   projectRoot: '/abs/path/to/project',
 //   specDir: '/abs/path/to/project/specs/user-auth',
@@ -26,7 +27,7 @@ export const meta = {
 //   date: 'YYYY-MM-DD'
 // }
 const A = args || {}
-const MODE = A.mode === 'review' ? 'review' : 'create'
+const MODE = A.mode === 'review' ? 'review' : A.mode === 'apply-cuts' ? 'apply-cuts' : 'create'
 const ROOT = A.projectRoot
 const DIR = A.specDir
 const REQ = `${DIR}/requirements.md`
@@ -102,6 +103,39 @@ const WRITE_RESULT = {
     eta: ETA,
   },
   required: ['path', 'summary', 'assumptions', 'concerns'],
+}
+
+const RUNNER_AGENT = typeof A.runnerAgent === 'string' && A.runnerAgent ? A.runnerAgent : null
+const ARBITER_AGENT = typeof A.arbiterAgent === 'string' && A.arbiterAgent ? A.arbiterAgent : null
+const CK_CALL = {
+  type: 'object',
+  properties: {
+    exitCode: { type: 'integer', description: 'the exit code of the ck command' },
+    json: { type: ['object', 'null'], description: 'the JSON the command printed, copied exactly; null if it printed none' },
+    error: { type: 'string', description: 'only if the command could not run or printed no JSON: what happened' },
+  },
+  required: ['exitCode', 'json'],
+}
+
+// One thin `ck` step through the runner agent: a mechanical call, no judgement. Returns {code, json}.
+const shellWord = s => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${String(s).replace(/'/g, `'\\''`)}'`)
+async function thinCk(label, argv, what, stdin) {
+  const cmd = `ck ${argv.map(shellWord).join(' ')}`
+  const doc = stdin == null ? cmd : `${cmd} <<'CK_STDIN'\n${stdin}\nCK_STDIN`
+  const prompt = `${what}. Do exactly this, nothing else. Edit no file.
+Run this command on its own line, with no other command:
+${doc}
+A non-zero exit is an answer, not a failure: still return its exit code and JSON.
+Return exitCode (the command's exit code) and json (its JSON output, copied exactly as printed; json must be an object, or null if it printed none). Put a message in error only if the command could not run or printed no JSON; no notes or remarks anywhere.`
+  const opts = { label, phase: 'Arbiter', schema: CK_CALL, effort: 'low', ...(RUNNER_AGENT ? { agentType: RUNNER_AGENT } : {}) }
+  let a = null
+  try {
+    a = await agent(prompt, opts)
+  } catch (e) {
+    return { code: -1, json: null, error: String(e && e.message) }
+  }
+  if (!a || typeof a !== 'object' || !Number.isInteger(a.exitCode)) return { code: -1, json: null, error: 'answer does not match CK_CALL' }
+  return { code: a.exitCode, json: a.json && typeof a.json === 'object' ? a.json : null, error: a.error || '' }
 }
 
 // ---------------------------------------------------------------------------
@@ -424,6 +458,73 @@ Return the structured result.`, { label: 'link tracks into tasks.md', phase: 'Li
 }
 
 // ---------------------------------------------------------------------------
+// apply-cuts mode (Task 86): the create skill launches it when I approve a proposed cut.
+// `ck arbiter context --approved-cut` decides, and this script branches only on its `cut` field:
+// `apply` runs one agent that removes the story from the four documents, then `ck lint` runs;
+// `frozen` runs no agent and returns the frozen message.
+// ---------------------------------------------------------------------------
+
+if (MODE === 'apply-cuts') {
+  const FROZEN = 'Not applied: a task has started, so the requirements are frozen. Removing the story is your change to make.'
+  const cuts = Array.isArray(A.cuts) ? A.cuts : []
+  const ctx = await thinCk('arbiter context approved cut', ['-C', ROOT, 'arbiter', 'context', A.feature, '--approved-cut', '--json'],
+    `Context step for spec ${A.feature}: the approved cut`)
+  const decision = ctx.code === 0 && ctx.json ? ctx.json.cut : null
+  if (decision === 'frozen') {
+    log(FROZEN)
+    return { mode: MODE, feature: A.feature, specDir: DIR, applied: false, frozen: true, message: FROZEN, cuts: [] }
+  }
+  if (decision !== 'apply') {
+    const message = `Not applied: the cut decision was ${decision === null ? 'not available (ck arbiter context did not answer)' : `"${decision}"`}.`
+    log(message)
+    return { mode: MODE, feature: A.feature, specDir: DIR, applied: false, frozen: false, message, cuts: [] }
+  }
+  const stories = cuts.map(c => `- Story ${c.story}${c.title ? ` (${c.title})` : ''}: ${c.weakness || ''}`).join('\n')
+  const done = await agent(`
+You are removing approved cuts from the spec. I approved them and no task has started.
+
+${BRIEF}
+
+Cuts to apply:
+${stories || '(none given)'}
+
+Remove each listed story from all four documents, consistently, and only that:
+- ${REQ}: the story and its numbered criteria (renumber nothing else unless the numbering would break; fix any reference to a removed criterion)
+- ${DES}: the parts that exist only for the story, and its traceability rows
+- ${TPL}: the test cases and properties that verify only the story
+- ${TSK}: the tasks that exist only for the story, and every other task's Dependencies, Verified by and Requirements references to them
+
+Do not edit any other file. Run no lint yourself. Return applied (the cut ids you removed) and a one-sentence summary.`, {
+    label: 'apply-cuts',
+    phase: 'Arbiter',
+    schema: {
+      type: 'object',
+      properties: { applied: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } },
+      required: ['applied', 'summary'],
+    },
+  })
+  if (!done) {
+    const message = 'The apply-cuts step returned no answer; the documents may be partly edited. Check them before going on.'
+    log(message)
+    return { mode: MODE, feature: A.feature, specDir: DIR, applied: false, frozen: false, message, cuts: [] }
+  }
+  const lint = await thinCk('lint after cut', ['-C', ROOT, 'lint', A.feature, '--json'], `Lint step for spec ${A.feature} after the cut`)
+  const lintOk = lint.code === 0
+  const lintText = lint.json ? JSON.stringify(lint.json) : (lint.error || '')
+  const message = lintOk
+    ? `Cut applied: ${done.summary}. ck lint reports no new failure.`
+    : `Cut edits are in the four documents (${done.summary}) but ck lint failed after them: ${lintText}. Fix this before going on.`
+  log(message)
+  return {
+    mode: MODE, feature: A.feature, specDir: DIR,
+    applied: lintOk, frozen: false,
+    edited: done.applied || [],
+    lint: { ok: lintOk, exitCode: lint.code, output: lint.json || lint.error || null },
+    message,
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Adversarial review: each lens finds defects, then a separate agent tries to
 // refute every finding. Only findings that survive refutation are acted on.
 // ---------------------------------------------------------------------------
@@ -644,9 +745,290 @@ if (unverified.length) log(`${unverified.length} finding(s) could not be verifie
 const shouldExistLost = reviewed.some((r, i) => !r && LENSES[i].cuts)
 log(`should-exist: ${proposedCuts.length} proposed cut(s).`)
 
+// ---------------------------------------------------------------------------
+// Arbiter (Task 84): rules on refuted findings and proposed cuts. Arbiter calls
+// are plain agents of the arbiter type; every `ck` step is a thin call through
+// the runner agent. Without an arbiter agent the steps with subjects are lost
+// (11.12); without usable principles no arbiter call runs (1.12). A lost step
+// leaves its findings or cuts as they stood and makes the result Needs work.
+// ---------------------------------------------------------------------------
+
+const ARBITER_CFG = A.agents && A.agents.arbiter ? A.agents.arbiter : {}
+// Model and effort of a tier from agents.arbiter (risky_model/risky_effort, falling back to the normal ones).
+function arbiterTierOpts(tier) {
+  const pick = (...vals) => vals.find(v => typeof v === 'string' && v && v !== 'inherit')
+  const risky = tier === 'risky'
+  const model = risky ? pick(ARBITER_CFG.risky_model, ARBITER_CFG.model) : pick(ARBITER_CFG.model)
+  const effort = risky ? pick(ARBITER_CFG.risky_effort, ARBITER_CFG.effort) : pick(ARBITER_CFG.effort)
+  return { ...(model ? { model } : {}), ...(effort ? { effort } : {}) }
+}
+
+const ARBITER_RULINGS = {
+  type: 'object',
+  properties: {
+    rulings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          claim: { type: 'string', description: 'the id of the subject this ruling settles' },
+          status: { type: 'string', enum: ['ruled', 'needs_stronger_look'] },
+          outcome: { type: 'string', enum: ['spec_edit'] },
+          verdict: { type: 'string', description: 'finding stands | refutation stands (refuted step); sound | unsound (cuts step)' },
+          reasoning: { type: 'string', description: 'one or two sentences citing the subject\'s evidence' },
+          principle: { type: 'string', description: 'one id from the principles list' },
+          changed: { type: 'string' },
+        },
+        required: ['claim', 'status', 'verdict', 'reasoning', 'principle'],
+      },
+    },
+  },
+  required: ['rulings'],
+}
+
+// The drift step names its own items (no subjects): an item is a passage that disagrees with PLAN.md's decisions.
+const DRIFT_RULINGS = {
+  type: 'object',
+  properties: {
+    rulings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          claim: { type: 'string', description: 'the drift item id, D1, D2, ...' },
+          status: { type: 'string', enum: ['ruled', 'needs_stronger_look'] },
+          outcome: { type: 'string', enum: ['spec_edit', 'requirements'] },
+          verdict: { type: 'string', enum: ['drift'] },
+          reasoning: { type: 'string', description: 'one or two sentences citing the passage and the PLAN.md decision' },
+          principle: { type: 'string', description: 'one id from the principles list' },
+          changed: { type: 'string', description: 'for spec_edit: the file and what you changed; otherwise "nothing"' },
+          requirement: {
+            type: 'object',
+            description: 'for outcome requirements: the change PLAN.md decided against',
+            properties: {
+              kind: { type: 'string', enum: ['add', 'remove', 'change'] },
+              wording: { type: 'string', description: 'the requirement as it should read' },
+              reason: { type: 'string', description: 'the PLAN.md decision it follows' },
+            },
+          },
+        },
+        required: ['claim', 'status', 'outcome', 'verdict', 'reasoning', 'principle'],
+      },
+    },
+  },
+  required: ['rulings'],
+}
+
+const ARBITER_RULES = {
+  refuted: 'Each subject is a finding that a refuter marked refuted; its "refutation" is the refuter\'s reason. Verdict "finding stands" when the defect is real and the fix is sound; verdict "refutation stands" when the refuter is right.',
+  cuts: 'Each subject is a proposed cut: a story whose "Without it" justification the should-exist lens says fails. Verdict "sound" when the justification fails and the cut is right; verdict "unsound" when the story should stay.',
+}
+
+const arbiterPrompt = (step, subjects, ctx) => `You are the arbiter of a spec review. Rule on each subject below yourself; defer to me only when the principles cannot settle it.
+
+${BRIEF}
+
+Subject kind: ${step}. ${ARBITER_RULES[step]}
+
+Cite exactly one principle per ruling, from this list (its id):
+${JSON.stringify(ctx.principles || [], null, 2)}
+Plan layer: ${ctx.planLayer || '(none)'}
+
+Return one ruling per subject: claim (the subject's id), status ("ruled", or "needs_stronger_look" when a stronger model should decide), verdict, reasoning (one or two sentences citing the subject's evidence), principle (an id from the list above), outcome ("spec_edit"), and changed ("nothing"). Do not edit any file.
+
+Subjects (JSON):
+${JSON.stringify(subjects, null, 2)}`
+
+// The drift prompt: one call after Revise that compares the revised spec with PLAN.md's decisions.
+const driftPrompt = ctx => `You are the arbiter of a spec review, run after the revision. Compare the spec files with the decisions in PLAN.md and with the principles. Name each drift item yourself; defer to me only when the principles cannot settle it.
+
+${BRIEF}
+
+Spec files: ${SPEC_FILES}. PLAN.md is the decided record: every item it decides must read the same way in the spec.
+
+Cite exactly one principle per ruling, from this list (its id):
+${JSON.stringify(ctx.principles || [], null, 2)}
+Plan layer: ${ctx.planLayer || '(none)'}
+
+For each drift item return one ruling: claim (a new id: D1, D2, ...), status ("ruled", or "needs_stronger_look" when a stronger model should decide), verdict ("drift"), reasoning (one or two sentences citing the passage and the PLAN.md decision), principle (an id from the list above), outcome:
+- "requirements" when the spec change would add, remove or change what PLAN.md decided. Do not edit the spec for it; give requirement {kind, wording (the requirement as it should read), reason (the PLAN.md decision it follows)}.
+- "spec_edit" when the item is only wording, traceability or a stale reference that changes no decision. Correct it in the spec files, and only if no task has started. implementationStarted is ${ctx.implementationStarted === true ? 'true: a task has started, so make NO edit to any spec file for any item; return it as "spec_edit" with changed "nothing" and let me decide' : 'false: no task has started, so an edit is allowed'}.
+changed: for spec_edit, the file and what you changed; otherwise "nothing". Return an empty list when nothing drifted.`
+
+// One arbiter call for a step at one tier. Returns the arbiter's answer, or null when the call failed.
+async function arbiterAsk(step, tier, subjects, ctx) {
+  const label = `arbiter ${step}${tier === 'risky' ? ' risky' : ''}`
+  try {
+    const prompt = step === 'drift' ? driftPrompt(ctx) : arbiterPrompt(step, subjects, ctx)
+    const schema = step === 'drift' ? DRIFT_RULINGS : ARBITER_RULINGS
+    const out = await agent(prompt, { label, phase: 'Arbiter', schema, ...(ARBITER_AGENT ? { agentType: ARBITER_AGENT } : {}), ...arbiterTierOpts(tier) })
+    return out === undefined ? null : out
+  } catch (e) {
+    log(`${label} failed: ${String(e && e.message)}`)
+    return null
+  }
+}
+
+// `ck arbiter review`: validates each entry on its own and records the rulings. Returns its results, or null when it did not answer.
+// `lostSteps` names the earlier steps that returned no usable ruling; ck turns a drift call with any of them into Needs work.
+async function arbiterReview(step, tier, subjects, output, lostSteps = []) {
+  const stdin = JSON.stringify({ subjects, output: output === undefined ? null : output, lostSteps })
+  const a = await thinCk(`arbiter review ${step} ${tier}`, ['-C', ROOT, 'arbiter', 'review', A.feature, '--step', step, '--tier', tier, '--json'],
+    `Validation step for the ${step} rulings of spec ${A.feature}, ${tier} tier`, stdin)
+  return a.code === 0 && a.json && Array.isArray(a.json.results) ? a.json.results : null
+}
+
+const SETTLED = ['confirm', 'keep-refuted', 'show-cut', 'reject-cut']
+
+// Rules on one step's subjects: one normal call, then one risky re-run for the entries that ask for a stronger look.
+async function ruleStep(step, subjects, ctx) {
+  const outcome = new Map()   // subject id -> {action, reason, ruling, reasoning}
+  const round = async (tier, subs) => {
+    const answer = await arbiterAsk(step, tier, subs, ctx)
+    const results = await arbiterReview(step, tier, subs, answer)
+    if (!results) return false
+    const rulings = answer && Array.isArray(answer.rulings) ? answer.rulings : []
+    for (const r of results) {
+      const entry = rulings.find(x => x && typeof x === 'object' && String((x.claim ?? x.id)) === String(r.id))
+      outcome.set(String(r.id), { action: r.action, reason: r.reason, ruling: r.ruling, reasoning: entry ? String(entry.reasoning || '') : '' })
+    }
+    return true
+  }
+  const ran = await round('normal', subjects)
+  const stronger = subjects.filter(s => { const o = outcome.get(String(s.id)); return o && o.action === 'unchecked' && o.reason === 'stronger-look' })
+  if (stronger.length) await round('risky', stronger)
+  const lost = subjects.map(s => String(s.id)).filter(id => { const o = outcome.get(id); return !(o && SETTLED.includes(o.action)) })
+  return { ran, outcome, lost }
+}
+
+const arb = { ran: [], lost: [], rulings: [], missing: null }
+const shownCuts = []     // proposed cuts not rejected by the arbiter (sound, reported, or lost): they reach the report
+const cutOutcome = new Map()  // proposed cut id -> the arbiter's outcome for it, when it ruled
+const standing = []      // refuted findings the arbiter ruled standing: they join the confirmed set
+const refutedBefore = refuted.length
+if (refuted.length || proposedCuts.length) {
+  phase('Arbiter')
+  const want = [refuted.length ? 'refuted' : null, proposedCuts.length ? 'cuts' : null].filter(Boolean)
+  const context = await thinCk('arbiter context', ['-C', ROOT, 'arbiter', 'context', A.feature, '--json'], `Context step for spec ${A.feature} before the arbiter`)
+  const ctx = context.code === 0 && context.json ? context.json : null
+  if (ctx && ctx.missing) arb.missing = String(ctx.missing)
+  const usable = !!ctx && !ctx.missing && !!ARBITER_AGENT
+  if (!usable) {
+    arb.lost.push(...want)
+    if (ctx && ctx.missing) log(`Arbiter did not run: ${ctx.missing} is missing or unusable. Run ck principles init.`)
+    else if (!ctx) log('Arbiter did not run: ck arbiter context did not answer.')
+    else log('Arbiter did not run: no arbiter agent is configured (arbiterAgent).')
+  } else {
+    await thinCk('arbiter lane open', ['-C', ROOT, 'arbiter', 'lane', 'open', A.feature, '--json'], `Lane step for spec ${A.feature}: the arbiter's ticket`)
+    const subjectsOf = {
+      refuted,
+      cuts: proposedCuts.map(c => ({ id: String(c.id), story: c.story, title: c.title, weakness: c.weakness, saves: c.saves })),
+    }
+    const outs = await parallel(want.map(step => () => ruleStep(step, subjectsOf[step], ctx)))
+    want.forEach((step, i) => {
+      const out = outs[i]
+      if (out.ran) arb.ran.push(step)
+      if (out.lost.length) arb.lost.push(step)
+      for (const o of out.outcome.values()) if (o.ruling != null) arb.rulings.push(o.ruling)
+      if (step === 'refuted') {
+        for (const f of refuted) {
+          const o = out.outcome.get(String(f.id))
+          if (!o) continue
+          if (o.action === 'confirm') standing.push({ ...f, verification: o.reasoning || o.reason })
+          else if (o.action === 'keep-refuted') f.arbiter = { ruling: o.ruling, reasoning: o.reasoning }
+        }
+      } else {
+        for (const [id, o] of out.outcome) cutOutcome.set(id, o)
+      }
+    })
+    const standingIds = new Set(standing.map(f => String(f.id)))
+    refuted.splice(0, refuted.length, ...refuted.filter(f => !standingIds.has(String(f.id))))
+  }
+  // A cut is listed unless the arbiter rejected it: a reported cut (it removes something PLAN.md decided) and a lost
+  // one (the step did not rule, so it stands as it was, 11.12, 1.12) are both shown to me and never applied.
+  // status: 'sound' (the arbiter found it sound), 'reported' (it removes something PLAN.md decided, so it is listed for my
+  // decision and never called sound), 'unchecked' (no usable ruling; it stands as it was).
+  for (const c of proposedCuts) {
+    const o = cutOutcome.get(String(c.id))
+    if (o && o.action === 'reject-cut') continue
+    const status = o && o.action === 'show-cut' ? 'sound' : o && o.action === 'report' ? 'reported' : 'unchecked'
+    shownCuts.push({ id: String(c.id), story: c.story, title: c.title, weakness: c.weakness, saves: c.saves,
+      status, ruling: o ? o.ruling : null, reasoning: o ? o.reasoning : '' })
+  }
+  if (shownCuts.length) log(`${shownCuts.length} proposed cut(s) listed in review.md, not applied; awaiting your approval.`)
+  if (arb.lost.length) log(`Arbiter: no usable ruling for ${arb.lost.join(', ')}; those stand as they were and the result is Needs work.`)
+}
+confirmed.push(...standing)
+
 const toFix = confirmed.filter(f => !f.needsUserDecision)
 const forUser = confirmed.filter(f => f.needsUserDecision)
 log(`Review: ${confirmed.length} confirmed (${toFix.length} to fix, ${forUser.length} need your decision), ${refuted.length} refuted.`)
+
+// Drift check (after Revise, only when PLAN.md exists): one arbiter call compares the revised spec with PLAN.md.
+// It validates and records its rulings through `ck arbiter review --step drift`, which also updates review.md's
+// Needs Your Decision and Result line; a lost step still makes that call (output null) so review.md says Needs work.
+// Returns {edited, decisions}: edited when the arbiter changed a spec file, decisions for what I must decide.
+async function driftCheck() {
+  const none = { edited: false, decisions: [] }
+  // A lost drift step still makes its ck call (output null, lostSteps = every lost step), so review.md gets the lost row
+  // and the Needs work Result, as Revise and the workflow result say (11.12). ck records the lost row only when it reads
+  // review.md's plan, so the call is made for every lost drift step.
+  const lostDrift = async () => {
+    arb.lost.push('drift')
+    await arbiterReview('drift', 'normal', [], null, [...arb.lost])
+    return none
+  }
+  const context = await thinCk('arbiter context', ['-C', ROOT, 'arbiter', 'context', A.feature, '--json'], `Context step for spec ${A.feature} before the arbiter's drift check`)
+  const ctx = context.code === 0 && context.json ? context.json : null
+  if (!ctx) { log('Arbiter did not run: ck arbiter context did not answer.'); return lostDrift() }
+  // PLAN.md exists: `plan` is set by ck arbiter context; planLayer covers a plan with a ## Principles section.
+  if (ctx.plan !== 'present' && ctx.planLayer !== 'present') return none
+  if (ctx.missing) { arb.missing = String(ctx.missing); log(`Arbiter did not run: ${ctx.missing} is missing or unusable. Run ck principles init.`); return lostDrift() }
+  if (!ARBITER_AGENT) { log('Arbiter did not run: no arbiter agent is configured (arbiterAgent).'); return lostDrift() }
+
+  await thinCk('arbiter lane open', ['-C', ROOT, 'arbiter', 'lane', 'open', A.feature, '--json'], `Lane step for spec ${A.feature}: the arbiter's ticket`)
+  const answer = await arbiterAsk('drift', 'normal', [], ctx)
+  // Earlier lost steps go to ck now; a lost drift step is marked by ck itself from its null or unchecked output.
+  let results = await arbiterReview('drift', 'normal', [], answer, [...arb.lost])
+  let finalAnswer = answer
+  // One risky-tier re-run for the items that ask for a stronger look (5.6, 5.7, 11.9); only items still unchecked after it are lost.
+  const stronger = results ? results.filter(r => r.action === 'unchecked' && r.reason === 'stronger-look').map(r => ({ id: String(r.id) })) : []
+  if (stronger.length) {
+    const answer2 = await arbiterAsk('drift', 'risky', stronger, ctx)
+    const results2 = await arbiterReview('drift', 'risky', stronger, answer2, [...arb.lost])
+    const have = new Map(results.map(r => [String(r.id), r]))
+    for (const r of results2 || []) have.set(String(r.id), r)
+    // An id the risky call did not return stays as the normal tier left it (unchecked, stronger-look): it is lost.
+    results = [...have.values()]
+    const merged = []
+    for (const src of [answer, answer2]) for (const x of (src && Array.isArray(src.rulings) ? src.rulings : [])) {
+      if (!x || typeof x !== 'object') continue
+      const id = String(x.claim ?? x.id)
+      const isStronger = stronger.some(s => s.id === id)
+      const fromRisky = src === answer2
+      if (isStronger === fromRisky || !stronger.length) merged.push(x)
+    }
+    finalAnswer = { rulings: merged }
+  }
+  await thinCk('arbiter lane close', ['-C', ROOT, 'arbiter', 'lane', 'close', A.feature, '--json'], `Lane step for spec ${A.feature}: close the arbiter's ticket`)
+
+  const rulings = finalAnswer && Array.isArray(finalAnswer.rulings) ? finalAnswer.rulings : []
+  const entryOf = id => rulings.find(x => x && typeof x === 'object' && String(x.claim ?? x.id) === String(id)) || null
+  if (!results) { arb.lost.push('drift'); log('Arbiter: the drift check returned no usable ruling; the result is Needs work.'); return none }
+  const usable = !!answer && Array.isArray(answer.rulings)
+  if (!usable || results.some(r => r.action === 'unchecked')) arb.lost.push('drift')
+  else arb.ran.push('drift')
+  for (const r of results) if (r.ruling != null) arb.rulings.push(r.ruling)
+
+  const edited = results.some(r => r.action === 'apply' && !/^\s*nothing\s*$/i.test(String((entryOf(r.id) || {}).changed || 'nothing')))
+  const decisions = results.filter(r => r.action === 'report').map(r => {
+    const e = entryOf(r.id) || {}
+    const req = e.requirement && typeof e.requirement === 'object' ? e.requirement : {}
+    return { id: r.id, question: String(req.wording || e.reasoning || r.id), conflictsWith: String(req.reason || ''), reason: r.reason }
+  })
+  if (decisions.length) log(`Drift: ${decisions.length} item(s) that change what PLAN.md decided, for your decision: ${decisions.map(d => d.id).join(', ')}.`)
+  return { edited, decisions }
+}
 
 // ---------------------------------------------------------------------------
 // Revise: apply confirmed fixes and write the review record.
@@ -697,10 +1079,17 @@ const GOVERNING_RULE = `**Fixes that change behaviour.** A fix changes behaviour
 
 const FROZEN_RULE = `**Frozen spec.** First read the Status line of every task in ${DIR}/tasks.md. If any task is not Not Started, implementation has started and requirements.md and test-plan.md are the contract it is checked against. Then a fix that changes or removes existing text in requirements.md or test-plan.md (rewording, renumbering, narrowing, weakening or deleting an existing requirement, criterion, test case or property) is one you do NOT apply, whatever the finding says. Return it under "escalated" instead: the finding id, the question (for example "Change <id> although implementation has started?"), and 2-3 options: one with the proposed text verbatim, and one "leave the spec as is". It goes in "escalated" only, not in "fixed" or "notFixed". Fixes that only add (a new requirement or criterion, a new test case or property, a new task, design or tasks.md edits) are add-only and are applied as usual. When every task is Not Started, this rule does not apply.`
 
-// Only the lens's silence is reported here; proposed cuts never reach this prompt (Task 84 routes them to the arbiter).
+// Only the lens's silence is reported here. Cuts reach this prompt only as listed proposals, never as fixes (cutsNote).
 const shouldExistNote = shouldExistLost || proposedCuts.length
   ? ''
   : '\n## Should-exist\nThe should-exist lens found nothing to cut. Say so in one sentence under this heading.\n'
+// Each cut's status says what the arbiter found, and review.md must word it the same way: only "sound" is called sound.
+const cutsNote = shownCuts.length
+  ? `\n## Proposed cuts\nEach cut's status is what the arbiter found: "sound" (the arbiter found the cut sound), "reported" (the cut removes something PLAN.md decided, so it is listed for my decision and is not called sound), or "unchecked" (the arbiter did not check it, so it stands as it was). Do NOT apply any of them and do NOT edit any spec file for them. List each under "## Proposed cuts" in review.md with its story, title, weakness, what it saves and its status, marked as not applied and awaiting my approval.\n${JSON.stringify(shownCuts.map(c => ({ id: c.id, status: c.status, story: c.story, title: c.title, weakness: c.weakness, saves: c.saves })), null, 2)}\n`
+  : ''
+const arbiterNote = arb.missing || arb.lost.length
+  ? `\n## Arbiter\n${arb.missing ? `${arb.missing} is missing or unusable, so the arbiter did not run. Name that file and the command \`ck principles init\` in this section.\n` : ''}${arb.lost.length ? `These arbiter steps returned no usable ruling: ${arb.lost.join(', ')}. Their findings and cuts stand as they were, and **Result:** must be Needs work.\n` : ''}`
+  : ''
 
 const revision = await pagent(`
 You are revising a spec after adversarial review.
@@ -725,7 +1114,7 @@ ${JSON.stringify(forUser.map(f => ({ id: f.id, question: f.question || f.problem
 
 **Date:** ${A.date || ''}
 **Mode:** ${MODE}
-**Result:** [Ready | Ready after decisions | Needs work]  (Ready after decisions whenever "Needs Your Decision" has a row, including ones you escalated)
+**Result:** [Ready | Ready after decisions | Needs work]  (Ready after decisions whenever "Needs Your Decision" has a row, including ones you escalated; Needs work whenever the Arbiter section below lists a step)
 
 ## Fixed
 | ID | File | Severity | Problem | Fix applied |
@@ -736,11 +1125,11 @@ The items from step 2 ("adversarial review"), then every finding you escalated i
 
 ## Refuted
 | ID | Problem | Why it was refuted |
-${JSON.stringify(refuted.map(f => ({ id: f.id, problem: f.problem, why: f.refutation })), null, 2)}
+${JSON.stringify(refuted.map(f => ({ id: f.id, problem: f.problem, why: f.refutation, ...(f.arbiter ? { arbiterRuling: f.arbiter.reasoning } : {}) })), null, 2)}
 
 ## Unverified
 ${unverified.length ? JSON.stringify(unverified.map(f => ({ id: f.id, problem: f.problem })), null, 2) : 'None'}
-${shouldExistNote}
+${shouldExistNote}${cutsNote}${arbiterNote}
 ## Schedule
 Re-run \`ck lint ${A.feature}\` from ${ROOT} after your fixes. Update the Schedule section of tasks.md from its "critical path" and "ready now" lines, and copy those two lines here.
 ${snapshot ? `\nDo not touch ${SNAP}/; it is the pre-revision snapshot a later check diffs against.\n` : ''}
@@ -780,6 +1169,11 @@ Return the structured result.`, {
 const escalated = (revision && revision.escalated) || []
 if (escalated.length) log(`Revise: ${escalated.length} fix(es) would change governed behaviour and were raised for your decision: ${escalated.map(e => e.id).join(', ')}.`)
 
+// Drift check: runs after Revise whether or not Revise applied fixes (only when PLAN.md exists).
+const drift = await driftCheck()
+// Revise fixed something only when there were confirmed fixes to apply.
+const revisionFixed = toFix.length && revision && Array.isArray(revision.fixed) ? revision.fixed.length : 0
+
 // ---------------------------------------------------------------------------
 // Consistency check: re-review what the revision changed, against the criteria
 // and properties. Fixes wording/traceability drift itself; behaviour conflicts
@@ -816,14 +1210,15 @@ const CONTRADICTIONS = {
 const MAX_CONSISTENCY_PASSES = 2
 const consistency = { passes: 0, fixed: [], decisions: [], lost: false }
 
-if (toFix.length) {
+// The check runs when Revise fixed something or the arbiter edited a spec document (Task 85).
+if (revisionFixed > 0 || drift.edited) {
   phase('Consistency Check')
   const applied = revision ? revision.fixed : []
   let lastFixed = []
   for (let pass = 1; pass <= MAX_CONSISTENCY_PASSES; pass++) {
     const scope = snapshot
       ? `The revision step just edited the spec. The pre-revision copies are in ${SNAP}/ (${snapshot.copied.join(', ')}). Diff each spec file against its snapshot (\`diff -u ${SNAP}/<file> ${DIR}/<file>\`; a file with no snapshot is new, so all of it changed). Every changed passage is in scope.`
-      : `There is no snapshot of the pre-revision spec (taking it failed), so you cannot diff. Treat every passage the applied findings below touched as changed, and read all four files in full.`
+      : `There is no snapshot of the pre-revision spec, so you cannot diff (no snapshot was taken: either no fix was confirmed, so only the arbiter may have edited a spec file, or the snapshot step failed). Read all four files in full. Treat every passage the applied findings below touched as changed, if there are any.`
     const previous = pass > 1
       ? `\nThis is pass ${pass}. Pass ${pass - 1} fixed these contradictions; check its edits especially, since a fix can introduce a new contradiction:\n${JSON.stringify(lastFixed.map(c => ({ id: c.id, fix: c.fix, changedSide: c.changedSide })), null, 2)}\nDo not re-report contradictions already resolved; report only what remains or is new.\n`
       : ''
@@ -871,18 +1266,19 @@ Use ids C${pass}.1, C${pass}.2, ... If you find nothing, return an empty list. R
     log(`Consistency check pass ${pass}: ${found.length} contradiction(s), ${lastFixed.length} fixed, ${decided.length} for your decision.`)
     if (!lastFixed.length) break
   }
-
-  if (snapshot) {
-    await agent(`
-Mechanical step. Run \`rm -rf ${SNAP}\` and nothing else. Return removed: true if ${SNAP} no longer exists.`, {
-      label: 'remove pre-revision snapshot',
-      phase: 'Consistency Check',
-      effort: 'low',
-      schema: { type: 'object', properties: { removed: { type: 'boolean' } }, required: ['removed'] },
-    })
-  }
 } else {
-  log('No fixes to apply; skipping the snapshot and the consistency check.')
+  log('No fixes applied and the arbiter changed no spec file; skipping the consistency check.')
+}
+
+// The snapshot is removed whenever one was taken, whether or not the check ran (a revision that fixed nothing must not leave it in the spec tree).
+if (snapshot) {
+  await agent(`
+Mechanical step. Run \`rm -rf ${SNAP}\` and nothing else. Return removed: true if ${SNAP} no longer exists.`, {
+    label: 'remove pre-revision snapshot',
+    phase: 'Consistency Check',
+    effort: 'low',
+    schema: { type: 'object', properties: { removed: { type: 'boolean' } }, required: ['removed'] },
+  })
 }
 
 const byFindingId = Object.fromEntries(toFix.map(f => [f.id, f]))
@@ -893,10 +1289,12 @@ const openQuestions = [
     return { id: e.id, source: 'revise', file: f.file || null, location: f.location || null, question: e.question, options: e.options || [], conflictsWith: e.conflictsWith, fix: f.fix || null }
   }),
   ...consistency.decisions.map(c => ({ id: c.id, source: 'consistency', file: (c.changedSide || '').split(':')[0] || null, location: c.changedSide, question: c.question || c.description, options: c.options || [], conflictsWith: c.otherSide, fix: null })),
+  ...drift.decisions.map(d => ({ id: d.id, source: 'drift', file: 'requirements.md', location: null, question: d.question, options: [], conflictsWith: d.conflictsWith, fix: null })),
 ]
 
 let result = revision ? revision.result : 'Needs work'
 if (result === 'Ready' && openQuestions.length) result = 'Ready after decisions'
+if (arb.lost.length) result = 'Needs work'
 
 return {
   mode: MODE,
@@ -913,9 +1311,11 @@ return {
     notFixed: revision ? revision.notFixed : toFix.map(f => ({ id: f.id, reason: 'revise step failed' })),
     escalated,
     openQuestions,
-    refutedCount: refuted.length,
+    refutedCount: refutedBefore,
     unverified: unverified.map(f => ({ id: f.id, problem: f.problem })),
     lensesLost,
+    proposedCuts: shownCuts,
+    arbiter: arb,
   },
   consistency,
   schedule: revision ? revision.schedule : null,

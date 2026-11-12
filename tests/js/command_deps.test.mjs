@@ -30,6 +30,7 @@ const landEndOf = (trace, n) => trace.findIndex(e => e.ev === 'end' && landTasks
 const taskEnd = (trace, n) => trace.findIndex(e => e.ev === 'end' && new RegExp(`^task ${n}( |$)`).test(e.label))
 const taskStart = (trace, n) => trace.findIndex(e => e.ev === 'start' && new RegExp(`^task ${n}( |$)`).test(e.label))
 const failedRec = (result, n) => (result.failed || []).find(t => String(t.task) === n)
+const needsInputRec = (result, n) => (result.needsInput || []).find(e => String(e.task) === n)
 
 const CMD = 'mtr thesis new'
 const missing = (providers, file = 'tests/test_cli.py') => [{
@@ -79,9 +80,13 @@ await test('TC-117: a live edge that would close a cycle is not added; Task 2 is
   const p = project({ deps, failUntil: { 2: 99 }, taskFailures: { 2: missing(['5']) }, provides: { [CMD]: ['5'] } })
   const { result, trace } = await runWorkflow(SCRIPT, { agent: p.agent, args: withGraph(deps) })
   assert.deepEqual(result.liveEdges || [], [], 'no edge added')
-  const f = failedRec(result, '2')
-  assert.ok(f, 'task 2 failed')
-  assert.match(f.reason, /blocked: command cycle Task 2 -> Task 5 -> Task 2/)
+  // 6.13: a command cycle is a wiring claim, not a blocked task; 6.10: with no arbiter it goes to me as a needs-input entry.
+  const e = needsInputRec(result, '2')
+  assert.ok(e, `task 2 has a needs-input entry: ${JSON.stringify(result.needsInput)}`)
+  assert.match(JSON.stringify(e), /command[- ]cycle/i, 'the entry names the command cycle')
+  // 6.10: the entry carries the claim, and the claim names the cycle (Task 5 provides the command Task 2 needs).
+  assert.ok(e.claim && /\b5\b/.test(JSON.stringify(e.claim)), `the entry carries the cycle's claim: ${JSON.stringify(e)}`)
+  assert.ok(!failedRec(result, '2'), 'task 2 is not ended blocked')
   assert.equal(requestsOf(trace, 2).length, 1, 'no retry, no wait')
   assert.ok(!result.merged.includes('5'), 'task 5 never ran')
 })
@@ -136,7 +141,8 @@ await test('TC-123: when the running task fails the next held task starts and th
   const p = project({ deps, overlaps: all, failUntil: { 2: 99 }, durations: { 2: 20 } })
   const { result, trace } = await runWorkflow(SCRIPT, { agent: p.agent, args: withGraph(deps, { maxConcurrent: 3, maxRetries: 0 }) })
   assert.deepEqual(sorted(result.merged), ['3', '4'])
-  assert.ok(failedRec(result, '2'), 'task 2 failed')
+  // 6.11: an exhausted gate is a claim; 6.10: with no arbiter it goes to me as a needs-input entry.
+  assert.ok(needsInputRec(result, '2'), `task 2 stopped as a needs-input entry: ${JSON.stringify(result.needsInput)}`)
   assert.ok(requestsOf(trace, 3)[0].i > taskEnd(trace, '2'), 'task 3 started after task 2 stopped')
   assert.ok(requestsOf(trace, 4)[0].i > landEndOf(trace, '3'), 'task 4 waited for task 3')
 })

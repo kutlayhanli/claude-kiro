@@ -58,14 +58,16 @@ const raw = []
 const tr = { testfixDone: false, attempts: {}, order: [] }
 
 const exec = (bin, args, opts = {}) => new Promise(resolve => {
-  execFile(bin, args, { cwd: opts.cwd || cfg.root, env: { ...process.env, ...cfg.env }, encoding: 'utf8', maxBuffer: 1 << 26 }, (err, out, errOut) => {
+  const child = execFile(bin, args, { cwd: opts.cwd || cfg.root, env: { ...process.env, ...cfg.env }, encoding: 'utf8', maxBuffer: 1 << 26 }, (err, out, errOut) => {
     resolve({ code: err ? (typeof err.code === 'number' ? err.code : -1) : 0, stdout: out || '', stderr: errOut || '' })
   })
+  child.stdin.on('error', () => {})
+  child.stdin.end(opts.stdin == null ? '' : String(opts.stdin))
 })
 const parse = t => { try { const v = JSON.parse(t); return v && typeof v === 'object' ? v : null } catch { return null } }
-const ckRun = async argv => {
+const ckRun = async (argv, o = {}) => {
   const [bin, ...pre] = cfg.ckCmd
-  const res = await exec(bin, [...pre, ...argv])
+  const res = await exec(bin, [...pre, ...argv], o)
   return { ...res, json: parse(res.stdout) }
 }
 // sc.landOrder: a task agent returns only after the landing step of every task before it in the order has run, so
@@ -77,8 +79,8 @@ const landedBefore = async n => {
   const i = (sc.landOrder || []).indexOf(n)
   if (i >= 0) await Promise.all(sc.landOrder.slice(0, i).map(m => landSlot(m).promise))
 }
-const ck = async argv => {
-  const r = await ckRun(argv)
+const ck = async (argv, o = {}) => {
+  const r = await ckRun(argv, o)
   ckCalls.push({ argv, code: r.code, json: r.json })
   if (argv.includes('land')) for (const n of argv) if ((sc.landOrder || []).includes(n)) landSlot(n).resolve()
   return r

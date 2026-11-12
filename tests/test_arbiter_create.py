@@ -163,6 +163,21 @@ const agent = async (prompt, opts) => {
   if (/^arbiter (refuted|cuts|drift)( risky)?$/.test(label)) {
     for (const [file, text] of Object.entries(req.arbiterEdits || {})) fs.writeFileSync(file, text)
   }
+  // The snapshot and its removal really touch the spec directory, so a test can see whether the snapshot is left behind.
+  const snap = path.join(req.specDir, '.pre-revision')
+  if (label === 'snapshot spec before revision' && !(label in req.overrides)) {
+    fs.rmSync(snap, { recursive: true, force: true })
+    fs.mkdirSync(snap)
+    const copied = []
+    for (const f of ['requirements.md', 'design.md', 'test-plan.md', 'tasks.md']) {
+      if (fs.existsSync(path.join(req.specDir, f))) { fs.copyFileSync(path.join(req.specDir, f), path.join(snap, f)); copied.push(f) }
+    }
+    return { copied }
+  }
+  if (label === 'remove pre-revision snapshot' && !(label in req.overrides)) {
+    fs.rmSync(snap, { recursive: true, force: true })
+    return { removed: !fs.existsSync(snap) }
+  }
   const planned = req.overrides[label]
   if (planned && typeof planned === 'object' && planned.__throw) throw new Error('the arbiter threw')
   if (label.startsWith('apply-cuts')) {
@@ -705,6 +720,69 @@ def test_tc158_a_lost_drift_step_sets_needs_work_in_review_md_and_in_the_result(
     assert "drift" in arbiter_of(out)["lost"]
 
 
+def test_tc158_a_lost_earlier_step_with_a_drift_requirement_keeps_needs_work_in_review_md_and_the_result(tmp_path):
+    project = plan_project(tmp_path, plan=f"# Plan: Demo\n\n## Decisions\n\n- {DECIDED}\n")
+    wording = "retries are capped at 5"
+    out = create(project, {**refuting("R3"), "arbiter refuted": {"__throw": True}, "arbiter drift": {"rulings": [drift_requirement(wording)]}})
+    assert "refuted" in arbiter_of(out)["lost"], arbiter_of(out)
+    assert review_calls(out, "drift"), out["ckCalls"]
+    text = (project.spec_dir / "review.md").read_text()
+    assert re.search(r"\*\*Result:\*\*\s*Needs work", text), f"a lost earlier step keeps Needs work over a decision: {text}"
+    assert wording in text.split("## Needs Your Decision", 1)[1], "the requirements item is still listed"
+    assert review_of(out)["result"] == "Needs work"
+
+
+def test_tc158_with_a_plan_and_no_arbiter_agent_the_drift_step_is_lost_in_review_md_and_the_result(tmp_path):
+    project = plan_project(tmp_path)
+    out = create(project, {**refuting("R3"), "review: fidelity": {"findings": []}}, args={"arbiterAgent": None})
+    assert not [l for l in out["labels"] if re.fullmatch(r"arbiter (refuted|cuts|drift)( risky)?", l)], out["labels"]
+    calls = review_calls(out, "drift")
+    assert calls and all(c["code"] == 0 for c in calls), f"a lost drift step still calls ck arbiter review, with output null: {out['ckCalls']}"
+    text = (project.spec_dir / "review.md").read_text()
+    assert "drift" in text and re.search(r"\*\*Result:\*\*\s*Needs work", text), text
+    assert review_of(out)["result"] == "Needs work"
+    assert "drift" in arbiter_of(out)["lost"]
+
+
+def test_tc85_the_pre_revision_snapshot_is_removed_when_revise_fixed_nothing(tmp_path):
+    project = plan_project(tmp_path)
+    revise = {"fixed": [], "notFixed": [{"id": "R1", "reason": "could not apply"}], "escalated": [], "result": "Needs work", "schedule": "s"}
+    out = create(project, {**refuting("R3"), "revise spec + write review.md": revise})
+    assert "snapshot spec before revision" in out["labels"], f"the snapshot was taken, so the case is real: {out['labels']}"
+    assert "consistency check: pass 1" not in out["labels"], "no fix and no arbiter edit: the check does not run"
+    assert not (project.spec_dir / ".pre-revision").exists(), "the snapshot is not left in the spec directory"
+
+
+def test_tc85_an_unchecked_cut_is_not_called_sound_in_the_revise_prompt(tmp_path):
+    project = cut_project(tmp_path)
+    out = run_create(project, overrides={"review: should-exist": cut_lens_answer(), "arbiter cuts": {"__throw": True}})
+    revise = [s["prompt"] for s in out["sent"] if s["label"].startswith("revise")]
+    assert revise, out["labels"]
+    assert all('"status": "unchecked"' in p for p in revise), "the cut carries its unchecked status"
+    assert all("found these cuts sound" not in p for p in revise), "an unchecked cut is not called sound"
+
+
+def test_tc85_a_cut_routed_to_report_is_not_called_sound_in_the_revise_prompt(tmp_path):
+    project = cut_project(tmp_path)
+    reported = {"rulings": [{**cut_ruling()["rulings"][0], "outcome": "requirements", "verdict": "sound",
+                             "requirement": {"kind": "remove", "wording": "drop story 2", "reason": "PLAN.md decided story 2"}}]}
+    out = run_create(project, overrides={"review: should-exist": cut_lens_answer(), "arbiter cuts": reported})
+    revise = [s["prompt"] for s in out["sent"] if s["label"].startswith("revise")]
+    assert revise, out["labels"]
+    assert all('"status": "reported"' in p for p in revise), "a cut that removes a decision is reported, not sound"
+    assert all('"status": "sound"' not in p for p in revise)
+
+
+def test_tc85_the_drift_prompt_says_no_spec_edit_once_a_task_has_started(tmp_path):
+    project = plan_project(tmp_path)
+    tasks = (project.spec_dir / "tasks.md").read_text()
+    (project.spec_dir / "tasks.md").write_text(tasks.replace("### Task 1: Greeting tests\n**Status:** Not Started", "### Task 1: Greeting tests\n**Status:** In Progress"))
+    out = create(project, {**refuting(), "review: fidelity": {"findings": []}, "arbiter drift": {"rulings": []}})
+    prompts = sent_for(out, "arbiter drift")
+    assert prompts, out["labels"]
+    assert "implementationStarted is true" in prompts[0]["prompt"], "the drift prompt carries that a task has started"
+
+
 # --- run-principles properties for rulings during /spec:create (P-28, P-29, P-30, P-42, P-46) ---------------------------
 # Each example runs the real spec-create.js under node over a real git project, with the thin `ck arbiter ...` steps run
 # through the real CLI (no server). P-42 calls the decision seam `arbiter_policy.decide_cut` directly.
@@ -871,3 +949,25 @@ def test_p46_with_no_refuted_finding_and_no_cut_no_arbiter_step_runs(tmp_path, m
     arb = arbiter_of(out)
     assert "refuted" not in arb["ran"] and "cuts" not in arb["ran"], arb
     assert "refuted" not in arb["lost"] and "cuts" not in arb["lost"], arb
+
+
+def test_tc158_a_drift_item_asking_for_a_stronger_look_is_re_run_once_at_the_risky_tier(tmp_path):
+    project = plan_project(tmp_path)
+    first = {"rulings": [{**ruling("D1", verdict="no drift"), "status": "needs_stronger_look"}]}
+    second = {"rulings": [ruling("D1", verdict="no drift", reasoning="RISKY-D1 settled")]}
+    out = create(project, {**refuting(), "review: fidelity": {"findings": []}, "arbiter drift": first, "arbiter drift risky": second})
+    labels = [l for l in out["labels"] if l.startswith("arbiter drift")]
+    assert labels == ["arbiter drift", "arbiter drift risky"], labels
+    tiers = [c["argv"][c["argv"].index("--tier") + 1] for c in review_calls(out, "drift") if "--tier" in c["argv"]]
+    assert tiers[:1] == ["normal"] and tiers.count("risky") == 1, tiers
+    assert "drift" not in arbiter_of(out)["lost"], arbiter_of(out)
+
+
+def test_tc158_a_drift_item_still_asking_for_a_stronger_look_at_the_risky_tier_is_lost(tmp_path):
+    project = plan_project(tmp_path)
+    ask = {"rulings": [{**ruling("D1", verdict="no drift"), "status": "needs_stronger_look"}]}
+    out = create(project, {**refuting(), "review: fidelity": {"findings": []}, "arbiter drift": ask, "arbiter drift risky": ask})
+    assert "drift" in arbiter_of(out)["lost"], arbiter_of(out)
+    text = (project.spec_dir / "review.md").read_text()
+    assert re.search(r"\*\*Result:\*\*\s*Needs work", text), text
+    assert review_of(out)["result"] == "Needs work"
