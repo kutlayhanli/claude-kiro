@@ -3201,7 +3201,8 @@ return {
   overhead,
   relinks,
   testFixes,
-  proposedCuts,
+  // Task 69 (4.8): the serves-no-requirement findings, listed when there are any, so a run without any keeps the pinned key set.
+  ...(proposedCuts.length ? { proposedCuts } : {}),
   // Task 65 (10.7): the rulings this run settled, listed when there are any, so a run without any keeps the pinned key set.
   ...(runRulings.length ? { rulings: runRulings } : {}),
   // Task 93 (12.8): listed when the run added live edges; a run without any keeps the result's pinned key set.
