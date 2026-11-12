@@ -218,9 +218,9 @@ def validate_ruling(raw: Any, key: str, citable: Mapping[str, Any], mode: str) -
     if raw.get("claim") != key:
         problems.append("claim is missing or is not the claim this ruling answers")
 
-    status = raw.get("status", "ruled")
+    status = raw.get("status")
     if status not in _STATUSES:
-        problems.append("status is neither ruled nor needs_stronger_look")
+        problems.append("status is missing or is neither ruled nor needs_stronger_look")
     stronger = status == "needs_stronger_look"
 
     reasoning = raw.get("reasoning")
