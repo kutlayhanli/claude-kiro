@@ -2,8 +2,10 @@
 
 import json
 import os
+import re
 import socket
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 import click
@@ -598,7 +600,13 @@ def merge_cmd(spec, tasks, into, keep, as_json):
     """
     root = _root()
     try:
-        outcomes = wt.merge(root, _spec_name(spec), list(tasks), into=into, keep=keep)
+        def say(checkout, rec):
+            if as_json:
+                return
+            tail = "; a merge was in progress" if rec["mergeInProgress"] else ""
+            click.echo(f"restored {checkout} to {rec['head']}: discarded {', '.join(rec['paths'])}{tail}")
+
+        outcomes = wt.merge(root, _spec_name(spec), list(tasks), into=into, keep=keep, on_recovered=say)
     except wt.WorktreeError as e:
         click.echo(f"❌ {e}")
         sys.exit(3)
@@ -689,6 +697,64 @@ def _priority(target: Path, spec: str) -> dict:
     return {}
 
 
+def _verify_gate_fn(spec: str):
+    """The gate of a spec-edit landing: each named Done task's own Verify commands, run in the target.
+
+    A spec edit changes how a finished task is verified, not what it delivered, so its acceptance boxes and
+    test files are not re-checked here (the task gate did that when it finished); the commands are (8.4).
+    """
+    import subprocess
+
+    def gate(target: Path, nums):
+        spec_dir = next((r / spec for r in spec_roots(target) if (r / spec / "tasks.md").exists()), None)
+        if spec_dir is None:
+            return False, f"no tasks.md for {spec} in {target}", []
+        from ..hooks._shared.spec_parser import parse_tasks
+
+        timeout = int(load_config(target).get("verify_timeout", 540))
+        tasks = {t.num: t for t in parse_tasks(spec_dir / "tasks.md")}
+        lines = []
+        for num in nums:
+            for command in tasks[num].verify if num in tasks else []:
+                try:
+                    proc = subprocess.run(command, shell=True, cwd=target, capture_output=True, text=True, timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    lines.append(f"✗ Task {num}: `{command}` timed out after {timeout}s")
+                    continue
+                if proc.returncode != 0:
+                    out = (proc.stdout + proc.stderr).strip().splitlines()[-20:]
+                    lines.append(f"✗ Task {num}: `{command}` exit {proc.returncode}")
+                    lines.extend(f"    {line}" for line in out)
+        return (not lines), "\n".join(lines), []
+
+    return gate
+
+
+def _land_spec_edit(root, name, num, into, do_gate, as_json):
+    """`ck worktree land SPEC arbiter<k>`: one entry, state MERGED|CONFLICT|RED|REFUSED|ERROR, with commit and moved."""
+    try:
+        integ = wt.integration_branch(name)
+        use_integ = wt.branch_exists(root, integ) and wt.checkout_of(root, integ) is not None
+        target_branch = into or (integ if use_integ else wt.current_branch(root))
+        entry = wt.land_spec_edit(root, name, num, into=target_branch, gate=_verify_gate_fn(name) if do_gate else None)
+    except wt.WorktreeError as e:
+        if as_json:
+            click.echo(json.dumps({"error": str(e), "tasks": []}, indent=2))
+        else:
+            click.echo(f"❌ {e}")
+        sys.exit(3)
+    if as_json:
+        click.echo(json.dumps(asdict(entry), indent=2))
+    else:
+        click.echo(entry.line())
+    if entry.state in ("BUSY", "ERROR", "MISSING", "PROTECTED", "REFUSED"):
+        sys.exit(3)
+    if entry.state == "CONFLICT":
+        sys.exit(2)
+    if entry.state == "RED":
+        sys.exit(1)
+
+
 @worktree.command("land")
 @click.argument("spec")
 @click.argument("tasks", nargs=-1, required=True)
@@ -719,6 +785,9 @@ def land_cmd(spec, tasks, into, do_gate, do_install, release_claims, keep, progr
     root = _root()
     name = _spec_name(spec)
     scopes: dict = {}
+    if len(tasks) == 1 and re.fullmatch(r"arbiter\d+", str(tasks[0])):
+        _land_spec_edit(root, name, str(tasks[0]), into, do_gate, as_json)
+        return
     try:
         integ = wt.integration_branch(name)
         use_integ = wt.branch_exists(root, integ) and wt.checkout_of(root, integ) is not None

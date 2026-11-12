@@ -1017,7 +1017,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 43: Add the /spec:create arbiter commands
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 4.3, 4.4, 4.5, 11.2, 11.4, 11.5, 11.6, 11.7, 11.9, 11.10, 11.12, 1.12
 **Description:** In `src/claude_kiro/arbiter_policy.py`, add `CreateRoute`, `route_create_ruling(check, step, started)` and `decide_cut(approved, started)`. Add `ck arbiter context SPEC [--approved-cut] --json` (principles, plan layer, implementation started, `missing` naming an unusable principles file, and `cut`, the result of `decide_cut` with `approved` from the flag) and `ck arbiter review SPEC --step refuted|cuts|drift --tier normal|risky --json` (stdin: `{"subjects", "output", "lostSteps"}`, stdout: `ReviewResult`). Validate each entry on its own, so one malformed entry loses only that finding; report entries needing a stronger look; record each ruling through the same path as Task 42 with the commit as none; and for `--step drift` append the drift rows to `review.md`, add each `requirements` item to Needs Your Decision, and set its `**Result:**` line (`Needs work` when this or a step in `lostSteps` was lost, including when `output` is null; else `Ready after decisions` when Needs Your Decision has a row). Anything that adds, removes or changes what PLAN.md decided routes to `report`. Foundation task: its Verify is a smoke check. Its commands and rules are verified at Task 84 by Task 78 and Task 79, and `decide_cut` at Task 86 by Task 80 (P-42) and by Task 78, where `apply-cuts` branches on the `cut` field.
@@ -1029,9 +1029,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Provides:** `ck arbiter context`, `ck arbiter review`
 
 **Acceptance:**
-- [ ] `decide_cut` returns `apply` only when approved and not started, `frozen` when approved and started, else `hold`
-- [ ] A malformed entry returns `lost` for that entry and leaves the others settled
-- [ ] A plan-changing ruling routes to `report`, and a wording correction is allowed only while implementation has not started
+- [x] `decide_cut` returns `apply` only when approved and not started, `frozen` when approved and started, else `hold`
+- [x] A malformed entry returns `lost` for that entry and leaves the others settled
+- [x] A plan-changing ruling routes to `report`, and a wording correction is allowed only while implementation has not started
 
 **Dependencies:** Task 42 (edits `arbiter_policy.py`, `arbiter.py` and `cli/arbiter.py`, and calls the record path)
 **Complexity:** High
@@ -1040,7 +1040,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 44: Land an arbiter spec edit through the merge queue
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 8.1, 8.4, 8.5, 8.6, 8.7, 1.7
 **Description:** In `src/claude_kiro/worktrees.py`, add the `REFUSED` state, `commit` and `moved` on `Landed`, and `land_spec_edit` under `land_lock` with a bounded wait of 120 seconds (a task landing keeps `wait_s=0` and refuses as today; the workflow's `withLandingLock` is what serializes the two inside a run): refuse a conflict found by `git merge-tree`; take a lint result and test selections on the target; merge the branch and take them again; call `decide_spec_edit` on the difference, passing the reservations in the target's effective principles as `reserved`; gate only the Done tasks from `gate_scope_of_edit`; reset the target to its earlier commit on any refusal or red gate. In `src/claude_kiro/cli/worktree.py`, `land_cmd` routes an `arbiter<k>` number to `land_spec_edit`, returning one entry with state, commit and moved. Harness Contract owner: `ck arbiter land`, which is `ck worktree land SPEC arbiter<k> --into BRANCH --gate --json`.
@@ -1051,14 +1051,19 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 39 (TC-61, 64 to 70, 138, 149, 156), Task 40 (P-36 through real landings)
 
 **Acceptance:**
-- [ ] An edit on an arbiter branch lands with state MERGED, a commit and any moved tests
-- [ ] A conflict, a red gate, a refused path, a new cycle, a new blocking finding, and a Status or mark change each leave the target HEAD unchanged
-- [ ] An arbiter landing waits for a task landing that holds the lock, and both merge
-- [ ] A reserved file changed by a ruling that does not report it is refused
+- [x] An edit on an arbiter branch lands with state MERGED, a commit and any moved tests
+- [x] A conflict, a red gate, a refused path, a new cycle, a new blocking finding, and a Status or mark change each leave the target HEAD unchanged
+- [x] An arbiter landing waits for a task landing that holds the lock, and both merge
+- [x] A reserved file changed by a ruling that does not report it is refused
 
 **Dependencies:** Task 24 (edits `cli/worktree.py` and reads its lint result), Task 36 (TC-156 goes through the real hook), Task 37 (TC-156 starts at `ck arbiter open`), Task 39 (its tests are the oracle), Task 40 (its tests are the oracle), Task 41 (calls `decide_spec_edit`), Task 42 (adds `land_lock`'s `wait_s`, in the same file)
 **Complexity:** High
 **Risk:** safety (merges into and resets the integration branch)
+
+**Implementation notes:**
+- The gate of a spec-edit landing (`_verify_gate_fn` in `cli/worktree.py`) runs the scoped Done tasks' own Verify commands in the target, not the full task gate: a spec edit changes how a finished task is verified, and TC-65's fixture has a Done task with an unchecked box and no test file, which the full gate can never pass.
+- `ck arbiter open` now returns the absolute `worktree` path (TC-156 reads it from the test's own working directory); the ledger keeps the relative one. Touches `src/claude_kiro/arbiter.py`.
+- `recover_target` (Story 14) is not part of this task, so `land_spec_edit` does not call it yet.
 
 ---
 
@@ -1181,7 +1186,8 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - `tests/js/load_decisions.mjs` - `GUARD_NAMES` after the ladder seam decision
 - `tests/js/bridge.mjs` - `ladder` op after the seam decision
 - `tests/landing_bridge.py` - `bridge.ladder` after the seam decision
-**Verify:** `uv run pytest -q tests/test_guard_ladder_properties.py tests/test_guard_park.py tests/test_guard_agent_mode_docs.py` `node tests/js/guard_ladder.test.mjs`
+**Verify:** `uv run pytest -q tests/test_guard_ladder_properties.py tests/test_guard_park.py` `uv run pytest -q tests/test_guard_agent_mode_docs.py -k "not without-workflow-tool and not tc87_vendored_workflow"` `node tests/js/guard_ladder.test.mjs`
+**Note:** the `without-workflow-tool` cases of `tests/test_guard_agent_mode_docs.py` check the guide Task 76 writes and `test_tc87_vendored_workflow_equals_its_source` checks the copy Task 92 regenerates, so they run in those tasks' Verify, not here (run of 2026-11-11: they held Task 65).
 **Verifies:** Task 65 (the guard-ladder routing these tests encode is replaced there)
 
 **Acceptance:**
@@ -1793,7 +1799,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - `plugin/skills/implement/SKILL.md` - new args, launch handling, reporting
 - `plugin/resources/spec-implement-brief.md` - arbiter route
 - `plugin/resources/without-workflow-tool.md` - manual path
-**Verify:** `uv run pytest tests/test_implement_skill_args.py -q` `uv run pytest tests/test_arbiter_skill_contracts.py -q -k "implement_skill"`
+**Verify:** `uv run pytest tests/test_implement_skill_args.py -q` `uv run pytest tests/test_arbiter_skill_contracts.py -q -k "implement_skill"` `uv run pytest tests/test_guard_agent_mode_docs.py -q -k "without-workflow-tool"`
 **Verified by:** Task 75 (the implement skill text)
 
 **Acceptance:**
@@ -1947,7 +1953,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 83: Require justifications in drafts and add the should-exist lens
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 2.3, 2.4, 4.1, 4.2, 4.6, 4.7
 **Description:** In `plugin/workflows/spec-create.js`, add a `**Without it:**` line to the requirements template: every story carries the reason from its plan item, and a story with no plan item gets its own. Add a `should-exist` entry to `LENSES`, which attacks each story's justification and proposes cuts in the `Cut` shape (story, title, weakness, saves counts). A lens that fails is counted in `lensesLost` like the others. The refute loop skips `should-exist`: its cuts go to the arbiter directly (Task 84). The Revise prompt tells the reviser to say so in review.md when the lens found nothing to cut. Harness Contract owner: the `review: should-exist` label.
@@ -1957,14 +1963,15 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 77 (TC-16, 17, 26, 32, 33), Task 90 (the migrated create-side suites)
 
 **Acceptance:**
-- [ ] The Requirements prompt requires the line on every story and covers a story with no plan item
-- [ ] `review: should-exist` runs in create and review modes and attacks each justification
-- [ ] A lens that throws counts in `lensesLost`
-- [ ] review.md says so when no cut is proposed
+- [x] The Requirements prompt requires the line on every story and covers a story with no plan item
+- [x] `review: should-exist` runs in create and review modes and attacks each justification
+- [x] A lens that throws counts in `lensesLost`
+- [x] review.md says so when no cut is proposed
 
 **Dependencies:** Task 77 (its tests are the oracle), Task 90 (its tests are the oracle), Task 31 (provides `cmd:ck principles init`), Task 43 (provides `cmd:ck arbiter context`)
 **Complexity:** Medium
 **Risk:** normal
+**Implementation notes:** TC-33 reads `lensesLost` at the top level of the workflow result, so the return object now carries `lensesLost` beside `review.lensesLost` (the existing `spec_create.test.mjs` reads the `review` copy; both hold the same count). The `should-exist` lens returns `{ cuts }` and is kept out of the refute loop; its cuts are collected in `proposedCuts` and are not yet on the result (Task 84 adds `review.proposedCuts`). The Revise prompt names the lens only when it found nothing to cut and did not lose.
 
 ---
 
@@ -1998,7 +2005,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Description:** In `plugin/workflows/spec-create.js`, after Revise, when a PLAN.md exists, run one arbiter call to compare the spec with its decisions and principles and validate it with `ck arbiter review --step drift`, which also updates review.md's Needs Your Decision and `**Result:**` line. A lost drift step still makes that call, with `output` null and `lostSteps`, so review.md matches the workflow's `result`. Corrections to draft wording are allowed only while every task is Not Started. Anything that adds, removes or changes what PLAN.md decided is reported in review.md and the result, and never applied. The Consistency Check runs when Revise fixed something or the arbiter edited a spec document. `ck arbiter lane close` ends the step. Harness Contract owner: the `arbiter drift` step.
 **Files:**
 - `plugin/workflows/spec-create.js` - drift step, Consistency Check condition, lane close
-**Verify:** `uv run pytest tests/test_arbiter_create.py -q -n auto -k "tc99_ or tc102_ or tc104_ or tc158_ or p29_"`
+**Verify:** `uv run pytest tests/test_arbiter_create.py -q -n auto -k "tc99_ or tc102_ or tc104_ or tc158_ or p29_ or tc148b_"`
 **Verified by:** Task 79 (TC-99, 102, 104, 158), Task 80 (P-29), Task 82 (red team of 11.6, 11.11, 11.12; the last `/spec:create` arbiter step), Task 87 (the create half of TC-128), Task 90 (the migrated create-side suites)
 
 **Acceptance:**
@@ -2147,7 +2154,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - `.claude/agents/ck-arbiter.md` - new, generated by `ck agents sync`
 - `.claude/agents/ck-auditor.md` - new, generated by `ck agents sync`
 - `.claude/ck-manifest.json` - updated hashes
-**Verify:** `CK_CONFIG_HOME=$(mktemp -d) uv run pytest tests/test_plugin.py -q`
+**Verify:** `CK_CONFIG_HOME=$(mktemp -d) uv run pytest tests/test_plugin.py -q` `uv run pytest tests/test_guard_agent_mode_docs.py -q -k "tc87_vendored_workflow"`
 
 **Acceptance:**
 - [ ] `tests/test_plugin.py` passes in full, including the dogfood and vendored-copy tests
@@ -2208,7 +2215,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 95: Restore a refused integration checkout before landing
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 14.1, 14.2, 14.3, 14.4, 14.5
 **Description:** In `src/claude_kiro/worktrees.py`, add `RecoveryFacts`, the pure `decide_recovery` and `recover_target` (design.md, "Landing recovery and bisection"). Replace the dirty-target refusals in `land` (inside `land_lock`) and `merge` (inside a `land_lock` taken for that step) with `recover_target`. It restores only with `_git_reset(root, target, into, head)` to the checkout's current head, then checks that HEAD is unchanged, MERGE_HEAD is gone and no tracked file is dirty, and clears the refusal. `land`'s result gains `recovered` when it restored. In `src/claude_kiro/cli/worktree.py`, `merge` prints `restored <checkout> to <head>: discarded <paths>` first when it restored, ending `; a merge was in progress` when one was (14.2). Call `recover_target` too at the start of `land_spec_edit` under its `land_lock` (its entry carries `recovered`), and in `ck arbiter record` on the `INTO` checkout under the `land_lock` it takes, before it commits `decisions.md`, when `INTO` is an `integrate/*` branch (its output carries `recovered` when it restored, 14.2), so no write into the integration checkout skips the restore (14.1). A record on any other branch, such as a `/spec:create` ruling through `ck arbiter review`, never calls it and still commits `decisions.md` alone (10.2, 14.3). When `recover_target` refuses (a dirty integration checkout with no matching refusal, 14.5), the record leaves the checkout unchanged and still commits `decisions.md` alone; it takes the 10.9 path only when git cannot make that commit, such as while a merge is in progress (10.1, D26).
@@ -2220,14 +2227,16 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 93 (TC-162 to TC-167, TC-196, TC-197, P-47), Task 101 (red team of 14.3, 14.4, 14.5), Task 100 (TC-169, in a full run)
 
 **Acceptance:**
-- [ ] A managed integration checkout with a matching refusal is restored and the landing goes on; any other dirty checkout is refused as today
-- [ ] The ref never moves, and untracked files are untouched
-- [ ] A failed reset refuses the landing and keeps the refusal record
-- [ ] An arbiter spec-edit landing and `ck arbiter record` restore the checkout the same way
+- [x] A managed integration checkout with a matching refusal is restored and the landing goes on; any other dirty checkout is refused as today
+- [x] The ref never moves, and untracked files are untouched
+- [x] A failed reset refuses the landing and keeps the refusal record
+- [x] An arbiter spec-edit landing and `ck arbiter record` restore the checkout the same way
 
 **Dependencies:** Task 93 (its tests are the oracle), Task 100 (its tests are the oracle), Task 101 (its tests are the oracle), Task 94 (the refusal record), Task 44 (edits the same `worktrees.py` and `cli/worktree.py`; adds `land_spec_edit`), Task 42 (adds `ck arbiter record` in `cli/arbiter.py`), Task 43 (edits the same `cli/arbiter.py`)
 **Complexity:** Medium
 **Risk:** safety (resets a checkout that protected-file hooks guard)
+
+**Implementation notes:** `ck arbiter record` restores `INTO` inside `arbiter.record_ruling` (in `src/claude_kiro/arbiter.py`, outside the Files list), the function that takes the `land_lock` and commits `decisions.md`. `ck arbiter open` now returns `number` as `arbiter<k>`, the label `ck worktree land` takes, as design.md's OpenResult (`number: string | null, // arbiter<k>`) states. It returned the bare `<k>` before, so TC-197 landed task `<k>` instead of the arbiter branch. `merge` takes an optional `on_recovered` callback so the CLI prints the restore line first. `recovered` sits on the `Landed` dataclass, so ordinary task entries carry it as null.
 
 ---
 

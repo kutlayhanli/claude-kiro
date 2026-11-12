@@ -22,9 +22,11 @@ from ..arbiter import (
     ArbiterError,
     claim_from_json,
     close_lane,
+    create_context,
     open_claim,
     open_lane,
     record_ruling,
+    review_step,
     ruling_record_from_json,
     settle_claim,
 )
@@ -164,6 +166,39 @@ def arbiter_record(spec: str, into: str, lock_wait: float, as_json: bool):
         result = record_ruling(root, spec, into, record, lock_wait)
     except (ArbiterError, wt.WorktreeError, ValueError) as exc:
         click.echo(f"ck arbiter record: {exc}", err=True)
+        sys.exit(2)
+    click.echo(json.dumps(result))
+
+
+@arbiter.command("context")
+@click.argument("spec")
+@click.option("--approved-cut", "approved_cut", is_flag=True, help="I approved a proposed cut.")
+@click.option("--json", "as_json", is_flag=True)
+def arbiter_context(spec: str, approved_cut: bool, as_json: bool):
+    """What /spec:create needs before the arbiter runs: principles, plan layer, whether implementation started, and the cut decision."""
+    try:
+        result = create_context(_toplevel(), spec, approved_cut)
+    except (ArbiterError, wt.WorktreeError) as exc:
+        click.echo(f"ck arbiter context: {exc}", err=True)
+        sys.exit(2)
+    click.echo(json.dumps(result))
+
+
+@arbiter.command("review")
+@click.argument("spec")
+@click.option("--step", "step", required=True, type=click.Choice(["refuted", "cuts", "drift"]))
+@click.option("--tier", "tier", required=True, type=click.Choice(["normal", "risky"]))
+@click.option("--json", "as_json", is_flag=True)
+def arbiter_review(spec: str, step: str, tier: str, as_json: bool):
+    """Validate and apply the arbiter's rulings for one /spec:create step (stdin: {subjects, output, lostSteps})."""
+    try:
+        payload = json.loads(sys.stdin.read())
+        checkout = _toplevel()
+        root = wt.main_root(checkout)
+        into = wt.current_branch(checkout)
+        result = review_step(root, checkout, spec, into, step, tier, payload)
+    except (ArbiterError, wt.WorktreeError, ValueError) as exc:
+        click.echo(f"ck arbiter review: {exc}", err=True)
         sys.exit(2)
     click.echo(json.dumps(result))
 
