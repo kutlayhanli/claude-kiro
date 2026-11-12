@@ -2315,12 +2315,13 @@ async function arbiterNeedsInput(n, rec, r, claim, { reason, text, ruling = null
 
 // `ck arbiter record` for one settled ruling (10.1), inside the landing lock and before anything acts on it. Returns
 // { number } or { error }; a failed record is logged in the run report and the claim goes to needs-input.
-async function recordRuling(n, { claim, answer, res, open, tier }) {
+async function recordRuling(n, { claim, answer, res, open, tier, landing = null }) {
   const outcome = res.route === 'needs_input' ? (['requirements', 'spec_edit', 'test_repair', 'code'].includes(answer && answer.outcome) ? answer.outcome : 'requirements') : res.route
   const body = {
     trigger: String(claim.trigger || ''), claim_key: open.key, claim_text: String(claim.text || ''), task: String(n), tier: tier === 'risky' ? 'risky' : 'normal', outcome,
     reasoning: String((answer && answer.reasoning) || ''), principle_id: String((res.principle && res.principle.id) || (answer && answer.principle) || ''), principle_text: String((res.principle && res.principle.text) || ''),
     plan_layer: String(open.planLayer || ''), changed: 'nothing', moved: [], commit: null, landed: null,
+    ...(landing ? { changed: String(landing.changed || 'the spec'), moved: landing.moved || [], commit: landing.commit || null, landed: [landing.landed, landing.why || ''] } : {}),
   }
   let out = null
   try {
@@ -2422,13 +2423,25 @@ async function arbitrate(n, rec, r, claim) {
     if (res.route === 'spec_edit') {
       // The arbiter's commit lands on INTO alone (Task 67 moves this into the merge queue); a landing that fails is an entry for me.
       const landed = await withLandingLock(() => thinCk('arbiter-land', ['-C', ROOT, 'worktree', 'land', SPEC, open.number, '--into', INTO, '--json'], { label: `arbiter-land ${n}`, phase, cwd: ROOT, what: `Landing step for the arbiter's spec edit of spec ${SPEC}: it merges the edit into ${INTO}` }))
-      // `ck worktree land SPEC arbiter<k> --json` prints the one landing entry (state, commit, moved); a refused call prints {error, tasks}.
+      // `ck worktree land SPEC arbiter<k> --json` prints the one landing entry (state, commit, moved, recovered); a refused call prints {error, tasks}.
       const lj = landed.json && typeof landed.json === 'object' ? landed.json : null
       const items = lj && Array.isArray(lj.tasks) ? lj.tasks : []
       const item = lj && isText(lj.state) ? lj : (items.find(t => String(t.task) === open.number) || items[0] || null)
-      if (!item || item.state !== 'MERGED') return await toMe('landing-failed', `the arbiter's spec edit did not land (${item ? `${item.state}${item.detail ? `: ${trim(item.detail, 200)}` : ''}` : ckError(landed)})`, { open, ruling: answer })
+      const changed = answer && typeof answer === 'object' ? String(answer.changed || '') : ''
+      if (!item || item.state !== 'MERGED') {
+        const why = `${item ? `${item.state}${item.detail ? `: ${trim(item.detail, 200)}` : ''}` : ckError(landed)}`
+        // 8.4: recorded as not landed, with why, and the ruling and result go to me; no new ruling.
+        const rn = await recordRuling(n, { claim, answer, res, open, tier, landing: { changed, landed: false, why } })
+        if (rn.number !== undefined) { runRuling.number = rn.number; out.rulingNo = rn.number }
+        return await toMe('landing-failed', `the arbiter's spec edit did not land (${why})${rn.error ? `; ${rn.error}` : ''}`, { open, ruling: answer, number: rn.number ?? null })
+      }
       runRuling.landed = true
       runRuling.commit = isText(item.commit) && item.commit ? item.commit : null
+      const rl = await recordRuling(n, { claim, answer, res, open, tier, landing: { changed, landed: true, commit: runRuling.commit, moved: Array.isArray(item.moved) ? item.moved : [] } })
+      if (rl.error) return await toMe('record-failed', `the arbiter's spec edit landed on ${INTO} (commit ${runRuling.commit || 'unknown'}), but ${rl.error}; the task was not resumed`, { open, ruling: answer })
+      runRuling.number = rl.number
+      out.rulingNo = rl.number
+      out.ruling = answer && typeof answer === 'object' ? { ...answer, number: rl.number } : answer
       requestPlan('landing')   // new wiring applies to tasks not yet started (8.3)
     }
     return out
@@ -2540,9 +2553,10 @@ async function runTask(n) {
     const resumeWith = async outs => {
       await acquireSlot(n)
       arbiterK++
-      r = await call('task', `${retryPrompt(n, r, retryNo(), claimFlags('retry', codeOpts(n), rec.attempts + 1))}\n${rulingNote(outs)}`, { label: `${label(n)} resume ${arbiterK}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
+      // The resume stays on the model that made the attempt the ruling interrupted: it spends no escalation (8.2).
+      const o = lastModel && lastModel !== codeOpts(n).model ? escalated(codeOpts(n), lastModel) : codeOpts(n)
+      r = await call('task', `${retryPrompt(n, r, retryNo(), claimFlags('retry', o, rec.attempts + 1))}\n${rulingNote(outs)}`, { label: `${label(n)} resume ${arbiterK}`, phase: phaseOf(n), schema: RESULT, ...o })
       rec.attempts++
-      lastModel = codeOpts(n).model
       stop = guardStopOf(r)
       rec.startedAt = rec.startedAt || (r && r.startedAt)
     }

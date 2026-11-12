@@ -1591,7 +1591,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 67: Land spec-edit rulings and resume the task
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 10.3, 10.9
 **Description:** In `plugin/workflows/spec-implement.js`, add `nextLandingBatch` to the decisions block so an arbiter entry lands alone, teach `landBatch` to skip review and task-list bookkeeping for it, and call `ck worktree land SPEC arbiter<k>`. Read its entry from `out.json` through the `landEntryOf` validity check (state `MERGED`, `CONFLICT`, `RED`, `REFUSED` or `ERROR`, `commit`, `moved`, `recovered`); there is no `LAND` schema to extend, and an entry that fails the check is a failed landing (8.4). On MERGED, call `ck arbiter record` with the commit, request a plan to apply new wiring to tasks not yet started, and resume the task with a prompt that merges `INTO` first and carries the ruling, adding to `arbiterK`, which `retryNo()` subtracts, so no retry or escalation is spent. A failed record after MERGED does not resume the task: it creates a needs-input entry saying the edit landed (10.9). On CONFLICT, RED or REFUSED, record it as not landed and send a needs-input entry with the ruling and result, with no new ruling.
@@ -1601,10 +1601,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 2 (`arbiterEdits`, the real landing), Task 59 (TC-62, TC-63), Task 61 (TC-90, TC-155), Task 63 (P-20)
 
 **Acceptance:**
-- [ ] A landed edit resumes the task, with attempts and escalations unchanged
-- [ ] A landed edit that adds a dependency on a not-started task changes the next plan's schedule
-- [ ] A failed landing is recorded as not landed, with why, and creates a needs-input entry
-- [ ] A failed record after a landing leaves the task unresumed and creates a needs-input entry saying the edit landed
+- [x] A landed edit resumes the task, with attempts and escalations unchanged
+- [x] A landed edit that adds a dependency on a not-started task changes the next plan's schedule
+- [x] A failed landing is recorded as not landed, with why, and creates a needs-input entry
+- [x] A failed record after a landing leaves the task unresumed and creates a needs-input entry saying the edit landed
+
+**Implementation notes:** `arbitrate` lands the arbiter's commit with `ck worktree land SPEC arbiter<k>` and records the ruling through `ck arbiter record` with the commit, moved and landed (`[true, ...]`, or `[false, why]` for a failed landing). A failed record after MERGED goes to needs-input saying the edit landed. `resumeWith` keeps the model of the interrupted attempt so no escalation is spent. Deviation: the landing stays in `arbitrate` under the landing lock rather than going through `nextLandingBatch`/`landBatch`.
 
 **Dependencies:** Task 2 (its tests are the oracle), Task 44 (calls `ck worktree land SPEC arbiter<k>`), Task 59 (its tests are the oracle), Task 61 (its tests are the oracle), Task 63 (its tests are the oracle), Task 66 (extends the arbiter paths), Task 43 (provides `cmd:ck arbiter context`)
 **Complexity:** High
