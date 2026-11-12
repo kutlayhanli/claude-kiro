@@ -110,7 +110,7 @@ function arbiterProject(deps) {
   tempRepos.push(path.dirname(a.root))
   return { root: a.root, targetDir: a.target, execCk: a.execCk }
 }
-const arbiterArgs = a => ({ ...baseArgs, root: a.root, targetDir: a.targetDir, ...(a.extra || {}) })
+const arbiterArgs = a => ({ ...baseArgs, arbiterAgent: 'spec:arbiter', root: a.root, targetDir: a.targetDir, ...(a.extra || {}) })
 
 await test('issue #8: a test conflict is ruled test_repair by the arbiter (no confirmation agent), goes to the test-fixer; one that persists after the fix parks only that task (needs-input, kind test-fix)', async () => {
   const deps = { 1: [], 2: [], 3: ['2'], 4: [] }
@@ -206,12 +206,14 @@ await test('continue (default): dependents of a failed task never start, others 
   assert.ok(p.state.events.includes('task 5'))
   assert.ok(!p.state.events.includes('task 4'))
   assert.deepEqual(result.notStarted, ['4'])
-  assert.deepEqual(result.failed.map(f => f.task), ['3'])
+  // 6.10: no arbiterAgent, so the exhausted gate failure is a needs-input claim, not a failed task.
+  assert.deepEqual(result.needsInput.map(f => f.task), ['3'])
+  assert.deepEqual(result.failed, [])
   assert.equal(result.targetGreen, true)
 })
 
 await test('halt: a failure stops new launches, running tasks still finish and merge', async () => {
-  const p = project({ deps: { 1: [], 2: ['1'], 3: ['1'], 4: ['2'] }, failUntil: { 3: 99 }, durations: { 2: 30, 3: 5 } })
+  const p = project({ deps: { 1: [], 2: ['1'], 3: ['1'], 4: ['2'] }, worktree: { 3: { state: 'ERROR', detail: 'disk full' } }, durations: { 2: 30, 3: 5 } })  // a failure the arbiter is never asked about (6.7)
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, onFailure: 'halt', maxRetries: 0 } })
   assert.equal(result.halted, true)
   assert.ok(landOf(p.state, '2'), 'task 2 was running and still merged')
@@ -483,7 +485,8 @@ await test('escalation: off by default, so a failing task just fails', async () 
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxRetries: 1, agents: HAIKU([]) } })
   assert.deepEqual(modelsOf(p.state, 'task 1'), ['haiku', 'haiku'])
   assert.deepEqual(result.escalated, [])
-  assert.equal(result.failed[0].task, '1')
+  assert.equal(result.needsInput[0].task, '1', '6.10: no arbiterAgent, so the exhausted gate failure is a needs-input claim')
+  assert.deepEqual(result.failed, [])
 })
 
 await test('escalation: blocking review findings that survive the rounds go to the arbiter, not up the model ladder (6.3)', async () => {
@@ -935,14 +938,13 @@ await test('the final report counts what git merged even when the agents under-r
 await test('git failures carry the agent reason; unlanded branches without one say so', async () => {
   const p = project({ deps: { 1: [], 2: ['1'] }, failUntil: { 1: 99 }, gitReport: out => ({ ...out, failed: [...out.failed, { task: '7', branch: 'feat/demo-task-7', ahead: 2, claim: 'ck task agent pid 2' }] }) })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxRetries: 0 } })
-  const f1 = result.failed.find(f => f.task === '1')
-  assert.match(f1.reason, /gate not passed/)
-  assert.equal(f1.git.branch, 'feat/demo-task-1')
+  // 6.10: no arbiterAgent, so Task 1's exhausted gate failure is a needs-input claim, not a failed task.
+  assert.match(result.needsInput.find(e => e.task === '1').decision, /did not rule on Task 1/)
   assert.match(result.failed.find(f => f.task === '7').reason, /2 commit\(s\) on feat\/demo-task-7 never landed; claimed: ck task agent pid 2/)
 })
 
 await test("without a usable git report the agents' results are used, still never merged and failed", async () => {
-  const p = project({ deps: { 1: [], 2: ['1'] }, failUntil: { 2: 99 }, gitReport: () => ({ error: 'refused' }) })
+  const p = project({ deps: { 1: [], 2: ['1'] }, worktree: { 2: { state: 'ERROR', detail: 'disk full' } }, gitReport: () => ({ error: 'refused' }) })  // a failure the arbiter is never asked about (6.7)
   const { result, logs } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxRetries: 0 } })
   assert.equal(result.reportSource, 'agents')
   assert.deepEqual(result.merged, ['1'])
@@ -951,7 +953,7 @@ await test("without a usable git report the agents' results are used, still neve
 })
 
 await test('all remaining tasks blocked behind a failed task is a clean stop that names the blocker', async () => {
-  const p = project({ deps: { 1: [], 2: [], 3: ['2'], 4: ['3'], 5: ['1'] }, failUntil: { 2: 99 } })
+  const p = project({ deps: { 1: [], 2: [], 3: ['2'], 4: ['3'], 5: ['1'] }, worktree: { 2: { state: 'ERROR', detail: 'disk full' } } })  // a failure the arbiter is never asked about (6.7)
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, maxRetries: 0 } })
   assert.equal(result.halted, false)
   assert.equal(result.outcome, 'blocked')
@@ -959,7 +961,7 @@ await test('all remaining tasks blocked behind a failed task is a clean stop tha
   assert.deepEqual(result.notStarted, ['3', '4'])
   assert.deepEqual(result.blocked, [{ task: '3', on: ['2'] }, { task: '4', on: ['3'] }])
   assert.deepEqual(result.blockedOn.map(b => [b.task, b.blocks]), [['2', ['3', '4']]])
-  assert.match(result.reason, /^blocked on: Task 2 \(gate not passed/)
+  assert.match(result.reason, /^blocked on: Task 2 \(worktree create failed/)
   assert.ok(!/planning/.test(result.reason))
 })
 
@@ -1013,7 +1015,7 @@ await test('planning: a failed plan step is retried once before it counts', asyn
 await test('planning: a plan step that keeps failing halts only if it left a ready task unstarted', async () => {
   const failLater = pr => async (prompt, opts) => (opts.label.startsWith('plan') && opts.label !== 'plan 1' ? null : pr.agent(prompt, opts))
   // Everything left is blocked behind failed Task 2: the failed plan step changed nothing.
-  const blockedRun = project({ deps: { 1: [], 2: [], 3: ['2'] }, failUntil: { 2: 99 }, durations: { 2: 30 } })
+  const blockedRun = project({ deps: { 1: [], 2: [], 3: ['2'] }, worktree: { 2: { state: 'ERROR', detail: 'disk full' } }, durations: { 2: 30 } })  // a failure the arbiter is never asked about (6.7)
   const a = await runWorkflow(SCRIPT, { agent: failLater(blockedRun), args: { ...baseArgs, maxRetries: 0 } })
   assert.equal(a.result.halted, false)
   assert.equal(a.result.outcome, 'blocked')
