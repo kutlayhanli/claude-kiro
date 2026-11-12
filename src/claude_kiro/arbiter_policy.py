@@ -290,7 +290,7 @@ def route_ruling(check: RulingCheck, tier: Tier, effective: EffectivePrinciples)
 # --------------------------------------------------------------------------- spec edits (Task 41)
 
 _TASK_HEAD = re.compile(r"^### Task ?(\d+): ")
-_MARK_LINE = re.compile(r"^\s*[-*]\s+\[([ xX])\]\s*(.*)$")
+_MARK_LINE = re.compile(r"^\s*[-*+]\s*\[([ xX])\]\s*(.*)$")
 _FIRST_TASK = re.compile(r"^### Task ?\d", re.MULTILINE)
 _LANE_FILES = ("tasks.md", "design.md", "test-plan.md")
 
