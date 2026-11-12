@@ -1615,7 +1615,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 68: Send exhausted gate failures to the arbiter
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 6.4, 6.5, 6.6, 6.11, 8.8, 8.9
 **Description:** In `plugin/workflows/spec-implement.js`, keep today's retry and escalation loops for a plain failing gate. After them, `claimTrigger` returns `gate-failure` only when the top model has failed (the last model when no escalation is configured); a pass at any point means no arbiter call. A live `wait` is not a gate failure for this: `claimTrigger`'s `live` input returns null for it, so `recordLiveWait` runs as today and spends no attempt (6.4, 6.5, Compatibility); a command cycle is Task 65's `command-cycle` claim. `testConflictsOf` can return several conflicts (live `conflict` tests included, through `liveConflicts`): `settleClaims` takes each as its own claim, in order. The first `exit` stops it raising the claims after it, but the `test_repair` rulings gathered from earlier claims still go to `handOffTestRepair`, with no task retry, since the task waits on my entry; and the task retries only once every claim has settled (D32).
@@ -1625,11 +1625,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 55 (TC-46 to 48, 202, 206), Task 62 (P-13)
 
 **Acceptance:**
-- [ ] A plain failure runs today's labels in today's order, and the arbiter runs only after the top model failed
-- [ ] With no escalation list, the arbiter follows the last retry
-- [ ] A retry or escalation that passes means no arbiter call
-- [ ] A live wait with no escalation configured records the edge, spends no retry and never calls the arbiter
-- [ ] With several conflicts in one attempt, a later claim's exit still sends the earlier `test_repair` rulings to the fixer with no task retry, and no retry starts before every claim has settled
+- [x] A plain failure runs today's labels in today's order, and the arbiter runs only after the top model failed
+- [x] With no escalation list, the arbiter follows the last retry
+- [x] A retry or escalation that passes means no arbiter call
+- [x] A live wait with no escalation configured records the edge, spends no retry and never calls the arbiter
+- [x] With several conflicts in one attempt, a later claim's exit still sends the earlier `test_repair` rulings to the fixer with no task retry, and no retry starts before every claim has settled
 
 **Dependencies:** Task 55 (its tests are the oracle), Task 62 (its tests are the oracle), Task 67 (edits the same `runTask` loop)
 **Complexity:** Medium
