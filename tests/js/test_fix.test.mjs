@@ -197,8 +197,9 @@ await test('tc47_ a node in priorFixes starts no fixer and goes to needs-input',
   assert.ok(!result.merged.includes('4'))
 })
 
-await test('tc48_ three conflicts in one file and one in another: exactly two fixers, the first with all three', async () => {
-  const a = ['test_tc4_one', 'test_tc4_two', 'test_tc4_three'].map(t => conflict(FILE_A, t))
+// Two conflicts in one file and one in another: at most 3 rulings on a task (7.6), so a 4th conflict would be my entry.
+await test('tc48_ two conflicts in one file and one in another: exactly two fixers, the first with both', async () => {
+  const a = ['test_tc4_one', 'test_tc4_two'].map(t => conflict(FILE_A, t))
   const b = conflict(FILE_B, 'test_tc4_four')
   const { p, trace } = await run([...a, b], { testFix: { [FILE_A]: {}, [FILE_B]: {} } })
   const fx = fixers(trace)
