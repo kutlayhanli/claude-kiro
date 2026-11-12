@@ -1,7 +1,7 @@
 ---
 description: Write the spec (requirements → design → tasks) as a workflow, ending with an adversarial review
 argument-hint: [feature-name-or-description]
-allowed-tools: Read, Edit, Write, Grep, Glob, AskUserQuestion, Workflow, Agent, TaskCreate, TaskUpdate, Bash(ck agents check:*)
+allowed-tools: Read, Edit, Write, Grep, Glob, AskUserQuestion, Workflow, Agent, TaskCreate, TaskUpdate, Bash(ck agents check:*), Bash(ck agents --json:*), Bash(ck principles init:*)
 ---
 
 Create the specification for: $ARGUMENTS
@@ -64,7 +64,9 @@ Also read `specs/ck.json`. If it is missing or has no `"verify"` commands, tell 
 
 ## Step 3: Launch the workflow
 
-1. Call the **Workflow** tool with:
+1. Before the workflow, run `ck principles init` (from the project root). If it created the principles file, tell me so in one line (it holds the principles the arbiter cites; I can edit it). If the file was already there, say nothing.
+   - Run `ck agents --json` and keep its `agents.arbiter` role. The arbiter is the agent that rules on refuted findings and proposed cuts. `arbiterAgent` is `spec:arbiter` in plugin mode and `ck-arbiter` in vendor mode; `runnerAgent` is `spec:runner` in plugin mode and `ck-runner` in vendor mode (it runs the thin `ck` calls). In vendor mode, if `.claude/agents/ck-arbiter.md` or `.claude/agents/ck-runner.md` is missing (run `ck agents sync` or `ck vendor`), pass `null` for it and tell me that the arbiter steps will be lost or run as default subagents.
+2. Call the **Workflow** tool with:
    - First run `ck progress begin <spec> --kind create --mode workflow --json` (`<spec>` is the feature name) and keep its `run` and `etaLine` (a failure prints `run: null`; carry on without them).
    - The script, picked by the project's mode first: if `.claude/ck-manifest.json` records `"mode": "vendor"` (copies made by `ck vendor`; the plugin is off there), `scriptPath` set to the absolute path of `.claude/workflows/spec-create.js`, without trying the plugin's name. Otherwise `name: "spec:spec-create"` (the workflow this plugin ships); only if no workflow by that name is found, fall back to that `scriptPath`. If the file is missing too, tell me to run `ck setup` (installs the plugin) and stop.
    - `args` (a JSON object, not a string):
@@ -79,10 +81,13 @@ Also read `specs/ck.json`. If it is missing or has no `"verify"` commands, tell 
        "evolvesFrom": "[absolute path to the old spec dir, or null]",
        "context": "[your Step 2 summary, plus any answers I gave in Step 1]",
        "date": "[today, YYYY-MM-DD]",
+       "arbiterAgent": "[spec:arbiter, or ck-arbiter in vendor mode]",
+       "runnerAgent": "[spec:runner, or ck-runner in vendor mode]",
+       "agents": { "arbiter": "[agents.arbiter from ck agents --json]" },
        "progressRun": "[run from ck progress begin]", "etaLine": "[etaLine from ck progress begin]"
      }
      ```
-2. Tell me it's running, with the `etaLine`: requirements, then design and test plan in parallel, then two task tracks in parallel and a link step, then adversarial review and revision. I can watch it with `/workflows`.
+3. Tell me it's running, with the `etaLine`: requirements, then design and test plan in parallel, then two task tracks in parallel and a link step, then adversarial review and revision. I can watch it with `/workflows`.
 
 **Without the Workflow tool** (it isn't among your tools, or calling it is refused or blocked, or I pass `--no-workflow`): run `${CLAUDE_PLUGIN_ROOT}/workflows/spec-create.js` by hand with the Agent tool and the same args, as `${CLAUDE_PLUGIN_ROOT}/resources/without-workflow-tool.md` describes, and tell me once that you're doing so. The steps, prompts, and result are the same.
 
@@ -104,11 +109,16 @@ When the workflow returns:
    Consistency check: [passes] pass(es), [F] drift fixed, [D] behaviour conflicts for your decision
    Assumptions to check: [only the ones that matter]
    ```
+   Proposed cuts: [only when `review.proposedCuts` is non-empty: one line per cut with the story, the weakness and what it saves]
    Mention any `unverified` findings, lost review lenses, or `consistency.lost` so I know coverage was partial.
    Then run `ck stats collect --run <wf_id> --auto` outside the sandbox and quote the line it prints (where the record went, or why it was skipped; if it failed, quote the retry command it gives). Never let its result change what you report about the run. In agent mode (no `wf_id`, the run was started with `ck stats begin`), run `ck stats collect --agents <run_id> --auto` instead, outside the sandbox, and quote its line the same way.
    Then close the progress run: `ck progress end <spec> --outcome <outcome> [--record <id>] --json` (`outcome` is `completed`, or `failed` if the workflow returned an `error`; `--record` is the record id `ck stats collect` printed, when it printed one). Quote the line it prints and every warning line (`⚠ progress: ...`, `⚠ notification failed: ...`). Never let its result change what you report about the run.
 3. **Open questions:** if `review.openQuestions` is non-empty, ask me with AskUserQuestion (wrap each question: `ck progress event <spec> approval-start --reason question` just before it and `ck progress event <spec> approval-end` as soon as I answer; up to 4 questions per call; put the reviewer's suggested fix first when it is a sensible default). Each item has a `source`: `review` (a reviewer's question), `revise` (a fix that would have changed behaviour a criterion governs, so it was not applied) or `consistency` (a contradiction the consistency check found after the revision). For `revise` and `consistency` items, show the criterion or property in `conflictsWith` next to the question and offer the item's `options`; don't pick one yourself. Applying my answer may mean changing the criterion, the design, or both: keep requirements, design, test plan and tasks consistent. Then apply my answers to the spec files, keeping requirements, design, and tasks consistent. Record each answer under a new "Decisions" entry in PLAN.md (if it exists) and in the "Needs Your Decision" table of `review.md`.
-4. Finish with: "Spec ready. Use `/spec:implement [task-number]` to start, or `/spec:implement [feature-name]` to run the whole spec (`/spec:spawn-worktree specs/[feature-name]` to steer it yourself). Tasks are only Done when `ck gate` passes."
+4. **Proposed cuts:** for each entry of `review.proposedCuts`, tell me the story, the weakness of its "Without it" justification, and what cutting it saves (`saves`). A cut is never applied by the review; it waits for my approval. Ask me with AskUserQuestion which cuts I approve.
+5. **Approved cuts:** when I approve a cut, launch the `spec-create` workflow again (same script pick as Step 3) with `args` `{ "mode": "apply-cuts", "feature", "projectRoot", "specDir", "cuts": [the approved entries of review.proposedCuts: id, story, title, weakness], "arbiterAgent", "runnerAgent", "agents" }`. You do not remove the story yourself: the `apply-cuts` mode decides from `ck arbiter context --approved-cut` and does the work. Report what it returns:
+   - **No task has started:** the story was removed from requirements, design, test plan and task list consistently, and `ck lint` ran. Say so, and quote any new `ck lint` failure it reports. If lint failed, the cut is not finished: tell me.
+   - **A task has started:** nothing was applied. Tell me the requirements are frozen because a task has started, and that removing the story is my change to make.
+6. Finish with: "Spec ready. Use `/spec:implement [task-number]` to start, or `/spec:implement [feature-name]` to run the whole spec (`/spec:spawn-worktree specs/[feature-name]` to steer it yourself). Tasks are only Done when `ck gate` passes."
 
 ---
 
