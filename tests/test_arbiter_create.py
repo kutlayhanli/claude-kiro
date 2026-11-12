@@ -949,3 +949,25 @@ def test_p46_with_no_refuted_finding_and_no_cut_no_arbiter_step_runs(tmp_path, m
     arb = arbiter_of(out)
     assert "refuted" not in arb["ran"] and "cuts" not in arb["ran"], arb
     assert "refuted" not in arb["lost"] and "cuts" not in arb["lost"], arb
+
+
+def test_tc158_a_drift_item_asking_for_a_stronger_look_is_re_run_once_at_the_risky_tier(tmp_path):
+    project = plan_project(tmp_path)
+    first = {"rulings": [{**ruling("D1", verdict="no drift"), "status": "needs_stronger_look"}]}
+    second = {"rulings": [ruling("D1", verdict="no drift", reasoning="RISKY-D1 settled")]}
+    out = create(project, {**refuting(), "review: fidelity": {"findings": []}, "arbiter drift": first, "arbiter drift risky": second})
+    labels = [l for l in out["labels"] if l.startswith("arbiter drift")]
+    assert labels == ["arbiter drift", "arbiter drift risky"], labels
+    tiers = [c["argv"][c["argv"].index("--tier") + 1] for c in review_calls(out, "drift") if "--tier" in c["argv"]]
+    assert tiers[:1] == ["normal"] and tiers.count("risky") == 1, tiers
+    assert "drift" not in arbiter_of(out)["lost"], arbiter_of(out)
+
+
+def test_tc158_a_drift_item_still_asking_for_a_stronger_look_at_the_risky_tier_is_lost(tmp_path):
+    project = plan_project(tmp_path)
+    ask = {"rulings": [{**ruling("D1", verdict="no drift"), "status": "needs_stronger_look"}]}
+    out = create(project, {**refuting(), "review: fidelity": {"findings": []}, "arbiter drift": ask, "arbiter drift risky": ask})
+    assert "drift" in arbiter_of(out)["lost"], arbiter_of(out)
+    text = (project.spec_dir / "review.md").read_text()
+    assert re.search(r"\*\*Result:\*\*\s*Needs work", text), text
+    assert review_of(out)["result"] == "Needs work"

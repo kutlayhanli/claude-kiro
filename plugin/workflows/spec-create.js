@@ -922,10 +922,30 @@ async function driftCheck() {
   await thinCk('arbiter lane open', ['-C', ROOT, 'arbiter', 'lane', 'open', A.feature, '--json'], `Lane step for spec ${A.feature}: the arbiter's ticket`)
   const answer = await arbiterAsk('drift', 'normal', [], ctx)
   // Earlier lost steps go to ck now; a lost drift step is marked by ck itself from its null or unchecked output.
-  const results = await arbiterReview('drift', 'normal', [], answer, [...arb.lost])
+  let results = await arbiterReview('drift', 'normal', [], answer, [...arb.lost])
+  let finalAnswer = answer
+  // One risky-tier re-run for the items that ask for a stronger look (5.6, 5.7, 11.9); only items still unchecked after it are lost.
+  const stronger = results ? results.filter(r => r.action === 'unchecked' && r.reason === 'stronger-look').map(r => ({ id: String(r.id) })) : []
+  if (stronger.length) {
+    const answer2 = await arbiterAsk('drift', 'risky', stronger, ctx)
+    const results2 = await arbiterReview('drift', 'risky', stronger, answer2, [...arb.lost])
+    const have = new Map(results.map(r => [String(r.id), r]))
+    for (const r of results2 || []) have.set(String(r.id), r)
+    // An id the risky call did not return stays as the normal tier left it (unchecked, stronger-look): it is lost.
+    results = [...have.values()]
+    const merged = []
+    for (const src of [answer, answer2]) for (const x of (src && Array.isArray(src.rulings) ? src.rulings : [])) {
+      if (!x || typeof x !== 'object') continue
+      const id = String(x.claim ?? x.id)
+      const isStronger = stronger.some(s => s.id === id)
+      const fromRisky = src === answer2
+      if (isStronger === fromRisky || !stronger.length) merged.push(x)
+    }
+    finalAnswer = { rulings: merged }
+  }
   await thinCk('arbiter lane close', ['-C', ROOT, 'arbiter', 'lane', 'close', A.feature, '--json'], `Lane step for spec ${A.feature}: close the arbiter's ticket`)
 
-  const rulings = answer && Array.isArray(answer.rulings) ? answer.rulings : []
+  const rulings = finalAnswer && Array.isArray(finalAnswer.rulings) ? finalAnswer.rulings : []
   const entryOf = id => rulings.find(x => x && typeof x === 'object' && String(x.claim ?? x.id) === String(id)) || null
   if (!results) { arb.lost.push('drift'); log('Arbiter: the drift check returned no usable ruling; the result is Needs work.'); return none }
   const usable = !!answer && Array.isArray(answer.rulings)

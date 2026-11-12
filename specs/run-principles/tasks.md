@@ -2004,7 +2004,8 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Requirements:** 11.3, 11.5, 11.6, 11.7, 11.8, 11.10, 11.12
 **Description:** In `plugin/workflows/spec-create.js`, after Revise, when a PLAN.md exists, run one arbiter call to compare the spec with its decisions and principles and validate it with `ck arbiter review --step drift`, which also updates review.md's Needs Your Decision and `**Result:**` line. A lost drift step still makes that call, with `output` null and `lostSteps`, so review.md matches the workflow's `result`. Corrections to draft wording are allowed only while every task is Not Started. Anything that adds, removes or changes what PLAN.md decided is reported in review.md and the result, and never applied. The Consistency Check runs when Revise fixed something or the arbiter edited a spec document. `ck arbiter lane close` ends the step. Harness Contract owner: the `arbiter drift` step.
 **Files:**
-- `plugin/workflows/spec-create.js` - drift step, Consistency Check condition, lane close
+- `plugin/workflows/spec-create.js` - drift step (with its one risky-tier re-run on a stronger-look ask), Consistency Check condition, lane close
+- `src/claude_kiro/arbiter.py` - `create_context` reports a `plan` key (PLAN.md present); a drift `spec_edit` carrying a requirement object routes as `requirements`
 **Verify:** `uv run pytest tests/test_arbiter_create.py -q -n auto -k "tc99_ or tc102_ or tc104_ or tc158_ or p29_ or tc148b_"`
 **Verified by:** Task 79 (TC-99, 102, 104, 158), Task 80 (P-29), Task 82 (red team of 11.6, 11.11, 11.12; the last `/spec:create` arbiter step), Task 87 (the create half of TC-128), Task 90 (the migrated create-side suites)
 
