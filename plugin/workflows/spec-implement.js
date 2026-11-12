@@ -1206,6 +1206,16 @@ function openResultOf(json) {
   return o
 }
 
+// `ck worktree land SPEC arbiter<k> --json`'s one landing entry: the object, or null when a required field is missing or
+// has the wrong type. Null is a failed landing (8.4), never a guessed default.
+function landEntryOf(json) {
+  const o = json && typeof json === 'object' && !Array.isArray(json) ? json : null
+  if (!o || !['MERGED', 'CONFLICT', 'RED', 'REFUSED', 'ERROR'].includes(o.state)) return null
+  if (o.state === 'MERGED' && !(isText(o.commit) && o.commit)) return null
+  if (o.moved != null && !(Array.isArray(o.moved) && o.moved.every(m => m && typeof m === 'object' && isText(String(m.task)) && isText(m.test)))) return null
+  return o
+}
+
 // `ck arbiter settle`'s answer (SettleResult): the object, or null as above.
 function settleResultOf(json) {
   const o = json && typeof json === 'object' && !Array.isArray(json) ? json : null
@@ -2422,14 +2432,12 @@ async function arbitrate(n, rec, r, claim) {
     out.runRuling = runRuling
     if (res.route === 'spec_edit') {
       // The arbiter's commit lands on INTO alone (Task 67 moves this into the merge queue); a landing that fails is an entry for me.
-      const landed = await withLandingLock(() => thinCk('arbiter-land', ['-C', ROOT, 'worktree', 'land', SPEC, open.number, '--into', INTO, '--json'], { label: `arbiter-land ${n}`, phase, cwd: ROOT, what: `Landing step for the arbiter's spec edit of spec ${SPEC}: it merges the edit into ${INTO}` }))
+      const landed = await withLandingLock(() => thinCk('arbiter-land', ['-C', ROOT, 'worktree', 'land', SPEC, open.number, '--into', INTO, '--gate', '--json'], { label: `arbiter-land ${n}`, phase, cwd: ROOT, gate: true, what: `Landing step for the arbiter's spec edit of spec ${SPEC}: it merges the edit into ${INTO}` }))
       // `ck worktree land SPEC arbiter<k> --json` prints the one landing entry (state, commit, moved, recovered); a refused call prints {error, tasks}.
-      const lj = landed.json && typeof landed.json === 'object' ? landed.json : null
-      const items = lj && Array.isArray(lj.tasks) ? lj.tasks : []
-      const item = lj && isText(lj.state) ? lj : (items.find(t => String(t.task) === open.number) || items[0] || null)
+      const item = landEntryOf(landed.json)
       const changed = answer && typeof answer === 'object' ? String(answer.changed || '') : ''
       if (!item || item.state !== 'MERGED') {
-        const why = `${item ? `${item.state}${item.detail ? `: ${trim(item.detail, 200)}` : ''}` : ckError(landed)}`
+        const why = `${item ? `${item.state}${item.detail ? `: ${trim(String(item.detail), 200)}` : ''}` : `no valid landing entry (${ckError(landed)})`}`
         // 8.4: recorded as not landed, with why, and the ruling and result go to me; no new ruling.
         const rn = await recordRuling(n, { claim, answer, res, open, tier, landing: { changed, landed: false, why } })
         if (rn.number !== undefined) { runRuling.number = rn.number; out.rulingNo = rn.number }
