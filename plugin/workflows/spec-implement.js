@@ -2289,7 +2289,7 @@ async function arbiterNeedsInput(n, rec, r, claim, { reason, text, ruling = null
   const decision = `The arbiter ${ruling ? 'ruled' : 'did not rule'} on Task ${n}'s ${claim.trigger} claim (${reason}): ${text}${ruling && ruling.requirement ? ` Requirement ${ruling.requirement.kind || 'change'}: ${ruling.requirement.wording || ''} (${ruling.requirement.reason || ''}).` : ''} Decide from the main session, then resume the run${RUN_ID ? ` with the same runId ${RUN_ID}` : ''}.`
   const entry = {
     task: n, file: String(claim.file || ''), kind, test: String(claim.test || ''), requirement: String(claim.criterion || ''), decision, action, notification: null, escalatedTo: [],
-    ruling: number, reason, claim: open ? open.key : (claim.text ? trim(String(claim.text), 600) : null), trigger: claim.trigger, output: ruling,
+    ruling: number, reason, claim: ruling ? (open ? open.key : (claim.text ? trim(String(claim.text), 600) : null)) : { ...(open ? { key: open.key } : {}), trigger: claim.trigger, text: trim(String(claim.text || ''), 600), file: String(claim.file || ''), test: String(claim.test || ''), ...(claim.cycle !== undefined ? { cycle: claim.cycle } : {}), ...(claim.command !== undefined ? { command: claim.command } : {}), ...(claim.provider !== undefined ? { provider: claim.provider } : {}) }, trigger: claim.trigger, output: ruling,
     ...(reason === 'repeat-after-ruling' ? { evidence: trim(String(claim.text || ''), 600), earlierRuling: open && ruledAnswers.has(open.key) ? ruledAnswers.get(open.key) : null } : {}),
     ...(open && open.missing ? { missing: open.missing } : {}),
   }
@@ -2402,10 +2402,8 @@ async function arbitrate(n, rec, r, claim) {
     }
     const out = { route: res.route, ruling: answer, claim, key: open.key, number: open.number, tier, rulingNo: null }
     let recorded = null
-    // A test repair is recorded by `settleClaims` just before the hand-off, once every claim of the attempt has settled, so
-    // the task's ruling limit (counted from the record) never cuts a group of conflicts short; everything else is recorded now.
-    if (res.route === 'test_repair') out.recordArgs = { claim, answer, res, open, tier }
-    if (res.route !== 'spec_edit' && res.route !== 'test_repair' && res.record) {
+    // Every ruling but a spec edit is recorded as it settles (10.1), so the task's ruling limit (7.6) counts it.
+    if (res.route !== 'spec_edit' && res.record) {
       recorded = await recordRuling(n, { claim, answer, res, open, tier })
       if (recorded.error) return await toMe('record-failed', `${recorded.error}; the ${res.route} ruling was not acted on`, { open, ruling: answer })
       out.ruling = answer && typeof answer === 'object' ? { ...answer, number: recorded.number } : answer
@@ -2558,19 +2556,7 @@ async function runTask(n) {
         settled.push(out)
       }
       const others = settled.filter(o => o.route !== 'test_repair')
-      // Record the gathered repairs now, in order, before acting (10.1): one whose record fails is an entry for me and goes no further.
-      const repairs = []
-      for (const o of settled.filter(x => x.route === 'test_repair')) {
-        const got = await recordRuling(n, o.recordArgs)
-        if (got.error) {
-          if (!exit) exit = await arbiterNeedsInput(n, rec, r, o.claim, { reason: 'record-failed', text: `${got.error}; the test_repair ruling was not acted on`, ruling: o.ruling, open: { key: o.key } })
-          continue
-        }
-        o.rulingNo = got.number
-        o.ruling = o.ruling && typeof o.ruling === 'object' ? { ...o.ruling, number: got.number } : o.ruling
-        if (o.runRuling) o.runRuling.number = got.number
-        repairs.push(o)
-      }
+      const repairs = settled.filter(x => x.route === 'test_repair')
       let fixed = null
       if (repairs.length) {
         rec.result = r
@@ -2583,7 +2569,12 @@ async function runTask(n) {
         const finding = (fixed.records.find(x => x.outcome === 'test-correct' && x.finding) || {}).finding
         const reasons = [...fixed.toMe, ...fixed.findings.map(f => `the test-fixer found the test correct, so it is not changed: ${trim(String(f.message || f.issue || ''), 300)}`)]
         if (reasons.length) {
-          if (exit) { runWarnings.push(`Task ${n}: the test repair did not land (${reasons.join(' | ')}) and a claim went to needs-input first`); return { exit } }
+          if (exit) {
+            runWarnings.push(`Task ${n}: the test repair did not land (${reasons.join(' | ')}) and a claim went to needs-input first`)
+            // The task has one needs-input entry: the repair that did not land rides along in it, so its exact change reaches me (8.8, 10.9).
+            if (exit.needsInput) exit.needsInput.alsoPending = [...(exit.needsInput.alsoPending || []), { ruling: lastRepair.ruling ?? null, testRepair: lastRepair.testRepair, reasons }]
+            return { exit }
+          }
           return { exit: await parkTestFix(n, rec, reasons, fixed.records, { ruling: lastRepair.ruling ?? null, testRepair: lastRepair.testRepair, ...(finding ? { finding } : {}) }) }
         }
       }
@@ -2668,11 +2659,6 @@ async function runTask(n) {
           const out = await arbitrate(n, rec, r, guardClaim(n, stop, [...new Set([codeOpts(n).model, ...rec.escalations.map(e => e.model), model].filter(Boolean))]))
           if (out.exit) return out.exit
           if (out.route === 'test_repair') {
-            const got = await recordRuling(n, out.recordArgs)
-            if (got.error) return await arbiterNeedsInput(n, rec, r, out.claim, { reason: 'record-failed', text: `${got.error}; the test_repair ruling was not acted on`, ruling: out.ruling, open: { key: out.key } })
-            out.rulingNo = got.number
-            out.ruling = { ...out.ruling, number: got.number }
-            if (out.runRuling) out.runRuling.number = got.number
             const t = out.ruling.testRepair || {}
             const fixed = await testFixFor(n, [{ file: String(t.file || out.claim.file || ''), test: String(t.test || out.claim.test || ''), criterion: String(out.claim.criterion || ''), reason: String(t.why || out.ruling.reasoning || ''), fix: String(t.change || ''), ruling: out.ruling }])
             if (fixed.toMe.length) return await parkTestFix(n, rec, fixed.toMe, fixed.records)

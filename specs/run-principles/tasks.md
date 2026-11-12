@@ -1585,7 +1585,8 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - A risky-tier call that is not the task's first call in the run carries the `risky` label, so the calls of a task have distinct labels (TC-201).
 - `rec.reportedConflicts` keeps the conflicts an attempt reported, so the result's `testConflicts` still lists them after a landed fix (TC-34).
 - `tests/test_unattended_smoke.py` TC-177/TC-43b hang, on the base branch as well. This is a defect in the test's Node driver, not the sandbox: its direct `ck` global (`const ck = async argv => ...`) drops the `{cwd, stdin}` option the workflow passes, and `exec` never closes the child's stdin, so `ck arbiter open` (stdin `{claim, task}`, design.md) blocks forever. With a driver copy that passes `stdin` and closes the pipe, the whole scenario runs green in about 3 minutes (order 2#1, 7#1, 8#1, 2#2, 3#1). The fix belongs to the test track (Task 100's file).
-- `tests/js/command_deps.test.mjs` TC-117 and TC-123 expect a `failed` record for a command cycle and for an exhausted gate. Under 6.13, 6.11 and 6.10, these claims go to the arbiter, or to needs-input when there is no arbiter, so the tests contradict the requirements.
+- `tests/js/command_deps.test.mjs` TC-117 and TC-123 were corrected in e46c80b (they now expect a needs-input entry when no arbiter is given); no conflict remains there.
+- `tests/js/test_fix.test.mjs` tc48 (four conflicts on one task, four rulings) contradicts 7.6: the 4th ruling on a task is a needs-input entry, not a ruling. The test track should use at most 3 conflicts per task, or expect the 4th to become a needs-input entry.
 
 ---
 

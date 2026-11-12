@@ -427,8 +427,12 @@ def record_ruling(root: Path, spec: str, into: str, record: RulingRecord, lock_w
             else:
                 path.write_text(existing, encoding="utf-8")
             raise
-        _mark_ruled(root, spec, record, number)
-    return {"number": number, "commit": sha, **({"recovered": recovered} if recovered else {})}
+        ledger_warning = None
+        try:
+            _mark_ruled(root, spec, record, number)
+        except Exception as exc:  # the entry is committed: a ledger failure is a warning, not a failed record
+            ledger_warning = f"the ruling is committed but the ledger was not updated: {exc}"
+    return {"number": number, "commit": sha, **({"recovered": recovered} if recovered else {}), **({"warning": ledger_warning} if ledger_warning else {})}
 
 
 def _mark_ruled(root: Path, spec: str, record: RulingRecord, number: int) -> None:
