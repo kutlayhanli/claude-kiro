@@ -1976,7 +1976,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 84: Have the arbiter rule on refuted findings and proposed cuts
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 4.2, 4.3, 11.1, 11.2, 11.4, 11.9, 11.11, 11.12, 1.12
 **Description:** In `plugin/workflows/spec-create.js`, add the `arbiterAgent`, `runnerAgent` and `agents.arbiter` args and a `thinCk` helper in the shape of `spec-implement.js`'s, which runs every `ck arbiter` step through `runnerAgent`. An absent `arbiterAgent` is 11.12: the steps with subjects are lost and the result is `Needs work`. Arbiter steps use plain `agent`, with `agentType` from `arbiterAgent` and the tier's model and effort from `agents.arbiter`, not `pagent`, whose `ck progress` lines the arbiter's lane denies; `thinCk` calls to `ck progress event ... phase-start` and `step-end`, phase `Arbiter`, keep their time in the ETA. After the refuter, call `ck arbiter context` and `ck arbiter lane open`. When `context` returns `missing`, make no arbiter call, leave the findings and cuts as they stood, and name the file and `ck principles init` in review.md and the report (1.12). Otherwise run one arbiter call each for refuted findings and for cuts, in parallel, with `ck arbiter review --step refuted|cuts` validating each entry. A step with no subjects makes no call. Entries asking for a stronger look go to one re-run at the risky tier. Findings ruled standing join the confirmed set. Cuts stay out of `toFix`, and only cuts the arbiter finds sound reach the report. A lost step leaves its findings or cuts as they stood, is named in `review.arbiter.lost`, and sets the result to `Needs work`, and the Revise prompt names any lost step so review.md's Result says the same. Add `review.proposedCuts` and `review.arbiter` to the result. Harness Contract owner: the `arbiter refuted` and `arbiter cuts` steps with their ` risky` suffix, `review.proposedCuts`, and `review.arbiter` (the contract's `arbiterChecks`).
@@ -1986,11 +1986,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 45 (TC-137, the arbiter step labels of `spec-create.js`), Task 78 (TC-27, TC-28), Task 79 (TC-97, 98, 100, 105, 107, 108, 141, 148), Task 80 (P-28, P-30, P-46), Task 81 (red team of 4.3), Task 90 (the migrated create-side suites)
 
 **Acceptance:**
-- [ ] A refuted finding gets one ruling and is neither dropped nor majority-voted
-- [ ] A finding ruled standing is in the revise prompt, and one ruled refuted stays listed with the ruling
-- [ ] No proposed cut reaches a revise prompt, and a rejected cut stays in the record of rulings only
-- [ ] With no refuted findings and no cuts, no arbiter call runs
-- [ ] A failed call leaves its subjects as they stood and the result is not Ready
+- [x] A refuted finding gets one ruling and is neither dropped nor majority-voted
+- [x] A finding ruled standing is in the revise prompt, and one ruled refuted stays listed with the ruling
+- [x] No proposed cut reaches a revise prompt, and a rejected cut stays in the record of rulings only
+- [x] With no refuted findings and no cuts, no arbiter call runs
+- [x] A failed call leaves its subjects as they stood and the result is not Ready
 
 **Dependencies:** Task 6 (runs the `spec:arbiter` agent), Task 90 (its tests are the oracle), Task 43 (calls `ck arbiter context` and `review`), Task 45 (its tests are the oracle), Task 78 (its tests are the oracle), Task 79 (its tests are the oracle), Task 80 (its tests are the oracle), Task 81 (its tests are the oracle), Task 83 (edits `spec-create.js` and reads the lens's cuts)
 **Complexity:** High
