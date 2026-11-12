@@ -2009,9 +2009,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 79 (TC-99, 102, 104, 158), Task 80 (P-29), Task 82 (red team of 11.6, 11.11, 11.12; the last `/spec:create` arbiter step), Task 87 (the create half of TC-128), Task 90 (the migrated create-side suites)
 
 **Acceptance:**
-- [ ] With a PLAN.md, the drift step runs after Revise whether or not Revise applied fixes, and with none it does not
-- [ ] A ruling that would change a decision is not applied and appears in review.md and the result
-- [ ] An arbiter change with no Revise fixes still runs the Consistency Check
+- [x] With a PLAN.md, the drift step runs after Revise whether or not Revise applied fixes, and with none it does not
+- [x] A ruling that would change a decision is not applied and appears in review.md and the result
+- [x] An arbiter change with no Revise fixes still runs the Consistency Check
 
 **Dependencies:** Task 90 (its tests are the oracle), Task 79 (its tests are the oracle), Task 80 (its tests are the oracle), Task 82 (its tests are the oracle), Task 84 (edits `spec-create.js`, uses its context and lane), Task 87 (its tests are the oracle), Task 24 (provides `cmd:ck lint --simulate`)
 **Complexity:** Medium
