@@ -1557,7 +1557,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 66: Carry out code, test-repair and requirements rulings and record them
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 7.3, 7.4, 7.5, 7.6, 7.7, 7.8, 8.8, 8.9, 8.10, 8.11, 8.13, 8.14, 8.15, 8.16, 10.7, 10.8, 10.9
 **Description:** In `plugin/workflows/spec-implement.js`, add the pure `testRepairEntries(rulings)` to the decisions block, `settleClaims(n, rec, claims, next)`, the one claim loop (design.md "One claim loop"), here with `next` `retry` for an attempt's claims, and `handOffTestRepair(n, rec, rulings)` as the single point a test-repair ruling goes through, with its one call site in `settleClaims` (D18, 8.9). The test-fixer is built (unattended-correctness Tasks 57 and 86), so `handOffTestRepair` takes the `test_repair` rulings `settleClaims` gathered, maps each to a conflict entry (`file` and `test` from `ruling.testRepair`, else the claim's; `criterion` from the claim; `reason` = `testRepair.why`; `fix` = `testRepair.change`; `ruling` = the settled ruling, unchanged) and calls `testFixFor(n, entries)`; `conflictEntry` keeps the optional `ruling`, and `testFixPrompt` says such a `fix` is the arbiter's ruled change. Move today's post-fix code out of the old confirmed-conflict branch: a landed fix resets `budgetBase`, retries with `afterFixNote` and runs `ladder()` again, whose result goes through `settleClaims` again, with no retry spent (8.16); a `test-correct` verdict on a ruled test no longer retries: it goes to `parkTestFix` as one `test-fix` entry carrying the ruling (`ruling`, `testRepair`) and the fixer's `finding`, with no second ruling (8.8, D27); `toMe` goes to `parkTestFix` (kind `test-fix`, with `ruling`, the number, and `testRepair`, the ruling's exact change and why, added, since the fixer's records carry no fix when the ledger refuses); a conflict reported again after the fix landed is today's "still reports a test that can never pass" park, with the new report as `evidence` and no second arbiter call (8.8, 8.10, 7.4). A `code` ruling returns the task to the implementer with the ruling text in its prompt and still needs a passing gate. A `requirements` ruling or a missing requirement creates a needs-input entry, using `parkAction` and the park path, with the kinds `requirements`, `missing-requirement` and `arbiter`, plus the existing `test-fix` from `parkTestFix`, and the `ruling` field. Run `ck arbiter record` inside `withLandingLock` for these outcomes, before acting; a failed record is logged in the run report and the claim goes to needs-input. Add `rulings` (this run only) to the result, and list them in the run report. Harness Contract owner: `testRepairEntries` in the decisions block (reached through the bridge `call` op), and the `rulings` result key with `ruling` on needs-input entries. There is no `testFixerAvailable` arg.
@@ -1567,17 +1567,24 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 2 (the bridge `call` op), Task 53 (red team of 7.2, 7.4, 7.6 in a run; needs the recording path too), Task 55 (TC-201), Task 56 (TC-12, the entry records the layer), Task 58 (TC-55 to 60), Task 59 (TC-74), Task 60 (TC-71 to 73, 76 to 78, 199, 205), Task 61 (TC-94, TC-96), Task 63 (P-15, P-27), Task 102 (the migrated test-fixer suites), Task 100 (TC-177 and TC-43b, in a full run)
 
 **Acceptance:**
-- [ ] A test-repair ruling starts the test-fixer with no confirmation, its conflict entry carries the ruling unchanged, and a landed fix retries the task without spending a retry
-- [ ] A repair the fixer cannot take or does not land yields one `test-fix` entry carrying the ruling, and the test file is byte-identical
-- [ ] A `test-correct` verdict on a ruled test yields one `test-fix` entry carrying the ruling and the fixer's finding, with no task retry and no second ruling
-- [ ] `handOffTestRepair` has a single call site, in `settleClaims`
-- [ ] A code ruling's text reaches the retry prompt, and a failing gate after it leaves the task unfinished
-- [ ] A requirements or missing-requirement ruling creates an entry and leaves requirements.md unchanged
-- [ ] The result's `rulings` holds this run's rulings only, and entries are in `needsInput`, not `failed`
+- [x] A test-repair ruling starts the test-fixer with no confirmation, its conflict entry carries the ruling unchanged, and a landed fix retries the task without spending a retry
+- [x] A repair the fixer cannot take or does not land yields one `test-fix` entry carrying the ruling, and the test file is byte-identical
+- [x] A `test-correct` verdict on a ruled test yields one `test-fix` entry carrying the ruling and the fixer's finding, with no task retry and no second ruling
+- [x] `handOffTestRepair` has a single call site, in `settleClaims`
+- [x] A code ruling's text reaches the retry prompt, and a failing gate after it leaves the task unfinished
+- [x] A requirements or missing-requirement ruling creates an entry and leaves requirements.md unchanged
+- [x] The result's `rulings` holds this run's rulings only, and entries are in `needsInput`, not `failed`
 
 **Dependencies:** Task 2 (its tests are the oracle), Task 42 (calls `ck arbiter record`), Task 53 (its tests are the oracle), Task 55 (its tests are the oracle), Task 56 (its tests are the oracle), Task 58 (its tests are the oracle), Task 59 (its tests are the oracle), Task 60 (its tests are the oracle), Task 61 (its tests are the oracle), Task 63 (its tests are the oracle), Task 65 (calls `arbitrate`), Task 100 (its tests are the oracle), Task 102 (its tests are the oracle), Task 43 (provides `cmd:ck arbiter context`)
 **Complexity:** High
 **Risk:** safety (sends needs-input notifications and starts the test-fixer, which lands test changes on the integration branch)
+
+**Implementation notes:**
+- A test-repair ruling is recorded by `settleClaims` just before the hand-off (after every claim of the attempt has settled), not as each claim settles, so the task's ruling limit never cuts a group of conflicts short (tc48: four conflicts, four rulings). Code, requirements and missing-requirement rulings are recorded as they settle.
+- `ck arbiter record` now also marks the claim `ruled` in the arbiter ledger with the ruling number and sets `lastEntry` (`src/claude_kiro/arbiter.py`, `_mark_ruled`): the limits and the repeat-after-ruling check read the ledger and nothing wrote it. `validate_ruling` now requires `status` (`src/claude_kiro/arbiter_policy.py`): an answer with no status was valid and got recorded (red-team story 7).
+- A risky-tier call that is not the task's first call in the run carries the `risky` label, so the calls of a task have distinct labels (TC-201).
+- `rec.reportedConflicts` keeps the conflicts an attempt reported, so the result's `testConflicts` still lists them after a landed fix (TC-34).
+- `tests/test_unattended_smoke.py` TC-177/TC-43b time out in this sandbox, on the base branch as well (the scripted Task 2 agent never returns).
 
 ---
 

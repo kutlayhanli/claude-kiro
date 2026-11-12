@@ -427,7 +427,23 @@ def record_ruling(root: Path, spec: str, into: str, record: RulingRecord, lock_w
             else:
                 path.write_text(existing, encoding="utf-8")
             raise
+        _mark_ruled(root, spec, record, number)
     return {"number": number, "commit": sha, **({"recovered": recovered} if recovered else {})}
+
+
+def _mark_ruled(root: Path, spec: str, record: RulingRecord, number: int) -> None:
+    """The ledger learns the ruling: the claim (and a deadlock's per-finding aliases, which share its worktree) is
+    `ruled` with this number, so a later `open` of the same claim is a repeat and the task's limits count it."""
+    with ledger_lock(root, spec):
+        ledger = load_ledger(ledger_path(root, spec))
+        entry = ledger["claims"].get(record.claim_key)
+        if entry is not None:
+            rel, branch = entry.get("worktree"), entry.get("branch")
+            for other in ledger["claims"].values():
+                if other is entry or (rel and other.get("worktree") == rel and other.get("branch") == branch):
+                    other.update({"status": "ruled", "ruling": number, "outcome": record.outcome, "reasoning": record.reasoning})
+        ledger["lastEntry"] = max(int(ledger.get("lastEntry", 0)), number)
+        write_ledger(ledger_path(root, spec), ledger)
 
 
 # --------------------------------------------------------------------------- /spec:create review (Task 43)
