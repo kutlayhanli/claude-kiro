@@ -1648,11 +1648,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 51 (confirmation and revise-ladder routing; `spec_implement.test.mjs` runs whole, so it needs every replaced path gone), Task 54 (red team of 8.2, 8.4 to 8.6, 8.12; the first task with landing, resume and re-review together), Task 55 (TC-44, TC-45, TC-200, TC-207), Task 59 (TC-75, TC-146, TC-210), Task 61 (TC-34), Task 62 (P-12, P-43, P-44), Task 64 (red team of 6.2, 6.3, 6.4, 6.6, 6.7, 6.10; the first task with every stop routed), Task 81 (red team of 4.8)
 
 **Acceptance:**
-- [ ] A deadlock on an individually reviewed or batched task calls the arbiter, and no `revise (model)` label runs
-- [ ] A guard stop during a revision reaches the arbiter, and a `code` ruling or a landed test fix re-runs the revision and the review goes on; `handOffTestRepair` keeps one call site
-- [ ] A `test_repair` ruling on a review deadlock goes to the fixer, and a landed fix re-reviews the task
-- [ ] A serves-no-requirement finding does not block landing, the code stays, and `proposedCuts` names it
-- [ ] The re-review prompt holds the ruling, and a settled finding raised again does not block
+- [x] A deadlock on an individually reviewed or batched task calls the arbiter, and no `revise (model)` label runs
+- [x] A guard stop during a revision reaches the arbiter, and a `code` ruling or a landed test fix re-runs the revision and the review goes on; `handOffTestRepair` keeps one call site
+- [x] A `test_repair` ruling on a review deadlock goes to the fixer, and a landed fix re-reviews the task
+- [x] A serves-no-requirement finding does not block landing, the code stays, and `proposedCuts` names it
+- [x] The re-review prompt holds the ruling, and a settled finding raised again does not block
 
 **Dependencies:** Task 51 (its tests are the oracle), Task 54 (its tests are the oracle), Task 55 (its tests are the oracle), Task 59 (its tests are the oracle), Task 61 (its tests are the oracle), Task 62 (its tests are the oracle), Task 64 (its tests are the oracle), Task 68 (edits the same workflow; calls `arbitrate`), Task 81 (its tests are the oracle)
 **Complexity:** High
