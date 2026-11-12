@@ -785,7 +785,7 @@ Plan layer: ${ctx.planLayer || '(none)'}
 
 For each drift item return one ruling: claim (a new id: D1, D2, ...), status ("ruled", or "needs_stronger_look" when a stronger model should decide), verdict ("drift"), reasoning (one or two sentences citing the passage and the PLAN.md decision), principle (an id from the list above), outcome:
 - "requirements" when the spec change would add, remove or change what PLAN.md decided. Do not edit the spec for it; give requirement {kind, wording (the requirement as it should read), reason (the PLAN.md decision it follows)}.
-- "spec_edit" when the item is only wording, traceability or a stale reference that changes no decision. Correct it in the spec files, and only if no task has started.
+- "spec_edit" when the item is only wording, traceability or a stale reference that changes no decision. Correct it in the spec files, and only if no task has started. implementationStarted is ${ctx.implementationStarted === true ? 'true: a task has started, so make NO edit to any spec file for any item; return it as "spec_edit" with changed "nothing" and let me decide' : 'false: no task has started, so an edit is allowed'}.
 changed: for spec_edit, the file and what you changed; otherwise "nothing". Return an empty list when nothing drifted.`
 
 // One arbiter call for a step at one tier. Returns the arbiter's answer, or null when the call failed.
@@ -803,8 +803,9 @@ async function arbiterAsk(step, tier, subjects, ctx) {
 }
 
 // `ck arbiter review`: validates each entry on its own and records the rulings. Returns its results, or null when it did not answer.
-async function arbiterReview(step, tier, subjects, output) {
-  const stdin = JSON.stringify({ subjects, output: output === undefined ? null : output, lostSteps: [] })
+// `lostSteps` names the earlier steps that returned no usable ruling; ck turns a drift call with any of them into Needs work.
+async function arbiterReview(step, tier, subjects, output, lostSteps = []) {
+  const stdin = JSON.stringify({ subjects, output: output === undefined ? null : output, lostSteps })
   const a = await thinCk(`arbiter review ${step} ${tier}`, ['-C', ROOT, 'arbiter', 'review', A.feature, '--step', step, '--tier', tier, '--json'],
     `Validation step for the ${step} rulings of spec ${A.feature}, ${tier} tier`, stdin)
   return a.code === 0 && a.json && Array.isArray(a.json.results) ? a.json.results : null
@@ -878,12 +879,14 @@ if (refuted.length || proposedCuts.length) {
   }
   // A cut is listed unless the arbiter rejected it: a reported cut (it removes something PLAN.md decided) and a lost
   // one (the step did not rule, so it stands as it was, 11.12, 1.12) are both shown to me and never applied.
+  // status: 'sound' (the arbiter found it sound), 'reported' (it removes something PLAN.md decided, so it is listed for my
+  // decision and never called sound), 'unchecked' (no usable ruling; it stands as it was).
   for (const c of proposedCuts) {
     const o = cutOutcome.get(String(c.id))
     if (o && o.action === 'reject-cut') continue
-    const ruled = !!o && o.action !== 'unchecked'
+    const status = o && o.action === 'show-cut' ? 'sound' : o && o.action === 'report' ? 'reported' : 'unchecked'
     shownCuts.push({ id: String(c.id), story: c.story, title: c.title, weakness: c.weakness, saves: c.saves,
-      status: ruled ? 'sound' : 'unchecked', ruling: o ? o.ruling : null, reasoning: o ? o.reasoning : '' })
+      status, ruling: o ? o.ruling : null, reasoning: o ? o.reasoning : '' })
   }
   if (shownCuts.length) log(`${shownCuts.length} proposed cut(s) listed in review.md, not applied; awaiting your approval.`)
   if (arb.lost.length) log(`Arbiter: no usable ruling for ${arb.lost.join(', ')}; those stand as they were and the result is Needs work.`)
@@ -900,17 +903,26 @@ log(`Review: ${confirmed.length} confirmed (${toFix.length} to fix, ${forUser.le
 // Returns {edited, decisions}: edited when the arbiter changed a spec file, decisions for what I must decide.
 async function driftCheck() {
   const none = { edited: false, decisions: [] }
+  // A lost drift step still makes its ck call (output null, lostSteps = every lost step), so review.md gets the lost row
+  // and the Needs work Result, as Revise and the workflow result say (11.12). ck records the lost row only when it reads
+  // review.md's plan, so the call is made for every lost drift step.
+  const lostDrift = async () => {
+    arb.lost.push('drift')
+    await arbiterReview('drift', 'normal', [], null, [...arb.lost])
+    return none
+  }
   const context = await thinCk('arbiter context', ['-C', ROOT, 'arbiter', 'context', A.feature, '--json'], `Context step for spec ${A.feature} before the arbiter's drift check`)
   const ctx = context.code === 0 && context.json ? context.json : null
-  if (!ctx) { arb.lost.push('drift'); log('Arbiter did not run: ck arbiter context did not answer.'); return none }
+  if (!ctx) { log('Arbiter did not run: ck arbiter context did not answer.'); return lostDrift() }
   // PLAN.md exists: `plan` is set by ck arbiter context; planLayer covers a plan with a ## Principles section.
   if (ctx.plan !== 'present' && ctx.planLayer !== 'present') return none
-  if (ctx.missing) { arb.missing = String(ctx.missing); arb.lost.push('drift'); log(`Arbiter did not run: ${ctx.missing} is missing or unusable. Run ck principles init.`); return none }
-  if (!ARBITER_AGENT) { arb.lost.push('drift'); log('Arbiter did not run: no arbiter agent is configured (arbiterAgent).'); return none }
+  if (ctx.missing) { arb.missing = String(ctx.missing); log(`Arbiter did not run: ${ctx.missing} is missing or unusable. Run ck principles init.`); return lostDrift() }
+  if (!ARBITER_AGENT) { log('Arbiter did not run: no arbiter agent is configured (arbiterAgent).'); return lostDrift() }
 
   await thinCk('arbiter lane open', ['-C', ROOT, 'arbiter', 'lane', 'open', A.feature, '--json'], `Lane step for spec ${A.feature}: the arbiter's ticket`)
   const answer = await arbiterAsk('drift', 'normal', [], ctx)
-  const results = await arbiterReview('drift', 'normal', [], answer)
+  // Earlier lost steps go to ck now; a lost drift step is marked by ck itself from its null or unchecked output.
+  const results = await arbiterReview('drift', 'normal', [], answer, [...arb.lost])
   await thinCk('arbiter lane close', ['-C', ROOT, 'arbiter', 'lane', 'close', A.feature, '--json'], `Lane step for spec ${A.feature}: close the arbiter's ticket`)
 
   const rulings = answer && Array.isArray(answer.rulings) ? answer.rulings : []
@@ -984,8 +996,9 @@ const FROZEN_RULE = `**Frozen spec.** First read the Status line of every task i
 const shouldExistNote = shouldExistLost || proposedCuts.length
   ? ''
   : '\n## Should-exist\nThe should-exist lens found nothing to cut. Say so in one sentence under this heading.\n'
+// Each cut's status says what the arbiter found, and review.md must word it the same way: only "sound" is called sound.
 const cutsNote = shownCuts.length
-  ? `\n## Proposed cuts\nThe arbiter found these cuts sound. Do NOT apply them and do NOT edit any spec file for them. List each under "## Proposed cuts" in review.md with its story, title, weakness and what it saves, marked as not applied and awaiting my approval.\n${JSON.stringify(shownCuts.map(c => ({ id: c.id, story: c.story, title: c.title, weakness: c.weakness, saves: c.saves })), null, 2)}\n`
+  ? `\n## Proposed cuts\nEach cut's status is what the arbiter found: "sound" (the arbiter found the cut sound), "reported" (the cut removes something PLAN.md decided, so it is listed for my decision and is not called sound), or "unchecked" (the arbiter did not check it, so it stands as it was). Do NOT apply any of them and do NOT edit any spec file for them. List each under "## Proposed cuts" in review.md with its story, title, weakness, what it saves and its status, marked as not applied and awaiting my approval.\n${JSON.stringify(shownCuts.map(c => ({ id: c.id, status: c.status, story: c.story, title: c.title, weakness: c.weakness, saves: c.saves })), null, 2)}\n`
   : ''
 const arbiterNote = arb.missing || arb.lost.length
   ? `\n## Arbiter\n${arb.missing ? `${arb.missing} is missing or unusable, so the arbiter did not run. Name that file and the command \`ck principles init\` in this section.\n` : ''}${arb.lost.length ? `These arbiter steps returned no usable ruling: ${arb.lost.join(', ')}. Their findings and cuts stand as they were, and **Result:** must be Needs work.\n` : ''}`
@@ -1118,7 +1131,7 @@ if (revisionFixed > 0 || drift.edited) {
   for (let pass = 1; pass <= MAX_CONSISTENCY_PASSES; pass++) {
     const scope = snapshot
       ? `The revision step just edited the spec. The pre-revision copies are in ${SNAP}/ (${snapshot.copied.join(', ')}). Diff each spec file against its snapshot (\`diff -u ${SNAP}/<file> ${DIR}/<file>\`; a file with no snapshot is new, so all of it changed). Every changed passage is in scope.`
-      : `There is no snapshot of the pre-revision spec (taking it failed), so you cannot diff. Treat every passage the applied findings below touched as changed, and read all four files in full.`
+      : `There is no snapshot of the pre-revision spec, so you cannot diff (no snapshot was taken: either no fix was confirmed, so only the arbiter may have edited a spec file, or the snapshot step failed). Read all four files in full. Treat every passage the applied findings below touched as changed, if there are any.`
     const previous = pass > 1
       ? `\nThis is pass ${pass}. Pass ${pass - 1} fixed these contradictions; check its edits especially, since a fix can introduce a new contradiction:\n${JSON.stringify(lastFixed.map(c => ({ id: c.id, fix: c.fix, changedSide: c.changedSide })), null, 2)}\nDo not re-report contradictions already resolved; report only what remains or is new.\n`
       : ''
@@ -1166,18 +1179,19 @@ Use ids C${pass}.1, C${pass}.2, ... If you find nothing, return an empty list. R
     log(`Consistency check pass ${pass}: ${found.length} contradiction(s), ${lastFixed.length} fixed, ${decided.length} for your decision.`)
     if (!lastFixed.length) break
   }
-
-  if (snapshot) {
-    await agent(`
-Mechanical step. Run \`rm -rf ${SNAP}\` and nothing else. Return removed: true if ${SNAP} no longer exists.`, {
-      label: 'remove pre-revision snapshot',
-      phase: 'Consistency Check',
-      effort: 'low',
-      schema: { type: 'object', properties: { removed: { type: 'boolean' } }, required: ['removed'] },
-    })
-  }
 } else {
   log('No fixes applied and the arbiter changed no spec file; skipping the consistency check.')
+}
+
+// The snapshot is removed whenever one was taken, whether or not the check ran (a revision that fixed nothing must not leave it in the spec tree).
+if (snapshot) {
+  await agent(`
+Mechanical step. Run \`rm -rf ${SNAP}\` and nothing else. Return removed: true if ${SNAP} no longer exists.`, {
+    label: 'remove pre-revision snapshot',
+    phase: 'Consistency Check',
+    effort: 'low',
+    schema: { type: 'object', properties: { removed: { type: 'boolean' } }, required: ['removed'] },
+  })
 }
 
 const byFindingId = Object.fromEntries(toFix.map(f => [f.id, f]))
