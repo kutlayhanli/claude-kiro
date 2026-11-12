@@ -103,6 +103,8 @@ def scrub(obj):
                 res[k] = fake(v, "agent")
             elif k in ("tool_use_id", "toolUseID"):
                 res[k] = fake(v, "toolu")
+            elif k in ("prompt_id", "promptId"):
+                res[k] = fake(v, "prompt")
             elif k == "transcript_path":
                 res[k] = "/home/user/.claude/projects/demo/transcript.jsonl"
             else:

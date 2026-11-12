@@ -7,7 +7,7 @@
   },
   "hook_event_name": "PreToolUse",
   "permission_mode": "bypassPermissions",
-  "prompt_id": "cfc1e1d1-ed65-450c-b58b-6d23e8fbac9c",
+  "prompt_id": "prompt-0002",
   "session_id": "session-0002",
   "tool_input": {
     "command": "echo CAPTURE_ARBITER_VENDORED",

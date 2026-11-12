@@ -2134,6 +2134,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Files:**
 - `tests/fixtures/hook_inputs/capture.sh` - the arbiter agent capture
 - `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json` - the real capture
+- `tests/fixtures/hook_inputs/arbiter-vendored-agent-pretooluse.json` - the real capture of the vendored `ck-arbiter`
 - `tests/test_arbiter_capture.py` - TC-160
 **Verify:** `uv run pytest tests/test_arbiter_capture.py -q`
 
