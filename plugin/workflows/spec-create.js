@@ -896,7 +896,8 @@ async function driftCheck() {
   const context = await thinCk('arbiter context', ['-C', ROOT, 'arbiter', 'context', A.feature, '--json'], `Context step for spec ${A.feature} before the arbiter's drift check`)
   const ctx = context.code === 0 && context.json ? context.json : null
   if (!ctx) { arb.lost.push('drift'); log('Arbiter did not run: ck arbiter context did not answer.'); return none }
-  if (ctx.plan !== 'present') return none
+  // PLAN.md exists: `plan` is set by ck arbiter context; planLayer covers a plan with a ## Principles section.
+  if (ctx.plan !== 'present' && ctx.planLayer !== 'present') return none
   if (ctx.missing) { arb.missing = String(ctx.missing); arb.lost.push('drift'); log(`Arbiter did not run: ${ctx.missing} is missing or unusable. Run ck principles init.`); return none }
   if (!ARBITER_AGENT) { arb.lost.push('drift'); log('Arbiter did not run: no arbiter agent is configured (arbiterAgent).'); return none }
 
@@ -908,7 +909,8 @@ async function driftCheck() {
   const rulings = answer && Array.isArray(answer.rulings) ? answer.rulings : []
   const entryOf = id => rulings.find(x => x && typeof x === 'object' && String(x.claim ?? x.id) === String(id)) || null
   if (!results) { arb.lost.push('drift'); log('Arbiter: the drift check returned no usable ruling; the result is Needs work.'); return none }
-  if (!answer || results.some(r => r.action === 'unchecked')) arb.lost.push('drift')
+  const usable = !!answer && Array.isArray(answer.rulings)
+  if (!usable || results.some(r => r.action === 'unchecked')) arb.lost.push('drift')
   else arb.ran.push('drift')
   for (const r of results) if (r.ruling != null) arb.rulings.push(r.ruling)
 

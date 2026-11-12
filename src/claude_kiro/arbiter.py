@@ -704,6 +704,9 @@ def review_step(root: Path, checkout: Path, spec: str, into: str, step: str, tie
         raw = dict(entry)
         raw["claim"] = key
         check = validate_ruling(raw, key, citable, "create")
+        # A drift ruling that names a requirement item changes what PLAN.md decided, whatever its outcome says (11.6).
+        if step == "drift" and check.valid and check.outcome == "spec_edit" and isinstance(raw.get("requirement"), dict) and raw["requirement"]:
+            check = replace(check, outcome="requirements")
         route = route_create_ruling(check, step, started)  # type: ignore[arg-type]
         action, reason = route.action, route.reason
         # A stronger-look ask is re-run once at the risky tier. When it asks again here it is not recorded
