@@ -1999,7 +1999,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 85: Have the arbiter check the revised spec against the plan
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 11.3, 11.5, 11.6, 11.7, 11.8, 11.10, 11.12
 **Description:** In `plugin/workflows/spec-create.js`, after Revise, when a PLAN.md exists, run one arbiter call to compare the spec with its decisions and principles and validate it with `ck arbiter review --step drift`, which also updates review.md's Needs Your Decision and `**Result:**` line. A lost drift step still makes that call, with `output` null and `lostSteps`, so review.md matches the workflow's `result`. Corrections to draft wording are allowed only while every task is Not Started. Anything that adds, removes or changes what PLAN.md decided is reported in review.md and the result, and never applied. The Consistency Check runs when Revise fixed something or the arbiter edited a spec document. `ck arbiter lane close` ends the step. Harness Contract owner: the `arbiter drift` step.

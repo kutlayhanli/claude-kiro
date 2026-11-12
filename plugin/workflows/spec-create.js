@@ -698,6 +698,39 @@ const ARBITER_RULINGS = {
   required: ['rulings'],
 }
 
+// The drift step names its own items (no subjects): an item is a passage that disagrees with PLAN.md's decisions.
+const DRIFT_RULINGS = {
+  type: 'object',
+  properties: {
+    rulings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          claim: { type: 'string', description: 'the drift item id, D1, D2, ...' },
+          status: { type: 'string', enum: ['ruled', 'needs_stronger_look'] },
+          outcome: { type: 'string', enum: ['spec_edit', 'requirements'] },
+          verdict: { type: 'string', enum: ['drift'] },
+          reasoning: { type: 'string', description: 'one or two sentences citing the passage and the PLAN.md decision' },
+          principle: { type: 'string', description: 'one id from the principles list' },
+          changed: { type: 'string', description: 'for spec_edit: the file and what you changed; otherwise "nothing"' },
+          requirement: {
+            type: 'object',
+            description: 'for outcome requirements: the change PLAN.md decided against',
+            properties: {
+              kind: { type: 'string', enum: ['add', 'remove', 'change'] },
+              wording: { type: 'string', description: 'the requirement as it should read' },
+              reason: { type: 'string', description: 'the PLAN.md decision it follows' },
+            },
+          },
+        },
+        required: ['claim', 'status', 'outcome', 'verdict', 'reasoning', 'principle'],
+      },
+    },
+  },
+  required: ['rulings'],
+}
+
 const ARBITER_RULES = {
   refuted: 'Each subject is a finding that a refuter marked refuted; its "refutation" is the refuter\'s reason. Verdict "finding stands" when the defect is real and the fix is sound; verdict "refutation stands" when the refuter is right.',
   cuts: 'Each subject is a proposed cut: a story whose "Without it" justification the should-exist lens says fails. Verdict "sound" when the justification fails and the cut is right; verdict "unsound" when the story should stay.',
@@ -739,11 +772,29 @@ Return one ruling per subject: claim (the subject's id), status ("ruled", or "ne
 Subjects (JSON):
 ${JSON.stringify(subjects, null, 2)}`
 
+// The drift prompt: one call after Revise that compares the revised spec with PLAN.md's decisions.
+const driftPrompt = ctx => `You are the arbiter of a spec review, run after the revision. Compare the spec files with the decisions in PLAN.md and with the principles. Name each drift item yourself; defer to me only when the principles cannot settle it.
+
+${BRIEF}
+
+Spec files: ${SPEC_FILES}. PLAN.md is the decided record: every item it decides must read the same way in the spec.
+
+Cite exactly one principle per ruling, from this list (its id):
+${JSON.stringify(ctx.principles || [], null, 2)}
+Plan layer: ${ctx.planLayer || '(none)'}
+
+For each drift item return one ruling: claim (a new id: D1, D2, ...), status ("ruled", or "needs_stronger_look" when a stronger model should decide), verdict ("drift"), reasoning (one or two sentences citing the passage and the PLAN.md decision), principle (an id from the list above), outcome:
+- "requirements" when the spec change would add, remove or change what PLAN.md decided. Do not edit the spec for it; give requirement {kind, wording (the requirement as it should read), reason (the PLAN.md decision it follows)}.
+- "spec_edit" when the item is only wording, traceability or a stale reference that changes no decision. Correct it in the spec files, and only if no task has started.
+changed: for spec_edit, the file and what you changed; otherwise "nothing". Return an empty list when nothing drifted.`
+
 // One arbiter call for a step at one tier. Returns the arbiter's answer, or null when the call failed.
 async function arbiterAsk(step, tier, subjects, ctx) {
   const label = `arbiter ${step}${tier === 'risky' ? ' risky' : ''}`
   try {
-    const out = await agent(arbiterPrompt(step, subjects, ctx), { label, phase: 'Arbiter', schema: ARBITER_RULINGS, ...(ARBITER_AGENT ? { agentType: ARBITER_AGENT } : {}), ...arbiterTierOpts(tier) })
+    const prompt = step === 'drift' ? driftPrompt(ctx) : arbiterPrompt(step, subjects, ctx)
+    const schema = step === 'drift' ? DRIFT_RULINGS : ARBITER_RULINGS
+    const out = await agent(prompt, { label, phase: 'Arbiter', schema, ...(ARBITER_AGENT ? { agentType: ARBITER_AGENT } : {}), ...arbiterTierOpts(tier) })
     return out === undefined ? null : out
   } catch (e) {
     log(`${label} failed: ${String(e && e.message)}`)
@@ -835,6 +886,41 @@ confirmed.push(...standing)
 const toFix = confirmed.filter(f => !f.needsUserDecision)
 const forUser = confirmed.filter(f => f.needsUserDecision)
 log(`Review: ${confirmed.length} confirmed (${toFix.length} to fix, ${forUser.length} need your decision), ${refuted.length} refuted.`)
+
+// Drift check (after Revise, only when PLAN.md exists): one arbiter call compares the revised spec with PLAN.md.
+// It validates and records its rulings through `ck arbiter review --step drift`, which also updates review.md's
+// Needs Your Decision and Result line; a lost step still makes that call (output null) so review.md says Needs work.
+// Returns {edited, decisions}: edited when the arbiter changed a spec file, decisions for what I must decide.
+async function driftCheck() {
+  const none = { edited: false, decisions: [] }
+  const context = await thinCk('arbiter context', ['-C', ROOT, 'arbiter', 'context', A.feature, '--json'], `Context step for spec ${A.feature} before the arbiter's drift check`)
+  const ctx = context.code === 0 && context.json ? context.json : null
+  if (!ctx) { arb.lost.push('drift'); log('Arbiter did not run: ck arbiter context did not answer.'); return none }
+  if (ctx.plan !== 'present') return none
+  if (ctx.missing) { arb.missing = String(ctx.missing); arb.lost.push('drift'); log(`Arbiter did not run: ${ctx.missing} is missing or unusable. Run ck principles init.`); return none }
+  if (!ARBITER_AGENT) { arb.lost.push('drift'); log('Arbiter did not run: no arbiter agent is configured (arbiterAgent).'); return none }
+
+  await thinCk('arbiter lane open', ['-C', ROOT, 'arbiter', 'lane', 'open', A.feature, '--json'], `Lane step for spec ${A.feature}: the arbiter's ticket`)
+  const answer = await arbiterAsk('drift', 'normal', [], ctx)
+  const results = await arbiterReview('drift', 'normal', [], answer)
+  await thinCk('arbiter lane close', ['-C', ROOT, 'arbiter', 'lane', 'close', A.feature, '--json'], `Lane step for spec ${A.feature}: close the arbiter's ticket`)
+
+  const rulings = answer && Array.isArray(answer.rulings) ? answer.rulings : []
+  const entryOf = id => rulings.find(x => x && typeof x === 'object' && String(x.claim ?? x.id) === String(id)) || null
+  if (!results) { arb.lost.push('drift'); log('Arbiter: the drift check returned no usable ruling; the result is Needs work.'); return none }
+  if (!answer || results.some(r => r.action === 'unchecked')) arb.lost.push('drift')
+  else arb.ran.push('drift')
+  for (const r of results) if (r.ruling != null) arb.rulings.push(r.ruling)
+
+  const edited = results.some(r => r.action === 'apply' && !/^\s*nothing\s*$/i.test(String((entryOf(r.id) || {}).changed || 'nothing')))
+  const decisions = results.filter(r => r.action === 'report').map(r => {
+    const e = entryOf(r.id) || {}
+    const req = e.requirement && typeof e.requirement === 'object' ? e.requirement : {}
+    return { id: r.id, question: String(req.wording || e.reasoning || r.id), conflictsWith: String(req.reason || ''), reason: r.reason }
+  })
+  if (decisions.length) log(`Drift: ${decisions.length} item(s) that change what PLAN.md decided, for your decision: ${decisions.map(d => d.id).join(', ')}.`)
+  return { edited, decisions }
+}
 
 // ---------------------------------------------------------------------------
 // Revise: apply confirmed fixes and write the review record.
@@ -974,6 +1060,11 @@ Return the structured result.`, {
 const escalated = (revision && revision.escalated) || []
 if (escalated.length) log(`Revise: ${escalated.length} fix(es) would change governed behaviour and were raised for your decision: ${escalated.map(e => e.id).join(', ')}.`)
 
+// Drift check: runs after Revise whether or not Revise applied fixes (only when PLAN.md exists).
+const drift = await driftCheck()
+// Revise fixed something only when there were confirmed fixes to apply.
+const revisionFixed = toFix.length && revision && Array.isArray(revision.fixed) ? revision.fixed.length : 0
+
 // ---------------------------------------------------------------------------
 // Consistency check: re-review what the revision changed, against the criteria
 // and properties. Fixes wording/traceability drift itself; behaviour conflicts
@@ -1010,7 +1101,8 @@ const CONTRADICTIONS = {
 const MAX_CONSISTENCY_PASSES = 2
 const consistency = { passes: 0, fixed: [], decisions: [], lost: false }
 
-if (toFix.length) {
+// The check runs when Revise fixed something or the arbiter edited a spec document (Task 85).
+if (revisionFixed > 0 || drift.edited) {
   phase('Consistency Check')
   const applied = revision ? revision.fixed : []
   let lastFixed = []
@@ -1076,7 +1168,7 @@ Mechanical step. Run \`rm -rf ${SNAP}\` and nothing else. Return removed: true i
     })
   }
 } else {
-  log('No fixes to apply; skipping the snapshot and the consistency check.')
+  log('No fixes applied and the arbiter changed no spec file; skipping the consistency check.')
 }
 
 const byFindingId = Object.fromEntries(toFix.map(f => [f.id, f]))
@@ -1087,6 +1179,7 @@ const openQuestions = [
     return { id: e.id, source: 'revise', file: f.file || null, location: f.location || null, question: e.question, options: e.options || [], conflictsWith: e.conflictsWith, fix: f.fix || null }
   }),
   ...consistency.decisions.map(c => ({ id: c.id, source: 'consistency', file: (c.changedSide || '').split(':')[0] || null, location: c.changedSide, question: c.question || c.description, options: c.options || [], conflictsWith: c.otherSide, fix: null })),
+  ...drift.decisions.map(d => ({ id: d.id, source: 'drift', file: 'requirements.md', location: null, question: d.question, options: [], conflictsWith: d.conflictsWith, fix: null })),
 ]
 
 let result = revision ? revision.result : 'Needs work'

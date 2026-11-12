@@ -458,6 +458,7 @@ def create_context(checkout: Path, spec: str, approved_cut: bool) -> Dict[str, A
     return {
         "principles": [{"id": p.id, "layer": p.layer, "text": p.text} for p in effective.citable],
         "planLayer": effective.plan_layer,
+        "plan": "present" if plan_text is not None else "absent",
         "implementationStarted": started,
         "missing": str(PRINCIPLES_REL) if state != "ok" else None,
         "cut": decide_cut(bool(approved_cut), started),
