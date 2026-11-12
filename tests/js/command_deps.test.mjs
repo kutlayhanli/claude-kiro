@@ -83,7 +83,9 @@ await test('TC-117: a live edge that would close a cycle is not added; Task 2 is
   // 6.13: a command cycle is a wiring claim, not a blocked task; 6.10: with no arbiter it goes to me as a needs-input entry.
   const e = needsInputRec(result, '2')
   assert.ok(e, `task 2 has a needs-input entry: ${JSON.stringify(result.needsInput)}`)
-  assert.match(JSON.stringify(e), /command cycle/i, 'the entry names the command cycle')
+  assert.match(JSON.stringify(e), /command[- ]cycle/i, 'the entry names the command cycle')
+  // 6.10: the entry carries the claim, and the claim names the cycle (Task 5 provides the command Task 2 needs).
+  assert.ok(e.claim && /\b5\b/.test(JSON.stringify(e.claim)), `the entry carries the cycle's claim: ${JSON.stringify(e)}`)
   assert.ok(!failedRec(result, '2'), 'task 2 is not ended blocked')
   assert.equal(requestsOf(trace, 2).length, 1, 'no retry, no wait')
   assert.ok(!result.merged.includes('5'), 'task 5 never ran')
