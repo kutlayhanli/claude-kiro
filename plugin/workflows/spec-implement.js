@@ -1212,7 +1212,7 @@ function landEntryOf(json) {
   const o = json && typeof json === 'object' && !Array.isArray(json) ? json : null
   if (!o || !['MERGED', 'CONFLICT', 'RED', 'REFUSED', 'ERROR'].includes(o.state)) return null
   if (o.state === 'MERGED' && !(isText(o.commit) && o.commit)) return null
-  if (o.moved != null && !(Array.isArray(o.moved) && o.moved.every(m => m && typeof m === 'object' && isText(String(m.task)) && isText(m.test)))) return null
+  if (o.moved != null && !(Array.isArray(o.moved) && o.moved.every(m => m && typeof m === 'object' && isText(String(m.task)) && isText(m.file) && (m.test == null || isText(m.test))))) return null
   return o
 }
 
@@ -2436,6 +2436,11 @@ async function arbitrate(n, rec, r, claim) {
       // `ck worktree land SPEC arbiter<k> --json` prints the one landing entry (state, commit, moved, recovered); a refused call prints {error, tasks}.
       const item = landEntryOf(landed.json)
       const changed = answer && typeof answer === 'object' ? String(answer.changed || '') : ''
+      if (item && item.recovered && typeof item.recovered === 'object') {
+        const r = item.recovered
+        runRuling.recovered = r
+        log(`Landing arbiter spec edit ${open.number}: restored ${INTO} first (${Array.isArray(r.paths) ? r.paths.length : 0} path(s)${r.mergeInProgress ? ', merge in progress' : ''}, head ${trim(String(r.head || ''), 12)})`)
+      }
       if (!item || item.state !== 'MERGED') {
         const why = `${item ? `${item.state}${item.detail ? `: ${trim(String(item.detail), 200)}` : ''}` : `no valid landing entry (${ckError(landed)})`}`
         // 8.4: recorded as not landed, with why, and the ruling and result go to me; no new ruling.
@@ -2445,12 +2450,12 @@ async function arbitrate(n, rec, r, claim) {
       }
       runRuling.landed = true
       runRuling.commit = isText(item.commit) && item.commit ? item.commit : null
+      requestPlan('landing')   // the landing changed the wiring, whether or not the record below succeeds (8.3)
       const rl = await recordRuling(n, { claim, answer, res, open, tier, landing: { changed, landed: true, commit: runRuling.commit, moved: Array.isArray(item.moved) ? item.moved : [] } })
       if (rl.error) return await toMe('record-failed', `the arbiter's spec edit landed on ${INTO} (commit ${runRuling.commit || 'unknown'}), but ${rl.error}; the task was not resumed`, { open, ruling: answer })
       runRuling.number = rl.number
       out.rulingNo = rl.number
       out.ruling = answer && typeof answer === 'object' ? { ...answer, number: rl.number } : answer
-      requestPlan('landing')   // new wiring applies to tasks not yet started (8.3)
     }
     return out
   }
