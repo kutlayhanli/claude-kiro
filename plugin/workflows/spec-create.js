@@ -16,7 +16,7 @@ export const meta = {
 
 // args (passed by the slash command):
 // {
-//   mode: 'create' | 'review',
+//   mode: 'create' | 'review' | 'apply-cuts',   // apply-cuts also takes cuts: [{id, story, title, weakness}]
 //   feature: 'user-auth',                 // kebab-case spec name
 //   projectRoot: '/abs/path/to/project',
 //   specDir: '/abs/path/to/project/specs/user-auth',
@@ -27,7 +27,7 @@ export const meta = {
 //   date: 'YYYY-MM-DD'
 // }
 const A = args || {}
-const MODE = A.mode === 'review' ? 'review' : 'create'
+const MODE = A.mode === 'review' ? 'review' : A.mode === 'apply-cuts' ? 'apply-cuts' : 'create'
 const ROOT = A.projectRoot
 const DIR = A.specDir
 const REQ = `${DIR}/requirements.md`
@@ -103,6 +103,39 @@ const WRITE_RESULT = {
     eta: ETA,
   },
   required: ['path', 'summary', 'assumptions', 'concerns'],
+}
+
+const RUNNER_AGENT = typeof A.runnerAgent === 'string' && A.runnerAgent ? A.runnerAgent : null
+const ARBITER_AGENT = typeof A.arbiterAgent === 'string' && A.arbiterAgent ? A.arbiterAgent : null
+const CK_CALL = {
+  type: 'object',
+  properties: {
+    exitCode: { type: 'integer', description: 'the exit code of the ck command' },
+    json: { type: ['object', 'null'], description: 'the JSON the command printed, copied exactly; null if it printed none' },
+    error: { type: 'string', description: 'only if the command could not run or printed no JSON: what happened' },
+  },
+  required: ['exitCode', 'json'],
+}
+
+// One thin `ck` step through the runner agent: a mechanical call, no judgement. Returns {code, json}.
+const shellWord = s => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${String(s).replace(/'/g, `'\\''`)}'`)
+async function thinCk(label, argv, what, stdin) {
+  const cmd = `ck ${argv.map(shellWord).join(' ')}`
+  const doc = stdin == null ? cmd : `${cmd} <<'CK_STDIN'\n${stdin}\nCK_STDIN`
+  const prompt = `${what}. Do exactly this, nothing else. Edit no file.
+Run this command on its own line, with no other command:
+${doc}
+A non-zero exit is an answer, not a failure: still return its exit code and JSON.
+Return exitCode (the command's exit code) and json (its JSON output, copied exactly as printed; json must be an object, or null if it printed none). Put a message in error only if the command could not run or printed no JSON; no notes or remarks anywhere.`
+  const opts = { label, phase: 'Arbiter', schema: CK_CALL, effort: 'low', ...(RUNNER_AGENT ? { agentType: RUNNER_AGENT } : {}) }
+  let a = null
+  try {
+    a = await agent(prompt, opts)
+  } catch (e) {
+    return { code: -1, json: null, error: String(e && e.message) }
+  }
+  if (!a || typeof a !== 'object' || !Number.isInteger(a.exitCode)) return { code: -1, json: null, error: 'answer does not match CK_CALL' }
+  return { code: a.exitCode, json: a.json && typeof a.json === 'object' ? a.json : null, error: a.error || '' }
 }
 
 // ---------------------------------------------------------------------------
@@ -425,6 +458,73 @@ Return the structured result.`, { label: 'link tracks into tasks.md', phase: 'Li
 }
 
 // ---------------------------------------------------------------------------
+// apply-cuts mode (Task 86): the create skill launches it when I approve a proposed cut.
+// `ck arbiter context --approved-cut` decides, and this script branches only on its `cut` field:
+// `apply` runs one agent that removes the story from the four documents, then `ck lint` runs;
+// `frozen` runs no agent and returns the frozen message.
+// ---------------------------------------------------------------------------
+
+if (MODE === 'apply-cuts') {
+  const FROZEN = 'Not applied: a task has started, so the requirements are frozen. Removing the story is your change to make.'
+  const cuts = Array.isArray(A.cuts) ? A.cuts : []
+  const ctx = await thinCk('arbiter context approved cut', ['-C', ROOT, 'arbiter', 'context', A.feature, '--approved-cut', '--json'],
+    `Context step for spec ${A.feature}: the approved cut`)
+  const decision = ctx.code === 0 && ctx.json ? ctx.json.cut : null
+  if (decision === 'frozen') {
+    log(FROZEN)
+    return { mode: MODE, feature: A.feature, specDir: DIR, applied: false, frozen: true, message: FROZEN, cuts: [] }
+  }
+  if (decision !== 'apply') {
+    const message = `Not applied: the cut decision was ${decision === null ? 'not available (ck arbiter context did not answer)' : `"${decision}"`}.`
+    log(message)
+    return { mode: MODE, feature: A.feature, specDir: DIR, applied: false, frozen: false, message, cuts: [] }
+  }
+  const stories = cuts.map(c => `- Story ${c.story}${c.title ? ` (${c.title})` : ''}: ${c.weakness || ''}`).join('\n')
+  const done = await agent(`
+You are removing approved cuts from the spec. I approved them and no task has started.
+
+${BRIEF}
+
+Cuts to apply:
+${stories || '(none given)'}
+
+Remove each listed story from all four documents, consistently, and only that:
+- ${REQ}: the story and its numbered criteria (renumber nothing else unless the numbering would break; fix any reference to a removed criterion)
+- ${DES}: the parts that exist only for the story, and its traceability rows
+- ${TPL}: the test cases and properties that verify only the story
+- ${TSK}: the tasks that exist only for the story, and every other task's Dependencies, Verified by and Requirements references to them
+
+Do not edit any other file. Run no lint yourself. Return applied (the cut ids you removed) and a one-sentence summary.`, {
+    label: 'apply-cuts',
+    phase: 'Arbiter',
+    schema: {
+      type: 'object',
+      properties: { applied: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } },
+      required: ['applied', 'summary'],
+    },
+  })
+  if (!done) {
+    const message = 'The apply-cuts step returned no answer; the documents may be partly edited. Check them before going on.'
+    log(message)
+    return { mode: MODE, feature: A.feature, specDir: DIR, applied: false, frozen: false, message, cuts: [] }
+  }
+  const lint = await thinCk('lint after cut', ['-C', ROOT, 'lint', A.feature, '--json'], `Lint step for spec ${A.feature} after the cut`)
+  const lintOk = lint.code === 0
+  const lintText = lint.json ? JSON.stringify(lint.json) : (lint.error || '')
+  const message = lintOk
+    ? `Cut applied: ${done.summary}. ck lint reports no new failure.`
+    : `Cut edits are in the four documents (${done.summary}) but ck lint failed after them: ${lintText}. Fix this before going on.`
+  log(message)
+  return {
+    mode: MODE, feature: A.feature, specDir: DIR,
+    applied: lintOk, frozen: false,
+    edited: done.applied || [],
+    lint: { ok: lintOk, exitCode: lint.code, output: lint.json || lint.error || null },
+    message,
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Adversarial review: each lens finds defects, then a separate agent tries to
 // refute every finding. Only findings that survive refutation are acted on.
 // ---------------------------------------------------------------------------
@@ -653,8 +753,6 @@ log(`should-exist: ${proposedCuts.length} proposed cut(s).`)
 // leaves its findings or cuts as they stood and makes the result Needs work.
 // ---------------------------------------------------------------------------
 
-const RUNNER_AGENT = typeof A.runnerAgent === 'string' && A.runnerAgent ? A.runnerAgent : null
-const ARBITER_AGENT = typeof A.arbiterAgent === 'string' && A.arbiterAgent ? A.arbiterAgent : null
 const ARBITER_CFG = A.agents && A.agents.arbiter ? A.agents.arbiter : {}
 // Model and effort of a tier from agents.arbiter (risky_model/risky_effort, falling back to the normal ones).
 function arbiterTierOpts(tier) {
@@ -663,16 +761,6 @@ function arbiterTierOpts(tier) {
   const model = risky ? pick(ARBITER_CFG.risky_model, ARBITER_CFG.model) : pick(ARBITER_CFG.model)
   const effort = risky ? pick(ARBITER_CFG.risky_effort, ARBITER_CFG.effort) : pick(ARBITER_CFG.effort)
   return { ...(model ? { model } : {}), ...(effort ? { effort } : {}) }
-}
-
-const CK_CALL = {
-  type: 'object',
-  properties: {
-    exitCode: { type: 'integer', description: 'the exit code of the ck command' },
-    json: { type: ['object', 'null'], description: 'the JSON the command printed, copied exactly; null if it printed none' },
-    error: { type: 'string', description: 'only if the command could not run or printed no JSON: what happened' },
-  },
-  required: ['exitCode', 'json'],
 }
 
 const ARBITER_RULINGS = {
@@ -734,27 +822,6 @@ const DRIFT_RULINGS = {
 const ARBITER_RULES = {
   refuted: 'Each subject is a finding that a refuter marked refuted; its "refutation" is the refuter\'s reason. Verdict "finding stands" when the defect is real and the fix is sound; verdict "refutation stands" when the refuter is right.',
   cuts: 'Each subject is a proposed cut: a story whose "Without it" justification the should-exist lens says fails. Verdict "sound" when the justification fails and the cut is right; verdict "unsound" when the story should stay.',
-}
-
-// One thin `ck` step through the runner agent: a mechanical call, no judgement. Returns {code, json}.
-const shellWord = s => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${String(s).replace(/'/g, `'\\''`)}'`)
-async function thinCk(label, argv, what, stdin) {
-  const cmd = `ck ${argv.map(shellWord).join(' ')}`
-  const doc = stdin == null ? cmd : `${cmd} <<'CK_STDIN'\n${stdin}\nCK_STDIN`
-  const prompt = `${what}. Do exactly this, nothing else. Edit no file.
-Run this command on its own line, with no other command:
-${doc}
-A non-zero exit is an answer, not a failure: still return its exit code and JSON.
-Return exitCode (the command's exit code) and json (its JSON output, copied exactly as printed; json must be an object, or null if it printed none). Put a message in error only if the command could not run or printed no JSON; no notes or remarks anywhere.`
-  const opts = { label, phase: 'Arbiter', schema: CK_CALL, effort: 'low', ...(RUNNER_AGENT ? { agentType: RUNNER_AGENT } : {}) }
-  let a = null
-  try {
-    a = await agent(prompt, opts)
-  } catch (e) {
-    return { code: -1, json: null, error: String(e && e.message) }
-  }
-  if (!a || typeof a !== 'object' || !Number.isInteger(a.exitCode)) return { code: -1, json: null, error: 'answer does not match CK_CALL' }
-  return { code: a.exitCode, json: a.json && typeof a.json === 'object' ? a.json : null, error: a.error || '' }
 }
 
 const arbiterPrompt = (step, subjects, ctx) => `You are the arbiter of a spec review. Rule on each subject below yourself; defer to me only when the principles cannot settle it.

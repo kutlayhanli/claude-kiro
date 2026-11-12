@@ -2021,7 +2021,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 86: Report proposed cuts in /spec:create and /spec:review, and apply approved ones
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 4.2, 4.4, 4.5, 1.1, 11.9
 **Description:** In `plugin/skills/create/SKILL.md` and `plugin/skills/review/SKILL.md`, using we/you/me framing, run `ck principles init` and tell me when it created the file, run `ck agents --json` and pass `arbiterAgent`, `runnerAgent` and `agents.arbiter` to the workflow, and report `review.proposedCuts` with the story, the weakness and what each saves. `spec-create.js` gains an `apply-cuts` mode that the create skill launches when I approve a cut: it runs `ck arbiter context --approved-cut --json` through `thinCk` and branches only on its `cut` field: `apply` runs one `apply-cuts` agent that removes the story from the four documents, then runs `ck lint` and reports any new failure, and `frozen` runs no agent and returns the frozen message. In the create skill: when I approve a cut, launch that mode and report what it returns: the story removed from requirements, design, test plan and task list consistently, with any new `ck lint` failure, or, when a task has started, that the requirements are frozen and the change is mine to make. The skill does not remove the story itself. Harness Contract owner: the `apply-cuts` label.
@@ -2033,9 +2033,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 75 (the create and review skill text), Task 78 (TC-29 to TC-31), Task 80 (P-42 at `decide_cut`), Task 81 (red team of 4.5)
 
 **Acceptance:**
-- [ ] Both skills report each cut with story, weakness and savings
-- [ ] An approved cut with no task started removes the story from all four documents, and `ck lint` reports no new failure
-- [ ] An approved cut after implementation started is not applied, and the message says so
+- [x] Both skills report each cut with story, weakness and savings
+- [x] An approved cut with no task started removes the story from all four documents, and `ck lint` reports no new failure
+- [x] An approved cut after implementation started is not applied, and the message says so
 
 **Dependencies:** Task 75 (its tests are the oracle), Task 78 (its tests are the oracle), Task 80 (its tests are the oracle), Task 81 (its tests are the oracle), Task 84 (reads `review.proposedCuts`), Task 85 (edits `spec-create.js` after it)
 **Complexity:** Medium
