@@ -23,7 +23,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 
@@ -297,10 +297,10 @@ PRINCIPLES = (
 )
 
 
-def demo_project(tmp_path: Path, calc_tests: str) -> Path:
+def demo_project(tmp_path: Path, calc_tests: str, done: Tuple[str, ...] = ("1", "6")) -> Path:
     """attr_project: tests 1 and 6 Done, impl tasks 2, 3, 7 and 8 left. TC-1 lives in its own file so Task 2's own
     Verify (tests/test_calc_tc.py) does not run it."""
-    root = h.attr_project(tmp_path, statuses={"1": "Done", "6": "Done"}, tests={"test_tc5_more": "pass"})
+    root = h.attr_project(tmp_path, statuses={n: "Done" for n in done}, tests={"test_tc5_more": "pass"})
     add_to_main_and_integration(
         root, {"tests/test_calc_tc.py": calc_tests, "tests/test_other.py": TC1_TEST, "specs/PRINCIPLES.md": PRINCIPLES},
         "real calc tests")
@@ -472,9 +472,11 @@ def test_tc169_the_run_end_audit_is_clean(tc169_run):
 
 @pytest.fixture(scope="module")
 def tc174_run(tmp_path_factory) -> Dict[str, Any]:
-    """The TC-176 scenario without `landOrder`: the tasks land as they finish."""
+    """The TC-176 scenario without `landOrder`, with Task 3 already Done: Task 3 is held behind Task 2 (both own
+    calc.py, 13.1), so only when it is Done does the batch Task 2 lands in (with Task 7) complete the spec, and that
+    batch's whole-spec landing gate (15.2) is the one that goes red with no single task to blame (15.3)."""
     tmp = tmp_path_factory.mktemp("tc174")
-    root = demo_project(tmp, CALC_GOOD)
+    root = demo_project(tmp, CALC_GOOD, done=("1", "3", "6"))
     branch = protected_branch(root)
     target = h.integration_worktree(root)
     scenario = calc_scenario()
