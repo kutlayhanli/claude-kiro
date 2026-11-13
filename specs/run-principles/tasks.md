@@ -2174,8 +2174,8 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verify:** `CK_CONFIG_HOME=$(mktemp -d) uv run pytest tests/test_plugin.py -q` `uv run pytest tests/test_guard_agent_mode_docs.py -q -k "tc87_vendored_workflow"`
 
 **Acceptance:**
-- [ ] `tests/test_plugin.py` passes in full, including the dogfood and vendored-copy tests
-- [ ] The generated `.claude/agents/ck-arbiter.md` and `ck-auditor.md` carry the `DEFAULTS` model and effort from `agents.py`, and no model or effort comes from personal config
+- [x] `tests/test_plugin.py` passes in full, including the dogfood and vendored-copy tests
+- [x] The generated `.claude/agents/ck-arbiter.md` and `ck-auditor.md` carry the `DEFAULTS` model and effort from `agents.py`, and no model or effort comes from personal config
 - [ ] The commit landed through `ck worktree approve`, and the integration checkout is clean afterwards
 
 **Dependencies:** Task 6 (plugin source this copies), Task 48 (plugin source this copies), Task 65 (plugin source this copies), Task 66 (plugin source this copies), Task 67 (plugin source this copies), Task 68 (plugin source this copies), Task 69 (plugin source this copies), Task 70 (plugin source this copies), Task 74 (plugin source this copies), Task 76 (plugin source this copies), Task 83 (plugin source this copies), Task 84 (plugin source this copies), Task 85 (plugin source this copies), Task 86 (plugin source this copies), Task 99 (plugin source this copies)
