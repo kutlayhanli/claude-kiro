@@ -418,9 +418,12 @@ await test('reviewer: the revise prompt asks for a release even when it stops ea
 await test('reviewer: findings that survive the revisions fail the task and nothing merges', async () => {
   const p = project({ deps: { 1: [], 2: ['1'] }, reviews: { 1: ['changes', 'changes'] } })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: ROLES } })
-  // Story 4 (4.6): a task whose blocking findings survive its revisions never merges.
+  // 6.3, 6.10: a review deadlock goes to the arbiter; with none callable it is a needs-input entry, never a failure.
   assert.deepEqual(result.merged, [])
-  assert.match(result.failed[0].reason, /review: blocking findings remain after 1 revision/)
+  const e = (result.needsInput || []).filter(x => x.task === '1')
+  assert.equal(e.length, 1, JSON.stringify(result.needsInput))
+  assert.match(JSON.stringify(e[0]), /no-arbiter|arbiter|deadlock|blocking findings remain/i)
+  assert.ok(!result.failed.some(x => x.task === '1'), 'a deadlock with no arbiter is not a failure')
   assert.ok(!landOf(p.state, '1'))
   assert.ok(!p.state.events.includes('task 2'))  // its dependent never starts
 })
@@ -809,7 +812,9 @@ await test('a long blocking finding reaches the reviser intact, and the failure 
   const p = project({ deps: { 1: [] }, reviews: { 1: ['changes', 'changes'] }, reviewIssue: issue })
   const { result } = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: { reviewer: { model: 'opus', effort: 'high', enabled: true, rounds: 1 } } } })
   assert.ok(p.state.prompts['task 1 revise 1'].includes('END-OF-FINDING'), 'revise prompt has the whole finding')
-  assert.ok(result.failed[0].reason.includes('END-OF-FINDING'), 'failure reason has the whole finding')
+  const e = (result.needsInput || []).find(x => x.task === '1')
+  assert.ok(e, JSON.stringify(result.needsInput))
+  assert.ok(JSON.stringify(e).includes('END-OF-FINDING'), 'the needs-input entry (6.10) has the whole finding')
 })
 
 await test('the brief path comes from args.brief (plugin), with the vendored path as fallback', async () => {
