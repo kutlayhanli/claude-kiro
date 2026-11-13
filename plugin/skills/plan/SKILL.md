@@ -70,6 +70,8 @@ For each decision:
 
 New decisions often surface along the way (a choice opens a new question). Add them to the list and tell me.
 
+If a decision hinges on something we could check in minutes instead of guess (does this API do X, is this fast enough, does approach A fit the code), say so and offer `/spec:explore [feature-name]`: park the decision as an Open Question, save PLAN.md, and pick it up here when the findings are in. If `specs/[feature-name]/EXPLORE.md` exists, read it in Step 1 and cite its findings in the rationale.
+
 Keep going until there are no open decisions that would change the requirements. Small details that `/spec:create` can reasonably settle can stay as "Delegated to spec", but say so and get my OK.
 
 ## Step 4: Confirm and hand off

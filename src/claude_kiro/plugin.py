@@ -28,7 +28,7 @@ PLUGIN_ID = f"{PLUGIN_NAME}@{MARKETPLACE_NAME}"
 MARKETPLACE_REPO = "kutlayhanli/claude-kiro"
 MARKETPLACE_ENTRY = {"source": {"source": "github", "repo": MARKETPLACE_REPO}}
 
-SKILLS = ("plan", "create", "implement", "review", "spawn-worktree")
+SKILLS = ("plan", "explore", "create", "implement", "review", "spawn-worktree")
 # plugin agent file name -> `ck agents` role
 AGENT_ROLES = {
     "implementer": "implementer",

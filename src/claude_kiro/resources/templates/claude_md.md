@@ -27,6 +27,9 @@ This project follows spec-driven development:
 # Discuss and decide the approach (writes specs/<name>/PLAN.md)
 /spec:plan [feature-description]
 
+# Optional: quick throwaway experiments on the plan's open questions (writes specs/<name>/EXPLORE.md)
+/spec:explore [feature-name]
+
 # Write the spec from PLAN.md as a workflow, ending in adversarial review
 /spec:create [feature-name]
 
