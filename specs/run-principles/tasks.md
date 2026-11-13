@@ -1804,7 +1804,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 76: Pass the new arguments and report rulings in /spec:implement
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 10.7, 12.5, 12.6, 1.1, 6.12, 12.12, 13.1
 **Description:** In `plugin/skills/implement/SKILL.md` and `plugin/resources/without-workflow-tool.md`, a single-task run and the no-Workflow path run the read-only audit (the `spec:auditor` agent, or `ck-auditor` when vendored) before the first attempt, and an audit problem is a needs-input entry (13.1, 6.12). In `plugin/skills/implement/SKILL.md`, after the merge target is chosen, run `ck -C <targetDir> principles init --commit --json` and tell me when it created the file; pass `arbiterAgent`, `auditorAgent`, `verifiedBy` and `agents.arbiter`; a `verify-scope` finding launches the workflow on a whole-spec run, and refuses a single-task run whose task it names, quoting the finding as a `verify-file` entry does; report rulings and proposed cuts. In `plugin/resources/spec-implement-brief.md` and `plugin/resources/without-workflow-tool.md`, say a guard stop or test conflict now goes to the arbiter, and that a single-task run and the manual path give claims to me as needs-input entries with no guard ladder and no confirmation agent, since they have no `ck arbiter` loop; a manual launch with a `verify-scope` finding stops and shows me the findings. Use we/you/me framing.
