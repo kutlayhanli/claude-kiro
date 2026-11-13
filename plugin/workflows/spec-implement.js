@@ -1899,11 +1899,10 @@ async function settleScopeClaim(g) {
   if (out.exit) return { exit: out.exit }
   if (out.route === 'spec_edit') return { route: 'spec_edit', ruling: out.ruling, changed: out.ruling && typeof out.ruling === 'object' ? String(out.ruling.changed || '') : '' }
   if (out.route === 'test_repair') {
-    const h = await handOffTestRepair(g.task, rec, [out], { onIntegration: true })
-    const reasons = [...h.fixed.toMe, ...h.fixed.findings.map(f => `the test-fixer found the test correct, so it is not changed: ${trim(String(f.message || f.issue || ''), 300)}`)]
-    if (!reasons.length) return { route: 'test_repair', ruling: out.ruling, changed: '' }
-    const t = (out.ruling && out.ruling.testRepair) || {}
-    return { exit: await parkTestFix(g.task, rec, reasons, h.fixed.records, { ruling: out.rulingNo ?? null, testRepair: { file: String(t.file || g.suite), test: String(t.test || ''), change: String(t.change || ''), why: String(t.why || '') } }) }
+    // A task that has not started has no branch, so the fix is proved on the integration branch (onIntegration).
+    const done = await settleRepairs(g.task, rec, [{ ...out, claim: { ...claim, ...(out.claim || {}) } }], null, { onIntegration: true })
+    if (done.stop) return { exit: done.stop }
+    return { route: 'test_repair', ruling: out.ruling, changed: '' }
   }
   return { exit: await arbiterNeedsInput(g.task, rec, null, claim, { reason: 'lint-route', text: `a verify-scope problem is settled by a spec edit or a test repair; the arbiter ruled ${out.route}`, ruling: out.ruling }) }
 }
@@ -2814,6 +2813,34 @@ async function auditFirst(n, rec) {
   }
   const note = `${fixed ? afterFixNote(fixed.fixed, []) : ''}${rulingNote(settled)}`
   return { exit: null, note }
+
+// D31-D33, 8.9: the one point where gathered test_repair rulings go to the fixer (handOffTestRepair has this single call
+// site), for every caller: a task's claim loop (settleClaims) and a launch or held verify-scope claim (settleScopeClaim).
+// A repair that did not land parks the task with each ruling's number and exact change (8.8); when another claim already
+// went to me (`exit`), it rides along in that entry. Returns { fixed, lastRepair, stop }: `stop` is the needs-input rec
+// to end on, or null when every repair landed.
+async function settleRepairs(n, rec, repairs, exit, opts = {}) {
+  const h = await handOffTestRepair(n, rec, repairs, opts)
+  const fixed = h.fixed
+  // Every ruling whose repair did not land, matched to its fixer record by test node: the entry carries each one's number and exact change (8.8).
+  const landedNodes = new Set(fixed.records.filter(x => x.outcome === 'landed').flatMap(x => x.tests))
+  const repairOf = x => { const t = (x.ruling && x.ruling.testRepair) || {}; return { file: String(t.file || x.claim.file || ''), test: String(t.test || x.claim.test || ''), change: String(t.change || ''), why: String(t.why || '') } }
+  const pending = repairs.map(x => ({ x, e: testRepairEntries([x])[0], testRepair: repairOf(x), ruling: x.rulingNo ?? null }))
+    .filter(p => !p.e || !landedNodes.has(conflictNode(p.e)))
+  const shown = pending.length ? pending : repairs.map(x => ({ x, testRepair: repairOf(x), ruling: x.rulingNo ?? null }))
+  const lastOne = shown[0]
+  const lastRepair = { records: fixed.records, ruling: lastOne.ruling, testRepair: lastOne.testRepair, all: shown.map(p => ({ ruling: p.ruling, testRepair: p.testRepair })) }
+  const finding = (fixed.records.find(x => x.outcome === 'test-correct' && x.finding) || {}).finding
+  const reasons = [...fixed.toMe, ...fixed.findings.map(f => `the test-fixer found the test correct, so it is not changed: ${trim(String(f.message || f.issue || ''), 300)}`)]
+  if (!reasons.length) return { fixed, lastRepair, stop: null }
+  const extra = { ruling: lastRepair.ruling ?? null, testRepair: lastRepair.testRepair, ...(lastRepair.all.length > 1 ? { testRepairs: lastRepair.all } : {}) }
+  if (exit) {
+    runWarnings.push(`Task ${n}: the test repair did not land (${reasons.join(' | ')}) and a claim went to needs-input first`)
+    // The task has one needs-input entry: the repair that did not land rides along in it, so its exact change reaches me (8.8, 10.9).
+    if (exit.needsInput) exit.needsInput.alsoPending = [...(exit.needsInput.alsoPending || []), { ...extra, reasons }]
+    return { fixed, lastRepair, stop: exit }
+  }
+  return { fixed, lastRepair, stop: await parkTestFix(n, rec, reasons, fixed.records, { ...extra, ...(finding ? { finding } : {}) }) }
 }
 
 async function runTask(n) {
@@ -2935,29 +2962,10 @@ async function runTask(n) {
       if (repairs.length) {
         rec.result = r
         rec.finishedAt = r && r.finishedAt
-        const h = await handOffTestRepair(n, rec, repairs)
-        fixed = h.fixed
-        // Every ruling whose repair did not land, matched to its fixer record by test node: the entry carries each one's number and exact change (8.8).
-        const landedNodes = new Set(fixed.records.filter(x => x.outcome === 'landed').flatMap(x => x.tests))
-        const pending = repairs.map(x => {
-          const e = testRepairEntries([x])[0]
-          const t = (x.ruling && x.ruling.testRepair) || {}
-          return { x, e, testRepair: { file: String(t.file || x.claim.file || ''), test: String(t.test || x.claim.test || ''), change: String(t.change || ''), why: String(t.why || '') }, ruling: x.rulingNo ?? null }
-        }).filter(p => !p.e || !landedNodes.has(conflictNode(p.e)))
-        const shown = pending.length ? pending : repairs.map(x => { const t = (x.ruling && x.ruling.testRepair) || {}; return { x, testRepair: { file: String(t.file || x.claim.file || ''), test: String(t.test || x.claim.test || ''), change: String(t.change || ''), why: String(t.why || '') }, ruling: x.rulingNo ?? null } })
-        const lastOne = shown[0]
-        lastRepair = { records: fixed.records, ruling: lastOne.ruling, testRepair: lastOne.testRepair, all: shown.map(p => ({ ruling: p.ruling, testRepair: p.testRepair })) }
-        const finding = (fixed.records.find(x => x.outcome === 'test-correct' && x.finding) || {}).finding
-        const reasons = [...fixed.toMe, ...fixed.findings.map(f => `the test-fixer found the test correct, so it is not changed: ${trim(String(f.message || f.issue || ''), 300)}`)]
-        if (reasons.length) {
-          if (exit) {
-            runWarnings.push(`Task ${n}: the test repair did not land (${reasons.join(' | ')}) and a claim went to needs-input first`)
-            // The task has one needs-input entry: the repair that did not land rides along in it, so its exact change reaches me (8.8, 10.9).
-            if (exit.needsInput) exit.needsInput.alsoPending = [...(exit.needsInput.alsoPending || []), { ruling: lastRepair.ruling ?? null, testRepair: lastRepair.testRepair, ...(lastRepair.all.length > 1 ? { testRepairs: lastRepair.all } : {}), reasons }]
-            return { exit }
-          }
-          return { exit: await parkTestFix(n, rec, reasons, fixed.records, { ruling: lastRepair.ruling ?? null, testRepair: lastRepair.testRepair, ...(lastRepair.all.length > 1 ? { testRepairs: lastRepair.all } : {}), ...(finding ? { finding } : {}) }) }
-        }
+        const done = await settleRepairs(n, rec, repairs, exit)
+        fixed = done.fixed
+        lastRepair = done.lastRepair
+        if (done.stop) return { exit: done.stop }
       }
       if (exit) return { exit }
       // Task 69: a revision (`revise`) or a review (`re-review`) carries the rulings' text in its next prompt and spends no
