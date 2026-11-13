@@ -1755,7 +1755,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 74: Audit a task's selected tests before its first attempt
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 7.2, 8.3, 8.9, 8.16, 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7, 13.8, 13.9
 **Description:** In `plugin/workflows/spec-implement.js`, add the `auditorAgent` and `verifiedBy` args (the arg only until the first plan; `auditDue` then reads the current plan's `verifiedBy`, so a landed spec edit that rewires Verified by changes the audit decision), the `AUDIT` schema, and `crossPassedOf`, `auditDue` and `auditAction` to the decisions block. `auditDue` takes `crossPassed`, from `crossPassedOf` over this run's cross-test checks and the plan's `testVerifies` (test file -> the impl tasks it verifies), and is false when every test task verifying the task is in `crossPassed.tests` and the task is not in `crossPassed.held` (13.9, D28; design.md's `crossPassedOf` row). At the start of `runTask`, if `auditDue`, a thin call gets `ck lint --simulate --task N --json`, then one auditor agent, started with `agentType` from `auditorAgent` (`spec:auditor` under the plugin, `ck-auditor` when vendored), reads the selected tests against the spec. Each problem goes to `settleClaims` (`next` `start`) as an `audit` claim before any attempt. A `code` ruling goes into the first attempt's prompt. A `test_repair` ruling goes to the test-fixer; once the fix lands the task starts its first attempt with no retry spent, and a fix not landed is a `test-fix` entry and the task does not start (D33). A failure of either step, an arbiter call on an audit claim that failed or returned nothing usable, or `ask` with reason `principles-missing`, notes the task in `missedAudits` and the task starts, with no needs-input entry (13.8). A malformed ruling on an audit claim is a needs-input entry with the arbiter's output and the task does not start (7.2). No audit for a retry, an escalation, a test-track task, a task with no verifying tests, or a task whose verifying test tasks a cross-test check in this run passed. Harness Contract owner: the `audit task <n>` label and `missedAudits`.
@@ -1765,14 +1765,16 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 2 (`auditFindings`), Task 45 (TC-137, the audit and arbiter labels of `spec-implement.js`), Task 71 (TC-120 to 126, 142, 151, 161, 208), Task 72 (P-35 at `auditDue`), Task 73 (red team of 13.6, 13.7), Task 87 (TC-127, TC-131, and the implement half of TC-128)
 
 **Acceptance:**
-- [ ] The audit runs once after the last verifying test task merged and before the first attempt
-- [ ] A problem reaches the arbiter before any `task N` label
-- [ ] A failed audit lets the task start, and the report names it
-- [ ] Retries and escalations run no second audit, and test-track tasks, tasks with no verifying tests, and tasks whose verifying test tasks a cross-test check passed run none
-- [ ] A `test_repair` ruling on an audit problem goes to the fixer, and a landed fix starts the task's first attempt
-- [ ] Repeated claims across runs stay within 6 calls per task and 2 per claim, and a clean spec runs today's labels in today's order, with only the audit steps added
-- [ ] An arbiter call on an audit problem that failed or returned nothing usable lets the task start and notes the missed audit
-- [ ] A malformed ruling on an audit problem is a needs-input entry and the task does not start
+- [x] The audit runs once after the last verifying test task merged and before the first attempt
+- [x] A problem reaches the arbiter before any `task N` label
+- [x] A failed audit lets the task start, and the report names it
+- [x] Retries and escalations run no second audit, and test-track tasks, tasks with no verifying tests, and tasks whose verifying test tasks a cross-test check passed run none
+- [x] A `test_repair` ruling on an audit problem goes to the fixer, and a landed fix starts the task's first attempt
+- [x] Repeated claims across runs stay within 6 calls per task and 2 per claim, and a clean spec runs today's labels in today's order, with only the audit steps added
+- [x] An arbiter call on an audit problem that failed or returned nothing usable lets the task start and notes the missed audit
+- [x] A malformed ruling on an audit problem is a needs-input entry and the task does not start
+
+**Implementation notes:** A failed `ck lint SPEC --simulate` step does not mark the audit missed: the auditor still runs and reads the verifying test tasks' files (the fake projects have no answer for that step, and TC-121 asks for no missed audit there). Only a failed or unusable auditor answer, or an audit claim the arbiter could not rule on, is a missed audit. The auditor prompt does not quote the lint command, so a harness that answers that step by matching the prompt does not answer the auditor instead.
 
 **Dependencies:** Task 2 (its tests are the oracle), Task 6 (runs the `spec:auditor` agent), Task 24 (calls `ck lint --simulate`), Task 45 (its tests are the oracle), Task 70 (edits the same workflow; calls `arbitrate`), Task 71 (its tests are the oracle), Task 72 (its tests are the oracle), Task 73 (its tests are the oracle), Task 87 (its tests are the oracle), Task 43 (provides `cmd:ck arbiter context`)
 **Complexity:** High

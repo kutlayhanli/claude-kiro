@@ -136,6 +136,9 @@ const RESOLVE = roleOpts('resolver', ROLES.resolver, null)
 // settings. A claim starts at the normal tier, or at the risky one when `ck arbiter open` says so (5.3-5.5). An absent
 // `arbiterAgent` means the arbiter cannot be called, so a stop that needs it is a needs-input entry (6.10).
 const ARBITER_AGENT = typeof A.arbiterAgent === 'string' && A.arbiterAgent ? A.arbiterAgent : null
+// The auditor (run-principles Story 13): `auditorAgent` is the agent type that reads an impl task's selected tests before
+// its first attempt. `verifiedBy` (Task 74) is the args' map until the first plan; the current plan's map is read after.
+const AUDITOR_AGENT = typeof A.auditorAgent === 'string' && A.auditorAgent ? A.auditorAgent : null
 const ARBITER = ROLES.arbiter || {}
 const arbiterOpts = tier => (tier === 'risky'
   ? roleOpts('arbiter.risky', { model: ARBITER.risky_model || ARBITER.model, effort: ARBITER.risky_effort || ARBITER.effort }, null, 'arbiter_risky')
@@ -326,6 +329,24 @@ const RULING = {
     verdict: { type: 'string', description: '/spec:create only' },
   },
   required: ['status', 'reasoning'],
+}
+// Task 74 (13.1, 13.2): the auditor's reading of an impl task's selected tests against the spec, before its first attempt.
+const AUDIT = {
+  type: 'object',
+  properties: {
+    problems: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          file: { type: 'string' }, test: { type: 'string' }, criterion: { type: 'string' },
+          reason: { type: 'string' }, needs: { type: 'string' },
+        },
+      },
+    },
+    summary: { type: 'string' },
+  },
+  required: ['problems'],
 }
 const REVIEW_SCHEMA = {
   type: 'object',
@@ -730,8 +751,9 @@ function chainLengths(order, deps, done) {
 // Task 87 (7.4): the impl tasks held while a cross-test finding is open: those verified by the test file each
 // finding names. A finding names its file in `file`, or as the node-id part of `test` ("file::name"); a bare
 // test name places nothing. Paths compare in one surface form (slashes, ./, case): holding too much is safe.
+const normTestPath = p => String(p == null ? '' : p).trim().replace(/\\/g, '/').split('/').filter(x => x !== '' && x !== '.').join('/').toLowerCase()
 function heldByCrossTest({ findings, testVerifies } = {}) {
-  const norm = p => String(p == null ? '' : p).trim().replace(/\\/g, '/').split('/').filter(x => x !== '' && x !== '.').join('/').toLowerCase()
+  const norm = normTestPath
   const tv = testVerifies && typeof testVerifies === 'object' && !Array.isArray(testVerifies) ? testVerifies : {}
   const byFile = new Map()
   for (const [k, v] of Object.entries(tv)) {
@@ -1322,6 +1344,49 @@ function coveredFindingsOf(findings, earlier) {
     const e = (earlier || []).find(x => x && claimIdsOf(x.claim).includes(id))
     return e ? [{ file: String(file || ''), issue: String(issue || ''), ruling: e.ruling, outcome: e.outcome, reasoning: e.reasoning }] : []
   })
+}
+
+// Task 74 (13.9, D28): what this run's cross-test checks passed. `checks` are the wave records (`tasks` the test tasks
+// the check read, `verdict` 'unchecked' when it returned nothing, `findings`). A check whose findings name a file
+// `testVerifies` lacks passes none of its tasks; a blocking finding holds the impl tasks its file verifies (`held`).
+function crossPassedOf({ checks, testVerifies } = {}) {
+  const tests = new Set()
+  const held = new Set()
+  const tv = testVerifies && typeof testVerifies === 'object' && !Array.isArray(testVerifies) ? testVerifies : {}
+  // Paths compare in the surface form heldByCrossTest uses (normTestPath), so a finding naming './tests/Foo.py' matches 'tests/foo.py'.
+  const tvKeys = new Set(Object.keys(tv).map(normTestPath))
+  for (const c of Array.isArray(checks) ? checks : []) {
+    if (!c || typeof c !== 'object' || c.verdict === 'unchecked') continue
+    const findings = (Array.isArray(c.findings) ? c.findings : []).filter(f => f && typeof f === 'object')
+    const fileOf = f => String(f.file || (String(f.test || '').includes('::') ? String(f.test).split('::')[0] : ''))
+    if (findings.some(f => !tvKeys.has(normTestPath(fileOf(f))))) continue
+    for (const t of Array.isArray(c.tasks) ? c.tasks : []) tests.add(String(t))
+    for (const t of heldByCrossTest({ findings, testVerifies: tv })) held.add(String(t))
+  }
+  return { tests, held }
+}
+
+// Task 74 (13.1, 13.6, 13.7, 13.9): the audit runs for an impl task with verifying test tasks, once, unless a cross-test
+// check of this run passed every one of them and the task is not held by a blocking finding.
+function auditDue({ task, track, verifiedBy, audited, crossPassed } = {}) {
+  if (track !== 'impl') return false
+  const tests = Array.isArray(verifiedBy) ? verifiedBy.map(String) : []
+  if (!tests.length) return false
+  const n = String(task)
+  if (audited instanceof Set && audited.has(n)) return false
+  const passed = crossPassed && crossPassed.tests instanceof Set ? crossPassed.tests : new Set()
+  const held = crossPassed && crossPassed.held instanceof Set ? crossPassed.held : new Set()
+  if (tests.every(t => passed.has(t)) && !held.has(n)) return false
+  return true
+}
+
+// Task 74 (13.2, 13.3, 13.5): a reading that came back unusable is missed (the task starts); a clean one has its problems.
+function auditAction(audit) {
+  if (!audit || typeof audit !== 'object' || !Array.isArray(audit.problems)) return { start: true, problems: [], missed: true }
+  const problems = audit.problems.filter(p => p && typeof p === 'object').map(p => ({
+    file: String(p.file || ''), test: String(p.test || ''), criterion: String(p.criterion || ''), reason: String(p.reason || ''), needs: String(p.needs || ''),
+  }))
+  return { start: true, problems, missed: false }
 }
 
 // --- end decisions ---
@@ -2534,7 +2599,10 @@ async function recordRuling(n, { claim, answer, res, open, tier, landing = null 
 // One claim to the arbiter: open, rule at the returned tier, settle, re-run once at the risky tier on `rerun` (5.7),
 // and land a spec edit. Returns { exit: rec } when the claim went to me, else { route, ruling, claim, key, number }.
 async function arbitrate(n, rec, r, claim) {
-  const toMe = async (reason, text, more = {}) => ({ exit: await arbiterNeedsInput(n, rec, r, claim, { reason, text, ...more }) })
+  // Task 74 (13.8): an audit claim the arbiter could not rule on (a failed call, nothing usable, no principles) is missed, not needs-input.
+  const toMe = async (reason, text, more = {}) => (claim.trigger === 'audit' && AUDIT_MISSED.includes(reason)
+    ? { missed: true }
+    : { exit: await arbiterNeedsInput(n, rec, r, claim, { reason, text, ...more }) })
   if (!ARBITER_AGENT) return await toMe('no-arbiter', 'no arbiter agent type was given to the run (arbiterAgent), so the arbiter cannot be called.')
   const phase = phaseOf(n)
   const meta = { risk: taskRisk(n), complexity: String(COMPLEXITY[n] || '') }
@@ -2576,7 +2644,9 @@ async function arbitrate(n, rec, r, claim) {
     releaseSlot(n)
     try { answer = await pending } catch (e) { threw = e }
     // A thrown or empty call is settled as `null` (invalid) so ck marks the claim failed and removes the worktree; it is never a ruling.
-    const empty = threw !== null || answer === null || answer === undefined
+    // An audit claim answered with an empty object has nothing usable in it either (13.8): it is missed, not a malformed ruling.
+    const emptyObject = answer !== null && typeof answer === 'object' && !Array.isArray(answer) && Object.keys(answer).length === 0
+    const empty = threw !== null || answer === null || answer === undefined || (claim.trigger === 'audit' && emptyObject)
     const settled = await thinCk('arbiter-settle', ['-C', ROOT, 'arbiter', 'settle', SPEC, open.key, '--tier', tier, '--json'], { stdin: empty ? 'null' : JSON.stringify(answer), label: `arbiter-settle ${n}${rerun ? ' risky' : ''}`, phase, cwd: ROOT, what: `Arbiter step for Task ${n} of spec ${SPEC}: settle the ruling` })
     const res = settled.code === 0 ? settleResultOf(settled.json) : null
     if (empty) return await toMe('arbiter-call-failed', threw ? `the arbiter agent failed: ${trim(threw && threw.message, 300)}` : 'the arbiter agent returned nothing', { open })
@@ -2676,6 +2746,85 @@ async function handOffTestRepair(n, rec, rulings, opts = {}) {
   return { entries, fixed: await testFixFor(n, entries, opts) }
 }
 
+// Task 74 (13.1-13.9): the reading audit before an impl task's first attempt. The auditor reads the tests `ck lint
+// --simulate` selects against the spec; each problem is an `audit` claim settled with `arbitrate`. Returns { exit } when
+// the task must not start (a needs-input or test-fix entry), else { exit: null, note } where note carries the rulings
+// for the first attempt's prompt. A reading that failed, or a claim the arbiter could not rule on, is missed (13.5, 13.8).
+const auditedTasks = new Set()   // impl tasks whose audit ran in this run (13.6)
+const missedAudits = []          // impl tasks whose audit could not run or be ruled on: the task started anyway (13.5)
+// 13.8: an audit claim the arbiter cannot be called for (no arbiterAgent) is missed too, the same as a failed call.
+const AUDIT_MISSED = ['arbiter-call-failed', 'principles-missing', 'no-arbiter']
+const auditPrompt = (n, verifiedBy, selected) => `${MANDATE}You are the auditor for Task ${n} of spec ${SPEC}. You read the tests this task's gate selects and check them against the spec. You do not edit, commit or run anything. ${GIT_NOTE}
+The verifying test tasks: ${(verifiedBy || []).map(t => `Task ${t}`).join(', ') || 'none'}.
+The selected tests (the tests this task's gate selects${selected ? '' : '; the list could not be read, so read the test files of the verifying test tasks'}): ${JSON.stringify(selected || [])}
+Read specs/${SPEC}/requirements.md, specs/${SPEC}/design.md, specs/${SPEC}/test-plan.md and specs/${SPEC}/tasks.md, then each selected test file. Report a problem for each selected test that asserts something the spec does not require, needs behaviour a later task adds, or can never pass with code that meets the spec: "file", "test", "criterion" (the requirement number), "reason" and "needs". Report no problem for a test that fits the spec. Return "problems" (an empty list when none) and a short "summary".`
+
+async function auditFirst(n, rec) {
+  const verifiedSrc = current ? current.verifiedBy : A.verifiedBy   // the args' map until the first plan, the current plan's after
+  const listed = verifiedSrc && typeof verifiedSrc === 'object' ? (verifiedSrc[n] ?? verifiedSrc[String(n)] ?? null) : null
+  // Only a test-track task of this spec verifies the task: a Verified by that names no task of the spec is no audit (13.7).
+  const verifiedBy = Array.isArray(listed) ? listed.map(String).filter(t => TRACKS[t] === 'test') : []
+  const crossPassed = crossPassedOf({ checks: crossTests, testVerifies: current && current.testVerifies })
+  if (!auditDue({ task: n, track: TRACKS[n] === 'test' ? 'test' : 'impl', verifiedBy, audited: auditedTasks, crossPassed })) return { exit: null, note: '' }
+  auditedTasks.add(String(n))
+  const phase = phaseOf(n)
+  const missed = why => {
+    missedAudits.push(String(n))
+    log(`Task ${n}: the audit did not finish (${why}); the task starts`)
+    return { exit: null, note: '' }
+  }
+  if (!AUDITOR_AGENT) return missed('no auditor agent type was given (auditorAgent)')
+  const lint = await thinCk('audit-lint', ['-C', ROOT, 'lint', SPEC, '--simulate', '--task', String(n), '--json'], { label: `audit lint ${n}`, phase, cwd: ROOT, what: `Audit step for Task ${n} of spec ${SPEC}: list the tests its gate selects` })
+  const selected = lint && lint.json && Array.isArray(lint.json.selected) ? lint.json.selected : null
+  let aud = null
+  try {
+    // The auditor's model and effort follow the reviewer role (design.md), so the reviewer's per-run settings apply here too.
+    aud = await call('audit', auditPrompt(n, verifiedBy, selected), { label: `audit task ${n}`, phase, schema: AUDIT, agentType: AUDITOR_AGENT, ...REVIEW })
+  } catch (e) {
+    aud = null
+  }
+  const act = auditAction(aud)
+  if (act.missed) return missed('the auditor returned nothing usable')
+  if (!act.problems.length) return { exit: null, note: '' }
+  const settled = []
+  let missedHere = false
+  for (const p of act.problems) {
+    const claim = {
+      trigger: 'audit', text: `Task ${n}'s selected test ${p.file} ${p.test} does not fit the spec: ${p.reason}${p.needs ? ` (needs ${p.needs})` : ''}`,
+      file: p.file, test: p.test, criterion: p.criterion, models_tried: [],
+    }
+    const out = await arbitrate(n, rec, null, claim)
+    if (out.exit) {
+      // The one claim loop (D31-D33, 8.9), as settleClaims does: the repairs gathered so far still go to the hand-off, and
+      // the claim that exited rides along in the entry the hand-off returns (or stands alone when every repair landed).
+      if (out.route) settled.push(out)
+      const gathered = settled.filter(o => o.route === 'test_repair')
+      if (gathered.length) {
+        rec.result = null
+        const done = await settleRepairs(n, rec, gathered, out.exit)
+        return { exit: done.stop || out.exit }
+      }
+      return { exit: out.exit }
+    }
+    if (out.missed) { missedHere = true; continue }
+    settled.push(out)
+  }
+  if (missedHere) missedAudits.push(String(n))
+  const repairs = settled.filter(o => o.route === 'test_repair')
+  let fixed = null
+  if (repairs.length) {
+    rec.result = null
+    // The one hand-off (D31-D33, 8.9): a repair that did not land is a test-fix entry and the task does not start (D33).
+    const done = await settleRepairs(n, rec, repairs, null)
+    fixed = done.fixed
+    if (done.stop) return { exit: done.stop }
+    rec.testConflictFixed = rec.testConflict
+    rec.testConflict = null
+  }
+  const note = `${fixed ? afterFixNote(fixed.fixed, []) : ''}${rulingNote(settled)}`
+  return { exit: null, note }
+}
+
 // D31-D33, 8.9: the one point where gathered test_repair rulings go to the fixer (handOffTestRepair has this single call
 // site), for every caller: a task's claim loop (settleClaims) and a launch or held verify-scope claim (settleScopeClaim).
 // A repair that did not land parks the task with each ruling's number and exact change (8.8); when another claim already
@@ -2716,7 +2865,12 @@ async function runTask(n) {
     log(`Task ${n}: risk ${rec.riskTag}${COMPLEXITY[n] ? `, complexity ${String(COMPLEXITY[n]).toLowerCase()}` : ''}, start ${desc(codeOpts(n))}${routed ? ' (routed)' : ''}${up(ladderOf(n))}, review ${REVIEW_ON ? desc(reviewOpts(n)) : 'off'}`)
   }
   try {
-    let r = await call('task', taskPrompt(n, claimFlags('task-start', codeOpts(n), 1)), { label: label(n), phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
+    // Task 74 (13.1): the reading audit runs before the first attempt; the rulings on its problems ride in that attempt's prompt.
+    const firstAudit = await auditFirst(n, rec)
+    if (firstAudit.exit) return firstAudit.exit
+    // The audit's arbiter and hand-off calls gave the slot up (releaseSlot): the first attempt takes it back before it runs (a no-op when still held).
+    await acquireSlot(n)
+    let r = await call('task', `${taskPrompt(n, claimFlags('task-start', codeOpts(n), 1))}${firstAudit.note}`, { label: label(n), phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
     let lastModel = codeOpts(n).model
     let stop = guardStopOf(r)   // set after every call; a guard stop leaves the retry and escalate loops at once and goes to the arbiter (6.2)
     let arbiterK = 0
@@ -3409,6 +3563,8 @@ return {
   testFixes,
   // Task 69 (4.8): the serves-no-requirement findings a review named. Listed when a review named any finding, so a run whose reviews are clean keeps the pinned key set.
   ...(proposedCuts.length || reviewedFindings ? { proposedCuts } : {}),
+  // Task 74 (13.5): the impl tasks whose audit could not run or be ruled on. Listed when an audit ran, so a run with none keeps its key set.
+  ...(auditedTasks.size ? { missedAudits: [...missedAudits] } : {}),
   // Task 65 (10.7): the rulings this run settled, listed when there are any, so a run without any keeps the pinned key set.
   ...(runRulings.length ? { rulings: runRulings } : {}),
   // Task 93 (12.8): listed when the run added live edges; a run without any keeps the result's pinned key set.
