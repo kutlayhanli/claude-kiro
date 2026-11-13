@@ -218,8 +218,9 @@ await test('TC-101: a green run, a red run (stopReason) and a run with a thrown 
   assert.equal(green.result.halted, false)
   assert.ok(green.result.audit, 'green result carries audit')
 
-  // red: task 1 never passes and the run halts
-  const r = project({ deps: { 1: [], 2: ['1'] }, failUntil: { 1: 99 } })
+  // red: task 1 is red on every landing and the run halts. (A task whose own gate never passes no longer halts the run:
+  // an exhausted gate failure goes to the arbiter, and with no arbiter to me as a needs-input entry, 6.10.)
+  const r = project({ deps: { 1: [], 2: ['1'] }, checkRed: ['1'], recheckRed: 99, redLands: { 1: 99 } })
   const red = await run(r.agent, claudeArgs({ onFailure: 'halt', maxRetries: 0 }))
   assert.equal(red.result.halted, true)
   assertAuditedOnce(null, red.trace)
