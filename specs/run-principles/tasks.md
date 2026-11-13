@@ -1765,8 +1765,8 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 2 (`auditFindings`), Task 45 (TC-137, the audit and arbiter labels of `spec-implement.js`), Task 71 (TC-120 to 126, 142, 151, 161, 208), Task 72 (P-35 at `auditDue`), Task 73 (red team of 13.6, 13.7), Task 87 (TC-127, TC-131, and the implement half of TC-128)
 
 **Acceptance:**
-- [ ] The audit runs once after the last verifying test task merged and before the first attempt
-- [ ] A problem reaches the arbiter before any `task N` label
+- [x] The audit runs once after the last verifying test task merged and before the first attempt
+- [x] A problem reaches the arbiter before any `task N` label
 - [x] A failed audit lets the task start, and the report names it
 - [x] Retries and escalations run no second audit, and test-track tasks, tasks with no verifying tests, and tasks whose verifying test tasks a cross-test check passed run none
 - [x] A `test_repair` ruling on an audit problem goes to the fixer, and a landed fix starts the task's first attempt
