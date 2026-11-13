@@ -342,6 +342,8 @@ const REVIEW_SCHEMA = {
           test: { type: 'string', description: 'the test the finding is about (a test finding names its file and test)' },
           issue: { type: 'string', description: 'what is wrong, and the spec text it contradicts' },
           fix: { type: 'string', description: 'what the implementer should change' },
+          noRequirement: { type: 'boolean', description: 'true when the code serves no requirement or design.md row: it is minor, never blocks, and is a proposed cut' },
+          settledBy: { type: 'integer', description: 'the ruling number of the arbiter ruling that already settled this finding, when you restate it' },
         },
         required: ['severity', 'issue'],
       },
@@ -541,7 +543,8 @@ Worktree: ${WT(n)} (branch ${BR(n)}), to merge into ${INTO}. ${GIT_NOTE}
 1. Read the change: command git -C ${WT(n)} diff ${INTO}...${BR(n)}  (and its file list with --stat).
 2. Read Task ${n}'s block in ${WT(n)}/specs/${SPEC}/tasks.md, the requirements it covers in requirements.md, and the parts of design.md it implements (interfaces, file paths, error handling).
 3. The task's gate already passed, so do not re-check what the tests check. Look for what tests miss: behaviour that contradicts design.md or a requirement, a public interface that differs from design.md, missing error handling the design specifies, edits outside the task's files, weakened or skipped tests, and security problems.
-${TRACKS[n] === 'test' ? `${CONTRACT_REVIEW(n)}\n${extra}` : ''}The implementer reported: ${trim(r && { summary: r.summary, deviations: r.deviations, outsideFiles: r.outsideFiles }, 2000)}
+${TRACKS[n] === 'test' ? `${CONTRACT_REVIEW(n)}\n${extra}` : ''}4. Flag code that serves no requirement: a function, branch, file or setting that no requirement or design.md row asks for. Mark each such finding noRequirement true; it is minor, never blocks, and is reported as a proposed cut.
+The implementer reported: ${trim(r && { summary: r.summary, deviations: r.deviations, outsideFiles: r.outsideFiles }, 2000)}
 Mark a finding "blocking" only if it should stop the merge; style and taste are "minor". verdict is "changes" only if there is at least one blocking finding.`
 
 // Task 87 (8.3-8.5, 15.6): what ck found out about a test task's files, for its review. Row fidelity: only the
@@ -1240,6 +1243,59 @@ function testRepairEntries(rulings) {
   }).filter(e => e.file)
 }
 
+// Task 69 (4.8, 8.11): a finding that serves no requirement is minor and never blocks a landing (the code stays and it is
+// a proposed cut). A review left with no blocking finding approves. Findings keep their order.
+function normalizeReview(review) {
+  if (!review || typeof review !== 'object') return review
+  const findings = (Array.isArray(review.findings) ? review.findings : []).map(f => (f && f.noRequirement === true ? { ...f, severity: 'minor' } : f))
+  const blocking = findings.some(f => f && f.severity === 'blocking')
+  return { ...review, findings, verdict: review.verdict === 'changes' && !blocking ? 'approve' : review.verdict }
+}
+
+// Task 69 (8.12): removes the findings a ruling settled. `settled` holds identities `<file>#<issue>`; a finding matches one
+// by its file and issue text (case, whitespace and a leading ./ do not matter). A finding the reviewer marks `settledBy`
+// restates a settled finding, so it is removed too, but only when something was settled (an empty `settled` matches
+// nothing). When `numbers` (the ruling numbers that settled something) is given, `settledBy` must be one of them. Every other finding passes, in order.
+function settleFindings(review, settled, numbers) {
+  if (!review || typeof review !== 'object') return review
+  const normPath = s => String(s || '').replace(/^(\.\/)+/, '')
+  const collapse = s => String(s || '').split(/\s+/).filter(Boolean).join(' ').toLowerCase()
+  const settledIds = new Set()
+  for (const s of settled || []) {
+    const text = String(s)
+    const k = text.indexOf('#')
+    const file = normPath(k < 0 ? text : text.slice(0, k))
+    settledIds.add(`${file}#${collapse(k < 0 ? '' : text.slice(k + 1))}`)
+  }
+  const findings = (Array.isArray(review.findings) ? review.findings : []).filter(f => {
+    if (!f) return true
+    const file = normPath(f.file)
+    if (settledIds.has(`${file}#${collapse(f.issue)}`)) return false
+    if (f.settledBy != null && settledIds.size > 0 && (numbers === undefined || (numbers || []).map(String).includes(String(f.settledBy)))) return false
+    return true
+  })
+  return { ...review, findings }
+}
+
+// Task 69 (8.12): the findings of a review deadlock an applied ruling of this task already covers, each with that ruling.
+// `earlier` is ck's list of this task's applied rulings; the claim key of each one names the finding it settled.
+// The finding identities a claim key names: `review:<id>,<id>`; compared whole, never as substrings.
+function claimIdsOf(claim) {
+  const text = String(claim || '')
+  const k = text.indexOf('review:')
+  return (k < 0 ? [text] : text.slice(k + 'review:'.length).split(',')).map(x => x.trim())
+}
+
+function coveredFindingsOf(findings, earlier) {
+  const normPath = s => String(s || '').replace(/^(\.\/)+/, '')
+  const collapse = s => String(s || '').split(/\s+/).filter(Boolean).join(' ').toLowerCase()
+  return (findings || []).flatMap(([file, issue]) => {
+    const id = `${normPath(file)}#${collapse(issue)}`
+    const e = (earlier || []).find(x => x && claimIdsOf(x.claim).includes(id))
+    return e ? [{ file: String(file || ''), issue: String(issue || ''), ruling: e.ruling, outcome: e.outcome, reasoning: e.reasoning }] : []
+  })
+}
+
 // --- end decisions ---
 
 // --- scheduler ---------------------------------------------------------------
@@ -1889,7 +1945,14 @@ async function reviewBatch(batch) {
     review = null
   }
   for (const n of ids) pendingReview.get(n).reviewed = true
-  review = attributeFindings(review, ids)
+  review = normalizeReview(attributeFindings(review, ids))
+  // Task 69 (4.8): a serves-no-requirement finding of a batched review is a proposed cut of the task it names.
+  if (((review && review.findings) || []).length) reviewedFindings = true
+  for (const f of (review && review.findings) || []) {
+    if (f && f.noRequirement && f.task != null && (batch.some(b => String(b.n) === String(f.task)) || view.order.includes(String(f.task)) || Object.hasOwn(view.deps, String(f.task)))) recordCut(f.task, f)
+    else if (f && f.noRequirement && f.task == null && ids.length === 1) recordCut(ids[0], { ...f, task: ids[0] })
+    else if (f && f.noRequirement) log(`Review wave ${waveNo}: a serves-no-requirement finding names no task of this spec, so it is not a proposed cut: ${f.file || '?'}: ${f.issue}`)
+  }
   const flagged = flaggedOf(review, ids)
   if (review && review.verdict === 'changes' && ids.length > 1 && flagged.length === ids.length && !(review.findings || []).some(f => f && f.severity !== 'minor' && f.task != null)) {
     log(`Review wave ${waveNo}: its blocking findings name no covered task, so all of Tasks ${ids.join(', ')} revise`)
@@ -2258,6 +2321,17 @@ const ruledKeys = new Set()   // claim keys ruled on in this run
 const arbiterCalls = {}
 const ruledAnswers = new Map()   // claim key -> the arbiter's answer, for the entry of a claim that comes back (7.4)
 const runRulings = []   // RunRuling, one per ruling this run settled (10.7); Task 66 adds the decisions.md number from `ck arbiter record`
+const proposedCuts = []   // Task 69 (4.8): each serves-no-requirement finding a review named, for the result's proposedCuts
+const cutKeys = new Set()
+let reviewedFindings = false   // a review named at least one finding (Task 69): proposedCuts is listed then
+const recordCut = (n, f) => {
+  // A batched review can name the task a finding belongs to; that task owns the cut.
+  const task = String(f.task || n)
+  const key = `${task}|${f.file || ''}|${f.issue || ''}`
+  if (cutKeys.has(key)) return
+  cutKeys.add(key)
+  proposedCuts.push({ task, file: String(f.file || ''), issue: String(f.issue || '') })
+}
 
 // A guard stop as a claim (6.2): the test or file the hook protected, and the requirement it verifies.
 function guardClaim(n, stop, tried) {
@@ -2268,13 +2342,17 @@ function guardClaim(n, stop, tried) {
 }
 
 // What the implementer is told after the arbiter ruled: the text of each ruling, and that a landed edit is on INTO.
-function rulingNote(outs) {
+function rulingNote(outs, forReviewer = false) {
   const lines = (outs || []).map(o => {
     const r = o.ruling || {}
-    const what = o.route === 'code' ? `What to do: ${r.code || r.reasoning}` : o.route === 'spec_edit' ? `The arbiter changed the spec (${r.changed || 'see the commit'}) and it landed on ${INTO}.` : ''
+    const t = r.testRepair || {}
+    const what = o.route === 'code' ? `What to do: ${r.code || r.reasoning}` : o.route === 'spec_edit' ? `The arbiter changed the spec (${r.changed || 'see the commit'}) and it landed on ${INTO}.` : o.route === 'test_repair' ? `The test ${t.file || o.claim.file || ''} ${t.test || o.claim.test || ''} was repaired: ${t.change || ''}` : ''
     return `The arbiter ruled on the ${o.claim.trigger} claim ${o.key} (${r.outcome}): ${trim(r.reasoning || '', 600)} ${what}`.trim()
   })
-  return lines.length ? `${lines.join('\n')}\nMerge ${INTO} into your branch first, so the ruled changes are in it, then finish the task. The ruling does not excuse a failing gate.\n` : ''
+  if (!lines.length) return ''
+  // The reviewer re-reviews the task against the ruling; it does not merge or finish anything, so it gets no implementer instruction.
+  const tail = forReviewer ? 'Review the task with these rulings in mind: a finding a ruling settled is not blocking again.' : `Merge ${INTO} into your branch first, so the ruled changes are in it, then finish the task. The ruling does not excuse a failing gate.`
+  return `${lines.join('\n')}\n${tail}\n`
 }
 
 const taskRisk = n => (isSafety(n) || String((current && current.risk && current.risk[n]) || '').toLowerCase() === 'safety' ? 'safety' : 'normal')
@@ -2290,7 +2368,7 @@ ${open.principles.map(p => `- ${p.id} (${p.layer}): ${p.text}`).join('\n')}
 Plan layer: ${open.planLayer}.
 ${open.earlier.length ? `Earlier rulings on this task: ${JSON.stringify(open.earlier)}\n` : ''}The spec: specs/${SPEC}/requirements.md, specs/${SPEC}/design.md, specs/${SPEC}/test-plan.md and specs/${SPEC}/tasks.md. Read what the claim needs.
 Your worktree for a spec edit: ${String(open.worktree).startsWith('/') ? open.worktree : `${ROOT}/${open.worktree}`} (branch ${open.branch}). Edit only tasks.md, design.md and test-plan.md there and commit with a plain git commit -m '...'.
-${first ? `You looked at this claim once already and asked for a stronger look. Your reasoning then: ${first.reasoning || ''}\nWhat you established: ${first.established || ''}\nThis is the last look: rule now.\n` : ''}Give exactly one outcome: spec_edit (you changed the spec in your worktree, name what in "changed"), test_repair (a test is wrong: "testRepair" {file, test, change, why}), code (the implementer must change: "code"), or requirements (a requirement must change or is missing: "requirement" {kind add|change|remove, wording, reason}). A reserved scope is mine, not yours: name it in "reservedBy". Always give "claim" (copy the Claim key above), "status" (ruled, or needs_stronger_look with "established"), "reasoning" and "principle".`
+${first ? `You looked at this claim once already and asked for a stronger look. Your reasoning then: ${first.reasoning || ''}\nWhat you established: ${first.established || ''}\nThis is the last look: rule now.\n` : ''}Give exactly one outcome: spec_edit (you changed the spec in your worktree, name what in "changed"), test_repair (a test is wrong: "testRepair" {file, test, change, why}), code (the implementer must change: "code"), or requirements (a requirement must change or is missing: "requirement" {kind add|change|remove, wording, reason}). A reserved scope is mine, not yours: name it in "reservedBy". For a review deadlock, "settles" lists each of the claim's findings your ruling settles, as "<file>#<issue>" copied from the claim (leave it empty for a finding the ruling does not settle). Always give "claim" (copy the Claim key above), "status" (ruled, or needs_stronger_look with "established"), "reasoning" and "principle".`
 
 // A stop the arbiter did not rule on, or ruled on in a way that needs me: one needs-input entry (7.2, 6.10). Parked
 // (unattended) or asked (interactive); no fallback runs.
@@ -2300,8 +2378,8 @@ async function arbiterNeedsInput(n, rec, r, claim, { reason, text, ruling = null
   const decision = `The arbiter ${ruling ? 'ruled' : 'did not rule'} on Task ${n}'s ${claim.trigger} claim (${reason}): ${text}${ruling && ruling.requirement ? ` Requirement ${ruling.requirement.kind || 'change'}: ${ruling.requirement.wording || ''} (${ruling.requirement.reason || ''}).` : ''} Decide from the main session, then resume the run${RUN_ID ? ` with the same runId ${RUN_ID}` : ''}.`
   const entry = {
     task: n, file: String(claim.file || ''), kind, test: String(claim.test || ''), requirement: String(claim.criterion || ''), decision, action, notification: null, escalatedTo: [],
-    ruling: number, reason, claim: ruling ? (open ? open.key : (claim.text ? trim(String(claim.text), 600) : null)) : { ...(open ? { key: open.key } : {}), trigger: claim.trigger, text: trim(String(claim.text || ''), 600), file: String(claim.file || ''), test: String(claim.test || ''), ...(claim.cycle !== undefined ? { cycle: claim.cycle } : {}), ...(claim.command !== undefined ? { command: claim.command } : {}), ...(claim.provider !== undefined ? { provider: claim.provider } : {}) }, trigger: claim.trigger, output: ruling,
-    ...(reason === 'repeat-after-ruling' ? { evidence: trim(String(claim.text || ''), 600), earlierRuling: open && ruledAnswers.has(open.key) ? ruledAnswers.get(open.key) : null } : {}),
+    ruling: number, reason, claim: ruling ? (open ? open.key : (claim.text ? String(claim.text) : null)) : { ...(open ? { key: open.key } : {}), trigger: claim.trigger, text: String(claim.text || ''), file: String(claim.file || ''), test: String(claim.test || ''), ...(claim.cycle !== undefined ? { cycle: claim.cycle } : {}), ...(claim.command !== undefined ? { command: claim.command } : {}), ...(claim.provider !== undefined ? { provider: claim.provider } : {}) }, trigger: claim.trigger, output: ruling,
+    ...(reason === 'repeat-after-ruling' ? { evidence: String(claim.text || ''), earlierRuling: open && ruledAnswers.has(open.key) ? ruledAnswers.get(open.key) : null } : {}),
     ...(open && open.missing ? { missing: open.missing } : {}),
   }
   rec.result = r
@@ -2373,6 +2451,18 @@ async function arbitrate(n, rec, r, claim) {
     await thinCk('arbiter-settle', ['-C', ROOT, 'arbiter', 'settle', SPEC, open.key, '--tier', open.tier, '--json'], { stdin: 'null', label: `arbiter-settle ${n}`, phase, cwd: ROOT, what: `Arbiter step for Task ${n} of spec ${SPEC}: discard the repeated claim` })
     return await toMe('repeat-after-ruling', 'the same claim was ruled on already in this run and came back', { open })
   }
+  // Task 69 (8.12): a deadlock finding an applied ruling already covers is not sent again. The arbiter rules on the rest; the
+  // covered ones go to me with their earlier ruling once the rest is settled.
+  const covered = claim.trigger === 'review-deadlock' ? coveredFindingsOf(claim.findings, open.earlier) : []
+  let promptOpen = open
+  if (covered.length) {
+    const coveredKeys = new Set(covered.map(c => `${c.file}\u0000${c.issue}`))
+    const left = claim.findings.filter(([f, i]) => !coveredKeys.has(`${f}\u0000${i}`))
+    claim = { ...claim, findings: left, text: `Task ${n} still has blocking review findings: ${left.map(([f, i]) => `${f}: ${i}`).join(' | ')}` }
+    // The covered findings' earlier rulings stay out of the arbiter's prompt too: only the rest of the deadlock is shown.
+    const idText = c => `${c.file.replace(/^(\.\/)+/, '')}#${c.issue.split(/\s+/).filter(Boolean).join(' ').toLowerCase()}`
+    promptOpen = { ...open, earlier: open.earlier.filter(e => !covered.some(c => claimIdsOf(e.claim).includes(idText(c)))) }
+  }
   let tier = open.tier
   let first = null
   for (let pass = 0; pass < 2; pass++) {
@@ -2381,7 +2471,7 @@ async function arbitrate(n, rec, r, claim) {
     let threw = null
     // The ruling runs without the task's slot: independent tasks continue and its dependents wait (6.9). The slot is
     // released once the arbiter's call is in flight, so the arbiter is the step right after the stop.
-    const pending = call('arbiter', rulingPrompt(n, claim, open, tier, first), { label: `arbiter task ${n}${rerun || (tier === 'risky' && arbiterCalls[n] > 0) ? ' risky' : ''}`, phase, schema: RULING, agentType: ARBITER_AGENT, ...arbiterOpts(tier) })
+    const pending = call('arbiter', rulingPrompt(n, claim, promptOpen, tier, first), { label: `arbiter task ${n}${rerun || (tier === 'risky' && arbiterCalls[n] > 0) ? ' risky' : ''}`, phase, schema: RULING, agentType: ARBITER_AGENT, ...arbiterOpts(tier) })
     arbiterCalls[n] = (arbiterCalls[n] || 0) + 1
     releaseSlot(n)
     try { answer = await pending } catch (e) { threw = e }
@@ -2456,6 +2546,15 @@ async function arbitrate(n, rec, r, claim) {
       runRuling.number = rl.number
       out.rulingNo = rl.number
       out.ruling = answer && typeof answer === 'object' ? { ...answer, number: rl.number } : answer
+    }
+    if (covered.length) {
+      const text = covered.map(c => `"${c.issue}" is settled by ruling #${c.ruling} (${c.outcome}): ${trim(String(c.reasoning || ''), 400)}`).join('; ')
+      // The ruling on the other findings is kept: settleClaims gathers its repair or code text, and the entry carries it.
+      const exit = await arbiterNeedsInput(n, rec, r, { trigger: 'review-deadlock', text: `Covered findings: ${text}`, findings: covered.map(c => [c.file, c.issue]) }, { reason: 'repeat-after-ruling', text: `${text}. The other findings of the deadlock were ruled on in this call.`, open })
+      if (exit.needsInput && answer && typeof answer === 'object') {
+        exit.needsInput.alsoPending = [...(exit.needsInput.alsoPending || []), { ruling: out.rulingNo ?? null, outcome: res.route, ...(answer.code ? { code: String(answer.code) } : {}), ...(answer.testRepair ? { testRepair: answer.testRepair } : {}) }]
+      }
+      return { ...out, exit }
     }
     return out
   }
@@ -2584,7 +2683,7 @@ async function runTask(n) {
       let exit = null
       for (const claim of claims) {
         const out = await arbitrate(n, rec, r, claim)
-        if (out.exit) { exit = out.exit; break }
+        if (out.exit) { exit = out.exit; if (out.route) settled.push(out); break }
         settled.push(out)
       }
       const others = settled.filter(o => o.route !== 'test_repair')
@@ -2618,6 +2717,12 @@ async function runTask(n) {
         }
       }
       if (exit) return { exit }
+      // Task 69: a revision (`revise`) or a review (`re-review`) carries the rulings' text in its next prompt and spends no
+      // attempt or escalation (8.2, 8.16): the caller re-runs it with `note`. Only `retry` resumes the task itself.
+      if (next !== 'retry') {
+        if (fixed) { rec.testConflictFixed = rec.testConflict; rec.testConflict = null }
+        return { exit: null, settled, note: `\n${fixed ? afterFixNote(fixed.fixed, []) : ''}${rulingNote([...others, ...repairs])}` }
+      }
       if (fixed) {
         rec.testConflictFixed = rec.testConflict   // the conflict is resolved: a later ordinary failure is handled like any other
         rec.testConflict = null
@@ -2682,27 +2787,36 @@ async function runTask(n) {
     // whose blocking findings survive the loop never merges.
     // reviewLoop returns { exit } when runTask must return that value, else null.
     const reviewLoop = async (first, opts) => {
-      let review = first
+      // Task 69 (4.8, 8.12): a review is normalized before it is read, and the findings a ruling settled are dropped. A
+      // serves-no-requirement finding is recorded as a proposed cut.
+      const settledIds = []
+      const settledNumbers = []
+      const reviewed = raw => {
+        if (!raw) return raw
+        const v = normalizeReview(raw)
+        if ((v.findings || []).length) reviewedFindings = true
+        for (const f of v.findings || []) if (f && f.noRequirement) recordCut(n, f)
+        return normalizeReview(settleFindings(v, settledIds, settledNumbers))
+      }
+      const reviewAgain = async (note = '') => reviewed(await call('review', `${reviewPrompt(n, r, WANT_EXTRA(n) ? await testReviewExtra(n) : '')}${note}`, { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts }))
+      let review = reviewed(first)
       let round = 0
-      // A revision that guard-stops goes to the arbiter (6.2, D31): a code ruling, a landed spec edit or a landed test
-      // fix runs the same revision again with the ruling in its prompt, spending no attempt; anything else is an entry for me.
+      // A revision that guard-stops is a claim (6.2, D31): the arbiter rules, and a code ruling, a landed spec edit or a landed
+      // test fix runs the same revision again with the ruling's text, spending no attempt. Settled by `settleClaims` (`revise`).
       const revised = async (prompt, lbl, o, model) => {
         let note = ''
         for (let again = 0; ; again++) {
           working.add(n)  // a revision takes a slot but never waits for one: the task is nearly done
-          r = await call('revise', `${prompt}${note}`, { label: lbl, phase: phaseOf(n), schema: RESULT, ...o })
+          // A rerun after a ruling carries its own label (the same revision, spending no attempt).
+          r = await call('revise', `${prompt}${note}`, { label: again ? `${lbl} (after ruling ${again})` : lbl, phase: phaseOf(n), schema: RESULT, ...o })
           lastModel = model
           stop = guardStopOf(r)
           if (!stop) { if (!ok(r)) await releaseClaim(n); releaseSlot(n); return null }
           releaseSlot(n)
-          const out = await arbitrate(n, rec, r, guardClaim(n, stop, [...new Set([codeOpts(n).model, ...rec.escalations.map(e => e.model), model].filter(Boolean))]))
-          if (out.exit) return out.exit
-          if (out.route === 'test_repair') {
-            const t = out.ruling.testRepair || {}
-            const fixed = await testFixFor(n, [{ file: String(t.file || out.claim.file || ''), test: String(t.test || out.claim.test || ''), criterion: String(out.claim.criterion || ''), reason: String(t.why || out.ruling.reasoning || ''), fix: String(t.change || ''), ruling: out.ruling }])
-            if (fixed.toMe.length) return await parkTestFix(n, rec, fixed.toMe, fixed.records)
-            note = `\n${afterFixNote(fixed.fixed, fixed.findings)}${rulingNote([out])}`
-          } else note = `\n${rulingNote([out])}`
+          const tried = [...new Set([codeOpts(n).model, ...rec.escalations.map(e => e.model), model].filter(Boolean))]
+          const got = await settleClaims(n, rec, [guardClaim(n, stop, tried)], 'revise')
+          if (got.exit) return got.exit
+          note = got.note
         }
       }
       while (review && review.verdict === 'changes' && round < REVIEW_ROUNDS && ok(r)) {
@@ -2710,16 +2824,40 @@ async function runTask(n) {
         log(`Task ${n}: reviewer asked for changes, revision ${round}/${REVIEW_ROUNDS}`)
         const parked1 = await revised(revisePrompt(n, review, round, claimFlags('revision', codeOpts(n), round + 1)), `${label(n)} revise ${round}`, codeOpts(n), codeOpts(n).model)
         if (parked1) return { exit: parked1 }
-        if (ok(r)) review = await call('review', reviewPrompt(n, r, WANT_EXTRA(n) ? await testReviewExtra(n) : ''), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts })
+        if (ok(r)) review = await reviewAgain()
       }
-      for (const model of ladderOf(n)) {
-        if (!(review && review.verdict === 'changes' && ok(r))) break
-        round++
-        log(`Task ${n}: blocking findings remain, escalating the revision to ${model}`)
-        const parked2 = await revised(revisePrompt(n, review, round, claimFlags('escalation', escalated(codeOpts(n), model), round + 1)), `${label(n)} revise ${round} (${model})`, escalated(codeOpts(n), model), model)
-        if (parked2) return { exit: parked2 }
-        rec.escalations.push({ stage: 'revise', model })
-        if (ok(r)) review = await call('review', reviewPrompt(n, r, WANT_EXTRA(n) ? await testReviewExtra(n) : ''), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts })
+      // Task 69 (8.9, 8.16, D33): blocking findings that survive the rounds are a review deadlock. The arbiter rules on them
+      // (one claim, split per finding by ck), and the ruling goes to the fixer if it is a test repair; then the task is
+      // reviewed again with the ruling in the prompt. A finding a ruling settled does not block again.
+      while (review && review.verdict === 'changes' && ok(r)) {
+        const blocking = review.findings.filter(f => f && f.severity === 'blocking')
+        if (!blocking.length) break
+        const tried = [...new Set([codeOpts(n).model, ...rec.escalations.map(e => e.model)].filter(Boolean))]
+        const claim = {
+          trigger: 'review-deadlock', findings: blocking.map(f => [String(f.file || ''), String(f.issue || '')]), models_tried: tried,
+          text: `Task ${n} still has blocking review findings after ${round} revision(s): ${blocking.map(f => `${f.file || '?'}: ${f.issue}`).join(' | ')}`,
+        }
+        const go = await settleClaims(n, rec, [claim], 're-review')
+        if (go.exit) return { exit: go.exit }
+        // 8.12: only the findings the ruling names in `settles` are settled. A spec edit is the arbiter's finding that the
+        // reviewer was wrong, so it settles every blocking finding of the claim.
+        const outs = go.settled || []
+        const named = outs.filter(o => o.route !== 'spec_edit').flatMap(o => (o.ruling && Array.isArray(o.ruling.settles) ? o.ruling.settles : []).map(String))
+        const reviewerWrong = outs.some(o => o.route === 'spec_edit')
+        // A code ruling is the arbiter ruling on the claim's findings (the implementer is told to fix them), so the findings
+        // it ruled on are settled once the revision has run; a test repair or requirement settles only what it names.
+        const codeRuled = outs.some(o => o.route === 'code')
+        const settledNow = reviewerWrong || codeRuled ? blocking : blocking.filter(f => settleFindings({ findings: [f] }, named).findings.length === 0)
+        // 8.11: a code ruling always returns the task to the implementer with the ruling's text, whether or not `settles` covers
+        // every finding, and the task still needs a passing gate. Only then is the task re-reviewed with the ruling in the prompt.
+        if (codeRuled) {
+          const parked = await revised(`${revisePrompt(n, review, round, claimFlags('revision', codeOpts(n), round + 1))}${go.note}`, `${label(n)} revise after ruling`, codeOpts(n), codeOpts(n).model)
+          if (parked) return { exit: parked }
+        }
+        for (const f of settledNow) settledIds.push(`${f.file || ''}#${f.issue || ''}`)
+        if (settledNow.length) for (const o of outs) if (o.rulingNo != null) settledNumbers.push(o.rulingNo)
+        // 8.12: the re-reviewer gets the ruling too
+        if (ok(r)) review = await reviewAgain(codeRuled ? rulingNote(outs, true) : go.note)
       }
       // model/effort: who judged the task, so an audit can count escapes (approved bugs) per reviewer tier.
       const by = { model: opts.model || 'inherited', effort: opts.effort || 'inherited', riskTag: rec.riskTag }
@@ -3106,6 +3244,8 @@ return {
   overhead,
   relinks,
   testFixes,
+  // Task 69 (4.8): the serves-no-requirement findings a review named. Listed when a review named any finding, so a run whose reviews are clean keeps the pinned key set.
+  ...(proposedCuts.length || reviewedFindings ? { proposedCuts } : {}),
   // Task 65 (10.7): the rulings this run settled, listed when there are any, so a run without any keeps the pinned key set.
   ...(runRulings.length ? { rulings: runRulings } : {}),
   // Task 93 (12.8): listed when the run added live edges; a run without any keeps the result's pinned key set.

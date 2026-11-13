@@ -111,7 +111,7 @@ def claim_key(claim: Claim) -> str:
     if t == "review-deadlock":
         subject = "review:" + ",".join(sorted({_finding_identity(f, i) for f, i in claim.findings}))
     elif t == "gate-failure":
-        subject = "gate:" + ",".join(sorted(claim.failing))
+        subject = "gate:" + ",".join(sorted(_test_name(f) for f in claim.failing))
     elif t == "lint":
         subject = f"lint:{claim.rule}:{claim.subject}"
     elif t == "command-cycle":
@@ -290,7 +290,7 @@ def route_ruling(check: RulingCheck, tier: Tier, effective: EffectivePrinciples)
 # --------------------------------------------------------------------------- spec edits (Task 41)
 
 _TASK_HEAD = re.compile(r"^### Task ?(\d+): ")
-_MARK_LINE = re.compile(r"^\s*[-*]\s+\[([ xX])\]\s*(.*)$")
+_MARK_LINE = re.compile(r"^\s*[-*+]\s*\[([ xX])\]\s*(.*)$")
 _FIRST_TASK = re.compile(r"^### Task ?\d", re.MULTILINE)
 _LANE_FILES = ("tasks.md", "design.md", "test-plan.md")
 

@@ -465,7 +465,7 @@ Return the structured result.`, { label: 'link tracks into tasks.md', phase: 'Li
 // ---------------------------------------------------------------------------
 
 if (MODE === 'apply-cuts') {
-  const FROZEN = 'Not applied: a task has started, so the requirements are frozen. Removing the story is your change to make.'
+  const FROZEN = 'Not applied: a task has started, so the requirements are frozen. The change to remove the story is yours to make.'
   const cuts = Array.isArray(A.cuts) ? A.cuts : []
   const ctx = await thinCk('arbiter context approved cut', ['-C', ROOT, 'arbiter', 'context', A.feature, '--approved-cut', '--json'],
     `Context step for spec ${A.feature}: the approved cut`)

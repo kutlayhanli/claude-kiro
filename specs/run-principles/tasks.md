@@ -1638,7 +1638,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 69: Send review deadlocks to the arbiter and flag code that serves no requirement
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 4.8, 6.2, 6.3, 8.9, 8.11, 8.12, 8.16, 7.3, 7.5
 **Description:** In `plugin/workflows/spec-implement.js`, drop the revise escalation ladder from `reviewLoop`, keeping the configured rounds. A guard stop in `revised()` (Task 65 replaced `climbGuard` there) is handed back as a `guard-stop` claim: `reviewLoop` returns `{ claim }` to `runTask`, which sends it to `settleClaims` with `next` `revise`, so a `test_repair` ruling goes through the single `handOffTestRepair` call site (D31). A `code` ruling, a landed `spec_edit` or a landed test fix re-runs that revision with the ruling text and no attempt counted, after merging `INTO`, and the review then continues; any other outcome waits on its needs-input entry. When blocking findings remain, send the deadlock to `settleClaims` with `next` `re-review` (a `test_repair` ruling goes to the fixer, and a landed fix re-reviews, D33), on tasks reviewed alone or in a landing batch, with the claim's `findings` holding each blocking finding's file and issue, so `ck arbiter open` can split a deadlock per finding (a finding already covered by an applied ruling goes to me with that ruling, and only findings never ruled on reach the arbiter). Add `noRequirement` and `settledBy` to the review schema. Add `normalizeReview` (a `noRequirement` finding is minor; a review left with no blocking finding is `approve`) and `settleFindings` (removes findings a ruling settled, by file and issue text or by `settledBy`) to the decisions block. The reviewer prompt asks reviewers to flag code that serves no requirement. The re-review prompt carries the ruling. Add `proposedCuts` to the result. Harness Contract owner: the `proposedCuts` result key.
@@ -1648,11 +1648,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 51 (confirmation and revise-ladder routing; `spec_implement.test.mjs` runs whole, so it needs every replaced path gone), Task 54 (red team of 8.2, 8.4 to 8.6, 8.12; the first task with landing, resume and re-review together), Task 55 (TC-44, TC-45, TC-200, TC-207), Task 59 (TC-75, TC-146, TC-210), Task 61 (TC-34), Task 62 (P-12, P-43, P-44), Task 64 (red team of 6.2, 6.3, 6.4, 6.6, 6.7, 6.10; the first task with every stop routed), Task 81 (red team of 4.8)
 
 **Acceptance:**
-- [ ] A deadlock on an individually reviewed or batched task calls the arbiter, and no `revise (model)` label runs
-- [ ] A guard stop during a revision reaches the arbiter, and a `code` ruling or a landed test fix re-runs the revision and the review goes on; `handOffTestRepair` keeps one call site
-- [ ] A `test_repair` ruling on a review deadlock goes to the fixer, and a landed fix re-reviews the task
-- [ ] A serves-no-requirement finding does not block landing, the code stays, and `proposedCuts` names it
-- [ ] The re-review prompt holds the ruling, and a settled finding raised again does not block
+- [x] A deadlock on an individually reviewed or batched task calls the arbiter, and no `revise (model)` label runs
+- [x] A guard stop during a revision reaches the arbiter, and a `code` ruling or a landed test fix re-runs the revision and the review goes on; `handOffTestRepair` keeps one call site
+- [x] A `test_repair` ruling on a review deadlock goes to the fixer, and a landed fix re-reviews the task
+- [x] A serves-no-requirement finding does not block landing, the code stays, and `proposedCuts` names it
+- [x] The re-review prompt holds the ruling, and a settled finding raised again does not block
 
 **Dependencies:** Task 51 (its tests are the oracle), Task 54 (its tests are the oracle), Task 55 (its tests are the oracle), Task 59 (its tests are the oracle), Task 61 (its tests are the oracle), Task 62 (its tests are the oracle), Task 64 (its tests are the oracle), Task 68 (edits the same workflow; calls `arbitrate`), Task 81 (its tests are the oracle)
 **Complexity:** High
