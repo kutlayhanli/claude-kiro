@@ -2155,7 +2155,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 92: Regenerate the vendored copies (lands by hand)
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** Constraints (vendored copies under .claude/)
 **Description:** I run this task myself, because `.claude/` is protected: ck's reference-transaction hook refuses any untokened update of `integrate/*` that changes `.claude/**`, so a plain hand commit on the integration branch is refused and leaves the dirty checkout Story 14 exists for. In the task's own worktree (`ck worktree create run-principles 92 --base integrate/run-principles`), run `CK_CONFIG_HOME=$(mktemp -d) uv run ck vendor`, then `CK_CONFIG_HOME=$(mktemp -d) uv run ck agents sync`, so the generated `ck-*.md` agent types carry the project defaults and not my machine's role settings (global config sets the implementer, reviewer and, per D9, arbiter models here; commit adb81a6 needed the same). Update `.claude/ck-manifest.json`, commit in that worktree, then land it from a real terminal with `ck worktree approve run-principles 92`. Run the Verify with `CK_CONFIG_HOME` pointing at an empty directory too, as `tests/conftest.py` does. Until it is done, the final whole-suite gate is expected to fail only on `test_dogfood_copies_in_this_repo_match_the_plugin_source` and `test_claude_vendored_workflow_matches_plugin_source`. Any other failure is a real one.
