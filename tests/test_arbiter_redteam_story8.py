@@ -97,13 +97,15 @@ def test_84_edit_against_a_block_the_target_deleted_is_a_conflict(tmp_path):
 
 
 def test_84_a_target_move_that_turns_a_clean_merge_red(tmp_path):
-    """The merge is clean, the combined tree fails the Verify the target just gained: state RED, HEAD unchanged."""
+    """The merge is clean, the combined tree fails the Verify of a Done task the edit changed: state RED, HEAD unchanged.
+
+    The arbiter edit moves Done Task 1's Verify onto the greeting test (so Task 1 is in the gate scope); the target
+    meanwhile gained a failing greeting test, a different file, so the merge is clean but the merged tree is red.
+    """
     p = arbiter_project(tmp_path, tasks=tasks_text(s1="Done"))
     wt = arbiter_wt(p)
-    edit_spec(wt, "tasks.md", "**Description:** Print the greeting.", "**Description:** Print the greeting twice.")
+    edit_spec(wt, "tasks.md", "**Verify:** `python -c pass`\n**Verifies:**", f"**Verify:** `uv run pytest -q {GREET}`\n**Verifies:**")
     commit_target(p, GREET, "def test_greet():\n    assert False\n", "target gained a failing test")
-    path = p.target / "specs/demo/tasks.md"
-    commit_target(p, "specs/demo/tasks.md", path.read_text().replace("**Verify:** `python -c pass`\n**Verifies:**", "**Verify:** `false`\n**Verifies:**"), "target Verify now red")
     before = head(p)
     assert_not_landed(p, 1, ("RED", "CONFLICT", "REFUSED"), before)
 

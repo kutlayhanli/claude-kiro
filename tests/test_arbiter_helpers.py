@@ -68,7 +68,7 @@ def test_arbiter_caller_matches_the_fixture_keys(project):
     caller = ah.arbiter_caller(project)
     fixture = json.loads(FIXTURE.read_text())
     assert fixture["agent_type"] in ah.ARBITER_AGENT_TYPES
-    assert "_derivedFrom" in fixture
+    assert "_derivedFrom" not in fixture, "the fixture is the real capture (Task 91), not the derived placeholder"
     assert caller["agent_type"] == fixture["agent_type"]
     assert isinstance(caller["agent_id"], str) and caller["agent_id"]
     assert set(caller) <= {"agent_id", "agent_type", "cwd"}

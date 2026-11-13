@@ -380,7 +380,7 @@ def test_a_failed_call_on_one_task_does_not_hold_back_the_next_claim_of_another(
 
 def node_run(tmp_path, project_opts, *, agents, wrap="", max_retries=1):
     project = ah.arbiter_project(tmp_path)
-    args = {**project.run_args, "agents": agents, "maxRetries": max_retries, "arbiterAgent": "spec:arbiter"}
+    args = {**project.run_args, "spec": "demo", "agents": agents, "maxRetries": max_retries, "arbiterAgent": "spec:arbiter"}
     script = (
         "import { runWorkflow, useVirtualTime } from './load_workflow.mjs'\n"
         "import { project } from './fake_project.mjs'\n"
