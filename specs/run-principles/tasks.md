@@ -2345,9 +2345,9 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 45 (TC-137, the new label), Task 98 (TC-173), Task 100 (TC-174, in a full run)
 
 **Acceptance:**
-- [ ] An unreproduced landing runs the attributed full gate, and its fixer when red
-- [ ] `full gate @<n> (unreproduced landing)` parses to the `full` role
-- [ ] The periodic gate behaves as before
+- [x] An unreproduced landing runs the attributed full gate, and its fixer when red
+- [x] `full gate @<n> (unreproduced landing)` parses to the `full` role
+- [x] The periodic gate behaves as before
 
 **Dependencies:** Task 45 (its tests are the oracle), Task 98 (its tests are the oracle), Task 100 (its tests are the oracle), Task 97 (the `unreproduced` key), Task 74 (edits the same workflow), Task 46 (shared file `roles.py`)
 **Complexity:** Medium
