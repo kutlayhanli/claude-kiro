@@ -2798,21 +2798,16 @@ async function auditFirst(n, rec) {
   let fixed = null
   if (repairs.length) {
     rec.result = null
-    const h = await handOffTestRepair(n, rec, repairs)
-    fixed = h.fixed
-    const reasons = [...fixed.toMe, ...fixed.findings.map(f => `the test-fixer found the test correct, so it is not changed: ${trim(String(f.message || f.issue || ''), 300)}`)]
-    if (reasons.length) {
-      const last = repairs[repairs.length - 1]
-      const t = (last.ruling && last.ruling.testRepair) || {}
-      const testRepair = { file: String(t.file || last.claim.file || ''), test: String(t.test || last.claim.test || ''), change: String(t.change || ''), why: String(t.why || '') }
-      const finding = (fixed.records.find(x => x.outcome === 'test-correct' && x.finding) || {}).finding
-      return { exit: await parkTestFix(n, rec, reasons, fixed.records, { ruling: last.rulingNo ?? null, testRepair, ...(finding ? { finding } : {}) }) }
-    }
+    // The one hand-off (D31-D33, 8.9): a repair that did not land is a test-fix entry and the task does not start (D33).
+    const done = await settleRepairs(n, rec, repairs, null)
+    fixed = done.fixed
+    if (done.stop) return { exit: done.stop }
     rec.testConflictFixed = rec.testConflict
     rec.testConflict = null
   }
   const note = `${fixed ? afterFixNote(fixed.fixed, []) : ''}${rulingNote(settled)}`
   return { exit: null, note }
+}
 
 // D31-D33, 8.9: the one point where gathered test_repair rulings go to the fixer (handOffTestRepair has this single call
 // site), for every caller: a task's claim loop (settleClaims) and a launch or held verify-scope claim (settleScopeClaim).
