@@ -1381,7 +1381,8 @@ const relinkedOk = new Set()   // relinked tasks whose next stale cycle report i
 const scopeSent = new Set()
 const scopeLaunchNeeds = []    // needs-input entries of a launch claim that went to me (the launch is refused)
 let launching = false
-let landingPlanPending = false  // a plan a landing asked for is in flight: no task starts until it is read (12.11)
+let landingPlanPending = false  // a plan a landing asked for is in flight: a task the landing made ready waits for it (12.11)
+let mergedAtLastPlan = new Set()  // mergedInRun when the last plan was read: a task depending on a later merge waits for the plan
 const MAX_RESOLVES = 3
 // Cross-test consistency (reviewer.cross_test): one check per wave of test tasks,
 // started when its last test task finishes (or at the end, for a wave that never
@@ -1699,7 +1700,7 @@ function requestPlan(trigger) {
   if (trigger === 'landing') landingPlanPending = true
   planRun = (async () => {
     let p = null
-    try { p = await runPlan(trigger) } catch (e) { p = null } finally { planRun = null; landingPlanPending = false }
+    try { p = await runPlan(trigger) } catch (e) { p = null } finally { planRun = null; landingPlanPending = false; mergedAtLastPlan = new Set(mergedInRun) }
     if (!p && trigger !== 'start') { stopLaunching = true; stopReason = stopReason || PLAN_FAILED }
     const q = queuedTrigger
     queuedTrigger = null
@@ -1793,10 +1794,15 @@ function noteWriteSetHold({ task, waitsOn }) {
 
 // Starts what may start now, and re-reads the plan when nothing is ready and a slot is free.
 function schedule() {
-  // Task 70 (12.11): while the plan a landing asked for is in flight, nothing starts; its plan may hold a task.
-  if (landingPlanPending) return
   const ctx = planContext()
   let ready = ctx.ready
+  // Task 70 (12.11): while the plan a landing asked for is in flight, a task that landing made ready (one depending on a
+  // task merged since the last plan was read) waits for it, since its plan may hold the task. A task that was ready
+  // before keeps starting (landing-speed 1.6, 1.8; a finding on a task already started is left to its gate).
+  if (landingPlanPending) {
+    const fresh = [...mergedInRun].filter(t => !mergedAtLastPlan.has(t))
+    if (fresh.length) ready = ready.filter(n => !((view.deps && view.deps[n]) || []).map(String).some(d => fresh.includes(d)))
+  }
   if (!SCRIPT_READINESS) {
     // Without args.deps only the plan agent's ready list counts, and only once.
     ready = lastPlanReady.map(String).filter(n => !ctx.exclude.has(n) && !view.done.has(n))
