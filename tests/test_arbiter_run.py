@@ -921,8 +921,9 @@ def review_labels(ev):
 
 
 def test_tc75_the_re_review_prompt_holds_the_ruling_and_the_settled_finding_raised_again_does_not_block(bridge, tmp_path):  # noqa: F811
+    # The ruling names F1 in `settles` (the RULING schema's field): only a finding a ruling settled stops blocking (8.12).
     project = arbiter_project(tmp_path)
-    opts = {"deps": {"1": []}, "reviews": {"1": [deadlock(F1)] * 6}, "rulings": {"1": [ruling("code"), REQ]}}
+    opts = {"deps": {"1": []}, "reviews": {"1": [deadlock(F1)] * 6}, "rulings": {"1": [ruling("code", settles=[f"src/greet.py#{F1}"]), REQ]}}
     out = run(bridge, project, opts, agents=roles("haiku", ["opus"], REVIEW_ON))
     ev = out["events"]
     assert arbiter_calls(ev) == ["arbiter task 1"], "the settled finding is not ruled on again: " + ", ".join(ev)

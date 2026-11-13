@@ -2366,8 +2366,8 @@ async function arbiterNeedsInput(n, rec, r, claim, { reason, text, ruling = null
   const decision = `The arbiter ${ruling ? 'ruled' : 'did not rule'} on Task ${n}'s ${claim.trigger} claim (${reason}): ${text}${ruling && ruling.requirement ? ` Requirement ${ruling.requirement.kind || 'change'}: ${ruling.requirement.wording || ''} (${ruling.requirement.reason || ''}).` : ''} Decide from the main session, then resume the run${RUN_ID ? ` with the same runId ${RUN_ID}` : ''}.`
   const entry = {
     task: n, file: String(claim.file || ''), kind, test: String(claim.test || ''), requirement: String(claim.criterion || ''), decision, action, notification: null, escalatedTo: [],
-    ruling: number, reason, claim: ruling ? (open ? open.key : (claim.text ? trim(String(claim.text), 600) : null)) : { ...(open ? { key: open.key } : {}), trigger: claim.trigger, text: trim(String(claim.text || ''), 600), file: String(claim.file || ''), test: String(claim.test || ''), ...(claim.cycle !== undefined ? { cycle: claim.cycle } : {}), ...(claim.command !== undefined ? { command: claim.command } : {}), ...(claim.provider !== undefined ? { provider: claim.provider } : {}) }, trigger: claim.trigger, output: ruling,
-    ...(reason === 'repeat-after-ruling' ? { evidence: trim(String(claim.text || ''), 600), earlierRuling: open && ruledAnswers.has(open.key) ? ruledAnswers.get(open.key) : null } : {}),
+    ruling: number, reason, claim: ruling ? (open ? open.key : (claim.text ? String(claim.text) : null)) : { ...(open ? { key: open.key } : {}), trigger: claim.trigger, text: String(claim.text || ''), file: String(claim.file || ''), test: String(claim.test || ''), ...(claim.cycle !== undefined ? { cycle: claim.cycle } : {}), ...(claim.command !== undefined ? { command: claim.command } : {}), ...(claim.provider !== undefined ? { provider: claim.provider } : {}) }, trigger: claim.trigger, output: ruling,
+    ...(reason === 'repeat-after-ruling' ? { evidence: String(claim.text || ''), earlierRuling: open && ruledAnswers.has(open.key) ? ruledAnswers.get(open.key) : null } : {}),
     ...(open && open.missing ? { missing: open.missing } : {}),
   }
   rec.result = r
