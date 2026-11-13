@@ -149,7 +149,7 @@ def test_vendored_rendering_has_no_plugin_placeholders_and_local_agent_types():
         if target.endswith(".md"):
             assert "${CLAUDE_PLUGIN_ROOT}" not in text, target
             assert "<plugin-root>" not in text and "plugin-only" not in text, target
-            assert not re.search(r"`spec:(implementer|test-writer|fixer|resolver|reviewer)`", text), target
+            assert not re.search(r"`spec:(implementer|test-writer|fixer|resolver|reviewer|arbiter|auditor)`", text), target
     implement = files[".claude/commands/spec/implement.md"]
     assert '"brief": ".claude/workflows/spec-implement-brief.md"' in implement
     assert ".claude/commands/spec/implement.md" in implement

@@ -226,6 +226,7 @@ async function arbiterWrite(prompt, files, state, n) {
 //   rulings: {n: [answer, ...]}            answers of `arbiter task <n>` and `arbiter task <n> risky`, in order (the
 //                                          last repeats); null, 'throw' or any object. A call for a task with no
 //                                          scripted answer throws, naming the label.
+//   lintSimulate: json                     answer of the audit's `ck lint --simulate --task N` (default: selected tests/test_greet.py)
 //   auditFindings: {n: answer}             answer of `audit task <n>` (default {problems: [], summary}: no problems)
 //   arbiterEdits: {n: {files: {path: text}}}  what the `arbiter task <n>` agent really writes and commits (real git) in
 //                                          the `...-task-arbiter<k>` checkout its prompt names
@@ -239,7 +240,7 @@ async function arbiterWrite(prompt, files, state, n) {
 //   reviews entries may carry {finding: 'serves-no-requirement'}: each finding then has noRequirement: true
 // Labels starting `arbiter-` run the one `ck ... arbiter ...` (or `ck ... worktree land ...`) line of their prompt, with
 // the prompt's one fenced JSON block as stdin, through execCkRun, and return {exitCode, json}; without execCk they throw.
-export function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [], gitReport = null, conflictRounds = {}, planDurations = {}, externalDone = null, planFail = [], worktree = {}, guardStops = {}, guardStopIn = {}, parkOutcome = null, relinkOutcome = null, testConflicts = {}, execCk = null, etaAnswer = null, sleep = realSleep, external = p => p, planSeq = null, badReady = null, risk = null, gateAnswers = [], taskFailures = {}, testConflictsList = {}, testFix = {}, priorFixes = {}, crossTest = null, fidelity = null, fixtureStatus = null, owns = null, overlaps = null, testVerifies = null, provides = null, missingCommand = null, audit = null, runStart = null, rulings = {}, auditFindings = {}, arbiterEdits = {}, landedDeps = {}, arbiterStepFailures = {}, ledgerFail = false, unreproduced = null, landRecovered = null }) {
+export function project({ deps, done = [], durations = {}, failUntil = {}, noCommitsFirst = [], busy = [], cycles = [], verifyCycles = [], verifyCyclesFromStart = false, checkRed = [], fullRed = false, relink = null, reviews = {}, mergeDurations = {}, reviewDurations = {}, recheckRed = 0, conflicts = [], redLands = {}, pairConflicts = [], reviewIssue = null, protectedTasks = [], gitReport = null, conflictRounds = {}, planDurations = {}, externalDone = null, planFail = [], worktree = {}, guardStops = {}, guardStopIn = {}, parkOutcome = null, relinkOutcome = null, testConflicts = {}, execCk = null, etaAnswer = null, sleep = realSleep, external = p => p, planSeq = null, badReady = null, risk = null, gateAnswers = [], taskFailures = {}, testConflictsList = {}, testFix = {}, priorFixes = {}, crossTest = null, fidelity = null, fixtureStatus = null, owns = null, overlaps = null, testVerifies = null, provides = null, missingCommand = null, audit = null, runStart = null, rulings = {}, auditFindings = {}, arbiterEdits = {}, landedDeps = {}, arbiterStepFailures = {}, ledgerFail = false, unreproduced = null, landRecovered = null, lintSimulate = null }) {
   let rechecksLeftRed = recheckRed
   let planCalls = 0  // plan agent invocations so far: call k consumes planSeq[k-1]
   // RED landings left per task: checkRed tasks are red on their first landing, redLands sets a count.
@@ -606,6 +607,13 @@ export function project({ deps, done = [], durations = {}, failUntil = {}, noCom
     // Calls that need no envelope go straight to today's agent, adding no microtask hop (the real-timer suites
     // order their agents by timing).
     if (l.startsWith('arbiter-')) return rawAgent(prompt, opts)  // always an envelope, and always the real CLI
+    // `ck ... lint SPEC --simulate --task N --json` (the audit's selected tests): its label is the workflow's choice,
+    // so it is matched on the thin opts schema and the argv. Answer: the verifying test file, or `lintSimulate`.
+    if (isCkCall(opts) && /\blint\b/.test(prompt) && /--simulate/.test(prompt)) {
+      const n = (String(prompt).match(/--task[ =](\d+)/) || [])[1] || '1'
+      const sim = lintSimulate ?? { task: n, suites: [{ file: 'tests/test_greet.py', command: 'pytest' }], selected: [{ file: 'tests/test_greet.py', tests: null }] }
+      return Promise.resolve({ exitCode: 0, json: sim })
+    }
     if (!(THIN_LABEL.test(l) && isCkCall(opts))) return rawAgent(prompt, opts)
     return thinAgent(prompt, opts)
   }
