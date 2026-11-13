@@ -2080,7 +2080,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 88: Extend the plugin tests to the arbiter and auditor agents
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.8, 13.4
 **Description:** In `tests/test_plugin.py`, add `arbiter` and `auditor` to `AGENTS` (`"arbiter": "arbiter"`, `"auditor": "reviewer"`), so the existing checks cover the two new agent files, their generated `ck-` copies, and the guide. Adding them also makes the guide assertion require `spec:arbiter` and `spec:auditor` in `plugin/resources/without-workflow-tool.md`, which Task 76 writes, so this suite verifies Task 76 as well as Task 6. Its Verify leaves out only the dogfood and vendored-copy tests, which need Task 92's protected `.claude/` copies.
@@ -2090,11 +2090,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** none: it runs after Tasks 6 and 76 (its `AGENTS` entries fail until their files exist, and `tests/test_plugin.py` is an existing suite that must stay green), and checks their files once they have landed
 
 **Acceptance:**
-- [ ] `AGENTS` holds both new agents with their roles
-- [ ] No assertion is loosened: the dogfood and vendored-copy tests still run on the full suite
-- [ ] Tests exercise the real boundary named in the test plan (the shipped plugin files)
-- [ ] Tests fail before the implementation exists for the right reason (the agent files do not exist)
-- [ ] No mocks of the project's own code in integration tests
+- [x] `AGENTS` holds both new agents with their roles
+- [x] No assertion is loosened: the dogfood and vendored-copy tests still run on the full suite
+- [x] Tests exercise the real boundary named in the test plan (the shipped plugin files)
+- [x] Tests fail before the implementation exists for the right reason (the agent files do not exist)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 6 (creates the agent files the new `AGENTS` entries read), Task 76 (adds `spec:arbiter` and `spec:auditor` to the guide)
 **Complexity:** Low
