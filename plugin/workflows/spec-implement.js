@@ -2747,7 +2747,7 @@ const missedAudits = []          // impl tasks whose audit could not run or be r
 const AUDIT_MISSED = ['arbiter-call-failed', 'principles-missing']
 const auditPrompt = (n, verifiedBy, selected) => `${MANDATE}You are the auditor for Task ${n} of spec ${SPEC}. You read the tests this task's gate selects and check them against the spec. You do not edit, commit or run anything. ${GIT_NOTE}
 The verifying test tasks: ${(verifiedBy || []).map(t => `Task ${t}`).join(', ') || 'none'}.
-The selected tests (ck lint --simulate --task ${n}): ${JSON.stringify(selected || [])}
+The selected tests (the tests this task's gate selects${selected ? '' : '; the list could not be read, so read the test files of the verifying test tasks'}): ${JSON.stringify(selected || [])}
 Read specs/${SPEC}/requirements.md, specs/${SPEC}/design.md, specs/${SPEC}/test-plan.md and specs/${SPEC}/tasks.md, then each selected test file. Report a problem for each selected test that asserts something the spec does not require, needs behaviour a later task adds, or can never pass with code that meets the spec: "file", "test", "criterion" (the requirement number), "reason" and "needs". Report no problem for a test that fits the spec. Return "problems" (an empty list when none) and a short "summary".`
 
 async function auditFirst(n, rec) {
@@ -2765,7 +2765,7 @@ async function auditFirst(n, rec) {
     return { exit: null, note: '' }
   }
   if (!AUDITOR_AGENT) return missed('no auditor agent type was given (auditorAgent)')
-  const lint = await thinCk('audit-lint', ['-C', ROOT, 'lint', '--simulate', '--task', String(n), '--json'], { label: `audit lint ${n}`, phase, cwd: ROOT, what: `Audit step for Task ${n} of spec ${SPEC}: list the tests its gate selects` })
+  const lint = await thinCk('audit-lint', ['-C', ROOT, 'lint', SPEC, '--simulate', '--task', String(n), '--json'], { label: `audit lint ${n}`, phase, cwd: ROOT, what: `Audit step for Task ${n} of spec ${SPEC}: list the tests its gate selects` })
   const selected = lint && lint.json && Array.isArray(lint.json.selected) ? lint.json.selected : null
   let aud = null
   try {

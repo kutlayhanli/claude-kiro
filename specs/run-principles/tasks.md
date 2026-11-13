@@ -1774,6 +1774,8 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 - [x] An arbiter call on an audit problem that failed or returned nothing usable lets the task start and notes the missed audit
 - [x] A malformed ruling on an audit problem is a needs-input entry and the task does not start
 
+**Implementation notes:** A failed `ck lint SPEC --simulate` step does not mark the audit missed: the auditor still runs and reads the verifying test tasks' files (the fake projects have no answer for that step, and TC-121 asks for no missed audit there). Only a failed or unusable auditor answer, or an audit claim the arbiter could not rule on, is a missed audit. The auditor prompt does not quote the lint command, so a harness that answers that step by matching the prompt does not answer the auditor instead.
+
 **Dependencies:** Task 2 (its tests are the oracle), Task 6 (runs the `spec:auditor` agent), Task 24 (calls `ck lint --simulate`), Task 45 (its tests are the oracle), Task 70 (edits the same workflow; calls `arbitrate`), Task 71 (its tests are the oracle), Task 72 (its tests are the oracle), Task 73 (its tests are the oracle), Task 87 (its tests are the oracle), Task 43 (provides `cmd:ck arbiter context`)
 **Complexity:** High
 **Risk:** normal
