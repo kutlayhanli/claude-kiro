@@ -75,6 +75,8 @@ _IMPL = [
     ("testfix_review", _c(rf"testfix review (?P<k>{_NUM})")),
     ("run_start", _c(r"run start")),
     ("audit_task", _c(rf"audit task (?P<n>{_ID})")),
+    # The audit's thin `ck lint --simulate` call for a task (Task 74): a gate-side check, not the auditor.
+    ("audit_lint", _c(rf"audit lint (?P<n>{_ID})")),
     ("audit", _c(r"audit")),
     ("arbiter_task", _c(rf"arbiter task (?P<n>{_ID})(?P<risky> risky)?")),
     # The thin `ck arbiter open|settle|record` calls around a ruling, and the landing of an arbiter spec edit.
@@ -217,6 +219,8 @@ def _implement(label: str) -> LabelMatch:
             return _arbiter(name, g)
         if name == "audit_task":
             return LabelMatch(role="reviewer", matched=True, task=_task(g["n"]), step="audit")
+        if name == "audit_lint":
+            return LabelMatch(role="gate", matched=True, task=_task(g["n"]), step="audit_lint")
     return _OTHER
 
 

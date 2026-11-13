@@ -2007,6 +2007,26 @@ async function fixAndRecheck(what, first, afterMerges, phaseName) {
   }
   return { fix, recheck, green: recheck.green }
 }
+// One full gate over everything merged so far (14.2, 15.3): an attributed gate, its fixer and rechecks when red.
+// The run stops launching new work only when the recheck is still red (2.9). Returns the gate run.
+async function fullGateAndFix(kind, label, phaseName) {
+  const g = await attributedGate(kind, mergedCount, label, phaseName, `Verification (${label}) for spec ${SPEC}`)
+  gates.push(g)
+  fullGates.push(g)
+  if (g.state === 'red') {
+    log(`${label} red, one fix attempt`)
+    g.fix = await fixAndRecheck(`full gate after ${mergedCount} merges`, g, mergedCount, phaseName)
+    // A recheck that errors leaves the run going (2.9); only a verdict that is still red stops it.
+    if (g.fix.recheck.state === 'red') {
+      redTarget = true
+      stopLaunching = true
+      stopReason = stopReason || `${INTO} is red: ${label}`
+    }
+  } else if (g.state === 'error') {
+    log(`${label} could not run (${g.error}); the run goes on`)
+  }
+  return g
+}
 
 function requestLanding(n) {
   return new Promise(resolve => {
@@ -2045,6 +2065,12 @@ async function landBatch(batch) {
   const byTask = {}
   for (const t of (res && res.tasks) || []) byTask[String(t.task)] = t
   const entry = { tasks, size: tasks.length, window: used, merged: [], red: [], conflict: [], deferred: [], other: [], gates: ((res && res.gates) || []).length, bisected: !!(res && res.bisected), minutes: minutes(res && res.startedAt, res && res.finishedAt) }
+  // The landing restored the integration checkout before it merged (the `recovered` key): keep it on the entry and log it.
+  if (res && res.recovered && typeof res.recovered === 'object') {
+    entry.recovered = res.recovered
+    const r = res.recovered
+    log(`Landing ${tasks.join(' ')}: restored ${INTO} first (${Array.isArray(r.paths) ? r.paths.length : 0} path(s)${r.mergeInProgress ? ', merge in progress' : ''}, head ${trim(String(r.head || ''), 12)})`)
+  }
   const outcomes = []
   const deferred = []
   const before = mergedCount
@@ -2063,22 +2089,14 @@ async function landBatch(batch) {
   landings.push(entry)
   if (entry.bisected || entry.red.length) log(`Landing ${tasks.join(' ')}: red, bisected; ${entry.red.length ? `culprit(s) ${entry.red.join(', ')}` : 'no culprit (flaky?)'}; window now ${batchWindow}`)
 
-  if (entry.merged.length && FULL_EVERY > 0 && Math.floor(mergedCount / FULL_EVERY) > Math.floor(before / FULL_EVERY)) {
-    const g = await attributedGate('periodic', mergedCount, `full gate @${mergedCount}`, phaseOf(tasks[0]), `Verification (full gate after ${mergedCount} merges) for spec ${SPEC}`)
-    gates.push(g)
-    fullGates.push(g)
-    if (g.state === 'red') {
-      log(`Full gate red after ${mergedCount} merges, one fix attempt`)
-      g.fix = await fixAndRecheck(`full gate after ${mergedCount} merges`, g, mergedCount, phaseOf(tasks[0]))
-      // A recheck that errors leaves the run going (2.9); only a verdict that is still red stops it.
-      if (g.fix.recheck.state === 'red') {
-        redTarget = true
-        stopLaunching = true
-        stopReason = stopReason || `${INTO} is red: full gate after ${mergedCount} merges`
-      }
-    } else if (g.state === 'error') {
-      log(`Full gate after ${mergedCount} merges could not run (${g.error}); the run goes on`)
-    }
+  // A landing the gate could not reproduce red (the `unreproduced` key) gets the full gate at once, in place of a
+  // periodic gate due on the same step.
+  if (res && res.unreproduced) {
+    entry.unreproduced = true
+    log(`Landing ${tasks.join(' ')}: unreproduced, the batch was red once and green on its halves; running the full gate`)
+    await fullGateAndFix('unreproduced', `full gate @${mergedCount} (unreproduced landing)`, phaseOf(tasks[0]))
+  } else if (entry.merged.length && FULL_EVERY > 0 && Math.floor(mergedCount / FULL_EVERY) > Math.floor(before / FULL_EVERY)) {
+    await fullGateAndFix('periodic', `full gate @${mergedCount}`, phaseOf(tasks[0]))
   }
   for (const [b, t] of outcomes) {
     if (t.state === 'MERGED') { mergedInRun.add(b.n); view.done.add(b.n) }  // Done for the scheduler at once; the plan below confirms it
