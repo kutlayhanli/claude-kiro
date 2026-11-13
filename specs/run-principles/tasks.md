@@ -1767,12 +1767,12 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Acceptance:**
 - [ ] The audit runs once after the last verifying test task merged and before the first attempt
 - [ ] A problem reaches the arbiter before any `task N` label
-- [ ] A failed audit lets the task start, and the report names it
-- [ ] Retries and escalations run no second audit, and test-track tasks, tasks with no verifying tests, and tasks whose verifying test tasks a cross-test check passed run none
-- [ ] A `test_repair` ruling on an audit problem goes to the fixer, and a landed fix starts the task's first attempt
-- [ ] Repeated claims across runs stay within 6 calls per task and 2 per claim, and a clean spec runs today's labels in today's order, with only the audit steps added
-- [ ] An arbiter call on an audit problem that failed or returned nothing usable lets the task start and notes the missed audit
-- [ ] A malformed ruling on an audit problem is a needs-input entry and the task does not start
+- [x] A failed audit lets the task start, and the report names it
+- [x] Retries and escalations run no second audit, and test-track tasks, tasks with no verifying tests, and tasks whose verifying test tasks a cross-test check passed run none
+- [x] A `test_repair` ruling on an audit problem goes to the fixer, and a landed fix starts the task's first attempt
+- [x] Repeated claims across runs stay within 6 calls per task and 2 per claim, and a clean spec runs today's labels in today's order, with only the audit steps added
+- [x] An arbiter call on an audit problem that failed or returned nothing usable lets the task start and notes the missed audit
+- [x] A malformed ruling on an audit problem is a needs-input entry and the task does not start
 
 **Dependencies:** Task 2 (its tests are the oracle), Task 6 (runs the `spec:auditor` agent), Task 24 (calls `ck lint --simulate`), Task 45 (its tests are the oracle), Task 70 (edits the same workflow; calls `arbitrate`), Task 71 (its tests are the oracle), Task 72 (its tests are the oracle), Task 73 (its tests are the oracle), Task 87 (its tests are the oracle), Task 43 (provides `cmd:ck arbiter context`)
 **Complexity:** High
