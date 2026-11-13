@@ -1253,26 +1253,25 @@ function normalizeReview(review) {
 }
 
 // Task 69 (8.12): removes the findings a ruling settled. `settled` holds identities `<file>#<issue>`; a finding matches one
-// by its file and issue text (case, whitespace and a leading ./ do not matter), or carries `settledBy` and names a file a
-// ruling settled. Every other finding passes, in order.
+// by its file and issue text (case, whitespace and a leading ./ do not matter). A finding the reviewer marks `settledBy`
+// restates a settled finding, so it is removed too, but only when something was settled (an empty `settled` matches
+// nothing). Every other finding passes, in order.
 function settleFindings(review, settled) {
   if (!review || typeof review !== 'object') return review
   const normPath = s => String(s || '').replace(/^(\.\/)+/, '')
   const collapse = s => String(s || '').split(/\s+/).filter(Boolean).join(' ').toLowerCase()
   const settledIds = new Set()
-  const settledFiles = new Set()
   for (const s of settled || []) {
     const text = String(s)
     const k = text.indexOf('#')
     const file = normPath(k < 0 ? text : text.slice(0, k))
     settledIds.add(`${file}#${collapse(k < 0 ? '' : text.slice(k + 1))}`)
-    settledFiles.add(file)
   }
   const findings = (Array.isArray(review.findings) ? review.findings : []).filter(f => {
     if (!f) return true
     const file = normPath(f.file)
     if (settledIds.has(`${file}#${collapse(f.issue)}`)) return false
-    if (f.settledBy != null && settledFiles.has(file)) return false
+    if (f.settledBy != null && settledIds.size > 0) return false
     return true
   })
   return { ...review, findings }
@@ -1939,7 +1938,7 @@ async function reviewBatch(batch) {
     review = null
   }
   for (const n of ids) pendingReview.get(n).reviewed = true
-  review = attributeFindings(review, ids)
+  review = normalizeReview(attributeFindings(review, ids))
   // Task 69 (4.8): a serves-no-requirement finding of a batched review is a proposed cut of the task it names.
   if (((review && review.findings) || []).length) reviewedFindings = true
   for (const f of (review && review.findings) || []) {
@@ -2322,7 +2321,7 @@ const recordCut = (n, f) => {
   const key = `${task}|${f.file || ''}|${f.issue || ''}`
   if (cutKeys.has(key)) return
   cutKeys.add(key)
-  proposedCuts.push({ task, file: String(f.file || ''), issue: String(f.issue || ''), fix: String(f.fix || '') })
+  proposedCuts.push({ task, file: String(f.file || ''), issue: String(f.issue || '') })
 }
 
 // A guard stop as a claim (6.2): the test or file the hook protected, and the requirement it verifies.
@@ -2357,7 +2356,7 @@ ${open.principles.map(p => `- ${p.id} (${p.layer}): ${p.text}`).join('\n')}
 Plan layer: ${open.planLayer}.
 ${open.earlier.length ? `Earlier rulings on this task: ${JSON.stringify(open.earlier)}\n` : ''}The spec: specs/${SPEC}/requirements.md, specs/${SPEC}/design.md, specs/${SPEC}/test-plan.md and specs/${SPEC}/tasks.md. Read what the claim needs.
 Your worktree for a spec edit: ${String(open.worktree).startsWith('/') ? open.worktree : `${ROOT}/${open.worktree}`} (branch ${open.branch}). Edit only tasks.md, design.md and test-plan.md there and commit with a plain git commit -m '...'.
-${first ? `You looked at this claim once already and asked for a stronger look. Your reasoning then: ${first.reasoning || ''}\nWhat you established: ${first.established || ''}\nThis is the last look: rule now.\n` : ''}Give exactly one outcome: spec_edit (you changed the spec in your worktree, name what in "changed"), test_repair (a test is wrong: "testRepair" {file, test, change, why}), code (the implementer must change: "code"), or requirements (a requirement must change or is missing: "requirement" {kind add|change|remove, wording, reason}). A reserved scope is mine, not yours: name it in "reservedBy". Always give "claim" (copy the Claim key above), "status" (ruled, or needs_stronger_look with "established"), "reasoning" and "principle".`
+${first ? `You looked at this claim once already and asked for a stronger look. Your reasoning then: ${first.reasoning || ''}\nWhat you established: ${first.established || ''}\nThis is the last look: rule now.\n` : ''}Give exactly one outcome: spec_edit (you changed the spec in your worktree, name what in "changed"), test_repair (a test is wrong: "testRepair" {file, test, change, why}), code (the implementer must change: "code"), or requirements (a requirement must change or is missing: "requirement" {kind add|change|remove, wording, reason}). A reserved scope is mine, not yours: name it in "reservedBy". For a review deadlock, "settles" lists each of the claim's findings your ruling settles, as "<file>#<issue>" copied from the claim (leave it empty for a finding the ruling does not settle). Always give "claim" (copy the Claim key above), "status" (ruled, or needs_stronger_look with "established"), "reasoning" and "principle".`
 
 // A stop the arbiter did not rule on, or ruled on in a way that needs me: one needs-input entry (7.2, 6.10). Parked
 // (unattended) or asked (interactive); no fallback runs.
@@ -2367,7 +2366,7 @@ async function arbiterNeedsInput(n, rec, r, claim, { reason, text, ruling = null
   const decision = `The arbiter ${ruling ? 'ruled' : 'did not rule'} on Task ${n}'s ${claim.trigger} claim (${reason}): ${text}${ruling && ruling.requirement ? ` Requirement ${ruling.requirement.kind || 'change'}: ${ruling.requirement.wording || ''} (${ruling.requirement.reason || ''}).` : ''} Decide from the main session, then resume the run${RUN_ID ? ` with the same runId ${RUN_ID}` : ''}.`
   const entry = {
     task: n, file: String(claim.file || ''), kind, test: String(claim.test || ''), requirement: String(claim.criterion || ''), decision, action, notification: null, escalatedTo: [],
-    ruling: number, reason, claim: ruling ? (open ? open.key : (claim.text ? String(claim.text) : null)) : { ...(open ? { key: open.key } : {}), trigger: claim.trigger, text: String(claim.text || ''), file: String(claim.file || ''), test: String(claim.test || ''), ...(claim.cycle !== undefined ? { cycle: claim.cycle } : {}), ...(claim.command !== undefined ? { command: claim.command } : {}), ...(claim.provider !== undefined ? { provider: claim.provider } : {}) }, trigger: claim.trigger, output: ruling,
+    ruling: number, reason, claim: ruling ? (open ? open.key : (claim.text ? trim(String(claim.text), 600) : null)) : { ...(open ? { key: open.key } : {}), trigger: claim.trigger, text: trim(String(claim.text || ''), 600), file: String(claim.file || ''), test: String(claim.test || ''), ...(claim.cycle !== undefined ? { cycle: claim.cycle } : {}), ...(claim.command !== undefined ? { command: claim.command } : {}), ...(claim.provider !== undefined ? { provider: claim.provider } : {}) }, trigger: claim.trigger, output: ruling,
     ...(reason === 'repeat-after-ruling' ? { evidence: trim(String(claim.text || ''), 600), earlierRuling: open && ruledAnswers.has(open.key) ? ruledAnswers.get(open.key) : null } : {}),
     ...(open && open.missing ? { missing: open.missing } : {}),
   }
@@ -2705,7 +2704,7 @@ async function runTask(n) {
       // attempt or escalation (8.2, 8.16): the caller re-runs it with `note`. Only `retry` resumes the task itself.
       if (next !== 'retry') {
         if (fixed) { rec.testConflictFixed = rec.testConflict; rec.testConflict = null }
-        return { exit: null, note: `\n${fixed ? afterFixNote(fixed.fixed, []) : ''}${rulingNote([...others, ...repairs])}` }
+        return { exit: null, settled, note: `\n${fixed ? afterFixNote(fixed.fixed, []) : ''}${rulingNote([...others, ...repairs])}` }
       }
       if (fixed) {
         rec.testConflictFixed = rec.testConflict   // the conflict is resolved: a later ordinary failure is handled like any other
@@ -2822,8 +2821,20 @@ async function runTask(n) {
         }
         const go = await settleClaims(n, rec, [claim], 're-review')
         if (go.exit) return { exit: go.exit }
-        for (const f of blocking) settledIds.push(`${f.file || ''}#${f.issue || ''}`)
-        if (ok(r)) review = await reviewAgain(go.note)
+        // 8.12: only the findings the ruling names in `settles` are settled. A spec edit is the arbiter's finding that the
+        // reviewer was wrong, so it settles every blocking finding of the claim.
+        const outs = go.settled || []
+        const named = outs.filter(o => o.route !== 'spec_edit').flatMap(o => (o.ruling && Array.isArray(o.ruling.settles) ? o.ruling.settles : []).map(String))
+        const reviewerWrong = outs.some(o => o.route === 'spec_edit')
+        const settledNow = reviewerWrong ? blocking : blocking.filter(f => settleFindings({ findings: [f] }, named).findings.length === 0)
+        for (const f of settledNow) settledIds.push(`${f.file || ''}#${f.issue || ''}`)
+        const stillBlocking = blocking.filter(f => !settledNow.includes(f))
+        if (outs.some(o => o.route === 'code') && stillBlocking.length) {
+          // 8.11: the reviewer was right, so the implementer changes the code with the ruling's text before the re-review
+          const parked = await revised(`${revisePrompt(n, review, round, claimFlags('revision', codeOpts(n), round + 1))}${go.note}`, `${label(n)} revise after ruling`, codeOpts(n), codeOpts(n).model)
+          if (parked) return { exit: parked }
+          if (ok(r)) review = await reviewAgain()
+        } else if (ok(r)) review = await reviewAgain(go.note)
       }
       // model/effort: who judged the task, so an audit can count escapes (approved bugs) per reviewer tier.
       const by = { model: opts.model || 'inherited', effort: opts.effort || 'inherited', riskTag: rec.riskTag }
