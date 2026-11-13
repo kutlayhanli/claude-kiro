@@ -18,6 +18,8 @@ Each role has an agent type, and each Agent call carries the role's `model` and 
 | review of a task's diff | `spec:reviewer` |
 | spec-create agents (requirements, design, reviewers, refuters) | `general-purpose` (the session's model, as in the workflow) |
 
+Two more types exist for the Workflow path: `spec:arbiter` (rules on claims) and `spec:auditor` (the read-only audit before a task's first attempt). On this path there is no arbiter loop, so you never start a `spec:arbiter`; you start a `spec:auditor` only for the audit described below.
+
 If these types are unknown to this session, use `general-purpose` with the same `model` and `effort`, and tell me once.
 
 ## Run id and Agent descriptions
