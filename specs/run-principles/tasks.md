@@ -2155,7 +2155,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 92: Regenerate the vendored copies (lands by hand)
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** Constraints (vendored copies under .claude/)
 **Description:** I run this task myself, because `.claude/` is protected: ck's reference-transaction hook refuses any untokened update of `integrate/*` that changes `.claude/**`, so a plain hand commit on the integration branch is refused and leaves the dirty checkout Story 14 exists for. In the task's own worktree (`ck worktree create run-principles 92 --base integrate/run-principles`), run `CK_CONFIG_HOME=$(mktemp -d) uv run ck vendor`, then `CK_CONFIG_HOME=$(mktemp -d) uv run ck agents sync`, so the generated `ck-*.md` agent types carry the project defaults and not my machine's role settings (global config sets the implementer, reviewer and, per D9, arbiter models here; commit adb81a6 needed the same). Update `.claude/ck-manifest.json`, commit in that worktree, then land it from a real terminal with `ck worktree approve run-principles 92`. Run the Verify with `CK_CONFIG_HOME` pointing at an empty directory too, as `tests/conftest.py` does. Until it is done, the final whole-suite gate is expected to fail only on `test_dogfood_copies_in_this_repo_match_the_plugin_source` and `test_claude_vendored_workflow_matches_plugin_source`. Any other failure is a real one.
@@ -2176,7 +2176,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Acceptance:**
 - [x] `tests/test_plugin.py` passes in full, including the dogfood and vendored-copy tests
 - [x] The generated `.claude/agents/ck-arbiter.md` and `ck-auditor.md` carry the `DEFAULTS` model and effort from `agents.py`, and no model or effort comes from personal config
-- [ ] The commit landed through `ck worktree approve`, and the integration checkout is clean afterwards
+- [x] The commit landed through `ck worktree approve`, and the integration checkout is clean afterwards
 
 **Dependencies:** Task 6 (plugin source this copies), Task 48 (plugin source this copies), Task 65 (plugin source this copies), Task 66 (plugin source this copies), Task 67 (plugin source this copies), Task 68 (plugin source this copies), Task 69 (plugin source this copies), Task 70 (plugin source this copies), Task 74 (plugin source this copies), Task 76 (plugin source this copies), Task 83 (plugin source this copies), Task 84 (plugin source this copies), Task 85 (plugin source this copies), Task 86 (plugin source this copies), Task 99 (plugin source this copies)
 **Complexity:** Low
