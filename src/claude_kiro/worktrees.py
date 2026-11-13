@@ -130,13 +130,14 @@ class RecoveryFacts:
     merge_in_progress: bool      # MERGE_HEAD exists in the target
     head: str
     refusal: Optional["Refusal"]
+    verb: str = "land"           # the refused write as the message names it: "merge" for `ck worktree merge`
 
 
 def decide_recovery(facts: RecoveryFacts) -> Tuple[str, str]:
     """("clean" | "recover" | "refuse", reason). Pure (14.1, 14.3, 14.5)."""
     if not facts.dirty and not facts.merge_in_progress:
         return "clean", ""
-    base = f"{facts.target} has uncommitted changes to tracked files; refusing to land into {facts.into}"
+    base = f"{facts.target} has uncommitted changes to tracked files; refusing to {facts.verb} into {facts.into}"
     if not facts.managed:
         return "refuse", base
     refusal = facts.refusal
@@ -177,7 +178,7 @@ def _recovery_state(target: Path) -> Tuple[List[str], bool, str]:
     return sorted(paths), merging, head
 
 
-def recover_target(root: Path, target: Path, into: str) -> Optional[Dict]:
+def recover_target(root: Path, target: Path, into: str, verb: str = "land") -> Optional[Dict]:
     """Restore a refused integration checkout before a write into it (Story 14).
 
     None when clean; WorktreeError when it must be refused; else resets to the checkout's own head and returns
@@ -188,7 +189,7 @@ def recover_target(root: Path, target: Path, into: str) -> Optional[Dict]:
     facts = RecoveryFacts(
         into=into, target=os.path.realpath(target), managed=_is_managed_checkout(root, target, into),
         dirty=tuple(paths), merge_in_progress=merging, head=head,
-        refusal=refusal_for(root, f"refs/heads/{into}") if (paths or merging) else None)
+        refusal=refusal_for(root, f"refs/heads/{into}") if (paths or merging) else None, verb=verb)
     verdict, reason = decide_recovery(facts)
     if verdict == "clean":
         return None
@@ -955,7 +956,7 @@ def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, ke
     if target is None:
         raise WorktreeError(f"branch {into} is not checked out anywhere; check it out or create the integration worktree")
     with land_lock(root, into):
-        recovered = recover_target(root, target, into)
+        recovered = recover_target(root, target, into, verb="merge")
     if recovered and on_recovered:
         on_recovered(target, recovered)
 
