@@ -751,8 +751,9 @@ function chainLengths(order, deps, done) {
 // Task 87 (7.4): the impl tasks held while a cross-test finding is open: those verified by the test file each
 // finding names. A finding names its file in `file`, or as the node-id part of `test` ("file::name"); a bare
 // test name places nothing. Paths compare in one surface form (slashes, ./, case): holding too much is safe.
+const normTestPath = p => String(p == null ? '' : p).trim().replace(/\\/g, '/').split('/').filter(x => x !== '' && x !== '.').join('/').toLowerCase()
 function heldByCrossTest({ findings, testVerifies } = {}) {
-  const norm = p => String(p == null ? '' : p).trim().replace(/\\/g, '/').split('/').filter(x => x !== '' && x !== '.').join('/').toLowerCase()
+  const norm = normTestPath
   const tv = testVerifies && typeof testVerifies === 'object' && !Array.isArray(testVerifies) ? testVerifies : {}
   const byFile = new Map()
   for (const [k, v] of Object.entries(tv)) {
@@ -1352,11 +1353,13 @@ function crossPassedOf({ checks, testVerifies } = {}) {
   const tests = new Set()
   const held = new Set()
   const tv = testVerifies && typeof testVerifies === 'object' && !Array.isArray(testVerifies) ? testVerifies : {}
+  // Paths compare in the surface form heldByCrossTest uses (normTestPath), so a finding naming './tests/Foo.py' matches 'tests/foo.py'.
+  const tvKeys = new Set(Object.keys(tv).map(normTestPath))
   for (const c of Array.isArray(checks) ? checks : []) {
     if (!c || typeof c !== 'object' || c.verdict === 'unchecked') continue
     const findings = (Array.isArray(c.findings) ? c.findings : []).filter(f => f && typeof f === 'object')
     const fileOf = f => String(f.file || (String(f.test || '').includes('::') ? String(f.test).split('::')[0] : ''))
-    if (findings.some(f => !Object.prototype.hasOwnProperty.call(tv, fileOf(f)))) continue
+    if (findings.some(f => !tvKeys.has(normTestPath(fileOf(f))))) continue
     for (const t of Array.isArray(c.tasks) ? c.tasks : []) tests.add(String(t))
     for (const t of heldByCrossTest({ findings, testVerifies: tv })) held.add(String(t))
   }
@@ -2749,7 +2752,8 @@ async function handOffTestRepair(n, rec, rulings, opts = {}) {
 // for the first attempt's prompt. A reading that failed, or a claim the arbiter could not rule on, is missed (13.5, 13.8).
 const auditedTasks = new Set()   // impl tasks whose audit ran in this run (13.6)
 const missedAudits = []          // impl tasks whose audit could not run or be ruled on: the task started anyway (13.5)
-const AUDIT_MISSED = ['arbiter-call-failed', 'principles-missing']
+// 13.8: an audit claim the arbiter cannot be called for (no arbiterAgent) is missed too, the same as a failed call.
+const AUDIT_MISSED = ['arbiter-call-failed', 'principles-missing', 'no-arbiter']
 const auditPrompt = (n, verifiedBy, selected) => `${MANDATE}You are the auditor for Task ${n} of spec ${SPEC}. You read the tests this task's gate selects and check them against the spec. You do not edit, commit or run anything. ${GIT_NOTE}
 The verifying test tasks: ${(verifiedBy || []).map(t => `Task ${t}`).join(', ') || 'none'}.
 The selected tests (the tests this task's gate selects${selected ? '' : '; the list could not be read, so read the test files of the verifying test tasks'}): ${JSON.stringify(selected || [])}
@@ -2774,7 +2778,8 @@ async function auditFirst(n, rec) {
   const selected = lint && lint.json && Array.isArray(lint.json.selected) ? lint.json.selected : null
   let aud = null
   try {
-    aud = await call('audit', auditPrompt(n, verifiedBy, selected), { label: `audit task ${n}`, phase, schema: AUDIT, agentType: AUDITOR_AGENT })
+    // The auditor's model and effort follow the reviewer role (design.md), so the reviewer's per-run settings apply here too.
+    aud = await call('audit', auditPrompt(n, verifiedBy, selected), { label: `audit task ${n}`, phase, schema: AUDIT, agentType: AUDITOR_AGENT, ...REVIEW })
   } catch (e) {
     aud = null
   }
@@ -2789,7 +2794,18 @@ async function auditFirst(n, rec) {
       file: p.file, test: p.test, criterion: p.criterion, models_tried: [],
     }
     const out = await arbitrate(n, rec, null, claim)
-    if (out.exit) return { exit: out.exit }
+    if (out.exit) {
+      // The one claim loop (D31-D33, 8.9), as settleClaims does: the repairs gathered so far still go to the hand-off, and
+      // the claim that exited rides along in the entry the hand-off returns (or stands alone when every repair landed).
+      if (out.route) settled.push(out)
+      const gathered = settled.filter(o => o.route === 'test_repair')
+      if (gathered.length) {
+        rec.result = null
+        const done = await settleRepairs(n, rec, gathered, out.exit)
+        return { exit: done.stop || out.exit }
+      }
+      return { exit: out.exit }
+    }
     if (out.missed) { missedHere = true; continue }
     settled.push(out)
   }
@@ -2852,6 +2868,8 @@ async function runTask(n) {
     // Task 74 (13.1): the reading audit runs before the first attempt; the rulings on its problems ride in that attempt's prompt.
     const firstAudit = await auditFirst(n, rec)
     if (firstAudit.exit) return firstAudit.exit
+    // The audit's arbiter and hand-off calls gave the slot up (releaseSlot): the first attempt takes it back before it runs (a no-op when still held).
+    await acquireSlot(n)
     let r = await call('task', `${taskPrompt(n, claimFlags('task-start', codeOpts(n), 1))}${firstAudit.note}`, { label: label(n), phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
     let lastModel = codeOpts(n).model
     let stop = guardStopOf(r)   // set after every call; a guard stop leaves the retry and escalate loops at once and goes to the arbiter (6.2)
