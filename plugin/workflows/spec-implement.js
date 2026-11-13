@@ -1255,8 +1255,8 @@ function normalizeReview(review) {
 // Task 69 (8.12): removes the findings a ruling settled. `settled` holds identities `<file>#<issue>`; a finding matches one
 // by its file and issue text (case, whitespace and a leading ./ do not matter). A finding the reviewer marks `settledBy`
 // restates a settled finding, so it is removed too, but only when something was settled (an empty `settled` matches
-// nothing). Every other finding passes, in order.
-function settleFindings(review, settled) {
+// nothing). When `numbers` (the ruling numbers that settled something) is given, `settledBy` must be one of them. Every other finding passes, in order.
+function settleFindings(review, settled, numbers) {
   if (!review || typeof review !== 'object') return review
   const normPath = s => String(s || '').replace(/^(\.\/)+/, '')
   const collapse = s => String(s || '').split(/\s+/).filter(Boolean).join(' ').toLowerCase()
@@ -1271,7 +1271,7 @@ function settleFindings(review, settled) {
     if (!f) return true
     const file = normPath(f.file)
     if (settledIds.has(`${file}#${collapse(f.issue)}`)) return false
-    if (f.settledBy != null && settledIds.size > 0) return false
+    if (f.settledBy != null && settledIds.size > 0 && (numbers === undefined || (numbers || []).map(String).includes(String(f.settledBy)))) return false
     return true
   })
   return { ...review, findings }
@@ -1279,12 +1279,19 @@ function settleFindings(review, settled) {
 
 // Task 69 (8.12): the findings of a review deadlock an applied ruling of this task already covers, each with that ruling.
 // `earlier` is ck's list of this task's applied rulings; the claim key of each one names the finding it settled.
+// The finding identities a claim key names: `review:<id>,<id>`; compared whole, never as substrings.
+function claimIdsOf(claim) {
+  const text = String(claim || '')
+  const k = text.indexOf('review:')
+  return (k < 0 ? [text] : text.slice(k + 'review:'.length).split(',')).map(x => x.trim())
+}
+
 function coveredFindingsOf(findings, earlier) {
   const normPath = s => String(s || '').replace(/^(\.\/)+/, '')
   const collapse = s => String(s || '').split(/\s+/).filter(Boolean).join(' ').toLowerCase()
   return (findings || []).flatMap(([file, issue]) => {
     const id = `${normPath(file)}#${collapse(issue)}`
-    const e = (earlier || []).find(x => x && String(x.claim || '').includes(id))
+    const e = (earlier || []).find(x => x && claimIdsOf(x.claim).includes(id))
     return e ? [{ file: String(file || ''), issue: String(issue || ''), ruling: e.ruling, outcome: e.outcome, reasoning: e.reasoning }] : []
   })
 }
@@ -1942,8 +1949,9 @@ async function reviewBatch(batch) {
   // Task 69 (4.8): a serves-no-requirement finding of a batched review is a proposed cut of the task it names.
   if (((review && review.findings) || []).length) reviewedFindings = true
   for (const f of (review && review.findings) || []) {
-    if (f && f.noRequirement && (f.task != null || ids.length === 1)) recordCut(ids.length === 1 ? ids[0] : f.task, f)
-    else if (f && f.noRequirement) log(`Review wave ${waveNo}: a serves-no-requirement finding names no task, so it is not a proposed cut: ${f.file || '?'}: ${f.issue}`)
+    if (f && f.noRequirement && f.task != null && (batch.some(b => String(b.n) === String(f.task)) || view.order.includes(String(f.task)) || Object.hasOwn(view.deps, String(f.task)))) recordCut(f.task, f)
+    else if (f && f.noRequirement && f.task == null && ids.length === 1) recordCut(ids[0], { ...f, task: ids[0] })
+    else if (f && f.noRequirement) log(`Review wave ${waveNo}: a serves-no-requirement finding names no task of this spec, so it is not a proposed cut: ${f.file || '?'}: ${f.issue}`)
   }
   const flagged = flaggedOf(review, ids)
   if (review && review.verdict === 'changes' && ids.length > 1 && flagged.length === ids.length && !(review.findings || []).some(f => f && f.severity !== 'minor' && f.task != null)) {
@@ -2453,7 +2461,7 @@ async function arbitrate(n, rec, r, claim) {
     claim = { ...claim, findings: left, text: `Task ${n} still has blocking review findings: ${left.map(([f, i]) => `${f}: ${i}`).join(' | ')}` }
     // The covered findings' earlier rulings stay out of the arbiter's prompt too: only the rest of the deadlock is shown.
     const idText = c => `${c.file.replace(/^(\.\/)+/, '')}#${c.issue.split(/\s+/).filter(Boolean).join(' ').toLowerCase()}`
-    promptOpen = { ...open, earlier: open.earlier.filter(e => !covered.some(c => String(e.claim || '').includes(idText(c)))) }
+    promptOpen = { ...open, earlier: open.earlier.filter(e => !covered.some(c => claimIdsOf(e.claim).includes(idText(c)))) }
   }
   let tier = open.tier
   let first = null
@@ -2541,7 +2549,12 @@ async function arbitrate(n, rec, r, claim) {
     }
     if (covered.length) {
       const text = covered.map(c => `"${c.issue}" is settled by ruling #${c.ruling} (${c.outcome}): ${trim(String(c.reasoning || ''), 400)}`).join('; ')
-      return { exit: await arbiterNeedsInput(n, rec, r, { trigger: 'review-deadlock', text: `Covered findings: ${text}`, findings: covered.map(c => [c.file, c.issue]) }, { reason: 'repeat-after-ruling', text: `${text}. The other findings of the deadlock were ruled on in this call.`, open }) }
+      // The ruling on the other findings is kept: settleClaims gathers its repair or code text, and the entry carries it.
+      const exit = await arbiterNeedsInput(n, rec, r, { trigger: 'review-deadlock', text: `Covered findings: ${text}`, findings: covered.map(c => [c.file, c.issue]) }, { reason: 'repeat-after-ruling', text: `${text}. The other findings of the deadlock were ruled on in this call.`, open })
+      if (exit.needsInput && answer && typeof answer === 'object') {
+        exit.needsInput.alsoPending = [...(exit.needsInput.alsoPending || []), { ruling: out.rulingNo ?? null, outcome: res.route, ...(answer.code ? { code: String(answer.code) } : {}), ...(answer.testRepair ? { testRepair: answer.testRepair } : {}) }]
+      }
+      return { ...out, exit }
     }
     return out
   }
@@ -2670,7 +2683,7 @@ async function runTask(n) {
       let exit = null
       for (const claim of claims) {
         const out = await arbitrate(n, rec, r, claim)
-        if (out.exit) { exit = out.exit; break }
+        if (out.exit) { exit = out.exit; if (out.route) settled.push(out); break }
         settled.push(out)
       }
       const others = settled.filter(o => o.route !== 'test_repair')
@@ -2777,12 +2790,13 @@ async function runTask(n) {
       // Task 69 (4.8, 8.12): a review is normalized before it is read, and the findings a ruling settled are dropped. A
       // serves-no-requirement finding is recorded as a proposed cut.
       const settledIds = []
+      const settledNumbers = []
       const reviewed = raw => {
         if (!raw) return raw
         const v = normalizeReview(raw)
         if ((v.findings || []).length) reviewedFindings = true
         for (const f of v.findings || []) if (f && f.noRequirement) recordCut(n, f)
-        return normalizeReview(settleFindings(v, settledIds))
+        return normalizeReview(settleFindings(v, settledIds, settledNumbers))
       }
       const reviewAgain = async (note = '') => reviewed(await call('review', `${reviewPrompt(n, r, WANT_EXTRA(n) ? await testReviewExtra(n) : '')}${note}`, { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts }))
       let review = reviewed(first)
@@ -2841,6 +2855,7 @@ async function runTask(n) {
           if (parked) return { exit: parked }
         }
         for (const f of settledNow) settledIds.push(`${f.file || ''}#${f.issue || ''}`)
+        if (settledNow.length) for (const o of outs) if (o.rulingNo != null) settledNumbers.push(o.rulingNo)
         // 8.12: the re-reviewer gets the ruling too
         if (ok(r)) review = await reviewAgain(codeRuled ? rulingNote(outs, true) : go.note)
       }
