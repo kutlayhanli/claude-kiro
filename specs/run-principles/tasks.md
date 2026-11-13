@@ -2334,7 +2334,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 99: Send an unreproduced landing to the full gate and its fixer
-**Status:** In Progress
+**Status:** Done
 **Track:** impl
 **Requirements:** 14.2, 15.3
 **Description:** In `plugin/workflows/spec-implement.js`, factor the periodic gate's code into `fullGateAndFix(kind, label)` (attributed gate, `fixAndRecheck` when red, `redTarget` and `stopLaunching` when the recheck is still red). In the landing step, keep `recovered` on the landing entry and log it; when the result has `unreproduced`, set `unreproduced: true` on the landing entry, log it, and call `fullGateAndFix('unreproduced', ...)` with label `full gate @<merges> (unreproduced landing)`, skipping a periodic gate due on the same step. No new clock or randomness. In `src/claude_kiro/analytics/roles.py`, add the label pattern `full gate @N (unreproduced landing)` mapped to the same role as `full`: today's `full gate @{_NUM}` is matched with `fullmatch`, so the new label would parse to no role and Task 98's emitted label would turn the label corpus test red.
