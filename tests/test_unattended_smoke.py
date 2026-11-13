@@ -472,7 +472,7 @@ def test_tc169_the_run_end_audit_is_clean(tc169_run):
 
 @pytest.fixture(scope="module")
 def tc174_run(tmp_path_factory) -> Dict[str, Any]:
-    """The TC-176 scenario without `landOrder`, with Tasks 3 and 8 already Done: Task 3 is held behind Task 2 (both own
+    """The TC-176 scenario without `landOrder`, with Task 3 already Done: Task 3 is held behind Task 2 (both own
     calc.py, 13.1), so only when it is Done does the batch Task 2 lands in (with Task 7) complete the spec, and that
     batch's whole-spec landing gate (15.2) is the one that goes red with no single task to blame (15.3)."""
     tmp = tmp_path_factory.mktemp("tc174")
