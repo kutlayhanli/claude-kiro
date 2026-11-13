@@ -178,7 +178,7 @@ def test_tc122_a_problem_reaches_the_arbiter_before_any_task_label_and_the_rulin
     assert 0 <= a < r, out["events"]
     assert t < 0 or r < t, out["events"]
     assert started(out, 2), "a `code` ruling lets the task start"
-    assert "make the code provide the later command first" in out["prompts"][out["optsList"][t]["label"]]
+    assert "make the code provide the later command first" in out["prompts"][re.match(r"task 2( .*)?", out["events"][t]).group(0)]
     entries = decisions_entries(project, "branch")
     assert [e for e in entries if e.get("Trigger") == "audit"], f"no audit ruling recorded: {entries}"
     assert missed(out) == []
