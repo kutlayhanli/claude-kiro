@@ -1943,6 +1943,7 @@ async function reviewBatch(batch) {
   if (((review && review.findings) || []).length) reviewedFindings = true
   for (const f of (review && review.findings) || []) {
     if (f && f.noRequirement && (f.task != null || ids.length === 1)) recordCut(ids.length === 1 ? ids[0] : f.task, f)
+    else if (f && f.noRequirement) log(`Review wave ${waveNo}: a serves-no-requirement finding names no task, so it is not a proposed cut: ${f.file || '?'}: ${f.issue}`)
   }
   const flagged = flaggedOf(review, ids)
   if (review && review.verdict === 'changes' && ids.length > 1 && flagged.length === ids.length && !(review.findings || []).some(f => f && f.severity !== 'minor' && f.task != null)) {
@@ -2333,14 +2334,17 @@ function guardClaim(n, stop, tried) {
 }
 
 // What the implementer is told after the arbiter ruled: the text of each ruling, and that a landed edit is on INTO.
-function rulingNote(outs) {
+function rulingNote(outs, forReviewer = false) {
   const lines = (outs || []).map(o => {
     const r = o.ruling || {}
     const t = r.testRepair || {}
     const what = o.route === 'code' ? `What to do: ${r.code || r.reasoning}` : o.route === 'spec_edit' ? `The arbiter changed the spec (${r.changed || 'see the commit'}) and it landed on ${INTO}.` : o.route === 'test_repair' ? `The test ${t.file || o.claim.file || ''} ${t.test || o.claim.test || ''} was repaired: ${t.change || ''}` : ''
     return `The arbiter ruled on the ${o.claim.trigger} claim ${o.key} (${r.outcome}): ${trim(r.reasoning || '', 600)} ${what}`.trim()
   })
-  return lines.length ? `${lines.join('\n')}\nMerge ${INTO} into your branch first, so the ruled changes are in it, then finish the task. The ruling does not excuse a failing gate.\n` : ''
+  if (!lines.length) return ''
+  // The reviewer re-reviews the task against the ruling; it does not merge or finish anything, so it gets no implementer instruction.
+  const tail = forReviewer ? 'Review the task with these rulings in mind: a finding a ruling settled is not blocking again.' : `Merge ${INTO} into your branch first, so the ruled changes are in it, then finish the task. The ruling does not excuse a failing gate.`
+  return `${lines.join('\n')}\n${tail}\n`
 }
 
 const taskRisk = n => (isSafety(n) || String((current && current.risk && current.risk[n]) || '').toLowerCase() === 'safety' ? 'safety' : 'normal')
@@ -2826,15 +2830,19 @@ async function runTask(n) {
         const outs = go.settled || []
         const named = outs.filter(o => o.route !== 'spec_edit').flatMap(o => (o.ruling && Array.isArray(o.ruling.settles) ? o.ruling.settles : []).map(String))
         const reviewerWrong = outs.some(o => o.route === 'spec_edit')
-        const settledNow = reviewerWrong ? blocking : blocking.filter(f => settleFindings({ findings: [f] }, named).findings.length === 0)
-        for (const f of settledNow) settledIds.push(`${f.file || ''}#${f.issue || ''}`)
-        const stillBlocking = blocking.filter(f => !settledNow.includes(f))
-        if (outs.some(o => o.route === 'code') && stillBlocking.length) {
-          // 8.11: the reviewer was right, so the implementer changes the code with the ruling's text before the re-review
+        // A code ruling is the arbiter ruling on the claim's findings (the implementer is told to fix them), so the findings
+        // it ruled on are settled once the revision has run; a test repair or requirement settles only what it names.
+        const codeRuled = outs.some(o => o.route === 'code')
+        const settledNow = reviewerWrong || codeRuled ? blocking : blocking.filter(f => settleFindings({ findings: [f] }, named).findings.length === 0)
+        // 8.11: a code ruling always returns the task to the implementer with the ruling's text, whether or not `settles` covers
+        // every finding, and the task still needs a passing gate. Only then is the task re-reviewed with the ruling in the prompt.
+        if (codeRuled) {
           const parked = await revised(`${revisePrompt(n, review, round, claimFlags('revision', codeOpts(n), round + 1))}${go.note}`, `${label(n)} revise after ruling`, codeOpts(n), codeOpts(n).model)
           if (parked) return { exit: parked }
-          if (ok(r)) review = await reviewAgain()
-        } else if (ok(r)) review = await reviewAgain(go.note)
+        }
+        for (const f of settledNow) settledIds.push(`${f.file || ''}#${f.issue || ''}`)
+        // 8.12: the re-reviewer gets the ruling too
+        if (ok(r)) review = await reviewAgain(codeRuled ? rulingNote(outs, true) : go.note)
       }
       // model/effort: who judged the task, so an audit can count escapes (approved bugs) per reviewer tier.
       const by = { model: opts.model || 'inherited', effort: opts.effort || 'inherited', riskTag: rec.riskTag }
