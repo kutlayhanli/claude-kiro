@@ -2447,7 +2447,7 @@ async function arbitrate(n, rec, r, claim) {
   if (covered.length) {
     const coveredKeys = new Set(covered.map(c => `${c.file}\u0000${c.issue}`))
     const left = claim.findings.filter(([f, i]) => !coveredKeys.has(`${f}\u0000${i}`))
-    claim = { ...claim, findings: left, text: `Task ${n} still has blocking review findings: ${left.map(([f, i]) => `${f}: ${trim(i, 300)}`).join(' | ')}` }
+    claim = { ...claim, findings: left, text: `Task ${n} still has blocking review findings: ${left.map(([f, i]) => `${f}: ${i}`).join(' | ')}` }
     // The covered findings' earlier rulings stay out of the arbiter's prompt too: only the rest of the deadlock is shown.
     const idText = c => `${c.file.replace(/^(\.\/)+/, '')}#${c.issue.split(/\s+/).filter(Boolean).join(' ').toLowerCase()}`
     promptOpen = { ...open, earlier: open.earlier.filter(e => !covered.some(c => String(e.claim || '').includes(idText(c)))) }
@@ -2818,7 +2818,7 @@ async function runTask(n) {
         const tried = [...new Set([codeOpts(n).model, ...rec.escalations.map(e => e.model)].filter(Boolean))]
         const claim = {
           trigger: 'review-deadlock', findings: blocking.map(f => [String(f.file || ''), String(f.issue || '')]), models_tried: tried,
-          text: `Task ${n} still has blocking review findings after ${round} revision(s): ${blocking.map(f => `${f.file || '?'}: ${trim(f.issue, 300)}`).join(' | ')}`,
+          text: `Task ${n} still has blocking review findings after ${round} revision(s): ${blocking.map(f => `${f.file || '?'}: ${f.issue}`).join(' | ')}`,
         }
         const go = await settleClaims(n, rec, [claim], 're-review')
         if (go.exit) return { exit: go.exit }
