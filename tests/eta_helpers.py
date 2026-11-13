@@ -408,12 +408,12 @@ def _build_impl(root: Path, runs: int, tag: str, *, costless: bool = False, dele
 
 # The create phases and the share of the run each agent takes (sums to 1.0)
 _CREATE_STEPS = (
-    ("write requirements.md", "Requirements", 0.10), ("write design.md", "Design + Test Plan", 0.10),
+    ("write requirements.md", "Requirements", 0.05), ("write design.md", "Design + Test Plan", 0.10),
     ("write test-plan.md", "Design + Test Plan", 0.10), ("write implementation track", "Task Tracks", 0.10),
     ("write test track", "Task Tracks", 0.10), ("link tracks into tasks.md", "Link", 0.05),
     ("review: fidelity", "Adversarial Review", 0.05), ("review: grounding", "Adversarial Review", 0.05),
     ("review: implementability", "Adversarial Review", 0.05), ("review: verification", "Adversarial Review", 0.05),
-    ("revise spec + write review.md", "Revise", 0.15),
+    ("arbiter refuted", "Arbiter", 0.05), ("revise spec + write review.md", "Revise", 0.15),
 )
 
 

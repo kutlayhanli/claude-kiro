@@ -169,7 +169,9 @@ def test_tc25_implement_run_writes_the_events_to_the_real_progress_file(bridge, 
 def test_tc25_create_run_writes_phase_events(bridge, tmp_path):  # noqa: F811
     repo = world(tmp_path)
     began = begin(repo, "orbit", "create")
-    args = {"feature": "orbit", "progressRun": began["run"], "etaLine": began.get("etaLine")}
+    # The run's root is the real repo: since run-principles the workflow also runs `ck -C <root> arbiter ...` steps.
+    args = {"feature": "orbit", "projectRoot": str(repo), "specDir": str(repo / "specs" / "orbit"),
+            "progressRun": began["run"], "etaLine": began.get("etaLine")}
     out = bridge.create(args, exec_ck=exec_ck(repo))
     end(repo, "orbit")
     assert all(r["code"] == 0 for r in out["execResults"]), out["execResults"]

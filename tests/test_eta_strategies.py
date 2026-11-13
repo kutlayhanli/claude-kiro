@@ -27,8 +27,9 @@ def test_module_imports_no_claude_kiro_module():
     assert out.strip() == "[]"
 
 
-def test_create_phases_has_seven_titles():
-    assert len(es.CREATE_PHASES) == 7
+def test_create_phases_has_eight_titles():
+    # run-principles design: an Arbiter phase between Adversarial Review and Revise keeps the arbiter's time in the ETA.
+    assert len(es.CREATE_PHASES) == 8
     assert es.CREATE_PHASES[0] == "Requirements"
 
 

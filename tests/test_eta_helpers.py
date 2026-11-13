@@ -83,7 +83,8 @@ def test_impl_nowait_pool_holds_only_runs_without_waits():
 def test_create_pool_phases_and_totals():
     records = h.history_records(h.POOL_CREATE)
     assert len(records) == h.CREATE_RUNS
-    phases = {"Requirements", "Design + Test Plan", "Task Tracks", "Link", "Adversarial Review", "Revise", "Consistency Check"}
+    phases = {"Requirements", "Design + Test Plan", "Task Tracks", "Link", "Adversarial Review", "Arbiter", "Revise",
+              "Consistency Check"}
     for rec in records:
         assert rec["workflow"] == "spec-create"
         assert set(rec["phases"]) == phases

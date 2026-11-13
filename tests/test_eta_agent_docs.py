@@ -102,10 +102,13 @@ def test_tc78_documents_name_the_verify_file_error_and_the_single_task_refusal(n
 
 def workflow_commands(bridge) -> Dict[str, object]:  # noqa: F811
     """What the Workflow scripts' prompts carry: claim kinds and flag names, land/plan flags, create event flags."""
-    deps = {str(i): [] for i in range(1, 7)}
+    deps = {str(i): [] for i in range(1, 8)}
+    # Task 7's worktree is busy, so it fails and later plans carry --failed. Task 6 never passes its gate, which under
+    # run-principles (Story 6) goes to the arbiter and parks as needs-input instead of failing.
     project = {
-        "deps": deps, "durations": {"1": 3, "2": 3, "3": 3, "4": 3, "5": 3, "6": 1},
+        "deps": deps, "durations": {"1": 3, "2": 3, "3": 3, "4": 3, "5": 3, "6": 1, "7": 1},
         "failUntil": {"2": 2, "6": 9}, "checkRed": ["3"], "reviews": {"4": ["changes", "approve"]}, "conflicts": ["5"],
+        "worktree": {"7": {"state": "BUSY", "detail": "claimed: someone"}},
         "planDurations": {str(k): 1 for k in range(1, 80)},
     }
     args = {"agents": {"implementer": dict(IMPLEMENTER), "reviewer": {"model": "opus", "effort": "high", "enabled": True, "rounds": 2}},
