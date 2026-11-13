@@ -71,7 +71,16 @@ function createAgent() {
       if (cmd[0] === 'arbiter' && cmd[1] === 'lane') return envelope({ ok: true, lane: cmd[2] })
       if (cmd[0] === 'arbiter' && cmd[1] === 'review') {
         const input = stdinJson(prompt) || {}
-        const results = (input.subjects || []).map((s, i) => ({ id: (s && s.id) || String(i + 1), action: 'recorded', reason: '', stronger: false, ruling: i + 1 }))
+        // As the real `ck arbiter review` does: a needs_stronger_look ruling at the normal tier is unchecked, stronger-look,
+        // which is what sends the workflow's one risky re-run.
+        const tier = cmd[cmd.indexOf('--tier') + 1]
+        const rulings = (input.output && Array.isArray(input.output.rulings)) ? input.output.rulings : []
+        const results = (input.subjects || []).map((s, i) => {
+          const id = (s && s.id) || String(i + 1)
+          const r = rulings.find(x => x && String(x.claim ?? x.id) === String(id))
+          const stronger = tier === 'normal' && !!r && r.status === 'needs_stronger_look'
+          return stronger ? { id, action: 'unchecked', reason: 'stronger-look', stronger: true, ruling: null } : { id, action: 'recorded', reason: '', stronger: false, ruling: i + 1 }
+        })
         return envelope({ results, lost: false })
       }
       if (/\bck .*\blint\b/.test(prompt)) return envelope({ ok: true, failures: [], warnings: [] })
