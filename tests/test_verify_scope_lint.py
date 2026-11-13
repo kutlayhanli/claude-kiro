@@ -353,7 +353,7 @@ import fs from 'node:fs'
 import { execFile } from 'node:child_process'
 import path from 'node:path'
 import { runWorkflow } from '__JS__/load_workflow.mjs'
-import { realAgents } from '__JS__/real_agents.mjs'
+import { realAgents, promptCommands } from '__JS__/real_agents.mjs'
 
 const cfg = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))
 const sc = cfg.scenario || {}
@@ -404,6 +404,13 @@ const markDone = (text, n) => {
 const scenarioFiles = n => Object.fromEntries(Object.entries((sc.files && sc.files[n]) || {}).map(([rel, v]) =>
   [rel, v && typeof v === 'object' && v.markDone ? cur => markDone(cur, String(v.markDone)) : v]))
 const worktreeFor = async (prompt, name) => {
+  // Run the prompt's own `worktree create` line, as the real test-fixer does, so the fix lands in a real worktree.
+  const create = promptCommands(prompt, ['worktree create']).find(a => a.includes('worktree') && a.includes('create'))
+  if (create) {
+    const res = await ck(create.includes('--json') ? create : [...create, '--json'])
+    const entry = (Array.isArray(res.json) ? res.json : []).find(e => String(e.task) === String(name))
+    if (entry && entry.path) return path.resolve(cfg.root, entry.path)
+  }
   const m = prompt.match(/(\/[^\s"'`]*-task-[\w-]*?\d+)/)
   return m ? m[1] : path.join(cfg.root, '.ck', 'worktrees', `${cfg.spec}-task-${name}`)
 }
@@ -590,12 +597,14 @@ def fixed_tasks(**kw) -> str:
 
 def test_tc115_one_lint_claim_per_problem_and_a_wiring_edit_lands(tmp_path):
     need_node()
-    root = launch_project(tmp_path, scope_launch_blocks(), {SHARED: SHARED_SRC})
+    # Test task 1 already filters its own Verify, so the only problem is Task 3's unfiltered run (an unfiltered Task 1
+    # Verify would own test_tc2_beta too, and Task 4 would be a second, separate problem).
+    root = launch_project(tmp_path, scope_launch_blocks(v1=RUN_T1), {SHARED: SHARED_SRC})
     scenario = {
         "files": ALL_FILES,
         "rulings": {"3": [{**SPEC_EDIT, "reasoning": "task 3 only needs its own tests; filter its Verify",
                            "changed": "specs/sim/tasks.md: Task 3 Verify filtered to test_tc1_"}]},
-        "arbiterEdits": {"3": [{f"specs/{SPEC}/tasks.md": fixed_tasks(v3=RUN_T1)}]},
+        "arbiterEdits": {"3": [{f"specs/{SPEC}/tasks.md": fixed_tasks(v1=RUN_T1, v3=RUN_T1)}]},
     }
     run = run_launch(tmp_path, root, scenario, {"arbiterAgent": "arbiter"})
     rulings = run.labels(r"^arbiter task ")
@@ -702,6 +711,15 @@ def late_blocks(**kw) -> str:
     )
 
 
+def mark_done(text: str, n: int) -> str:
+    """Task n's block as it stands once merged: Status Done, boxes ticked (a spec edit may not change a status, 8.4)."""
+    start = text.index(f"### Task {n}:")
+    nxt = text.find("\n### Task ", start + 1)
+    end = len(text) if nxt < 0 else nxt
+    block = text[start:end].replace("**Status:** Not Started", "**Status:** Done").replace("- [ ]", "- [x]")
+    return text[:start] + block + text[end:]
+
+
 def test_tc144_a_finding_after_launch_is_ruled_before_its_task_starts_and_only_once(tmp_path):
     need_node()
     root = launch_project(tmp_path, late_blocks(), {})
@@ -719,7 +737,8 @@ def test_tc144_a_finding_after_launch_is_ruled_before_its_task_starts_and_only_o
         # finding for Task 3 is still there when the plan after Task 1's merge reads it.
         "holdUntilRuling": ["2"],
         "rulings": {"3": [{**SPEC_EDIT, "reasoning": "filter Task 3's Verify", "changed": "Task 3 Verify filtered"}]},
-        "arbiterEdits": {"3": [{f"specs/{SPEC}/tasks.md": TASKS_HEAD + late_blocks(v3=f"{RUN_LATE} -k test_tc1_")}]},
+        # Task 1 has merged by then: the edit keeps it as it stands on the target (Done), and changes only Task 3's Verify.
+        "arbiterEdits": {"3": [{f"specs/{SPEC}/tasks.md": mark_done(TASKS_HEAD + late_blocks(v3=f"{RUN_LATE} -k test_tc1_"), 1)}]},
     }
     run = run_launch(tmp_path, root, scenario, {"arbiterAgent": "arbiter"})
     assert run.result.get("refused") is not True, "the launch was refused; the finding only appears after it"
@@ -739,17 +758,21 @@ def test_tc144_a_finding_after_launch_is_ruled_before_its_task_starts_and_only_o
 def test_tc209_a_launch_claim_ruled_test_repair_goes_to_the_fixer_then_the_launch_goes_on(tmp_path):
     need_node()
     root = launch_project(tmp_path, scope_launch_blocks(), {SHARED: SHARED_SRC})
-    alpha_only = "def test_tc1_alpha():\n    assert True\n"
+    # The fix moves test_tc2_beta out of the shared file into its own file. ck testfix scope refuses a changed test that
+    # drops a TC id it carried (4.5), so the shared file keeps a TC-2 note; the ruling and the fixer's changedTests name
+    # the node at the place the repaired test lives, since that is the node the proof runs (4.2).
+    alpha_only = "# TC-2 (test_tc2_beta) lives in tests/test_beta.py\ndef test_tc1_alpha():\n    assert True\n"
     beta = "def test_tc2_beta():\n    assert True\n"
+    moved = "tests/test_beta.py"
     scenario = {
         "files": ALL_FILES,
         "rulings": {"3": [{
             "status": "ruled", "outcome": "test_repair", "principle": "project:test-intent",
             "reasoning": "the shared file selects another task's test; moving that test keeps its intent",
-            "testRepair": {"file": SHARED, "test": "test_tc2_beta", "change": "move test_tc2_beta to tests/test_beta.py",
+            "testRepair": {"file": moved, "test": "test_tc2_beta", "change": "move test_tc2_beta to tests/test_beta.py",
                            "why": "Task 3's unfiltered run selects it before Task 4 exists"}}]},
-        "testfix": {SHARED: alpha_only, "tests/test_beta.py": beta},
-        "testfixChanged": [{"file": SHARED, "test": "test_tc2_beta"}],
+        "testfix": {SHARED: alpha_only, moved: beta},
+        "testfixChanged": [{"file": moved, "test": "test_tc2_beta"}],
     }
     run = run_launch(tmp_path, root, scenario, {"arbiterAgent": "arbiter"})
     order = [a["label"] for a in run.agents]
