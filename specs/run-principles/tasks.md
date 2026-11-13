@@ -1671,13 +1671,13 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 12 (TC-25 through the real workflow), Task 15 (red team of 3.7 at launch), Task 19 (TC-114 to 116, 143, 144, 209)
 
 **Acceptance:**
-- [ ] A plan with `verifyScope` refuses launch, and no task agent runs
-- [ ] Each distinct problem reaches the arbiter as one claim listing every test it covers, and a wiring edit lands under the ruling rules
-- [ ] A fix that clears several findings costs one ruling and leaves no needs-input entry
-- [ ] A finding that first appears after launch holds its task until it is settled, and is ruled once
-- [ ] A remaining finding after a fix keeps the launch blocked and shows the proposed fix
-- [ ] A spec with only justification findings launches
-- [ ] A `test_repair` ruling on a `lint` claim goes to the fixer, and a landed fix re-plans
+- [x] A plan with `verifyScope` refuses launch, and no task agent runs
+- [x] Each distinct problem reaches the arbiter as one claim listing every test it covers, and a wiring edit lands under the ruling rules
+- [x] A fix that clears several findings costs one ruling and leaves no needs-input entry
+- [x] A finding that first appears after launch holds its task until it is settled, and is ruled once
+- [x] A remaining finding after a fix keeps the launch blocked and shows the proposed fix
+- [x] A spec with only justification findings launches
+- [x] A `test_repair` ruling on a `lint` claim goes to the fixer, and a landed fix re-plans
 
 **Dependencies:** Task 12 (its tests are the oracle), Task 15 (its tests are the oracle), Task 19 (its tests are the oracle), Task 24 (reads `verifyScope` from `ck plan`), Task 69 (edits the same workflow; calls `arbitrate`)
 **Complexity:** Medium
