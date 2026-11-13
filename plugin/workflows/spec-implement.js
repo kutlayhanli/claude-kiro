@@ -637,7 +637,7 @@ Return green=true only if ${INTO} is green after your merge, else failing with t
 // Task 86 (4.1): the test-fixer's brief. It is the test writer, started on a testfix<k> branch from INTO.
 const testFixPrompt = (k, n, entries) => `${MANDATE}You are a test-fixer for spec ${SPEC}. ${n != null ? `Task ${n} is blocked because` : 'A cross-test check found that'} these tests can never pass with code that meets the spec (every entry, one per test; the "fix" is the correction a first agent proposed, or, when the entry has a "ruling", the change the arbiter ruled on it: do that change):
 ${JSON.stringify(entries)}
-Work on branch ${BR(`testfix${k}`)} in worktree ${WT(`testfix${k}`)}. Create it from the integration branch, on its own line:
+Work in worktree ${WT(`testfix${k}`)} on branch ${BR(`testfix${k}`)}. Create it from the integration branch, on its own line:
 ck -C ${ROOT} worktree create ${SPEC} testfix${k} --install --base ${INTO} --json
 ${GIT_NOTE}
 Read each test, the criterion in requirements.md and design.md. Then decide, for all of the tests together:
@@ -795,7 +795,35 @@ function applyPlanView(plan, mergedInRun, liveDeps) {
     verifyCycles: [...(plan.verifyCycles || [])],
     // Task 94: ck plan's write-set overlap map, read by writeSetHold; holds never change deps.
     overlaps: plan.overlaps && typeof plan.overlaps === 'object' && !Array.isArray(plan.overlaps) ? plan.overlaps : {},
+    // Task 70 (12.5): ck plan's verify-scope findings and its impl-task -> verifying-test-task map. A missing key reads as
+    // [] or {}; a wrong-typed one never reaches here (runPlan treats that plan call as failed).
+    verifyScope: Array.isArray(plan.verifyScope) ? plan.verifyScope.filter(f => f && typeof f === 'object') : [],
+    verifiedBy: plan.verifiedBy && typeof plan.verifiedBy === 'object' && !Array.isArray(plan.verifiedBy) ? plan.verifiedBy : {},
   }
+}
+
+// Task 70 (12.6, 12.11): one claim per problem. A problem is a shared suite that the gates of impl tasks select tests of
+// when their test tasks are not due: every finding on one suite is that problem, so one lint claim lists every test task
+// it covers. The claim belongs to the lowest task the problem names (`task`); `tasks` lists them all, for the hold. `sent`
+// holds the keys this run already sent (scopeKeyOf), so a problem is ruled once. Pure: no I/O.
+const scopeKeyOf = suite => `verify-scope|${String(suite)}`
+const byTaskNum = (a, b) => (Number(a) - Number(b)) || String(a).localeCompare(String(b))
+function scopeClaimsOf(findings, sent) {
+  const sentSet = sent instanceof Set ? sent : new Set()
+  const groups = new Map()
+  for (const f of Array.isArray(findings) ? findings : []) {
+    if (!f || typeof f !== 'object' || f.task === undefined || f.task === null) continue
+    const suite = String(f.suite || f.file || '')
+    const key = scopeKeyOf(suite)
+    if (sentSet.has(key)) continue
+    if (!groups.has(key)) groups.set(key, { key, suite, tasks: [], tests: [], messages: [] })
+    const g = groups.get(key)
+    const task = String(f.task)
+    if (!g.tasks.includes(task)) g.tasks.push(task)
+    if (f.testTask !== undefined && f.testTask !== null && !g.tests.includes(String(f.testTask))) g.tests.push(String(f.testTask))
+    if (f.message) g.messages.push(String(f.message))
+  }
+  return [...groups.values()].map(g => ({ ...g, tasks: g.tasks.sort(byTaskNum), tests: g.tests.sort(byTaskNum), task: g.tasks.slice().sort(byTaskNum)[0] }))
 }
 
 // Task 93 (12.5-12.7): what a task whose gate failed on a missing command does next. Pure: the caller records it.
@@ -1348,6 +1376,12 @@ const AUTO_RELINK = A.relink !== false && !(A.agents && A.agents.relink && A.age
 const relinkTried = new Set()  // tasks a relink was attempted for (at most once each)
 const relinks = []             // { task, cycle, reason } for every applied relink
 const relinkedOk = new Set()   // relinked tasks whose next stale cycle report is ignored once
+// Task 70 (12.5-12.11): verify-scope problems this run sent to the arbiter, by scopeKeyOf: each is ruled once. `launching`
+// is true while the launch sends its claims, so a plan read in between leaves those claims to the launch.
+const scopeSent = new Set()
+const scopeLaunchNeeds = []    // needs-input entries of a launch claim that went to me (the launch is refused)
+let launching = false
+let landingPlanPending = false  // a plan a landing asked for is in flight: no task starts until it is read (12.11)
 const MAX_RESOLVES = 3
 // Cross-test consistency (reviewer.cross_test): one check per wave of test tasks,
 // started when its last test task finishes (or at the end, for a wave that never
@@ -1522,7 +1556,9 @@ async function runPlan(trigger) {
     if (out.json && out.stderr) p.error = out.stderr  // a note next to a usable plan is a remark, not a failure
     if (p.error === undefined || p.error === null) delete p.error
     // An "error" next to a usable plan is a remark, not a failure; an empty plan with an error is a failure.
-    if (usablePlan(p) && !(p.error && !p.done.length && !p.remaining.length)) {
+    // Task 70: a wrong-typed verifyScope or verifiedBy is a failed plan call (a missing one reads as [] or {}).
+    const scopeShapeOk = (p.verifyScope === undefined || Array.isArray(p.verifyScope)) && (p.verifiedBy === undefined || (!!p.verifiedBy && typeof p.verifiedBy === 'object' && !Array.isArray(p.verifiedBy)))
+    if (usablePlan(p) && scopeShapeOk && !(p.error && !p.done.length && !p.remaining.length)) {
       const n = normalizePlan(p)
       // Done is ground truth even when the ready list is not: fold it in so the
       // fallback below never re-schedules an already-finished task (1.5). (Order
@@ -1659,9 +1695,11 @@ function requestPlan(trigger) {
     idleArmed = false
     log(`plan ${refills + 1} (idle): nothing ready, ${ctx.open} task(s) open; re-reading the plan`)
   }
+  // Task 70 (12.11): starts wait for the plan a landing asked for, so a verify-scope finding it reads holds its task first.
+  if (trigger === 'landing') landingPlanPending = true
   planRun = (async () => {
     let p = null
-    try { p = await runPlan(trigger) } catch (e) { p = null } finally { planRun = null }
+    try { p = await runPlan(trigger) } catch (e) { p = null } finally { planRun = null; landingPlanPending = false }
     if (!p && trigger !== 'start') { stopLaunching = true; stopReason = stopReason || PLAN_FAILED }
     const q = queuedTrigger
     queuedTrigger = null
@@ -1755,6 +1793,8 @@ function noteWriteSetHold({ task, waitsOn }) {
 
 // Starts what may start now, and re-reads the plan when nothing is ready and a slot is free.
 function schedule() {
+  // Task 70 (12.11): while the plan a landing asked for is in flight, nothing starts; its plan may hold a task.
+  if (landingPlanPending) return
   const ctx = planContext()
   let ready = ctx.ready
   if (!SCRIPT_READINESS) {
@@ -1777,7 +1817,61 @@ function schedule() {
   if (SCRIPT_READINESS && !stopLaunching && !planRun) requestPlan('idle')
 }
 
+// Task 70 (12.6, 8.9, D33): one verify-scope problem (a lint claim listing every test task it covers) settled by the
+// arbiter. A spec edit lands as it settles; a test repair goes to the test-fixer like any other claim. Returns
+// { route, ruling, changed } when it settled, or { exit: rec } when it went to me (the rec carries needsInput).
+async function settleScopeClaim(g) {
+  const rec = { task: g.task, wave: waveOf(g.task), title: TITLES[g.task], attempts: 0, ok: false, escalations: [], resolves: 0 }
+  const testsText = g.tests.map(t => `Task ${t}`).join(', ')
+  const claim = {
+    trigger: 'lint', task: g.task, rule: 'verify-scope', subject: g.suite, file: g.suite, tests: g.tests,
+    text: `Verify-scope lint: Task ${g.task}'s gate runs the tests of the shared suite ${g.suite} that belong to ${testsText}, which are not Done at its gate. ${g.messages.slice(0, 3).join(' ')}`.trim(),
+  }
+  const out = await arbitrate(g.task, rec, null, claim)
+  if (out.exit) return { exit: out.exit }
+  if (out.route === 'spec_edit') return { route: 'spec_edit', ruling: out.ruling, changed: out.ruling && typeof out.ruling === 'object' ? String(out.ruling.changed || '') : '' }
+  if (out.route === 'test_repair') {
+    const h = await handOffTestRepair(g.task, rec, [out])
+    const reasons = [...h.fixed.toMe, ...h.fixed.findings.map(f => `the test-fixer found the test correct, so it is not changed: ${trim(String(f.message || f.issue || ''), 300)}`)]
+    if (!reasons.length) return { route: 'test_repair', ruling: out.ruling, changed: '' }
+    const t = (out.ruling && out.ruling.testRepair) || {}
+    return { exit: await parkTestFix(g.task, rec, reasons, h.fixed.records, { ruling: out.rulingNo ?? null, testRepair: { file: String(t.file || g.suite), test: String(t.test || ''), change: String(t.change || ''), why: String(t.why || '') } }) }
+  }
+  return { exit: await arbiterNeedsInput(g.task, rec, null, claim, { reason: 'lint-route', text: `a verify-scope problem is settled by a spec edit or a test repair; the arbiter ruled ${out.route}`, ruling: out.ruling }) }
+}
+
+// Task 70 (12.11): a finding that appears after launch holds its task until the claim settles, then the plan is read again.
+// The hold is a running entry, so the run waits for it and the task is not ready meanwhile.
+async function settleHeldScope(g) {
+  const n = g.task
+  try {
+    const out = await settleScopeClaim(g)
+    if (out.exit) {
+      for (const t of g.tasks) if (out.exit.needsInput) parked.set(t, { ...out.exit.needsInput, task: t })
+      log(`Task ${n}: its verify-scope claim went to me; ${g.tasks.map(t => `Task ${t}`).join(', ')} wait for my decision`)
+    } else log(`Task ${n}: its verify-scope claim settled (${out.route}); the plan is read again before ${g.tasks.map(t => `Task ${t}`).join(', ')} start`)
+  } catch (e) {
+    for (const t of g.tasks) parked.set(t, { task: t, file: g.suite, kind: 'arbiter', test: '', requirement: '', decision: `the verify-scope claim failed: ${trim(String(e && e.message), 300)}`, action: 'park', notification: null, escalatedTo: [], reason: 'arbiter-call-failed', trigger: 'lint' })
+    log(`Task ${n}: the verify-scope claim failed (${trim(String(e && e.message), 200)})`)
+  }
+  for (const t of g.tasks) running.delete(t)
+  requestPlan('landing')
+  poke()
+}
+
 function applyLint(p) {
+  // Task 70 (12.11): a verify-scope finding for a task not yet started holds that task until its claim settles, once.
+  if (!launching) {
+    for (const g of scopeClaimsOf(p.verifyScope, scopeSent)) {
+      const held = g.tasks.filter(t => !(running.has(t) || failed.has(t) || parked.has(t) || mergedInRun.has(t) || view.done.has(t)))
+      if (!held.length) continue
+      scopeSent.add(g.key)
+      const claim = { ...g, task: held[0], tasks: held }
+      log(`${held.map(t => `Task ${t}`).join(', ')} held: its verify scope selects tests of ${g.suite} that belong to ${g.tests.map(t => `Task ${t}`).join(', ')}; the arbiter rules on it before ${held.length > 1 ? 'they start' : 'it starts'}`)
+      const settling = settleHeldScope(claim)
+      for (const t of held) running.set(t, settling)
+    }
+  }
   for (const vc of p.verifyCycles || []) {
     const n = String(vc.task)
     if (failed.has(n) || running.has(n)) continue
@@ -2972,6 +3066,41 @@ async function auditRun() {
   return { schema: 'ck-audit/1', spec: SPEC, into: INTO, complete: false, clean: false, drift: [], problems: [`audit did not complete: ${trim(error, 300)}`] }
 }
 
+// Task 70 (12.5-12.7, 12.11): the launch is blocked while a verify-scope finding remains. Each problem goes to the arbiter as
+// one lint claim, one at a time; after every settled claim the plan is read again, so a finding the fix cleared is not
+// sent. Returns null when the launch may go on, else the refusal's fields. A justification finding never reaches here.
+async function clearLaunchScope() {
+  const proposals = []
+  launching = true
+  try {
+    for (;;) {
+      const next = scopeClaimsOf(view.verifyScope, scopeSent)
+      if (!next.length) break
+      const g = next[0]
+      scopeSent.add(g.key)
+      log(`Launch: Task ${g.task}'s verify scope selects tests of ${g.suite} that belong to ${g.tests.map(t => `Task ${t}`).join(', ')}; the arbiter rules on it before the launch`)
+      const out = await settleScopeClaim(g)
+      if (out.exit) {
+        if (out.exit.needsInput) scopeLaunchNeeds.push(out.exit.needsInput)
+        break
+      }
+      proposals.push({ task: g.task, suite: g.suite, outcome: out.route, changed: out.changed || '', reasoning: String((out.ruling && out.ruling.reasoning) || '') })
+      const p = await requestPlan('landing')
+      if (!p) break
+    }
+  } finally {
+    launching = false
+  }
+  const remaining = view.verifyScope || []
+  if (!remaining.length) return null
+  return {
+    reason: 'verify-scope findings remain; nothing was started',
+    verifyScope: remaining,
+    proposals,
+    needsInput: [...scopeLaunchNeeds],
+  }
+}
+
 async function mainRun() {
 const startPlan = await requestPlan('start')
 if (!startPlan) return { halted: true, refused: false, reason: PLAN_FAILED, into: INTO, degraded, planFallbacks, overhead: buildOverhead(), directCk: directCkOut(), thinAgent: thinAgentOut() }
@@ -2983,6 +3112,24 @@ if (startPlan.cycles.length || startPlan.verifyCycles.length) {
     reason: 'plan has a cycle; nothing was started',
     cycles: startPlan.cycles,
     verifyCycles: startPlan.verifyCycles,
+    into: INTO,
+    degraded,
+    planFallbacks,
+    overhead: buildOverhead(),
+    directCk: directCkOut(), thinAgent: thinAgentOut(),
+  }
+}
+// Task 70: verify-scope findings refuse the launch (no task agent runs), after the arbiter had its chance to fix them.
+const launchScope = await clearLaunchScope()
+if (launchScope) {
+  log(`Refusing to launch: ${launchScope.verifyScope.length} verify-scope finding(s) remain; see the proposals in the result`)
+  return {
+    halted: true,
+    refused: true,
+    reason: launchScope.reason,
+    verifyScope: launchScope.verifyScope,
+    proposals: launchScope.proposals,
+    needsInput: launchScope.needsInput,
     into: INTO,
     degraded,
     planFallbacks,

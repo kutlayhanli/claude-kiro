@@ -139,7 +139,7 @@ def _provides_by_command(graph) -> dict:
 
 
 # The keys `ck plan --compact` prints: what the scheduler reads.
-COMPACT_KEYS = ("done", "remaining", "deps", "ready", "cycles", "verifyCycles", "overlaps", "testVerifies", "provides")
+COMPACT_KEYS = ("done", "remaining", "deps", "ready", "cycles", "verifyCycles", "verifyScope", "verifiedBy", "overlaps", "testVerifies", "provides")
 
 
 def _worktree_dir(project_dir: Path, spec: str):
