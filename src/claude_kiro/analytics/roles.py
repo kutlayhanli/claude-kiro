@@ -51,6 +51,9 @@ _ARBITER_STEP = _c(r"arbiter (?!task )(?P<step>[A-Za-z][\w-]*)(?P<risky> risky)?
 _IMPL = [
     ("task", _c(rf"task (?P<n>{_ID})(?P<t> \[test\])?"
                 rf"(?: (?P<kind>retry|revise|guard) (?P<k>{_NUM})(?: \((?P<m>{_MODEL})\))?)?")),
+    # run-principles: a task resumed after a ruling, and a revision that carries a code ruling's text.
+    ("task_resume", _c(rf"task (?P<n>{_ID})(?P<t> \[test\])? resume (?P<k>{_NUM})")),
+    ("task_after_ruling", _c(rf"task (?P<n>{_ID})(?P<t> \[test\])? revise after ruling")),
     ("park", _c(rf"park (?P<n>{_ID})")),
     ("relink", _c(rf"relink (?P<n>{_ID})")),
     ("review", _c(rf"review (?P<n>{_ID})(?: round (?P<r>{_NUM}))?")),
@@ -74,6 +77,9 @@ _IMPL = [
     ("audit_task", _c(rf"audit task (?P<n>{_ID})")),
     ("audit", _c(r"audit")),
     ("arbiter_task", _c(rf"arbiter task (?P<n>{_ID})(?P<risky> risky)?")),
+    # The thin `ck arbiter open|settle|record` calls around a ruling, and the landing of an arbiter spec edit.
+    ("arbiter_ck", _c(rf"arbiter-(?P<step>open|settle|record) (?P<n>{_ID})(?P<risky> risky)?")),
+    ("arbiter_land", _c(rf"arbiter-land (?P<n>{_ID})")),
     ("arbiter_step", _ARBITER_STEP),
     ("testfix_ledger", _c(rf"testfix ledger (?P<k>{_NUM})")),
     ("testfix_prove", _c(rf"testfix prove (?P<k>{_NUM})")),
@@ -90,12 +96,19 @@ _CREATE_FIXED = {
     "revise spec + write review.md": ("fixer", "revise"),
     "snapshot spec before revision": ("land", "snapshot"),
     "remove pre-revision snapshot": ("land", "cleanup"),
+    # run-principles: the thin ck calls around the create-side arbiter, and applying approved cuts.
+    "arbiter lane open": ("gate", "arbiter_lane"),
+    "arbiter lane close": ("gate", "arbiter_lane"),
+    "arbiter context approved cut": ("gate", "arbiter_context"),
+    "lint after cut": ("gate", "lint_after_cut"),
+    "apply-cuts": ("fixer", "apply_cuts"),
 }
 _LENS = r"(?:\S|\S.*\S)"
 _CREATE_RX = [
     ("review", "reviewer", _c(rf"review: {_LENS}")),
     ("refute", "reviewer", _c(rf"refute: {_LENS}")),
     ("consistency", "gate", _c(rf"consistency check: pass (?P<p>{_NUM})")),
+    ("arbiter_review", "gate", _c(r"arbiter review [A-Za-z][\w-]* (?:normal|risky)")),
 ]
 
 
@@ -189,6 +202,17 @@ def _implement(label: str) -> LabelMatch:
             return LabelMatch(role="gate", matched=True, attempt=int(g["k"]), step="testfix_record")
         if name == "unreproduced":
             return LabelMatch(role="gate", matched=True, step="unreproduced")
+        if name in ("task_resume", "task_after_ruling"):
+            n = g["n"]
+            role = "test-writer" if g["t"] else "implementer"
+            if name == "task_resume":
+                return LabelMatch(role=role, matched=True, task=_task(n), step="resume", attempt=None)
+            return LabelMatch(role=role, matched=True, task=_task(n), step="revise_after_ruling")
+        if name == "arbiter_ck":
+            return LabelMatch(role="gate", matched=True, task=_task(g["n"]), step=f"arbiter_{g['step']}",
+                              escalated_to="risky" if g.get("risky") else None)
+        if name == "arbiter_land":
+            return LabelMatch(role="land", matched=True, task=_task(g["n"]), step="arbiter")
         if name in ("arbiter_task", "arbiter_step"):
             return _arbiter(name, g)
         if name == "audit_task":
