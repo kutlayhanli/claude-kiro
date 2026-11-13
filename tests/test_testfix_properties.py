@@ -13,12 +13,15 @@ shape and no `malformed` field); `scope_decision` reads `config["tests"]["dirs"|
 
 import json
 import re
+import tempfile
 from collections import Counter
+from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
 from hypothesis import HealthCheck, given, settings, strategies as st
 
+from arbiter_helpers import arbiter_project
 from landing_bridge import bridge  # noqa: F401  (module-scoped fixture)
 
 PROPERTIES = {
@@ -328,7 +331,15 @@ def test_tc174_p33b_land_iff_scope_proof_and_review_all_hold(bridge, scope_ok, p
         "mergeDurations": {"1": 1 + delay},
         "reviewDurations": {"1": delay},
     }
-    run = bridge.run(project, args={"onFailure": "continue"}, clock="virtual")
+    # the conflict reaches the fixer only through the arbiter's test_repair ruling (design D31-D33); the arbiter's thin
+    # steps (`ck arbiter open`, `settle`, `record`) run the real CLI on a real git project
+    project["rulings"] = {"1": [{"claim": "@key", "status": "ruled", "outcome": "test_repair", "principle": "project:test-intent",
+                                 "reasoning": "the test asserts a value no correct code returns",
+                                 "testRepair": {"file": f, "test": CONFLICT["test"], "change": CONFLICT["fix"], "why": CONFLICT["reason"]}}]}
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = arbiter_project(Path(tmp))
+        args = {"onFailure": "continue", **repo.run_args, "spec": "demo", "arbiterAgent": "spec:arbiter"}
+        run = bridge.run(project, args=args, clock="virtual", exec_ck=repo.exec_ck)
     effective_proved = proved and not contradictory
     should_land = scope_ok and effective_proved and approve
     assert landed_testfix(run) is should_land, (scope_ok, proved, approve, contradictory, run["result"].get("needsInput"))

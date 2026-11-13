@@ -18,12 +18,14 @@ bridge and assert that no `worktree land` of the fix branch was requested.
 
 import json
 import re
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 
 import pytest
 
+from arbiter_helpers import arbiter_project
 from landing_bridge import bridge  # noqa: F401  (module-scoped fixture)
 from test_testfix_cli import (
     HEADER,
@@ -396,13 +398,32 @@ SECOND = {**CONFLICT, "file": "tests/test_other.py", "test": "test_other"}
 LAND_FIX = re.compile(r"worktree land[^\n]*\btestfix\d+")
 
 
+TASKS_1_TO_6 = "# Implementation Tasks: Demo\n\n**Status:** Not Started\n\n## Task Breakdown\n\n" + "\n".join(
+    f"### Task {n}: Work {n}\n**Status:** Not Started\n**Track:** impl\n**Requirements:** 1.1\n**Description:** Work {n}.\n"
+    f"**Files:**\n- `src/work{n}.py` - the work\n**Verify:** `uv run pytest -q tests/test_work{n}.py`\n**Dependencies:** None\n\n---\n"
+    for n in range(1, 7))
+
+
+def repair_ruling(c: Dict[str, Any]) -> Dict[str, Any]:
+    """The `arbiter task 4` answer that rules conflict `c` test_repair (design D31-D33: a test conflict reaches the
+    test-fixer only through a test_repair ruling); "@key" makes the fake arbiter copy the claim key from its prompt."""
+    return {"claim": "@key", "status": "ruled", "outcome": "test_repair", "principle": "project:test-intent",
+            "reasoning": "the test asserts a value no correct code returns; its intent stands, only the value moves",
+            "testRepair": {"file": c["file"], "test": c["test"], "change": c["fix"], "why": c["reason"]}}
+
+
 def run_wf(bridge, testfix: Optional[Dict[str, Any]] = None, prior: Optional[Dict[str, Any]] = None,
            conflicts: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     project: Dict[str, Any] = {"deps": {"4": [], "5": ["4"]}, "testFix": testfix if testfix is not None else {CONFLICT["file"]: {}}}
     project["testConflictsList" if conflicts else "testConflicts"] = {"4": conflicts} if conflicts else {"4": {"conflict": CONFLICT}}
+    project["rulings"] = {"4": [repair_ruling(c) for c in (conflicts or [CONFLICT])]}
     if prior:
         project["priorFixes"] = prior
-    return bridge.run(project, args={"onFailure": "continue"}, clock="virtual")
+    # the arbiter's thin steps (`ck arbiter open`, `settle`, `record`) run the real CLI on a real git project
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = arbiter_project(Path(tmp), tasks=TASKS_1_TO_6)
+        args = {"onFailure": "continue", **repo.run_args, "spec": "demo", "arbiterAgent": "spec:arbiter"}
+        return bridge.run(project, args=args, clock="virtual", exec_ck=repo.exec_ck)
 
 
 def fix_landed(out: Dict[str, Any]) -> bool:
