@@ -309,5 +309,6 @@ def test_positive_control_a_cycle_still_refuses_the_same_launch(tmp_path, bridge
     project = _project(tmp_path, 3)
     fields = _real_plan_fields(project, 3)
     fields["cycles"] = [["1", "2", "1"]]
+    fields["ready"] = []  # a real plan with a cycle runs nothing in it, so its ready list is consistent with the cycle
     out = _launch(bridge, project, fields)
     assert out["result"]["refused"] is True

@@ -49,6 +49,8 @@ def justification_findings(text: Optional[str]) -> List[JustificationFinding]:
     has: Dict[str, bool] = {}
     current: Optional[str] = None
     fence: Optional[str] = None
+    # an HTML comment, one line or many, counts for nothing: drop it before reading lines
+    text = _COMMENT.sub("", text)
     for line in text.splitlines():
         if fence is not None:
             close = _FENCE_CLOSE.match(line)
