@@ -1,0 +1,839 @@
+"""The `ck arbiter` CLI and the record of rulings (run-principles Task 25).
+
+TC-53, 88, 89, 91, 92, 93, 133, 135, 150, 152, 154. Real git repos, the real `ck` CLI as a subprocess, real files, real
+file locks and real concurrent processes. Project modules are imported inside test bodies, so the file collects before
+`ck arbiter` exists. Harness names map to design.md: `ck arbiter decide` is `ck arbiter open`, `ck arbiter route` is
+`ck arbiter settle`, and `ck arbiter log` is `decisions_entries` over `specs/demo/decisions.md`.
+"""
+
+import fcntl
+import json
+import subprocess
+from pathlib import Path
+from typing import Optional
+
+import pytest
+from hypothesis import assume, given, settings, strategies as st
+
+from arbiter_helpers import DEFAULT_PRINCIPLES, ArbiterProject, arbiter_project, ck_run, claims, decisions_entries
+from landing_bridge import bridge  # noqa: F401  (module-scoped fixture)
+
+INTO = "integrate/demo"
+TEST_FILE = "tests/test_greet.py"
+
+
+# --------------------------------------------------------------------------- helpers
+
+
+def git(cwd: Path, *args: str) -> str:
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def common_dir(p: ArbiterProject) -> Path:
+    return Path(git(p.root, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+
+
+def ledger_path(p: ArbiterProject) -> Path:
+    return common_dir(p) / "ck" / "demo" / "arbiter-ledger.json"
+
+
+def seed_ledger(p: ArbiterProject, claims: dict, last_entry: int = 0) -> dict:
+    ledger = {"schema": "ck-arbiter-ledger/1", "nextWorktree": 1, "lastEntry": last_entry, "claims": claims}
+    path = ledger_path(p)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(ledger, indent=2) + "\n")
+    return ledger
+
+
+def claim_json(task: str = "2", test: str = "test_x", text: str = "the test contradicts the requirement") -> dict:
+    return {"task": task, "trigger": "test-conflict", "text": text, "file": TEST_FILE, "test": test, "criterion": "1.1"}
+
+
+def key_of(claim: dict) -> str:
+    from claude_kiro.arbiter_policy import Claim, claim_key
+
+    return claim_key(Claim(**claim))
+
+
+def open_claim(p: ArbiterProject, claim: dict, risk: str = "normal") -> subprocess.CompletedProcess:
+    payload = {"claim": claim, "task": {"risk": risk, "complexity": "Low"}}
+    return p.ck("arbiter", "open", "demo", "--task", claim["task"], "--into", INTO, "--json", stdin=json.dumps(payload))
+
+
+def settle(p: ArbiterProject, key: str, raw, tier: str = "normal") -> subprocess.CompletedProcess:
+    stdin = raw if isinstance(raw, str) else json.dumps(raw)
+    return p.ck("arbiter", "settle", "demo", key, "--tier", tier, "--json", stdin=stdin)
+
+
+def parsed(done: subprocess.CompletedProcess) -> dict:
+    assert done.returncode == 0, done.stdout + done.stderr
+    return json.loads(done.stdout)
+
+
+def ruling(key: str, outcome: str = "code", **over) -> dict:
+    out = {"claim": key, "status": "ruled", "outcome": outcome, "reasoning": "the requirement says so",
+           "principle": "project:test-intent"}
+    if outcome == "code":
+        out["code"] = "make the implementer print the greeting"
+    if outcome == "spec_edit":
+        out["changed"] = "tasks.md: Task 2 Verify narrowed"
+    if outcome == "test_repair":
+        out["testRepair"] = {"file": TEST_FILE, "test": "test_x", "change": "assert the greeting", "why": "1.1"}
+    if outcome == "requirements":
+        out["requirement"] = {"kind": "add", "wording": "WHEN x, THE SYSTEM SHALL y.", "reason": "missing"}
+    out.update(over)
+    return out
+
+
+def stronger_look(key: str) -> dict:
+    return {"claim": key, "status": "needs_stronger_look", "reasoning": "I cannot decide this at this tier",
+            "established": "the test and the requirement disagree", "principle": "project:test-intent"}
+
+
+def fresh(tmp_path: Path, name: str) -> ArbiterProject:
+    return arbiter_project(tmp_path / name)
+
+
+def opened(tmp_path: Path, name: str, **kw):
+    """A fresh project with one claim opened at `rule`; returns (project, key, open result)."""
+    p = fresh(tmp_path, name)
+    claim = claim_json(**kw)
+    result = parsed(open_claim(p, claim))
+    assert result["action"] == "rule", result
+    return p, result["key"], result
+
+
+def record_payload(n: int = 1, **over) -> dict:
+    out = {
+        "trigger": "test-conflict", "claim_key": f"2|test:{TEST_FILE}::test_r{n}", "claim_text": f"claim number {n}",
+        "task": "2", "tier": "normal", "outcome": "spec_edit", "reasoning": f"reasoning {n}",
+        "principle_id": "project:test-intent", "principle_text": "a test states what the requirement says",
+        "plan_layer": "absent", "changed": "tasks.md: Task 2 Verify narrowed", "moved": [],
+        "commit": "abc1234", "landed": [True, ""],
+    }
+    out.update(over)
+    return out
+
+
+def record(p: ArbiterProject, payload: dict, *extra: str) -> subprocess.CompletedProcess:
+    return p.ck("arbiter", "record", "demo", "--into", INTO, *extra, "--json", stdin=json.dumps(payload))
+
+
+def decisions_text(p: ArbiterProject) -> str:
+    path = p.target / "specs" / "demo" / "decisions.md"
+    return path.read_text() if path.exists() else ""
+
+
+def branch_exists(p: ArbiterProject, branch: str) -> bool:
+    return subprocess.run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=p.root).returncode == 0
+
+
+# --------------------------------------------------------------------------- TC-53
+
+
+@pytest.mark.parametrize("outcome", ["spec_edit", "test_repair", "code", "requirements"])
+def test_tc53_a_ruling_with_each_outcome_passes_settle(tmp_path, outcome):
+    p, key, _ = opened(tmp_path, outcome)
+    result = parsed(settle(p, key, ruling(key, outcome)))
+    assert result["problems"] == [], result
+    assert result["reason"] != "invalid-ruling", result
+    assert result["principle"]["id"] == "project:test-intent", result
+
+
+def test_tc53_a_ruling_asking_for_a_stronger_look_passes_settle(tmp_path):
+    p, key, _ = opened(tmp_path, "stronger")
+    result = parsed(settle(p, key, stronger_look(key)))
+    assert result["problems"] == [], result
+    assert result["route"] == "rerun", result
+
+
+@pytest.mark.parametrize("lacking", ["claim", "reasoning", "principle"])
+def test_tc53_a_ruling_lacking_claim_reasoning_or_principle_fails(tmp_path, lacking):
+    p, key, _ = opened(tmp_path, "lacking-" + lacking)
+    raw = ruling(key, "code")
+    del raw[lacking]
+    result = parsed(settle(p, key, raw))
+    assert result["route"] == "needs_input" and result["reason"] == "invalid-ruling", result
+    assert result["record"] is False, result
+    assert result["problems"], result
+
+
+# --------------------------------------------------------------------------- TC-88
+
+
+def test_tc88_record_appends_one_numbered_entry_with_every_field(tmp_path):
+    p = fresh(tmp_path, "p")
+    done = parsed(record(p, record_payload(1)))
+    assert done["number"] == 1 and done["commit"], done
+    [entry] = decisions_entries(p)
+    assert entry["number"] == 1
+    assert entry["Trigger"] == "test-conflict"
+    assert f"2|test:{TEST_FILE}::test_r1" in entry["Claim"] and "claim number 1" in entry["Claim"]
+    assert entry["Ruling"].startswith("spec_edit") and "reasoning 1" in entry["Ruling"]
+    assert "project:test-intent" in entry["Principle cited"]
+    assert "tasks.md: Task 2 Verify narrowed" in entry["What changed"]
+    assert entry["Commit"] == "abc1234"
+    # committed alone on the integration branch, so a landing's clean-target check passes
+    assert decisions_entries(p, "branch") == decisions_entries(p)
+    assert git(p.target, "status", "--porcelain") == ""
+    assert git(p.target, "show", "--name-only", "--format=", "HEAD").splitlines() == ["specs/demo/decisions.md"]
+
+
+# --------------------------------------------------------------------------- TC-89
+
+
+def test_tc89_a_ruling_with_no_file_changed_records_commit_none(tmp_path):
+    p = fresh(tmp_path, "p")
+    parsed(record(p, record_payload(1, outcome="code", changed="nothing", commit=None, landed=None)))
+    [entry] = decisions_entries(p)
+    assert entry["Commit"] == "none"
+    assert entry["What changed"].lower().startswith("nothing")
+
+
+def test_tc89_a_create_ruling_records_commit_none(tmp_path):
+    p = fresh(tmp_path, "p")
+    payload = record_payload(1, trigger="create:refuted", task=None, claim_key="refuted|finding-1",
+                             changed="requirements.md: wording corrected", commit=None, landed=None)
+    parsed(record(p, payload))
+    [entry] = decisions_entries(p)
+    assert entry["Commit"] == "none"
+    assert entry["Trigger"] == "create:refuted"
+
+
+# --------------------------------------------------------------------------- TC-91
+
+
+def test_tc91_earlier_entries_stay_byte_identical_and_numbers_keep_rising(tmp_path):
+    p = fresh(tmp_path, "p")
+    seen = ""
+    for n in (1, 2, 3):
+        done = parsed(record(p, record_payload(n)))  # each `ck` call is a new process
+        assert done["number"] == n, done
+        now = decisions_text(p)
+        assert now.startswith(seen), f"entries before number {n} changed"
+        assert len(now) > len(seen)
+        seen = now
+    assert [e["number"] for e in decisions_entries(p)] == [1, 2, 3]
+
+
+# --------------------------------------------------------------------------- TC-92
+
+
+def test_tc92_sixteen_concurrent_records_give_sixteen_entries_and_numbers(tmp_path):
+    p = fresh(tmp_path, "p")
+    from arbiter_helpers import CK
+
+    procs = []
+    for n in range(1, 17):
+        proc = subprocess.Popen([*CK, "arbiter", "record", "demo", "--into", INTO, "--json"], cwd=p.root,
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        procs.append((n, proc))
+    for n, proc in procs:  # all 16 are started before any one is fed, so they overlap
+        proc.stdin.write(json.dumps(record_payload(n)))
+        proc.stdin.close()
+    outs = []
+    for n, proc in procs:
+        out = proc.stdout.read()
+        err = proc.stderr.read()
+        assert proc.wait(timeout=300) == 0, f"record {n} failed: {out}{err}"
+        outs.append(json.loads(out))
+    entries = decisions_entries(p)
+    assert len(entries) == 16, [e["number"] for e in entries]
+    assert sorted(e["number"] for e in entries) == list(range(1, 17))
+    assert sorted(o["number"] for o in outs) == list(range(1, 17))
+    assert sorted(e["Claim"].split("claim number ")[1] for e in entries) == sorted(str(n) for n in range(1, 17))
+    assert git(p.target, "status", "--porcelain") == ""
+
+
+# --------------------------------------------------------------------------- TC-93
+
+
+def test_tc93_no_file_before_the_first_ruling_and_the_first_ruling_creates_it(tmp_path):
+    p = fresh(tmp_path, "p")
+    for where in ("target", "root", "branch"):
+        assert decisions_entries(p, where) == []
+    assert not (p.target / "specs" / "demo" / "decisions.md").exists()
+    assert not (p.root / "specs" / "demo" / "decisions.md").exists()
+    parsed(record(p, record_payload(1)))
+    assert (p.target / "specs" / "demo" / "decisions.md").is_file()
+    assert len(decisions_entries(p)) == 1
+
+
+def test_tc93_a_workflow_run_with_no_rulings_leaves_no_file(tmp_path, bridge):
+    p = fresh(tmp_path, "p")
+    out = bridge.run({"deps": {"1": [], "2": ["1"]}}, dict(p.run_args), exec_ck=p.exec_ck)
+    assert out is not None
+    assert not (p.target / "specs" / "demo" / "decisions.md").exists()
+    assert not (p.root / "specs" / "demo" / "decisions.md").exists()
+    assert decisions_entries(p, "branch") == []
+
+
+# --------------------------------------------------------------------------- TC-133
+
+
+def test_tc133_open_equals_decide_claim_and_only_a_recorded_history_changes_the_answer(tmp_path):
+    from claude_kiro.arbiter_policy import Claim, TaskMeta, claim_facts, claim_key, decide_claim
+
+    claim = claim_json()
+    key = claim_key(Claim(**claim))
+    task = TaskMeta(risk="normal", complexity="Low")
+
+    def seam(ledger: dict):
+        d = decide_claim(claim_facts(Claim(**claim), ledger, "ok", task))
+        return d.action, d.tier, d.reason
+
+    empty = {"schema": "ck-arbiter-ledger/1", "nextWorktree": 1, "lastEntry": 0, "claims": {}}
+    a = fresh(tmp_path, "empty")
+    got_a = parsed(open_claim(a, claim))
+    assert (got_a["action"], got_a["tier"], got_a["reason"]) == seam(empty)
+    assert got_a["key"] == key
+
+    history = {key: {"task": "2", "status": "ruled", "calls": 1, "ruling": 1, "base": "abc1234"}}
+    b = fresh(tmp_path, "history")
+    ledger = seed_ledger(b, history, last_entry=1)
+    got_b = parsed(open_claim(b, claim))
+    assert (got_b["action"], got_b["tier"], got_b["reason"]) == seam(ledger)
+    assert got_b["action"] == "ask"
+    assert got_a["action"] != got_b["action"], "the fixture must be one where only the recorded history differs"
+
+
+# --------------------------------------------------------------------------- TC-135
+
+
+def _seam_route(raw: dict, key: str, tier: str):
+    from claude_kiro.arbiter_policy import route_ruling, validate_ruling
+    from claude_kiro.principles import effective_principles, parse_principles
+
+    project = parse_principles(DEFAULT_PRINCIPLES, "project")
+    effective = effective_principles(project, None)
+    citable = {pr.id: pr for pr in effective.citable}
+    check = validate_ruling(raw, key, citable, "run")
+    return check, route_ruling(check, tier, effective)
+
+
+@pytest.mark.parametrize("form", ["valid", "invalid"])
+def test_tc135_settle_equals_validate_ruling_plus_route_ruling(tmp_path, form):
+    p, key, _ = opened(tmp_path, form)
+    raw = ruling(key, "code") if form == "valid" else ruling(key, "code", principle="project:made-up")
+    check, route = _seam_route(raw, key, "normal")
+    got = parsed(settle(p, key, raw))
+    assert got["route"] == route.route
+    assert got["reason"] == route.reason
+    assert got["record"] == route.record
+    assert got["problems"] == list(check.problems)
+    assert check.valid == (form == "valid")
+
+
+# --------------------------------------------------------------------------- TC-150
+
+
+def _start_commit(p: ArbiterProject, opened_result: dict) -> str:
+    return git(p.root, "rev-parse", INTO)
+
+
+def _partial_commit(worktree: Path) -> str:
+    (worktree / "specs" / "demo" / "tasks.md").write_text("# partial edit from the first attempt\n")
+    git(worktree, "add", "-A")
+    git(worktree, "commit", "-qm", "partial")
+    return git(worktree, "rev-parse", "HEAD")
+
+
+def test_tc150_rerun_keeps_the_worktree_and_resets_its_branch_to_the_starting_commit(tmp_path):
+    p, key, result = opened(tmp_path, "rerun")
+    start = _start_commit(p, result)
+    worktree, branch = Path(result["worktree"]), result["branch"]
+    if not worktree.is_absolute():
+        worktree = p.root / worktree
+    assert worktree.is_dir() and git(worktree, "rev-parse", "HEAD") == start
+    partial = _partial_commit(worktree)
+    assert partial != start
+
+    got = parsed(settle(p, key, stronger_look(key)))
+    assert got["route"] == "rerun", got
+    assert worktree.is_dir(), "a re-run keeps the worktree"
+    assert branch_exists(p, branch)
+    assert git(worktree, "rev-parse", "HEAD") == start, "the partial commit must be gone"
+    assert git(p.root, "rev-parse", branch) == start
+    assert git(worktree, "status", "--porcelain") == ""
+
+
+@pytest.mark.parametrize("outcome", ["test_repair", "code", "needs_input"])
+def test_tc150_test_repair_code_and_needs_input_remove_the_worktree_and_branch(tmp_path, outcome):
+    p, key, result = opened(tmp_path, outcome)
+    worktree, branch = Path(result["worktree"]), result["branch"]
+    if not worktree.is_absolute():
+        worktree = p.root / worktree
+    assert worktree.is_dir() and branch_exists(p, branch)
+    if outcome == "needs_input":
+        raw = ruling(key, "code", principle="project:made-up")  # invalid: needs input
+    else:
+        raw = ruling(key, outcome)
+    got = parsed(settle(p, key, raw))
+    assert got["route"] == outcome, got
+    assert not worktree.exists(), "the worktree must be removed"
+    assert not branch_exists(p, branch), "the branch must be removed"
+    assert str(worktree) not in git(p.root, "worktree", "list", "--porcelain")
+
+
+def test_tc150_spec_edit_keeps_the_worktree_and_branch_for_the_landing(tmp_path):
+    p, key, result = opened(tmp_path, "spec-edit")
+    worktree, branch = Path(result["worktree"]), result["branch"]
+    if not worktree.is_absolute():
+        worktree = p.root / worktree
+    tip = _partial_commit(worktree)
+    got = parsed(settle(p, key, ruling(key, "spec_edit")))
+    assert got["route"] == "spec_edit", got
+    assert worktree.is_dir() and branch_exists(p, branch)
+    assert git(p.root, "rev-parse", branch) == tip, "the edit commit stays for the landing"
+
+
+# --------------------------------------------------------------------------- TC-152
+
+
+def test_tc152_record_with_the_landing_lock_held_past_lock_wait_exits_nonzero_and_writes_nothing(tmp_path):
+    p = fresh(tmp_path, "p")
+    before = git(p.root, "rev-parse", INTO)
+    lock = common_dir(p) / "ck-land-integrate-demo.lock"
+    with open(lock, "a+") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)  # the real landing lock, held by this test
+        done = record(p, record_payload(1), "--lock-wait", "1")
+        assert done.returncode != 0, done.stdout + done.stderr
+    assert not (p.target / "specs" / "demo" / "decisions.md").exists()
+    assert decisions_entries(p) == [] and decisions_entries(p, "branch") == []
+    assert git(p.root, "rev-parse", INTO) == before
+    assert git(p.target, "status", "--porcelain") == ""
+    assert "lock" in (done.stdout + done.stderr).lower() or "landing" in (done.stdout + done.stderr).lower()
+    parsed(record(p, record_payload(1)))  # the same record succeeds once the lock is free
+    assert len(decisions_entries(p)) == 1
+
+
+# --------------------------------------------------------------------------- TC-154
+
+
+def _ruled(task: str, names: str, first: int) -> dict:
+    return {
+        f"{task}|test:{TEST_FILE}::test_{n}": {"task": task, "status": "ruled", "calls": 1, "ruling": first + i, "base": "abc1234"}
+        for i, n in enumerate(names)
+    }
+
+
+def test_tc154_three_rulings_on_the_task_make_open_ask_and_list_them(tmp_path):
+    p = fresh(tmp_path, "p")
+    seed_ledger(p, _ruled("2", "abc", 1), last_entry=3)
+    got = parsed(open_claim(p, claim_json(task="2", test="test_new")))
+    assert got["action"] == "ask", got
+    assert got["reason"] == "task-ruling-limit", got
+    assert [e["ruling"] for e in got["earlier"]] == [1, 2, 3], got
+    assert got["worktree"] is None and got["branch"] is None
+
+
+def test_tc154_three_rulings_on_another_task_do_not_count(tmp_path):
+    p = fresh(tmp_path, "p")
+    seed_ledger(p, _ruled("1", "abc", 1), last_entry=3)
+    got = parsed(open_claim(p, claim_json(task="2", test="test_new")))
+    assert got["action"] == "rule", got
+    assert got["reason"] == "", got
+    assert got["earlier"] == [] or got["earlier"] is None or all(e["ruling"] not in (1, 2, 3) for e in got["earlier"])
+
+
+# --------------------------------------------------------------------------- properties P-10, P-18, P-19
+
+PROPERTIES = {
+    "P-10": "test_p10_tier_is_risky_exactly_for_safety_guard_stop_or_unruled_repeat",
+    "P-18": "test_p18_a_claim_after_its_applied_ruling_is_never_ruled_again",
+    "P-19": "test_p19_the_arbiter_is_called_exactly_under_the_task_limits",
+    "P-17": "test_p17_only_a_well_formed_ruling_citing_an_effective_principle_is_valid",
+    "P-37": "test_p37_each_outcome_goes_to_exactly_one_lane",
+    "P-26": "test_p26_records_keep_earlier_bytes_and_numbers_rise",
+}
+
+PROP = settings(derandomize=True, max_examples=200, database=None, deadline=None)
+
+
+def _claim(raw: dict):
+    from claude_kiro.arbiter_policy import Claim
+
+    tuples = ("findings",)
+    lists = ("failing", "tests", "cycle", "models_tried")
+    kw = dict(raw)
+    for k in tuples:
+        if k in kw:
+            kw[k] = tuple(tuple(x) for x in kw[k])
+    for k in lists:
+        if k in kw:
+            kw[k] = tuple(kw[k])
+    return Claim(**kw)
+
+
+def _ledger(entries: dict) -> dict:
+    return {"schema": "ck-arbiter-ledger/1", "nextWorktree": 1, "lastEntry": len(entries), "claims": entries}
+
+
+def _entry(task: str, status: str, calls: int, n: int = 1) -> dict:
+    return {"task": task, "status": status, "calls": calls, "ruling": n if status == "ruled" else None, "base": "abc1234"}
+
+
+def _decide(claim, ledger: dict, risk: str = "normal", complexity: str = "Low", read: str = "ok"):
+    from claude_kiro.arbiter_policy import TaskMeta, claim_facts, decide_claim
+
+    facts = claim_facts(claim, ledger, read, TaskMeta(risk=risk, complexity=complexity))
+    return facts, decide_claim(facts)
+
+
+@PROP
+@given(raw=claims(), risk=st.sampled_from(["safety", "normal"]), complexity=st.sampled_from(["Low", "Medium", "High"]),
+       other=st.sampled_from(["Low", "Medium", "High"]), prior=st.sampled_from(["none", "failed", "ruled"]))
+def test_p10_tier_is_risky_exactly_for_safety_guard_stop_or_unruled_repeat(raw, risk, complexity, other, prior):
+    from claude_kiro.arbiter_policy import claim_key
+
+    claim = _claim(raw)
+    key = claim_key(claim)
+    entries = {} if prior == "none" else {key: _entry(claim.task, prior, 1)}
+    ledger = _ledger(entries)
+    _, got = _decide(claim, ledger, risk, complexity)
+    _, again = _decide(claim, ledger, risk, other)
+    assert got == again, "Complexity must never change the decision"
+    if prior == "ruled":
+        assert got.action == "ask" and got.tier is None
+        return
+    assert got.action == "rule", got
+    risky = risk == "safety" or claim.trigger == "guard-stop" or prior == "failed"
+    assert got.tier == ("risky" if risky else "normal"), (raw, risk, prior, got)
+
+
+def _with(raw: dict, **over) -> dict:
+    out = dict(raw)
+    out.update(over)
+    return out
+
+
+@PROP
+@given(raw=claims(), evidence=st.text(max_size=20), text=st.text(max_size=20),
+       size=st.integers(0, 1), data=st.data())
+def test_p18_a_claim_after_its_applied_ruling_is_never_ruled_again(raw, evidence, text, size, data):
+    from claude_kiro.arbiter_policy import claim_key
+
+    claim = _claim(raw)
+    key = claim_key(claim)
+    entries = {f"{claim.task}|test:tests/test_o.py::test_o{i}": _entry(claim.task, "ruled", 1, i + 2) for i in range(size)}
+    entries[key] = _entry(claim.task, "ruled", 1, 1)
+    order = data.draw(st.permutations(list(entries)))
+    ledger = _ledger({k: entries[k] for k in order})
+    # the claim returns with different evidence and text: same identity, never ruled again
+    back = _claim(_with(raw, evidence=evidence, text=text))
+    assert claim_key(back) == key
+    facts, got = _decide(back, ledger)
+    assert got.action == "ask" and got.reason == "repeat-after-ruling" and got.tier is None, got
+    # reordering the ledger changes neither the facts nor the decision
+    base_facts, base = _decide(back, _ledger(dict(entries)))
+    assert facts == base_facts and got == base
+
+
+@PROP
+@given(raw=claims(), data=st.data())
+def test_p18_changing_evidence_never_changes_identity_but_identity_fields_do(raw, data):
+    from claude_kiro.arbiter_policy import claim_key
+
+    claim = _claim(raw)
+    key = claim_key(claim)
+    assert claim_key(_claim(_with(raw, evidence=raw.get("evidence", "") + " more", text=raw["text"] + " changed"))) == key
+    changed = []
+    if raw.get("file"):
+        changed.append(_with(raw, file=raw["file"] + "z"))
+    if raw.get("test"):
+        changed.append(_with(raw, test=raw["test"] + "z"))
+    if raw.get("criterion") and not raw.get("test"):
+        changed.append(_with(raw, criterion=raw["criterion"] + "z"))
+    if raw.get("findings"):
+        fs = [list(f) for f in raw["findings"]]
+        i = data.draw(st.integers(0, len(fs) - 1))
+        for which, suffix in ((0, "z"), (1, "z")):
+            g = [list(f) for f in fs]
+            g[i][which] = g[i][which] + suffix
+            changed.append(_with(raw, findings=g))
+    for other in changed:
+        assert claim_key(_claim(other)) != key, (raw, other)
+
+
+@PROP
+@given(file=st.text(alphabet="abcdefgh", min_size=1, max_size=6), issue=st.text(alphabet="abcdefgh ", min_size=1, max_size=12),
+       extra=st.text(alphabet="abcdefgh", min_size=1, max_size=4), task=st.integers(1, 99).map(str))
+def test_p18_a_review_finding_covered_by_a_ruling_is_not_ruled_again(file, issue, extra, task):
+    from claude_kiro.arbiter_policy import claim_key
+
+    def review(findings):
+        return _claim({"task": task, "trigger": "review-deadlock", "text": "deadlock", "findings": findings})
+
+    covered = (f"src/{file}.py", issue)
+    single = review([covered])
+    ledger = _ledger({claim_key(single): _entry(task, "ruled", 1)})
+    _, got = _decide(single, ledger)
+    assert got.action == "ask" and got.reason == "repeat-after-ruling", got
+    # the same finding with different case and spacing is the same identity
+    variant = review([(f"src/{file}.py", "  " + issue.upper().replace(" ", "  ") + " ")])
+    assert claim_key(variant) == claim_key(single)
+    # a different issue on the same file is a new claim
+    other = review([(f"src/{file}.py", issue + extra + "q")])
+    assert claim_key(other) != claim_key(single)
+    _, fresh_got = _decide(other, ledger)
+    assert fresh_got.action == "rule", fresh_got
+
+
+@PROP
+@given(n_ruled=st.integers(0, 5), n_failed=st.integers(0, 4), ruled_calls=st.lists(st.integers(1, 3), min_size=5, max_size=5),
+       failed_calls=st.lists(st.integers(1, 3), min_size=4, max_size=4), others=st.integers(0, 4),
+       other_calls=st.integers(0, 5), risk=st.sampled_from(["safety", "normal"]))
+def test_p19_the_arbiter_is_called_exactly_under_the_task_limits(n_ruled, n_failed, ruled_calls, failed_calls, others,
+                                                               other_calls, risk):
+    claim = _claim(claim_json(task="7", test="test_new"))
+    entries = {}
+    for i in range(n_ruled):
+        entries[f"7|test:{TEST_FILE}::test_r{i}"] = _entry("7", "ruled", ruled_calls[i], i + 1)
+    for i in range(n_failed):
+        entries[f"7|test:{TEST_FILE}::test_f{i}"] = _entry("7", "failed", failed_calls[i])
+    for i in range(others):  # other tasks never count
+        entries[f"8|test:{TEST_FILE}::test_o{i}"] = _entry("8", "ruled", other_calls, 20 + i)
+    facts, got = _decide(claim, _ledger(entries), risk)
+    rulings = n_ruled
+    calls = sum(ruled_calls[:n_ruled]) + sum(failed_calls[:n_failed])
+    assert (facts.task_rulings, facts.task_calls) == (rulings, calls)
+    if calls >= 6:
+        assert (got.action, got.reason, got.tier) == ("ask", "task-call-limit", None), got
+    elif rulings >= 3:
+        assert (got.action, got.reason, got.tier) == ("ask", "task-ruling-limit", None), got
+    else:
+        assert got.action == "rule" and got.reason == "" and got.tier is not None, got
+
+
+# --------------------------------------------------------------------------- properties P-17, P-37
+
+_KEY = "2|test:tests/test_greet.py::test_x"
+_OTHER_PLAN = (
+    "# Plan: Other\n\n## Principles\n\n"
+    "- **Alpha rule:** other spec one.\n- **Beta rule:** other spec two.\n- **Gamma rule:** other spec three.\n"
+    "- **Delta rule:** other spec four.\n- **Epsilon rule:** other spec five.\n"
+)
+_MY_PLAN = (
+    "# Plan: Mine\n\n## Principles\n\n"
+    "- **Local rule:** this spec's own rule.\n"
+    "- **Overrides remove-first:** drop it, no reason given.\n"
+)
+
+
+def _effective_set():
+    from claude_kiro.principles import effective_principles, parse_principles
+
+    project = parse_principles(DEFAULT_PRINCIPLES, "project")
+    plan = parse_principles(_MY_PLAN, "plan")
+    effective = effective_principles(project, plan)
+    citable = {pr.id: pr for pr in effective.citable}
+    return project, plan, effective, citable
+
+
+def _good(outcome: str, principle: str, stronger: bool) -> dict:
+    if stronger:
+        out = stronger_look(_KEY)
+        out["principle"] = principle
+        return out
+    return ruling(_KEY, outcome, principle=principle)
+
+
+@st.composite
+def _p17_case(draw):
+    """(raw, expect_valid). Positives cite a real effective id; negatives are real near-misses and malformed shapes."""
+    from claude_kiro.principles import parse_principles
+
+    project, plan, effective, citable = _effective_set()
+    ids = sorted(citable)
+    form = draw(st.sampled_from([
+        "valid", "valid", "other-plan", "decision", "ignored-override", "truncated", "case", "text",
+        "two-outcomes", "unknown-outcome", "missing", "wrong-type", "wrong-claim", "not-a-dict"]))
+    outcome = draw(st.sampled_from(OUTCOMES_P))
+    stronger = draw(st.booleans())
+    pid = draw(st.sampled_from(ids))
+    if form == "valid":
+        return _good(outcome, pid, stronger), True
+    if form == "other-plan":
+        foreign = [x.id for x in parse_principles(_OTHER_PLAN, "plan") if x.id not in citable]
+        assume(foreign)
+        return _good(outcome, draw(st.sampled_from(foreign)), stronger), False
+    if form == "decision":
+        return _good(outcome, f"D-{draw(st.integers(1, 99))}", stronger), False
+    if form == "ignored-override":
+        ignored = [x.id for x in effective.ignored if x.id not in citable]
+        assume(ignored)
+        return _good(outcome, draw(st.sampled_from(ignored)), stronger), False
+    if form == "truncated":
+        cut = pid[: draw(st.integers(0, len(pid) - 1))]
+        assume(cut not in citable)
+        return _good(outcome, cut, stronger), False
+    if form == "case":
+        variant = draw(st.sampled_from([pid.upper(), pid.title(), pid.swapcase()]))
+        assume(variant not in citable)
+        return _good(outcome, variant, stronger), False
+    if form == "text":
+        return _good(outcome, citable[pid].text, stronger), False
+    if form == "two-outcomes":
+        raw = _good(outcome, pid, False)
+        raw["outcome"] = draw(st.sampled_from([["code", "spec_edit"], "code,spec_edit", "code spec_edit", ["code", "code"]]))
+        return raw, False
+    if form == "unknown-outcome":
+        raw = _good(outcome, pid, False)
+        raw["outcome"] = draw(st.sampled_from(["revert", "SPEC_EDIT", "spec-edit", "", "code ", 3, None, True]))
+        return raw, False
+    if form == "missing":
+        raw = _good(outcome, pid, stronger)
+        del raw[draw(st.sampled_from(["claim", "reasoning", "principle"]))]
+        return raw, False
+    if form == "wrong-type":
+        raw = _good(outcome, pid, stronger)
+        raw[draw(st.sampled_from(["claim", "reasoning", "principle"]))] = draw(
+            st.sampled_from([1, None, ["x"], {"a": 1}, True]))
+        return raw, False
+    if form == "wrong-claim":
+        raw = _good(outcome, pid, stronger)
+        raw["claim"] = "3|test:tests/test_other.py::test_y"
+        return raw, False
+    return draw(st.sampled_from([None, [], "code", 7, [{"claim": _KEY}]])), False
+
+
+OUTCOMES_P = ["spec_edit", "test_repair", "code", "requirements"]
+
+
+@PROP
+@given(case=_p17_case())
+def test_p17_only_a_well_formed_ruling_citing_an_effective_principle_is_valid(case):
+    from claude_kiro.arbiter_policy import validate_ruling
+
+    raw, expect = case
+    _, _, _, citable = _effective_set()
+    check = validate_ruling(raw, _KEY, citable, "run")
+    assert check.valid is expect, (raw, check)
+    if not expect:
+        assert check.problems, raw
+
+
+@st.composite
+def _p37_case(draw):
+    outcome = draw(st.sampled_from(OUTCOMES_P))
+    stronger = draw(st.booleans())
+    invalid = draw(st.booleans())
+    tier = draw(st.sampled_from(["normal", "risky"]))
+    raw = _good(outcome, "project:test-intent", stronger)
+    if invalid:
+        raw = draw(st.sampled_from([
+            {**raw, "principle": "project:made-up"}, {**raw, "principle": ""},
+            {**raw, "outcome": ["code", "spec_edit"]} if not stronger else {**raw, "reasoning": 5},
+            {k: v for k, v in raw.items() if k != "reasoning"}, {**raw, "claim": "9|other"}, None, "text"]))
+    return raw, tier, invalid, stronger, outcome
+
+
+_LANE = {"spec_edit": "spec_edit", "code": "code", "requirements": "needs_input", "test_repair": "test_repair"}
+
+
+@PROP
+@given(case=_p37_case())
+def test_p37_each_outcome_goes_to_exactly_one_lane(case):
+    from claude_kiro.arbiter_policy import route_ruling, validate_ruling
+
+    raw, tier, invalid, stronger, outcome = case
+    _, _, effective, citable = _effective_set()
+    check = validate_ruling(raw, _KEY, citable, "run")
+    route = route_ruling(check, tier, effective)
+    if invalid:
+        assert not check.valid, raw
+        assert route.route == "needs_input" and route.record is False, (raw, route)
+    elif stronger:
+        assert check.valid and check.stronger_look, (raw, check)
+        if tier == "normal":
+            assert route.route == "rerun", route
+        else:
+            assert (route.route, route.reason) == ("needs_input", "exhausted"), route
+    else:
+        assert check.valid and not check.stronger_look, (raw, check)
+        assert route.route == _LANE[outcome], (outcome, route)
+    assert (route.route == "spec_edit") == (not invalid and not stronger and outcome == "spec_edit"), (raw, route)
+
+
+# --------------------------------------------------------------------------- property P-26
+
+_P26_FRAGMENTS = ["## 3", "## Ruling 3: fake", "---", "```", "```python\n", "\r\n", "\r", "\n", "- **Claim:** x", "# h",
+                  "\u00e9\u4e2d\U0001f600", "\u2028", "\t", " ", "x" * 5000]
+_p26_text = st.lists(st.one_of(st.sampled_from(_P26_FRAGMENTS),
+                               st.text(alphabet=st.characters(blacklist_categories=("Cs", "Cc")), max_size=30)),
+                     min_size=1, max_size=6).map("".join)
+_p26_fields = st.fixed_dictionaries({"claim_text": _p26_text, "reasoning": _p26_text, "changed": _p26_text,
+                                     "principle_text": _p26_text})
+_P26_SETTINGS = settings(derandomize=True, max_examples=30, database=None, deadline=None,
+                         suppress_health_check=list(__import__("hypothesis").HealthCheck))
+
+
+def _p26_record(n: int, fields: dict):
+    from claude_kiro.arbiter_policy import RulingRecord
+
+    payload = record_payload(n, **fields)
+    payload["moved"] = tuple(payload["moved"])
+    payload["landed"] = tuple(payload["landed"])
+    return RulingRecord(**payload)
+
+
+@_P26_SETTINGS
+@given(batch=st.lists(_p26_fields, min_size=1, max_size=5))
+def test_p26_records_keep_earlier_bytes_and_numbers_rise(batch):
+    """append_entry and next_number: every earlier prefix stays byte-identical and numbers strictly increase."""
+    from claude_kiro.arbiter_policy import append_entry, next_number
+
+    assert append_entry is not None
+    existing, last = None, 0
+    for i, fields in enumerate(batch, 1):
+        number = next_number(existing, last)
+        assert number > last, (number, last)
+        out = append_entry(existing, _p26_record(i, fields), number)
+        assert out.startswith(existing or ""), "an earlier entry changed"
+        assert len(out) > len(existing or "")
+        existing, last = out, number
+
+
+@_P26_SETTINGS
+@given(batch=st.lists(_p26_fields, min_size=1, max_size=3))
+def test_p26_real_processes_keep_earlier_bytes_and_numbers_rise(batch):
+    """`ck arbiter record`, each call a new process: no file before the first record, then prefixes and numbers hold."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        p = fresh(Path(tmp), "p")
+        path = p.target / "specs" / "demo" / "decisions.md"
+        assert not path.exists(), "decisions.md exists before the first record"
+        seen = b""
+        last = 0
+        for i, fields in enumerate(batch, 1):
+            done = record(p, record_payload(i, **fields))
+            assert done.returncode == 0, done.stdout + done.stderr
+            number = json.loads(done.stdout)["number"]
+            assert number > last, (number, last)
+            now = path.read_bytes()
+            assert now.startswith(seen), f"entries before record {i} changed"
+            assert len(now) > len(seen)
+            seen, last = now, number
+
+
+
+# --------------------------------------------------------------------------- one call, one count
+
+
+def test_a_deadlock_of_two_findings_counts_one_call_on_the_task_after_one_open(tmp_path):
+    from claude_kiro.arbiter import load_ledger
+    from claude_kiro.arbiter_policy import Claim, TaskMeta, claim_facts
+
+    p = fresh(tmp_path, "p")
+    raw = {"task": "2", "trigger": "review-deadlock", "text": "deadlock",
+           "findings": [["tests/test_a.py", "first issue"], ["tests/test_b.py", "second issue"]]}
+    got = parsed(open_claim(p, raw))
+    assert got["action"] == "rule", got
+    ledger = load_ledger(ledger_path(p))
+    assert len(ledger["claims"]) == 3, ledger["claims"]  # the combined entry and one alias per finding
+    claim = Claim(task="2", trigger="review-deadlock", text="deadlock",
+                  findings=(("tests/test_a.py", "first issue"), ("tests/test_b.py", "second issue")))
+    facts = claim_facts(claim, ledger, "ok", TaskMeta(risk="normal", complexity="Low"))
+    assert facts.task_calls == 1, ledger["claims"]
+    assert facts.task_rulings == 0, ledger["claims"]

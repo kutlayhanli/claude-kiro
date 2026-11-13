@@ -99,7 +99,7 @@ const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 // (`role` opt), so opencode.roles can map it to a model. Escalated ladder steps drop the tag
 // (see escalated), and Claude Code, which has no ck() global, never sees a role opt.
 const ROLE_TAGS = typeof ck === 'function'
-const ROLE_NAMES = ['implementer', 'test_writer', 'reviewer', 'reviewer_risky', 'fixer', 'orchestrator', 'resolver']
+const ROLE_NAMES = ['implementer', 'test_writer', 'reviewer', 'reviewer_risky', 'fixer', 'orchestrator', 'resolver', 'arbiter', 'arbiter_risky']
 function roleOpts(name, role, override, tag = name) {
   const model = (override && override.model) || (role && role.model)
   const effort = (override && override.effort) || (role && role.effort)
@@ -132,6 +132,14 @@ const CROSS_TEST = !!A.agents && REVIEWER.cross_test !== false
 const ORCH = roleOpts('orchestrator', ROLES.orchestrator, null)
 const LOW = { effort: 'low', ...ORCH }
 const RESOLVE = roleOpts('resolver', ROLES.resolver, null)
+// The arbiter (run-principles Story 6): `arbiterAgent` is the agent type that rules, `agents.arbiter` its role
+// settings. A claim starts at the normal tier, or at the risky one when `ck arbiter open` says so (5.3-5.5). An absent
+// `arbiterAgent` means the arbiter cannot be called, so a stop that needs it is a needs-input entry (6.10).
+const ARBITER_AGENT = typeof A.arbiterAgent === 'string' && A.arbiterAgent ? A.arbiterAgent : null
+const ARBITER = ROLES.arbiter || {}
+const arbiterOpts = tier => (tier === 'risky'
+  ? roleOpts('arbiter.risky', { model: ARBITER.risky_model || ARBITER.model, effort: ARBITER.risky_effort || ARBITER.effort }, null, 'arbiter_risky')
+  : roleOpts('arbiter', ARBITER, null))
 // Escalation: bigger models to try, in order, once a role's own budget runs out
 // (its retries for a failing gate, its review rounds for blocking findings, its
 // one fix for a red branch). One extra attempt per model, at the role's effort.
@@ -296,6 +304,29 @@ const RESOLVED = {
   required: ['resolved'],
 }
 
+// The arbiter's answer (design.md RULING). `outcome` is unconstrained so that a malformed answer reaches `ck arbiter
+// settle` and my needs-input entry instead of failing in the agent tool (7.2). The prompt states the claim on its own
+// line (`Claim key: <key>`) and the arbiter copies it into `claim`; settle compares the two (7.1).
+const RULING = {
+  type: 'object',
+  properties: {
+    claim: { type: 'string', description: 'the claim key you were given, copied' },
+    status: { type: 'string', description: 'ruled | needs_stronger_look' },
+    outcome: { description: 'spec_edit | test_repair | code | requirements' },
+    reasoning: { type: 'string' },
+    principle: { type: 'string', description: 'the id of the principle you upheld' },
+    reservedBy: { type: 'string' },
+    established: { type: 'string', description: 'with needs_stronger_look: what you did establish' },
+    changed: { type: 'string', description: 'spec_edit: what you changed' },
+    commits: { type: 'string' },
+    testRepair: { type: 'object', properties: { file: { type: 'string' }, test: { type: 'string' }, change: { type: 'string' }, why: { type: 'string' } } },
+    code: { type: 'string', description: 'code: what the implementer must do' },
+    requirement: { type: 'object', properties: { kind: { type: 'string' }, wording: { type: 'string' }, reason: { type: 'string' } } },
+    settles: { type: 'array', items: { type: 'string' }, description: 'review deadlock: the findings this ruling settles' },
+    verdict: { type: 'string', description: '/spec:create only' },
+  },
+  required: ['status', 'reasoning'],
+}
 const REVIEW_SCHEMA = {
   type: 'object',
   properties: {
@@ -311,6 +342,8 @@ const REVIEW_SCHEMA = {
           test: { type: 'string', description: 'the test the finding is about (a test finding names its file and test)' },
           issue: { type: 'string', description: 'what is wrong, and the spec text it contradicts' },
           fix: { type: 'string', description: 'what the implementer should change' },
+          noRequirement: { type: 'boolean', description: 'true when the code serves no requirement or design.md row: it is minor, never blocks, and is a proposed cut' },
+          settledBy: { type: 'integer', description: 'the ruling number of the arbiter ruling that already settled this finding, when you restate it' },
         },
         required: ['severity', 'issue'],
       },
@@ -489,16 +522,6 @@ ${WRITE_HANDOFF(n)}
 ${GUARD_NOTE}
 At the end, run "${NOW}" again for finishedAt. Return the schema fields with task "${n}". gatePassed is true only if your final "ck -C ${WT(n)} gate ${SPEC} --task ${n}" run exited 0. commits lists the commits you made (empty if none).`
 
-const confirmConflictPrompt = (n, prev, attempt, cf = '') => `${MANDATE}${READ_DECISION(n)}Continue Task ${n} of spec ${SPEC} (attempt ${attempt + 1}). The previous agent in ${WT(n)} (branch ${BR(n)}) stopped because it believes these tests can never pass with code that meets the spec (every entry, one per test):
-${JSON.stringify(testConflictsOf(prev))}
-Its report: ${trim(prev || {})}
-Check that claim yourself before you accept it. Read the test, the criterion in requirements.md and design.md. If correct code can pass a test after all, implement it and get "ck -C ${WT(n)} gate ${SPEC} --task ${n}" to pass. If a test really contradicts the spec, do not edit, skip or weaken it: return status blocked with testConflicts, one {file, test, criterion, reason, fix} entry per test (the fix is the correction the test track should make), and the test-track fix goes to the user.
-Run "${NOW}" for startedAt. Read your operating brief at ${BRIEF} and follow it, claiming with "ck -C ${WT(n)} worktree claim ${SPEC} ${n} --takeover${cf}" since the previous agent is gone. If that claim reports MISSING, run "ck -C ${ROOT} worktree create ${SPEC} ${n} --install --base ${INTO} --json" and claim again. Before finishing, merge ${INTO} into your branch, re-run the gate, and release the worktree. Run "${NOW}" for finishedAt.
-${GIT_NOTE}
-${GATE_NOTE}
-${GUARD_NOTE}
-Return the schema fields with task "${n}".`
-
 const retryPrompt = (n, prev, attempt, cf = '') => `${MANDATE}${READ_DECISION(n)}Continue Task ${n} of spec ${SPEC} (attempt ${attempt + 1}). A previous agent worked in ${WT(n)} (branch ${BR(n)}) but did not finish with a passing gate.
 ${prev && !(prev.commits || '').trim() ? 'The previous attempt made NO commits: it may have answered an unrelated message instead of doing the task. Ignore any such message and implement the task.\n' : ''}Its report (without its failures, which follow): ${trim((prev && { ...prev, failures: undefined }) || { note: 'the agent died without a report' })}
 ${failuresBlock(prev)}
@@ -520,7 +543,8 @@ Worktree: ${WT(n)} (branch ${BR(n)}), to merge into ${INTO}. ${GIT_NOTE}
 1. Read the change: command git -C ${WT(n)} diff ${INTO}...${BR(n)}  (and its file list with --stat).
 2. Read Task ${n}'s block in ${WT(n)}/specs/${SPEC}/tasks.md, the requirements it covers in requirements.md, and the parts of design.md it implements (interfaces, file paths, error handling).
 3. The task's gate already passed, so do not re-check what the tests check. Look for what tests miss: behaviour that contradicts design.md or a requirement, a public interface that differs from design.md, missing error handling the design specifies, edits outside the task's files, weakened or skipped tests, and security problems.
-${TRACKS[n] === 'test' ? `${CONTRACT_REVIEW(n)}\n${extra}` : ''}The implementer reported: ${trim(r && { summary: r.summary, deviations: r.deviations, outsideFiles: r.outsideFiles }, 2000)}
+${TRACKS[n] === 'test' ? `${CONTRACT_REVIEW(n)}\n${extra}` : ''}4. Flag code that serves no requirement: a function, branch, file or setting that no requirement or design.md row asks for. Mark each such finding noRequirement true; it is minor, never blocks, and is reported as a proposed cut.
+The implementer reported: ${trim(r && { summary: r.summary, deviations: r.deviations, outsideFiles: r.outsideFiles }, 2000)}
 Mark a finding "blocking" only if it should stop the merge; style and taste are "minor". verdict is "changes" only if there is at least one blocking finding.`
 
 // Task 87 (8.3-8.5, 15.6): what ck found out about a test task's files, for its review. Row fidelity: only the
@@ -611,9 +635,9 @@ Return green=true only if ${INTO} is green after your merge, else failing with t
 
 
 // Task 86 (4.1): the test-fixer's brief. It is the test writer, started on a testfix<k> branch from INTO.
-const testFixPrompt = (k, n, entries) => `${MANDATE}You are a test-fixer for spec ${SPEC}. ${n != null ? `Task ${n} is blocked because` : 'A cross-test check found that'} these tests can never pass with code that meets the spec (every entry, one per test; the "fix" is the correction a first agent proposed):
+const testFixPrompt = (k, n, entries) => `${MANDATE}You are a test-fixer for spec ${SPEC}. ${n != null ? `Task ${n} is blocked because` : 'A cross-test check found that'} these tests can never pass with code that meets the spec (every entry, one per test; the "fix" is the correction a first agent proposed, or, when the entry has a "ruling", the change the arbiter ruled on it: do that change):
 ${JSON.stringify(entries)}
-Work on branch ${BR(`testfix${k}`)} in worktree ${WT(`testfix${k}`)}. Create it from the integration branch, on its own line:
+Work in worktree ${WT(`testfix${k}`)} on branch ${BR(`testfix${k}`)}. Create it from the integration branch, on its own line:
 ck -C ${ROOT} worktree create ${SPEC} testfix${k} --install --base ${INTO} --json
 ${GIT_NOTE}
 Read each test, the criterion in requirements.md and design.md. Then decide, for all of the tests together:
@@ -771,7 +795,35 @@ function applyPlanView(plan, mergedInRun, liveDeps) {
     verifyCycles: [...(plan.verifyCycles || [])],
     // Task 94: ck plan's write-set overlap map, read by writeSetHold; holds never change deps.
     overlaps: plan.overlaps && typeof plan.overlaps === 'object' && !Array.isArray(plan.overlaps) ? plan.overlaps : {},
+    // Task 70 (12.5): ck plan's verify-scope findings and its impl-task -> verifying-test-task map. A missing key reads as
+    // [] or {}; a wrong-typed one never reaches here (runPlan treats that plan call as failed).
+    verifyScope: Array.isArray(plan.verifyScope) ? plan.verifyScope.filter(f => f && typeof f === 'object') : [],
+    verifiedBy: plan.verifiedBy && typeof plan.verifiedBy === 'object' && !Array.isArray(plan.verifiedBy) ? plan.verifiedBy : {},
   }
+}
+
+// Task 70 (12.6, 12.11): one claim per problem. A problem is a shared suite that the gates of impl tasks select tests of
+// when their test tasks are not due: every finding on one suite is that problem, so one lint claim lists every test task
+// it covers. The claim belongs to the lowest task the problem names (`task`); `tasks` lists them all, for the hold. `sent`
+// holds the keys this run already sent (scopeKeyOf), so a problem is ruled once. Pure: no I/O.
+const scopeKeyOf = suite => `verify-scope|${String(suite)}`
+const byTaskNum = (a, b) => (Number(a) - Number(b)) || String(a).localeCompare(String(b))
+function scopeClaimsOf(findings, sent) {
+  const sentSet = sent instanceof Set ? sent : new Set()
+  const groups = new Map()
+  for (const f of Array.isArray(findings) ? findings : []) {
+    if (!f || typeof f !== 'object' || f.task === undefined || f.task === null) continue
+    const suite = String(f.suite || f.file || '')
+    const key = scopeKeyOf(suite)
+    if (sentSet.has(key)) continue
+    if (!groups.has(key)) groups.set(key, { key, suite, tasks: [], tests: [], messages: [] })
+    const g = groups.get(key)
+    const task = String(f.task)
+    if (!g.tasks.includes(task)) g.tasks.push(task)
+    if (f.testTask !== undefined && f.testTask !== null && !g.tests.includes(String(f.testTask))) g.tests.push(String(f.testTask))
+    if (f.message) g.messages.push(String(f.message))
+  }
+  return [...groups.values()].map(g => ({ ...g, tasks: g.tasks.sort(byTaskNum), tests: g.tests.sort(byTaskNum), task: g.tasks.slice().sort(byTaskNum)[0] }))
 }
 
 // Task 93 (12.5-12.7): what a task whose gate failed on a missing command does next. Pure: the caller records it.
@@ -901,7 +953,7 @@ function queuedAgents(inFlight, slots) {
   return [...(inFlight || [])].sort((a, b) => a.seq - b.seq).slice(slots)
 }
 
-const UNBLOCKER_KINDS = ['review', 'revise', 'land']
+const UNBLOCKER_KINDS = ['review', 'revise', 'land', 'arbiter']
 
 // Which ready tasks start now (3.1, 3.3, 3.5, 3.9). Asked only about new task starts.
 function startDecision({ finishFirst, inFlight, slots, ready, working, maxConcurrent, stopLaunching } = {}) {
@@ -935,18 +987,6 @@ function worktreeOutcome(result) {
   }
   if (state === 'ERROR') return { kind: 'error', reason: `worktree create failed: ${detail || blocker}` }
   return proceed
-}
-
-// The guard ladder (S17): the models of sonnet, opus, fable ranked above the attempted model, in order. An
-// inherited or unknown model gives all three, fable gives none. A mirror of agents.guard_ladder; it ignores
-// implementer.escalate.
-function guardLadder(attemptedModel) {
-  const ladder = ['sonnet', 'opus', 'fable']
-  const families = ['haiku', 'sonnet', 'opus', 'fable']
-  const text = typeof attemptedModel === 'string' ? attemptedModel.toLowerCase() : ''
-  const family = families.find(f => text.includes(f))
-  if (!family) return ladder
-  return ladder.filter(m => families.indexOf(m) > families.indexOf(family))
 }
 
 // S18: the guard stop in a task agent's result, or null. A passing result is never a guard stop.
@@ -1157,6 +1197,133 @@ function canonicalNode(node) {
   return (path + sep + rest).toLowerCase()
 }
 
+// Which stop of a task attempt goes to the arbiter (6.1-6.7, 6.11, 6.13), or null when none does. A busy or failed
+// worktree never does (6.7). A live `wait` with nothing refused is today's live edge and never does (6.4); a `blocked`
+// action or any refused provider is a command cycle (D29); a live `conflict` has joined `testConflicts` already.
+// An ordinary gate failure goes only once its retries and escalations are spent (6.5, 6.11).
+function claimTrigger({ result, guardStop, testConflict, live, worktreeKind, retryNo, maxRetries, rungsLeft, reviewDeadlock } = {}) {
+  if (worktreeKind === 'busy' || worktreeKind === 'error') return null
+  if (guardStop) return 'guard-stop'
+  if (reviewDeadlock) return 'review-deadlock'
+  const lv = live && typeof live === 'object' ? live : {}
+  const refused = Array.isArray(lv.refused) ? lv.refused : []
+  if (lv.action === 'blocked' || refused.length) return 'command-cycle'
+  if (testConflict) return 'test-conflict'
+  if (lv.action === 'wait') return null
+  const passed = !!result && result.status === 'done' && result.gatePassed === true
+  if (passed) return null
+  const spent = Number.isInteger(retryNo) && Number.isInteger(maxRetries) ? retryNo > maxRetries : false
+  if (spent && !(Number.isInteger(rungsLeft) && rungsLeft > 0)) return 'gate-failure'
+  return null
+}
+
+const isText = v => typeof v === 'string'
+const isTextList = v => Array.isArray(v) && v.every(isText)
+
+// `ck arbiter open`'s answer (OpenResult, read from out.json): the object, or null when a required field is missing or
+// has the wrong type. Null makes the call a failed `ck arbiter` call (6.10), never a guessed default.
+function openResultOf(json) {
+  const o = json && typeof json === 'object' && !Array.isArray(json) ? json : null
+  if (!o) return null
+  if (o.action !== 'rule' && o.action !== 'ask') return null
+  if (!isText(o.key) || !o.key || !isText(o.reason)) return null
+  if (!Array.isArray(o.principles) || !o.principles.every(p => p && typeof p === 'object' && isText(p.id) && isText(p.layer) && isText(p.text))) return null
+  if (!isText(o.planLayer) || !Array.isArray(o.earlier)) return null
+  if (o.missing != null && !isText(o.missing)) return null
+  if (o.action === 'rule') {
+    if (o.tier !== 'normal' && o.tier !== 'risky') return null
+    if (!isText(o.worktree) || !o.worktree || !isText(o.branch) || !isText(o.number)) return null
+  }
+  return o
+}
+
+// `ck worktree land SPEC arbiter<k> --json`'s one landing entry: the object, or null when a required field is missing or
+// has the wrong type. Null is a failed landing (8.4), never a guessed default.
+function landEntryOf(json) {
+  const o = json && typeof json === 'object' && !Array.isArray(json) ? json : null
+  if (!o || !['MERGED', 'CONFLICT', 'RED', 'REFUSED', 'ERROR'].includes(o.state)) return null
+  if (o.state === 'MERGED' && !(isText(o.commit) && o.commit)) return null
+  if (o.moved != null && !(Array.isArray(o.moved) && o.moved.every(m => m && typeof m === 'object' && isText(String(m.task)) && isText(m.file) && (m.test == null || isText(m.test))))) return null
+  return o
+}
+
+// `ck arbiter settle`'s answer (SettleResult): the object, or null as above.
+function settleResultOf(json) {
+  const o = json && typeof json === 'object' && !Array.isArray(json) ? json : null
+  if (!o) return null
+  if (!['spec_edit', 'test_repair', 'code', 'needs_input', 'rerun'].includes(o.route)) return null
+  if (!isText(o.reason) || typeof o.record !== 'boolean' || !isTextList(o.problems)) return null
+  if (o.principle != null && !(typeof o.principle === 'object' && isText(o.principle.id) && isText(o.principle.text))) return null
+  return o
+}
+
+// Task 66 (8.9, 8.10): the conflict entries a settled test-repair ruling hands to the test-fixer, one per ruling. The
+// ruling is attached unchanged; it is the confirmation the fixer starts on.
+function testRepairEntries(rulings) {
+  return (rulings || []).map(o => {
+    const ruling = (o && o.ruling) || {}
+    const claim = (o && o.claim) || {}
+    const t = ruling.testRepair || {}
+    return {
+      file: String(t.file || claim.file || ''), test: String(t.test || claim.test || ''), criterion: String(claim.criterion || ''),
+      reason: String(t.why || ruling.reasoning || ''), fix: String(t.change || ''), ruling,
+    }
+  }).filter(e => e.file)
+}
+
+// Task 69 (4.8, 8.11): a finding that serves no requirement is minor and never blocks a landing (the code stays and it is
+// a proposed cut). A review left with no blocking finding approves. Findings keep their order.
+function normalizeReview(review) {
+  if (!review || typeof review !== 'object') return review
+  const findings = (Array.isArray(review.findings) ? review.findings : []).map(f => (f && f.noRequirement === true ? { ...f, severity: 'minor' } : f))
+  const blocking = findings.some(f => f && f.severity === 'blocking')
+  return { ...review, findings, verdict: review.verdict === 'changes' && !blocking ? 'approve' : review.verdict }
+}
+
+// Task 69 (8.12): removes the findings a ruling settled. `settled` holds identities `<file>#<issue>`; a finding matches one
+// by its file and issue text (case, whitespace and a leading ./ do not matter). A finding the reviewer marks `settledBy`
+// restates a settled finding, so it is removed too, but only when something was settled (an empty `settled` matches
+// nothing). When `numbers` (the ruling numbers that settled something) is given, `settledBy` must be one of them. Every other finding passes, in order.
+function settleFindings(review, settled, numbers) {
+  if (!review || typeof review !== 'object') return review
+  const normPath = s => String(s || '').replace(/^(\.\/)+/, '')
+  const collapse = s => String(s || '').split(/\s+/).filter(Boolean).join(' ').toLowerCase()
+  const settledIds = new Set()
+  for (const s of settled || []) {
+    const text = String(s)
+    const k = text.indexOf('#')
+    const file = normPath(k < 0 ? text : text.slice(0, k))
+    settledIds.add(`${file}#${collapse(k < 0 ? '' : text.slice(k + 1))}`)
+  }
+  const findings = (Array.isArray(review.findings) ? review.findings : []).filter(f => {
+    if (!f) return true
+    const file = normPath(f.file)
+    if (settledIds.has(`${file}#${collapse(f.issue)}`)) return false
+    if (f.settledBy != null && settledIds.size > 0 && (numbers === undefined || (numbers || []).map(String).includes(String(f.settledBy)))) return false
+    return true
+  })
+  return { ...review, findings }
+}
+
+// Task 69 (8.12): the findings of a review deadlock an applied ruling of this task already covers, each with that ruling.
+// `earlier` is ck's list of this task's applied rulings; the claim key of each one names the finding it settled.
+// The finding identities a claim key names: `review:<id>,<id>`; compared whole, never as substrings.
+function claimIdsOf(claim) {
+  const text = String(claim || '')
+  const k = text.indexOf('review:')
+  return (k < 0 ? [text] : text.slice(k + 'review:'.length).split(',')).map(x => x.trim())
+}
+
+function coveredFindingsOf(findings, earlier) {
+  const normPath = s => String(s || '').replace(/^(\.\/)+/, '')
+  const collapse = s => String(s || '').split(/\s+/).filter(Boolean).join(' ').toLowerCase()
+  return (findings || []).flatMap(([file, issue]) => {
+    const id = `${normPath(file)}#${collapse(issue)}`
+    const e = (earlier || []).find(x => x && claimIdsOf(x.claim).includes(id))
+    return e ? [{ file: String(file || ''), issue: String(issue || ''), ruling: e.ruling, outcome: e.outcome, reasoning: e.reasoning }] : []
+  })
+}
+
 // --- end decisions ---
 
 // --- scheduler ---------------------------------------------------------------
@@ -1209,6 +1376,12 @@ const AUTO_RELINK = A.relink !== false && !(A.agents && A.agents.relink && A.age
 const relinkTried = new Set()  // tasks a relink was attempted for (at most once each)
 const relinks = []             // { task, cycle, reason } for every applied relink
 const relinkedOk = new Set()   // relinked tasks whose next stale cycle report is ignored once
+// Task 70 (12.5-12.11): verify-scope problems this run sent to the arbiter, by scopeKeyOf: each is ruled once. `launching`
+// is true while the launch sends its claims, so a plan read in between leaves those claims to the launch.
+const scopeSent = new Set()
+const scopeLaunchNeeds = []    // needs-input entries of a launch claim that went to me (the launch is refused)
+let launching = false
+let landingPlanPending = false  // a plan a landing asked for is in flight: no task starts until it is read (12.11)
 const MAX_RESOLVES = 3
 // Cross-test consistency (reviewer.cross_test): one check per wave of test tasks,
 // started when its last test task finishes (or at the end, for a wave that never
@@ -1383,7 +1556,9 @@ async function runPlan(trigger) {
     if (out.json && out.stderr) p.error = out.stderr  // a note next to a usable plan is a remark, not a failure
     if (p.error === undefined || p.error === null) delete p.error
     // An "error" next to a usable plan is a remark, not a failure; an empty plan with an error is a failure.
-    if (usablePlan(p) && !(p.error && !p.done.length && !p.remaining.length)) {
+    // Task 70: a wrong-typed verifyScope or verifiedBy is a failed plan call (a missing one reads as [] or {}).
+    const scopeShapeOk = (p.verifyScope === undefined || Array.isArray(p.verifyScope)) && (p.verifiedBy === undefined || (!!p.verifiedBy && typeof p.verifiedBy === 'object' && !Array.isArray(p.verifiedBy)))
+    if (usablePlan(p) && scopeShapeOk && !(p.error && !p.done.length && !p.remaining.length)) {
       const n = normalizePlan(p)
       // Done is ground truth even when the ready list is not: fold it in so the
       // fallback below never re-schedules an already-finished task (1.5). (Order
@@ -1520,9 +1695,11 @@ function requestPlan(trigger) {
     idleArmed = false
     log(`plan ${refills + 1} (idle): nothing ready, ${ctx.open} task(s) open; re-reading the plan`)
   }
+  // Task 70 (12.11): starts wait for the plan a landing asked for, so a verify-scope finding it reads holds its task first.
+  if (trigger === 'landing') landingPlanPending = true
   planRun = (async () => {
     let p = null
-    try { p = await runPlan(trigger) } catch (e) { p = null } finally { planRun = null }
+    try { p = await runPlan(trigger) } catch (e) { p = null } finally { planRun = null; landingPlanPending = false }
     if (!p && trigger !== 'start') { stopLaunching = true; stopReason = stopReason || PLAN_FAILED }
     const q = queuedTrigger
     queuedTrigger = null
@@ -1616,6 +1793,8 @@ function noteWriteSetHold({ task, waitsOn }) {
 
 // Starts what may start now, and re-reads the plan when nothing is ready and a slot is free.
 function schedule() {
+  // Task 70 (12.11): while the plan a landing asked for is in flight, nothing starts; its plan may hold a task.
+  if (landingPlanPending) return
   const ctx = planContext()
   let ready = ctx.ready
   if (!SCRIPT_READINESS) {
@@ -1638,7 +1817,61 @@ function schedule() {
   if (SCRIPT_READINESS && !stopLaunching && !planRun) requestPlan('idle')
 }
 
+// Task 70 (12.6, 8.9, D33): one verify-scope problem (a lint claim listing every test task it covers) settled by the
+// arbiter. A spec edit lands as it settles; a test repair goes to the test-fixer like any other claim. Returns
+// { route, ruling, changed } when it settled, or { exit: rec } when it went to me (the rec carries needsInput).
+async function settleScopeClaim(g) {
+  const rec = { task: g.task, wave: waveOf(g.task), title: TITLES[g.task], attempts: 0, ok: false, escalations: [], resolves: 0 }
+  const testsText = g.tests.map(t => `Task ${t}`).join(', ')
+  const claim = {
+    trigger: 'lint', task: g.task, rule: 'verify-scope', subject: g.suite, file: g.suite, tests: g.tests,
+    text: `Verify-scope lint: Task ${g.task}'s gate runs the tests of the shared suite ${g.suite} that belong to ${testsText}, which are not Done at its gate. ${g.messages.slice(0, 3).join(' ')}`.trim(),
+  }
+  const out = await arbitrate(g.task, rec, null, claim)
+  if (out.exit) return { exit: out.exit }
+  if (out.route === 'spec_edit') return { route: 'spec_edit', ruling: out.ruling, changed: out.ruling && typeof out.ruling === 'object' ? String(out.ruling.changed || '') : '' }
+  if (out.route === 'test_repair') {
+    const h = await handOffTestRepair(g.task, rec, [out], { onIntegration: true })
+    const reasons = [...h.fixed.toMe, ...h.fixed.findings.map(f => `the test-fixer found the test correct, so it is not changed: ${trim(String(f.message || f.issue || ''), 300)}`)]
+    if (!reasons.length) return { route: 'test_repair', ruling: out.ruling, changed: '' }
+    const t = (out.ruling && out.ruling.testRepair) || {}
+    return { exit: await parkTestFix(g.task, rec, reasons, h.fixed.records, { ruling: out.rulingNo ?? null, testRepair: { file: String(t.file || g.suite), test: String(t.test || ''), change: String(t.change || ''), why: String(t.why || '') } }) }
+  }
+  return { exit: await arbiterNeedsInput(g.task, rec, null, claim, { reason: 'lint-route', text: `a verify-scope problem is settled by a spec edit or a test repair; the arbiter ruled ${out.route}`, ruling: out.ruling }) }
+}
+
+// Task 70 (12.11): a finding that appears after launch holds its task until the claim settles, then the plan is read again.
+// The hold is a running entry, so the run waits for it and the task is not ready meanwhile.
+async function settleHeldScope(g) {
+  const n = g.task
+  try {
+    const out = await settleScopeClaim(g)
+    if (out.exit) {
+      for (const t of g.tasks) if (out.exit.needsInput) parked.set(t, { ...out.exit.needsInput, task: t })
+      log(`Task ${n}: its verify-scope claim went to me; ${g.tasks.map(t => `Task ${t}`).join(', ')} wait for my decision`)
+    } else log(`Task ${n}: its verify-scope claim settled (${out.route}); the plan is read again before ${g.tasks.map(t => `Task ${t}`).join(', ')} start`)
+  } catch (e) {
+    for (const t of g.tasks) parked.set(t, { task: t, file: g.suite, kind: 'arbiter', test: '', requirement: '', decision: `the verify-scope claim failed: ${trim(String(e && e.message), 300)}`, action: 'park', notification: null, escalatedTo: [], reason: 'arbiter-call-failed', trigger: 'lint' })
+    log(`Task ${n}: the verify-scope claim failed (${trim(String(e && e.message), 200)})`)
+  }
+  for (const t of g.tasks) running.delete(t)
+  requestPlan('landing')
+  poke()
+}
+
 function applyLint(p) {
+  // Task 70 (12.11): a verify-scope finding for a task not yet started holds that task until its claim settles, once.
+  if (!launching) {
+    for (const g of scopeClaimsOf(p.verifyScope, scopeSent)) {
+      const held = g.tasks.filter(t => !(running.has(t) || failed.has(t) || parked.has(t) || mergedInRun.has(t) || view.done.has(t)))
+      if (!held.length) continue
+      scopeSent.add(g.key)
+      const claim = { ...g, task: held[0], tasks: held }
+      log(`${held.map(t => `Task ${t}`).join(', ')} held: its verify scope selects tests of ${g.suite} that belong to ${g.tests.map(t => `Task ${t}`).join(', ')}; the arbiter rules on it before ${held.length > 1 ? 'they start' : 'it starts'}`)
+      const settling = settleHeldScope(claim)
+      for (const t of held) running.set(t, settling)
+    }
+  }
   for (const vc of p.verifyCycles || []) {
     const n = String(vc.task)
     if (failed.has(n) || running.has(n)) continue
@@ -1806,7 +2039,14 @@ async function reviewBatch(batch) {
     review = null
   }
   for (const n of ids) pendingReview.get(n).reviewed = true
-  review = attributeFindings(review, ids)
+  review = normalizeReview(attributeFindings(review, ids))
+  // Task 69 (4.8): a serves-no-requirement finding of a batched review is a proposed cut of the task it names.
+  if (((review && review.findings) || []).length) reviewedFindings = true
+  for (const f of (review && review.findings) || []) {
+    if (f && f.noRequirement && f.task != null && (batch.some(b => String(b.n) === String(f.task)) || view.order.includes(String(f.task)) || Object.hasOwn(view.deps, String(f.task)))) recordCut(f.task, f)
+    else if (f && f.noRequirement && f.task == null && ids.length === 1) recordCut(ids[0], { ...f, task: ids[0] })
+    else if (f && f.noRequirement) log(`Review wave ${waveNo}: a serves-no-requirement finding names no task of this spec, so it is not a proposed cut: ${f.file || '?'}: ${f.issue}`)
+  }
   const flagged = flaggedOf(review, ids)
   if (review && review.verdict === 'changes' && ids.length > 1 && flagged.length === ids.length && !(review.findings || []).some(f => f && f.severity !== 'minor' && f.task != null)) {
     log(`Review wave ${waveNo}: its blocking findings name no covered task, so all of Tasks ${ids.join(', ')} revise`)
@@ -1946,7 +2186,7 @@ let testFixSeq = 0
 let ledgerSeq = 0
 const conflictNode = c => (c.test ? `${c.file}::${c.test}` : String(c.file))
 const conflictKey = c => canonicalNode(conflictNode(c))   // the run ledger's key, as ck's ledger keys it (4.8)
-const conflictEntry = c => ({ file: String(c.file ?? ''), test: String(c.test ?? ''), criterion: String(c.criterion ?? ''), reason: String(c.reason ?? ''), fix: String(c.fix ?? '') })
+const conflictEntry = c => ({ file: String(c.file ?? ''), test: String(c.test ?? ''), criterion: String(c.criterion ?? ''), reason: String(c.reason ?? ''), fix: String(c.fix ?? ''), ...(c.ruling ? { ruling: c.ruling } : {}) })
 // 4.5: the workflow does not trust in_scope alone.
 const scopeRefusal = sc => {
   if (!sc || typeof sc !== 'object') return 'ck returned no scope decision'
@@ -1966,7 +2206,7 @@ const proofRefusal = pf => {
 const reviewApproved = rv => !!rv && rv.verdict === 'approve' && !(rv.findings || []).some(f => f && f.severity === 'blocking')
 
 // One test-fixer for one file group. `blocked` is the task the tests block (null for a cross-test fix, which holds `held`).
-async function runTestFix({ k, blocked, held = [], source = 'conflict', conflicts }) {
+async function runTestFix({ k, blocked, held = [], source = 'conflict', conflicts, onIntegration = false }) {
   const fix = `testfix${k}`
   const entries = conflicts.map(conflictEntry)
   const nodes = conflicts.map(conflictNode)
@@ -1998,7 +2238,8 @@ async function runTestFix({ k, blocked, held = [], source = 'conflict', conflict
   if (Array.isArray(fx.changedTests)) rec.changedTests = fx.changedTests.map(String)
   if (fx.verdict !== 'fixed') return toMe(`the test-fixer cannot fix it: ${trim(fx.summary, 400)}`)
   if (fx.finding && typeof fx.finding === 'object') return toMe(`the test-fixer's report contradicts itself (verdict fixed with a finding about the code): ${trim(fx.finding, 300)}`)
-  const proveArgv = ['-C', ROOT, 'testfix', 'prove', SPEC, fix, ...(blocked != null ? ['--blocked', String(blocked)] : held.flatMap(h => ['--held', String(h)])), ...nodes.flatMap(x => ['--test', x]), '--into', INTO, '--json']
+  // Task 70: a task that has not started has no branch, so its fix is proved on the integration branch (--held).
+  const proveArgv = ['-C', ROOT, 'testfix', 'prove', SPEC, fix, ...(blocked != null && !onIntegration ? ['--blocked', String(blocked)] : (blocked != null ? [String(blocked)] : held).flatMap(h => ['--held', String(h)])), ...nodes.flatMap(x => ['--test', x]), '--into', INTO, '--json']
   const pv = await thinCk('testfix prove', proveArgv, { label: `testfix prove ${k}`, phase, cwd: ROOT, what: `Proof step for test fix ${fix} of spec ${SPEC}: it checks the fix's scope, then that the tests pass with it` })
   if (!pv.json) { await record('to-me'); return toMe(`ck testfix prove gave no result: ${ckError(pv)}`) }
   rec.scope = pv.json.scope ?? null
@@ -2042,7 +2283,7 @@ async function runTestFix({ k, blocked, held = [], source = 'conflict', conflict
 
 // A blocked task's confirmed conflicts: plan, run one test-fixer per file, record each outcome.
 // Returns {records, fixed: [node], findings: [Failure], toMe: [reason]}.
-async function testFixFor(n, conflicts, { held = [] } = {}) {
+async function testFixFor(n, conflicts, { held = [], onIntegration = false } = {}) {
   const src = n == null ? 'cross-test' : 'conflict'
   const nodes = [...new Set(conflicts.map(conflictNode))]
   const led = await thinCk('testfix ledger', ['-C', ROOT, 'testfix', 'check', SPEC, ...nodes.flatMap(x => ['--test', x]), '--json'], { label: `testfix ledger ${++ledgerSeq}`, phase: n != null ? phaseOf(n) : 'Test fix', cwd: ROOT, what: `Ledger check for the test fixes of spec ${SPEC}` })
@@ -2065,7 +2306,7 @@ async function testFixFor(n, conflicts, { held = [] } = {}) {
   for (const g of plan.groups) {
     const k = ++testFixSeq
     log(`${n != null ? `Task ${n}` : 'Cross-test'}: test-fixer ${k} for ${g.file} (${g.conflicts.length} test(s))`)
-    const rec = await runTestFix({ k, blocked: n, held, source: src, conflicts: g.conflicts })
+    const rec = await runTestFix({ k, blocked: n, held, source: src, conflicts: g.conflicts, onIntegration })
     out.records.push(rec)
     if (rec.outcome === 'landed') out.fixed.push(...rec.tests)
     else if (rec.outcome === 'test-correct') out.findings.push({ ...rec.finding, kind: 'assertion', message: rec.reason, tasks: n != null ? [String(n)] : held.map(String), command: null, node: rec.tests[0], file: rec.finding.file || g.file })
@@ -2076,14 +2317,15 @@ async function testFixFor(n, conflicts, { held = [] } = {}) {
 }
 
 // A task whose test fix goes to me: needs-input kind "test-fix" with the findings, parked (unattended) or asked (interactive).
-async function parkTestFix(n, rec, reasons, records) {
+const repairText = x => { const l = x.testRepairs || (x.testRepair ? [{ ruling: x.ruling, testRepair: x.testRepair }] : []); return l.length ? ` Ruled test change${l.length > 1 ? 's' : ''}: ${l.map(p => `${p.ruling != null ? `ruling ${p.ruling}, ` : ''}${p.testRepair.file}${p.testRepair.test ? `::${p.testRepair.test}` : ''}: ${trim(p.testRepair.change, 300)} (why: ${trim(p.testRepair.why, 200)})`).join(' | ')}.` : '' }
+async function parkTestFix(n, rec, reasons, records, extra = {}) {
   const action = parkAction({ interactive: INTERACTIVE })
   const tests = [...new Set(records.flatMap(x => x.tests))]
   const files = [...new Set(tests.map(t => t.split('::')[0]))]
-  const decision = `Task ${n} is blocked on tests that can never pass, and the automatic test fix did not land: ${reasons.join(' | ')}. Fix the tests yourself on ${INTO} (a test-track change: you decide), or tell the agent how to proceed; then resume the run${RUN_ID ? ` with the same runId ${RUN_ID}` : ''}.`
+  const decision = `Task ${n} is blocked on tests that can never pass, and the automatic test fix did not land: ${reasons.join(' | ')}.${repairText(extra)} Fix the tests yourself on ${INTO} (a test-track change: you decide), or tell the agent how to proceed; then resume the run${RUN_ID ? ` with the same runId ${RUN_ID}` : ''}.`
   const entry = {
     task: n, file: files.join(', '), files, kind: 'test-fix', test: tests.join(', '), requirement: '', decision,
-    findings: reasons, fixes: records.map(x => x.fix).filter(Boolean), runId: RUN_ID || null, action, notification: null, escalatedTo: [],
+    findings: reasons, fixes: records.map(x => x.fix).filter(Boolean), runId: RUN_ID || null, action, notification: null, escalatedTo: [], ...extra,
   }
   releaseSlot(n)
   if (action === 'park') {
@@ -2168,6 +2410,267 @@ async function routeCrossFindings(w, findings, replan, entry0 = null) {
   log(`cross-test (wave ${w}): test fix landed; ${held.length ? `Task ${held.join(', ')} released` : 'no task was held'}`)
 }
 
+// --- the arbiter (run-principles Story 6) ---
+const ruledKeys = new Set()   // claim keys ruled on in this run
+// Calls made to the arbiter per task in this run: a risky-tier call after the first carries the `risky` label, so each call of a task has its own.
+const arbiterCalls = {}
+const ruledAnswers = new Map()   // claim key -> the arbiter's answer, for the entry of a claim that comes back (7.4)
+const runRulings = []   // RunRuling, one per ruling this run settled (10.7); Task 66 adds the decisions.md number from `ck arbiter record`
+const proposedCuts = []   // Task 69 (4.8): each serves-no-requirement finding a review named, for the result's proposedCuts
+const cutKeys = new Set()
+let reviewedFindings = false   // a review named at least one finding (Task 69): proposedCuts is listed then
+const recordCut = (n, f) => {
+  // A batched review can name the task a finding belongs to; that task owns the cut.
+  const task = String(f.task || n)
+  const key = `${task}|${f.file || ''}|${f.issue || ''}`
+  if (cutKeys.has(key)) return
+  cutKeys.add(key)
+  proposedCuts.push({ task, file: String(f.file || ''), issue: String(f.issue || '') })
+}
+
+// A guard stop as a claim (6.2): the test or file the hook protected, and the requirement it verifies.
+function guardClaim(n, stop, tried) {
+  return {
+    trigger: 'guard-stop', file: String(stop.file || ''), test: String(stop.test || ''), criterion: String(stop.requirement || ''), models_tried: tried,
+    text: `A hook stopped Task ${n} from changing ${stop.test || stop.file}${stop.requirement ? ` (requirement ${stop.requirement})` : ''}${stop.kind ? `; the protected file is a ${stop.kind}` : ''}.`,
+  }
+}
+
+// What the implementer is told after the arbiter ruled: the text of each ruling, and that a landed edit is on INTO.
+function rulingNote(outs, forReviewer = false) {
+  const lines = (outs || []).map(o => {
+    const r = o.ruling || {}
+    const t = r.testRepair || {}
+    const what = o.route === 'code' ? `What to do: ${r.code || r.reasoning}` : o.route === 'spec_edit' ? `The arbiter changed the spec (${r.changed || 'see the commit'}) and it landed on ${INTO}.` : o.route === 'test_repair' ? `The test ${t.file || o.claim.file || ''} ${t.test || o.claim.test || ''} was repaired: ${t.change || ''}` : ''
+    return `The arbiter ruled on the ${o.claim.trigger} claim ${o.key} (${r.outcome}): ${trim(r.reasoning || '', 600)} ${what}`.trim()
+  })
+  if (!lines.length) return ''
+  // The reviewer re-reviews the task against the ruling; it does not merge or finish anything, so it gets no implementer instruction.
+  const tail = forReviewer ? 'Review the task with these rulings in mind: a finding a ruling settled is not blocking again.' : `Merge ${INTO} into your branch first, so the ruled changes are in it, then finish the task. The ruling does not excuse a failing gate.`
+  return `${lines.join('\n')}\n${tail}\n`
+}
+
+const taskRisk = n => (isSafety(n) || String((current && current.risk && current.risk[n]) || '').toLowerCase() === 'safety' ? 'safety' : 'normal')
+
+const rulingPrompt = (n, claim, open, tier, first) => `You are the arbiter for Task ${n} of spec ${SPEC}. Rule on one claim, by the principles below.
+Stop type: ${claim.trigger}
+Claim key: ${open.key}
+Task: ${n}${TITLES[n] ? ` ("${TITLES[n]}")` : ''}; tier: ${tier}; models tried: ${(claim.models_tried || []).join(', ') || 'none'}
+The claim:
+${JSON.stringify(claim, null, 2)}
+${claim.evidence ? `Evidence: ${claim.evidence}\n` : ''}Principles (project layer and plan layer; cite the id of the one you uphold in "principle"):
+${open.principles.map(p => `- ${p.id} (${p.layer}): ${p.text}`).join('\n')}
+Plan layer: ${open.planLayer}.
+${open.earlier.length ? `Earlier rulings on this task: ${JSON.stringify(open.earlier)}\n` : ''}The spec: specs/${SPEC}/requirements.md, specs/${SPEC}/design.md, specs/${SPEC}/test-plan.md and specs/${SPEC}/tasks.md. Read what the claim needs.
+Your worktree for a spec edit: ${String(open.worktree).startsWith('/') ? open.worktree : `${ROOT}/${open.worktree}`} (branch ${open.branch}). Edit only tasks.md, design.md and test-plan.md there and commit with a plain git commit -m '...'.
+${first ? `You looked at this claim once already and asked for a stronger look. Your reasoning then: ${first.reasoning || ''}\nWhat you established: ${first.established || ''}\nThis is the last look: rule now.\n` : ''}Give exactly one outcome: spec_edit (you changed the spec in your worktree, name what in "changed"), test_repair (a test is wrong: "testRepair" {file, test, change, why}), code (the implementer must change: "code"), or requirements (a requirement must change or is missing: "requirement" {kind add|change|remove, wording, reason}). A reserved scope is mine, not yours: name it in "reservedBy". For a review deadlock, "settles" lists each of the claim's findings your ruling settles, as "<file>#<issue>" copied from the claim (leave it empty for a finding the ruling does not settle). Always give "claim" (copy the Claim key above), "status" (ruled, or needs_stronger_look with "established"), "reasoning" and "principle".`
+
+// A stop the arbiter did not rule on, or ruled on in a way that needs me: one needs-input entry (7.2, 6.10). Parked
+// (unattended) or asked (interactive); no fallback runs.
+async function arbiterNeedsInput(n, rec, r, claim, { reason, text, ruling = null, open = null, number = null }) {
+  const action = parkAction({ interactive: INTERACTIVE })
+  const kind = reason === 'requirements' || reason === 'missing-requirement' ? reason : 'arbiter'
+  const decision = `The arbiter ${ruling ? 'ruled' : 'did not rule'} on Task ${n}'s ${claim.trigger} claim (${reason}): ${text}${ruling && ruling.requirement ? ` Requirement ${ruling.requirement.kind || 'change'}: ${ruling.requirement.wording || ''} (${ruling.requirement.reason || ''}).` : ''} Decide from the main session, then resume the run${RUN_ID ? ` with the same runId ${RUN_ID}` : ''}.`
+  const entry = {
+    task: n, file: String(claim.file || ''), kind, test: String(claim.test || ''), requirement: String(claim.criterion || ''), decision, action, notification: null, escalatedTo: [],
+    ruling: number, reason, claim: ruling ? (open ? open.key : (claim.text ? String(claim.text) : null)) : { ...(open ? { key: open.key } : {}), trigger: claim.trigger, text: String(claim.text || ''), file: String(claim.file || ''), test: String(claim.test || ''), ...(claim.cycle !== undefined ? { cycle: claim.cycle } : {}), ...(claim.command !== undefined ? { command: claim.command } : {}), ...(claim.provider !== undefined ? { provider: claim.provider } : {}) }, trigger: claim.trigger, output: ruling,
+    ...(reason === 'repeat-after-ruling' ? { evidence: String(claim.text || ''), earlierRuling: open && ruledAnswers.has(open.key) ? ruledAnswers.get(open.key) : null } : {}),
+    ...(open && open.missing ? { missing: open.missing } : {}),
+  }
+  rec.result = r
+  rec.finishedAt = r && r.finishedAt
+  releaseSlot(n)
+  if (action === 'park') {
+    const note = JSON.stringify({ file: entry.file, kind, test: entry.test, requirement: entry.requirement, decision })
+    const out = await thinCk('park', ['worktree', 'park', SPEC, n, '--json'], { stdin: note, label: `park ${n}`, phase: phaseOf(n), cwd: ROOT, what: `Parking step for Task ${n} of spec ${SPEC}` })
+    const p = out.json ? out.json : { parked: false, error: ckError(out) }
+    entry.notification = p && p.notification ? p.notification : 'failed'
+    entry.notificationDetail = (p && (p.detail || p.error)) || ''
+    if (!p || p.parked === false) {
+      entry.notification = 'failed'
+      entry.notificationDetail = 'park failed: ' + ((p && (p.error || p.detail)) || 'the park step returned nothing')
+    } else rec.parked = true
+  }
+  rec.needsInput = entry
+  rec.reason = `needs input: arbiter (${reason})`
+  return rec
+}
+
+// `ck arbiter record` for one settled ruling (10.1), inside the landing lock and before anything acts on it. Returns
+// { number } or { error }; a failed record is logged in the run report and the claim goes to needs-input.
+async function recordRuling(n, { claim, answer, res, open, tier, landing = null }) {
+  const outcome = res.route === 'needs_input' ? (['requirements', 'spec_edit', 'test_repair', 'code'].includes(answer && answer.outcome) ? answer.outcome : 'requirements') : res.route
+  const body = {
+    trigger: String(claim.trigger || ''), claim_key: open.key, claim_text: String(claim.text || ''), task: String(n), tier: tier === 'risky' ? 'risky' : 'normal', outcome,
+    reasoning: String((answer && answer.reasoning) || ''), principle_id: String((res.principle && res.principle.id) || (answer && answer.principle) || ''), principle_text: String((res.principle && res.principle.text) || ''),
+    plan_layer: String(open.planLayer || ''), changed: 'nothing', moved: [], commit: null, landed: null,
+    ...(landing ? { changed: String(landing.changed || 'the spec'), moved: landing.moved || [], commit: landing.commit || null, landed: [landing.landed, landing.why || ''] } : {}),
+  }
+  let out = null
+  try {
+    out = await withLandingLock(() => thinCk('arbiter-record', ['-C', ROOT, 'arbiter', 'record', SPEC, '--into', INTO, '--json'], { stdin: JSON.stringify(body), label: `arbiter-record ${n}`, phase: phaseOf(n), cwd: ROOT, what: `Arbiter step for Task ${n} of spec ${SPEC}: record the ruling in decisions.md` }))
+  } catch (e) {
+    out = null
+  }
+  const j = out && out.code === 0 && out.json && typeof out.json === 'object' ? out.json : null
+  if (!j || !Number.isInteger(j.number)) {
+    const error = `ck arbiter record did not confirm (${out ? (out.json && out.json.error ? trim(String(out.json.error), 300) : ckError(out)) : 'no answer'}); the entry for claim ${open.key} was not written to decisions.md`
+    log(`Task ${n}: ${error}`)
+    runWarnings.push(`Task ${n}: ${error}`)
+    return { error }
+  }
+  if (j.warning) {
+    log(`Task ${n}: ck arbiter record: ${trim(String(j.warning), 300)}`)
+    runWarnings.push(`Task ${n}: ck arbiter record: ${trim(String(j.warning), 300)}`)
+  }
+  return { number: j.number }
+}
+
+// One claim to the arbiter: open, rule at the returned tier, settle, re-run once at the risky tier on `rerun` (5.7),
+// and land a spec edit. Returns { exit: rec } when the claim went to me, else { route, ruling, claim, key, number }.
+async function arbitrate(n, rec, r, claim) {
+  const toMe = async (reason, text, more = {}) => ({ exit: await arbiterNeedsInput(n, rec, r, claim, { reason, text, ...more }) })
+  if (!ARBITER_AGENT) return await toMe('no-arbiter', 'no arbiter agent type was given to the run (arbiterAgent), so the arbiter cannot be called.')
+  const phase = phaseOf(n)
+  const meta = { risk: taskRisk(n), complexity: String(COMPLEXITY[n] || '') }
+  const opened = await thinCk('arbiter-open', ['-C', ROOT, 'arbiter', 'open', SPEC, '--task', String(n), '--into', INTO, '--json'], { stdin: JSON.stringify({ claim, task: meta }), label: `arbiter-open ${n}`, phase, cwd: ROOT, what: `Arbiter step for Task ${n} of spec ${SPEC}: open the claim` })
+  const open = opened.code === 0 ? openResultOf(opened.json) : null
+  if (!open) return await toMe('arbiter-call-failed', `ck arbiter open failed or answered something unusable: ${opened.json && opened.json.error ? trim(String(opened.json.error), 300) : ckError(opened)}`)
+  if (open.action === 'ask') {
+    const why = { 'principles-missing': `the principles file ${open.missing || 'specs/PRINCIPLES.md'} is missing, a directory or unreadable; run "ck principles init" or fix it`, 'repeat-after-ruling': 'the same claim was ruled on already and came back', exhausted: 'the arbiter asked for a stronger look at the risky tier already' }[open.reason] || `the arbiter may not be called again (${open.reason})`
+    return await toMe(open.reason || 'ask', `${why}.${open.earlier.length ? ` Earlier rulings: ${open.earlier.map(e => `#${e.ruling} ${e.outcome}${e.reasoning ? ` (${trim(String(e.reasoning), 300)})` : ''}`).join('; ')}.` : ''}${ruledAnswers.has(open.key) ? ` The ruling on this claim: ${trim(JSON.stringify(ruledAnswers.get(open.key)), 600)}.` : ''}${claim.text ? ` The claim came back: ${trim(String(claim.text), 300)}.` : ''}`, { open })
+  }
+  // A claim this run already ruled on that comes back is never ruled on again (7.4): the arbiter worktree that open
+  // started is discarded and the claim goes to me. (The ledger knows it only once the ruling is recorded.)
+  if (ruledKeys.has(open.key)) {
+    await thinCk('arbiter-settle', ['-C', ROOT, 'arbiter', 'settle', SPEC, open.key, '--tier', open.tier, '--json'], { stdin: 'null', label: `arbiter-settle ${n}`, phase, cwd: ROOT, what: `Arbiter step for Task ${n} of spec ${SPEC}: discard the repeated claim` })
+    return await toMe('repeat-after-ruling', 'the same claim was ruled on already in this run and came back', { open })
+  }
+  // Task 69 (8.12): a deadlock finding an applied ruling already covers is not sent again. The arbiter rules on the rest; the
+  // covered ones go to me with their earlier ruling once the rest is settled.
+  const covered = claim.trigger === 'review-deadlock' ? coveredFindingsOf(claim.findings, open.earlier) : []
+  let promptOpen = open
+  if (covered.length) {
+    const coveredKeys = new Set(covered.map(c => `${c.file}\u0000${c.issue}`))
+    const left = claim.findings.filter(([f, i]) => !coveredKeys.has(`${f}\u0000${i}`))
+    claim = { ...claim, findings: left, text: `Task ${n} still has blocking review findings: ${left.map(([f, i]) => `${f}: ${i}`).join(' | ')}` }
+    // The covered findings' earlier rulings stay out of the arbiter's prompt too: only the rest of the deadlock is shown.
+    const idText = c => `${c.file.replace(/^(\.\/)+/, '')}#${c.issue.split(/\s+/).filter(Boolean).join(' ').toLowerCase()}`
+    promptOpen = { ...open, earlier: open.earlier.filter(e => !covered.some(c => claimIdsOf(e.claim).includes(idText(c)))) }
+  }
+  let tier = open.tier
+  let first = null
+  for (let pass = 0; pass < 2; pass++) {
+    const rerun = pass > 0
+    let answer = null
+    let threw = null
+    // The ruling runs without the task's slot: independent tasks continue and its dependents wait (6.9). The slot is
+    // released once the arbiter's call is in flight, so the arbiter is the step right after the stop.
+    const pending = call('arbiter', rulingPrompt(n, claim, promptOpen, tier, first), { label: `arbiter task ${n}${rerun || (tier === 'risky' && arbiterCalls[n] > 0) ? ' risky' : ''}`, phase, schema: RULING, agentType: ARBITER_AGENT, ...arbiterOpts(tier) })
+    arbiterCalls[n] = (arbiterCalls[n] || 0) + 1
+    releaseSlot(n)
+    try { answer = await pending } catch (e) { threw = e }
+    // A thrown or empty call is settled as `null` (invalid) so ck marks the claim failed and removes the worktree; it is never a ruling.
+    const empty = threw !== null || answer === null || answer === undefined
+    const settled = await thinCk('arbiter-settle', ['-C', ROOT, 'arbiter', 'settle', SPEC, open.key, '--tier', tier, '--json'], { stdin: empty ? 'null' : JSON.stringify(answer), label: `arbiter-settle ${n}${rerun ? ' risky' : ''}`, phase, cwd: ROOT, what: `Arbiter step for Task ${n} of spec ${SPEC}: settle the ruling` })
+    const res = settled.code === 0 ? settleResultOf(settled.json) : null
+    if (empty) return await toMe('arbiter-call-failed', threw ? `the arbiter agent failed: ${trim(threw && threw.message, 300)}` : 'the arbiter agent returned nothing', { open })
+    if (!res) return await toMe('arbiter-call-failed', `ck arbiter settle failed or answered something unusable: ${settled.json && settled.json.error ? trim(String(settled.json.error), 300) : ckError(settled)}`, { open, ruling: answer })
+    if (res.route === 'rerun') {
+      if (rerun) return await toMe('exhausted', 'the arbiter asked for a stronger look again', { open, ruling: answer })
+      first = answer && typeof answer === 'object' ? answer : {}
+      tier = 'risky'
+      continue
+    }
+    if (res.route === 'needs_input') {
+      const why = {
+        'invalid-ruling': `the answer is not a valid ruling (${res.problems.join('; ') || 'see the output'}); nothing was applied or recorded`,
+        exhausted: `it still needs a stronger look at the risky tier${answer && answer.established ? `; established so far: ${answer.established}` : ''}`,
+        reserved: 'it touches a scope a principle reserves for me',
+        requirements: 'a requirement must change',
+        'missing-requirement': 'a requirement is missing',
+      }[res.reason] || res.reason
+      let number = null
+      if (res.record && res.reason !== 'exhausted') {   // a needs-a-stronger-look answer at the risky tier is no ruling
+        const rec1 = await recordRuling(n, { claim, answer, res, open, tier })
+        if (rec1.error) return await toMe('record-failed', `${rec1.error}. ${why}.`, { open, ruling: answer })
+        number = rec1.number
+        ruledKeys.add(open.key)
+        ruledAnswers.set(open.key, answer)
+        runRulings.push({ number, task: String(n), trigger: String(claim.trigger || ''), outcome: String((answer && answer.outcome) || 'requirements'), tier: tier === 'risky' ? 'risky' : 'normal', principle: String((answer && answer.principle) || ''), commit: null, landed: null })
+      }
+      return await toMe(res.reason, `${why}. Arbiter's reasoning: ${answer && typeof answer === 'object' ? trim(answer.reasoning || answer.changed || '', 500) : trim(answer, 300)}`, { open, ruling: answer, number })
+    }
+    const out = { route: res.route, ruling: answer, claim, key: open.key, number: open.number, tier, rulingNo: null }
+    let recorded = null
+    // Every ruling but a spec edit is recorded as it settles (10.1), so the task's ruling limit (7.6) counts it.
+    if (res.route !== 'spec_edit' && res.record) {
+      recorded = await recordRuling(n, { claim, answer, res, open, tier })
+      if (recorded.error) return await toMe('record-failed', `${recorded.error}; the ${res.route} ruling was not acted on`, { open, ruling: answer })
+      out.ruling = answer && typeof answer === 'object' ? { ...answer, number: recorded.number } : answer
+      out.rulingNo = recorded.number
+    }
+    ruledKeys.add(open.key)
+    ruledAnswers.set(open.key, answer)
+    const runRuling = { number: recorded ? recorded.number : null, task: String(n), trigger: String(claim.trigger || ''), outcome: String(res.route), tier: tier === 'risky' ? 'risky' : 'normal', principle: String((answer && answer.principle) || ''), commit: null, landed: res.route === 'spec_edit' ? false : null }
+    runRulings.push(runRuling)
+    out.runRuling = runRuling
+    if (res.route === 'spec_edit') {
+      // The arbiter's commit lands on INTO alone (Task 67 moves this into the merge queue); a landing that fails is an entry for me.
+      const landed = await withLandingLock(() => thinCk('arbiter-land', ['-C', ROOT, 'worktree', 'land', SPEC, open.number, '--into', INTO, '--gate', '--json'], { label: `arbiter-land ${n}`, phase, cwd: ROOT, gate: true, what: `Landing step for the arbiter's spec edit of spec ${SPEC}: it merges the edit into ${INTO}` }))
+      // `ck worktree land SPEC arbiter<k> --json` prints the one landing entry (state, commit, moved, recovered); a refused call prints {error, tasks}.
+      const item = landEntryOf(landed.json)
+      const changed = answer && typeof answer === 'object' ? String(answer.changed || '') : ''
+      if (item && item.recovered && typeof item.recovered === 'object') {
+        const r = item.recovered
+        runRuling.recovered = r
+        log(`Landing arbiter spec edit ${open.number}: restored ${INTO} first (${Array.isArray(r.paths) ? r.paths.length : 0} path(s)${r.mergeInProgress ? ', merge in progress' : ''}, head ${trim(String(r.head || ''), 12)})`)
+      }
+      if (!item || item.state !== 'MERGED') {
+        const why = `${item ? `${item.state}${item.detail ? `: ${trim(String(item.detail), 200)}` : ''}` : `no valid landing entry (${ckError(landed)})`}`
+        // 8.4: recorded as not landed, with why, and the ruling and result go to me; no new ruling.
+        const rn = await recordRuling(n, { claim, answer, res, open, tier, landing: { changed, landed: false, why } })
+        if (rn.number !== undefined) { runRuling.number = rn.number; out.rulingNo = rn.number }
+        return await toMe('landing-failed', `the arbiter's spec edit did not land (${why})${rn.error ? `; ${rn.error}` : ''}`, { open, ruling: answer, number: rn.number ?? null })
+      }
+      runRuling.landed = true
+      runRuling.commit = isText(item.commit) && item.commit ? item.commit : null
+      requestPlan('landing')   // the landing changed the wiring, whether or not the record below succeeds (8.3)
+      const rl = await recordRuling(n, { claim, answer, res, open, tier, landing: { changed, landed: true, commit: runRuling.commit, moved: Array.isArray(item.moved) ? item.moved : [] } })
+      if (rl.error) return await toMe('record-failed', `the arbiter's spec edit landed on ${INTO} (commit ${runRuling.commit || 'unknown'}), but ${rl.error}; the task was not resumed`, { open, ruling: answer })
+      runRuling.number = rl.number
+      out.rulingNo = rl.number
+      out.ruling = answer && typeof answer === 'object' ? { ...answer, number: rl.number } : answer
+    }
+    if (covered.length) {
+      const text = covered.map(c => `"${c.issue}" is settled by ruling #${c.ruling} (${c.outcome}): ${trim(String(c.reasoning || ''), 400)}`).join('; ')
+      // The ruling on the other findings is kept: settleClaims gathers its repair or code text, and the entry carries it.
+      const exit = await arbiterNeedsInput(n, rec, r, { trigger: 'review-deadlock', text: `Covered findings: ${text}`, findings: covered.map(c => [c.file, c.issue]) }, { reason: 'repeat-after-ruling', text: `${text}. The other findings of the deadlock were ruled on in this call.`, open })
+      if (exit.needsInput && answer && typeof answer === 'object') {
+        exit.needsInput.alsoPending = [...(exit.needsInput.alsoPending || []), { ruling: out.rulingNo ?? null, outcome: res.route, ...(answer.code ? { code: String(answer.code) } : {}), ...(answer.testRepair ? { testRepair: answer.testRepair } : {}) }]
+      }
+      return { ...out, exit }
+    }
+    return out
+  }
+  return await toMe('arbiter-call-failed', 'the arbiter did not settle')
+}
+
+// Task 66 (8.9, 8.10, D18): the single point a test-repair ruling goes through, called once, from `settleClaims`. The
+// rulings are gathered `{claim, ruling}` outcomes; each becomes a conflict entry carrying the ruling unchanged, and the
+// ruling is the confirmation the test-fixer starts on, so no second agent confirms. Returns { entries, fixed }.
+async function handOffTestRepair(n, rec, rulings, opts = {}) {
+  releaseSlot(n)
+  const entries = testRepairEntries(rulings)
+  if (!entries.length) {
+    const reason = 'the ruled test repair names no test file'
+    return { entries, fixed: { records: [], fixed: [], findings: [], toMe: [reason] } }
+  }
+  rec.testConflict = { ...entries[0] }
+  rec.reason = `blocked: test (${entries[0].file}${entries[0].test ? ` ${entries[0].test}` : ''}): ${entries[0].reason || 'a ruled test repair'}`
+  return { entries, fixed: await testFixFor(n, entries, opts) }
+}
+
 async function runTask(n) {
   const rec = { task: n, wave: waveOf(n), title: TITLES[n], attempts: 0, ok: false, escalations: [], resolves: 0 }
   const busy = r => worktreeOutcome(r).kind === 'busy'
@@ -2181,61 +2684,9 @@ async function runTask(n) {
   try {
     let r = await call('task', taskPrompt(n, claimFlags('task-start', codeOpts(n), 1)), { label: label(n), phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
     let lastModel = codeOpts(n).model
-    let stop = guardStopOf(r)   // set after every call; a guard stop leaves the retry, escalate and revise loops at once
-    let guardK = 0
-    const triedGuard = new Set()
-    const retryNo = () => rec.attempts - guardK   // attempts that spent the retry budget: guard attempts do not count
-    // Climb the guard ladder (S17) from the model that stopped: each higher model once, at the role's effort, no
-    // retry or escalate step spent. Returns the last result; `stop` stays set if the top of the ladder stopped too.
-    const climbGuard = async attempted => {
-      for (const model of guardLadder(attempted)) {
-        if (triedGuard.has(model)) continue
-        triedGuard.add(model)
-        guardK++
-        log(`Task ${n}: guard stop, trying ${model} (guard ${guardK})`)
-        r = await call('task', retryPrompt(n, r, retryNo(), claimFlags('escalation', escalated(codeOpts(n), model), rec.attempts + 1)), { label: `${label(n)} guard ${guardK} (${model})`, phase: phaseOf(n), schema: RESULT, ...escalated(codeOpts(n), model) })
-        rec.attempts++
-        rec.escalations.push({ stage: 'guard', model })
-        rec.startedAt = rec.startedAt || (r && r.startedAt)
-        lastModel = model
-        stop = guardStopOf(r)
-        if (!stop) break
-      }
-      return r
-    }
-    // Still guard-stopped through the top of the ladder: park it (unattended) or list it for me to decide (interactive).
-    const needInput = async () => {
-      const action = parkAction({ interactive: INTERACTIVE })
-      const entry = {
-        task: n,
-        file: stop.file,
-        kind: stop.kind || 'test',
-        test: stop.test || '',
-        requirement: stop.requirement || '',
-        decision: `Is ${stop.test || stop.file} wrong${stop.requirement ? ` (requirement ${stop.requirement})` : ''}, or must the implementation change? Change the test or requirement yourself from the main session, or tell the agent to keep it as is.`,
-        action,
-        notification: null,
-        escalatedTo: rec.escalations.filter(e => e.stage === 'guard').map(e => e.model),
-      }
-      rec.result = r
-      rec.finishedAt = r && r.finishedAt
-      releaseSlot(n)
-      if (action === 'park') {
-        let p = null
-        const note = JSON.stringify({ file: stop.file, kind: stop.kind || 'test', test: stop.test || '', requirement: stop.requirement || '', decision: entry.decision })
-        const out = await thinCk('park', ['worktree', 'park', SPEC, n, '--json'], { stdin: note, label: `park ${n}`, phase: phaseOf(n), cwd: ROOT, what: `Parking step for Task ${n} of spec ${SPEC}` })
-        p = out.json ? out.json : { parked: false, error: ckError(out) }
-        entry.notification = p && p.notification ? p.notification : 'failed'
-        entry.notificationDetail = (p && (p.detail || p.error)) || ''
-        if (!p || p.parked === false) {
-          entry.notification = 'failed'
-          entry.notificationDetail = 'park failed: ' + ((p && (p.error || p.detail)) || 'the park step returned nothing')
-        } else rec.parked = true
-      }
-      rec.needsInput = entry
-      rec.reason = `needs input: ${stop.test || stop.file}`
-      return rec
-    }
+    let stop = guardStopOf(r)   // set after every call; a guard stop leaves the retry and escalate loops at once and goes to the arbiter (6.2)
+    let arbiterK = 0
+    const retryNo = () => rec.attempts - arbiterK   // attempts that spent the retry budget: an attempt a ruling resumed does not count (8.2)
     rec.attempts = 1
     rec.startedAt = r && r.startedAt
     // The task agent creates its own worktree first: a busy or failed creation ends the task here (2.3, 2.4).
@@ -2251,12 +2702,13 @@ async function runTask(n) {
     let escIdx = 0
     let budgetBase = 0   // retries spent before a landed test fix do not count against the fresh attempt
     // Task 93 (12.5-12.7): a missing command another unfinished task provides is a live edge (wait), one no task
-    // provides is a test conflict, and an edge that would close a cycle blocks the task. None of them is retried.
+    // provides is a test conflict, and an edge that would close a cycle is a command-cycle claim (D29). None is retried.
     const liveOf = res => (res && !ok(res) && !guardStopOf(res) ? liveEdgeDecision({ task: n, failures: res.failures, deps: view.deps, done: [...view.done, ...mergedInRun], liveDeps }) : { action: 'none', edges: [], cycle: null, command: null, tests: [], refused: [] })
     const liveConflicts = res => { const lv = liveOf(res); return lv.action === 'conflict' ? { ...res, testConflicts: [...testConflictsOf(res), ...lv.tests] } : res }
     const rungs = ladderOf(n)
+    // Today's retry and escalation loops, for plain gate failures. Both stop on a guard stop, a test conflict or a live
+    // action: those are claims for the arbiter, which spend no retry.
     const ladder = async () => {
-    for (;;) {
       while (!ok(r) && !stop && retryNo() - budgetBase <= MAX_RETRIES && !busy(r) && !testConflictOf(r) && liveOf(r).action === 'none') {
         log(`Task ${n}: ${r && !(r.commits || '').trim() ? 'no commits' : 'gate not passed'}, retry ${retryNo()}/${MAX_RETRIES}`)
         r = await call('task', retryPrompt(n, r, retryNo(), claimFlags('retry', codeOpts(n), retryNo() + 1)), { label: `${label(n)} retry ${retryNo()}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
@@ -2275,73 +2727,147 @@ async function runTask(n) {
         stop = guardStopOf(r)
         rec.startedAt = rec.startedAt || (r && r.startedAt)
       }
-      if (!stop) break
-      await climbGuard(lastModel)
-      if (stop) return await needInput()
-      if (ok(r) || busy(r)) break
     }
-    return null
+    // The models the task has been tried on, for the arbiter's prompt (design.md Claim.models_tried).
+    const modelsTried = () => [...new Set([codeOpts(n).model, ...rec.escalations.map(e => e.model), lastModel].filter(Boolean))]
+    // The claims of an attempt that stopped (6.1-6.6, 6.11, 6.13): one per test conflict, else one for the stop.
+    const claimsOf = (trigger, live) => {
+      const tried = modelsTried()
+      if (trigger === 'guard-stop') return [guardClaim(n, stop, tried)]
+      if (trigger === 'test-conflict') {
+        return testConflictsOf(r).map(c => ({
+          trigger, text: String(c.reason || ''), file: String(c.file || ''), test: String(c.test || ''), criterion: String(c.criterion || ''),
+          models_tried: tried, evidence: c.fix ? `the agent proposed this fix: ${c.fix}` : '',
+        }))
+      }
+      if (trigger === 'command-cycle') {
+        const provider = String((live.refused && live.refused[0]) || '')
+        return [{
+          trigger, text: `Task ${n} needs the command "${live.command}", which Task ${provider} provides, but waiting for it would close a cycle (${(live.cycle || []).map(x => `Task ${x}`).join(' -> ')}).`,
+          command: String(live.command || ''), provider, cycle: (live.cycle || []).map(String), models_tried: tried,
+        }]
+      }
+      const failures = Array.isArray(r && r.failures) ? r.failures : []
+      const nodes = failures.map(f => String((f && (f.node || f.file)) || '')).filter(Boolean)
+      const shown = failures.slice(0, 20).map(f => `${(f && (f.node || f.file)) || '?'}: ${trim((f && f.message) || '', 300)}`)
+      return [{
+        trigger: 'gate-failure', failing: nodes.length ? nodes : ['gate not passed'], models_tried: tried,
+        text: `Task ${n} still fails its gate after ${rec.attempts} attempt(s) on ${tried.join(', ') || 'its model'}. ${shown.length ? `Failures: ${shown.join(' | ')}` : trim(r ? r.blocker || r.summary || 'no failures were reported' : 'the agent died without a report', 400)}`,
+      }]
     }
-    const early = await ladder()
-    if (early) return early
-    const live = liveOf(r)
-    // A refused cycle (12.7) blocks the task even when another provider is safe: no edge is recorded for it.
-    if (live.action === 'blocked' || live.refused.length) {
-      releaseSlot(n)
-      rec.result = r
-      rec.finishedAt = r && r.finishedAt
-      rec.reason = `blocked: command cycle ${(live.cycle || []).map(x => `Task ${x}`).join(' -> ')}`
-      log(`Task ${n}: ${rec.reason}; the live edge is not added`)
-      return rec
-    }
-    if (live.action === 'wait') {
-      // 12.5, 12.8: the edges are recorded and logged; the task waits for them and spends no retry.
-      releaseSlot(n)
-      return recordLiveWait(n, rec, r, live)
-    }
-    r = liveConflicts(r)
-    if (testConflictOf(r)) {
-      // Issue #8: one confirmation on the strongest rung (unless the claim already came from it):
-      // a second agent that agrees makes the task blocked: test; one that passes the gate wins.
-      const first = testConflictOf(r)
-      const top = rungs.length ? rungs[rungs.length - 1] : null
-      const onTop = !top || lastModel === top
-      log(`Task ${n}: the agent reports a test that can never pass (${trim(first.file, 120)}: ${trim(first.reason, 200)}); ${onTop ? 'confirming' : `confirming on ${top}`}`)
-      const o = onTop ? codeOpts(n) : escalated(codeOpts(n), top)
-      r = await call('task', confirmConflictPrompt(n, r, retryNo(), claimFlags(onTop ? 'retry' : 'escalation', o, retryNo() + 1)), { label: `${label(n)} retry ${retryNo()}${onTop ? '' : ` (${top})`}`, phase: phaseOf(n), schema: RESULT, ...o })
+    // The task goes back to the implementer with the rulings, spending no retry or escalation (8.2): `arbiterK` is
+    // subtracted by retryNo(). Its prompt merges INTO first, so a landed spec edit or test fix is in the branch.
+    const resumeWith = async outs => {
+      await acquireSlot(n)
+      arbiterK++
+      // The resume stays on the model that made the attempt the ruling interrupted: it spends no escalation (8.2).
+      const o = lastModel && lastModel !== codeOpts(n).model ? escalated(codeOpts(n), lastModel) : codeOpts(n)
+      r = await call('task', `${retryPrompt(n, r, retryNo(), claimFlags('retry', o, rec.attempts + 1))}\n${rulingNote(outs)}`, { label: `${label(n)} resume ${arbiterK}`, phase: phaseOf(n), schema: RESULT, ...o })
       rec.attempts++
-      if (!onTop) { rec.escalations.push({ stage: 'test-conflict', model: top }); lastModel = top }
+      stop = guardStopOf(r)
       rec.startedAt = rec.startedAt || (r && r.startedAt)
-      r = liveConflicts(r)
-      const confirmed = testConflictOf(r)
-      if (confirmed) {
-        // Task 86 (4.1-4.10): the confirmed conflicts go to a test-fixer; a landed fix or a test-correct verdict retries the task.
-        releaseSlot(n)
+    }
+    // Task 66 (D31-D33): the one claim loop. Each claim goes to the arbiter in order; a `spec_edit` lands as it settles, a
+    // `code` ruling's text is kept and `test_repair` rulings are gathered. Whether or not a claim exited, the gathered
+    // repairs go to `handOffTestRepair` (8.9), so a recorded ruling always reaches the fixer or me. Only when every
+    // claim settled, none exited and the hand-off sent nothing to me does the task go on, once, with every ruling's text
+    // and no retry or escalation spent (8.2, 8.16). Returns { exit: rec } or { exit: null }.
+    let lastRepair = null   // the ruled repair of the last hand-off: its number and exact change, for a later park
+    const settleClaims = async (n, rec, claims, next) => {
+      const settled = []
+      let exit = null
+      for (const claim of claims) {
+        const out = await arbitrate(n, rec, r, claim)
+        if (out.exit) { exit = out.exit; if (out.route) settled.push(out); break }
+        settled.push(out)
+      }
+      const others = settled.filter(o => o.route !== 'test_repair')
+      const repairs = settled.filter(x => x.route === 'test_repair')
+      let fixed = null
+      if (repairs.length) {
         rec.result = r
         rec.finishedAt = r && r.finishedAt
-        rec.testConflict = { ...confirmed, firstReport: first }
-        rec.reason = `blocked: test (${confirmed.file}${confirmed.test ? ` ${confirmed.test}` : ''}): ${confirmed.reason}`
-        const fixed = await testFixFor(n, testConflictsOf(r))
-        if (fixed.toMe.length) return await parkTestFix(n, rec, fixed.toMe, fixed.records)
+        const h = await handOffTestRepair(n, rec, repairs)
+        fixed = h.fixed
+        // Every ruling whose repair did not land, matched to its fixer record by test node: the entry carries each one's number and exact change (8.8).
+        const landedNodes = new Set(fixed.records.filter(x => x.outcome === 'landed').flatMap(x => x.tests))
+        const pending = repairs.map(x => {
+          const e = testRepairEntries([x])[0]
+          const t = (x.ruling && x.ruling.testRepair) || {}
+          return { x, e, testRepair: { file: String(t.file || x.claim.file || ''), test: String(t.test || x.claim.test || ''), change: String(t.change || ''), why: String(t.why || '') }, ruling: x.rulingNo ?? null }
+        }).filter(p => !p.e || !landedNodes.has(conflictNode(p.e)))
+        const shown = pending.length ? pending : repairs.map(x => { const t = (x.ruling && x.ruling.testRepair) || {}; return { x, testRepair: { file: String(t.file || x.claim.file || ''), test: String(t.test || x.claim.test || ''), change: String(t.change || ''), why: String(t.why || '') }, ruling: x.rulingNo ?? null } })
+        const lastOne = shown[0]
+        lastRepair = { records: fixed.records, ruling: lastOne.ruling, testRepair: lastOne.testRepair, all: shown.map(p => ({ ruling: p.ruling, testRepair: p.testRepair })) }
+        const finding = (fixed.records.find(x => x.outcome === 'test-correct' && x.finding) || {}).finding
+        const reasons = [...fixed.toMe, ...fixed.findings.map(f => `the test-fixer found the test correct, so it is not changed: ${trim(String(f.message || f.issue || ''), 300)}`)]
+        if (reasons.length) {
+          if (exit) {
+            runWarnings.push(`Task ${n}: the test repair did not land (${reasons.join(' | ')}) and a claim went to needs-input first`)
+            // The task has one needs-input entry: the repair that did not land rides along in it, so its exact change reaches me (8.8, 10.9).
+            if (exit.needsInput) exit.needsInput.alsoPending = [...(exit.needsInput.alsoPending || []), { ruling: lastRepair.ruling ?? null, testRepair: lastRepair.testRepair, ...(lastRepair.all.length > 1 ? { testRepairs: lastRepair.all } : {}), reasons }]
+            return { exit }
+          }
+          return { exit: await parkTestFix(n, rec, reasons, fixed.records, { ruling: lastRepair.ruling ?? null, testRepair: lastRepair.testRepair, ...(lastRepair.all.length > 1 ? { testRepairs: lastRepair.all } : {}), ...(finding ? { finding } : {}) }) }
+        }
+      }
+      if (exit) return { exit }
+      // Task 69: a revision (`revise`) or a review (`re-review`) carries the rulings' text in its next prompt and spends no
+      // attempt or escalation (8.2, 8.16): the caller re-runs it with `note`. Only `retry` resumes the task itself.
+      if (next !== 'retry') {
+        if (fixed) { rec.testConflictFixed = rec.testConflict; rec.testConflict = null }
+        return { exit: null, settled, note: `\n${fixed ? afterFixNote(fixed.fixed, []) : ''}${rulingNote([...others, ...repairs])}` }
+      }
+      if (fixed) {
         rec.testConflictFixed = rec.testConflict   // the conflict is resolved: a later ordinary failure is handled like any other
         rec.testConflict = null
-        log(`Task ${n}: ${fixed.fixed.length ? `test fix landed for ${fixed.fixed.join(', ')}` : 'the tests are correct'}; retrying the task`)
+        log(`Task ${n}: test fix landed for ${fixed.fixed.join(', ')}; retrying the task`)
         budgetBase = retryNo()
+        justFixed = true
         await acquireSlot(n)
-        r = await call('task', `${retryPrompt(n, { ...r, failures: fixed.findings }, retryNo(), claimFlags('retry', codeOpts(n), retryNo() + 1))}\n${afterFixNote(fixed.fixed, fixed.findings)}`, { label: `${label(n)} retry ${retryNo()}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
+        r = await call('task', `${retryPrompt(n, { ...r, failures: [] }, retryNo(), claimFlags('retry', codeOpts(n), retryNo() + 1))}\n${afterFixNote(fixed.fixed, [])}${rulingNote(others)}`, { label: `${label(n)} retry ${retryNo()}`, phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
         rec.attempts++
         lastModel = codeOpts(n).model
         stop = guardStopOf(r)
         rec.startedAt = rec.startedAt || (r && r.startedAt)
-        const again = await ladder()
-        if (again) return again
-        if (testConflictOf(r)) {
+        return { exit: null }
+      }
+      await resumeWith(others)
+      return { exit: null }
+    }
+    let justFixed = false   // the attempt that follows a landed test fix: a conflict it reports again goes straight to me (7.4)
+    // Where each stop of an attempt goes. A spec edit lands as it settles; a code ruling's text is kept; test repairs
+    // are gathered and go to the test-fixer. The task goes on only once every claim has settled (D32).
+    for (;;) {
+      await ladder()
+      if (justFixed) {
+        justFixed = false
+        const again = testConflictOf(r)
+        if (again) {
           rec.result = r
           rec.finishedAt = r && r.finishedAt
           releaseSlot(n)
-          return await parkTestFix(n, rec, [`the task still reports a test that can never pass after its test fix: ${trim(testConflictOf(r).file, 120)}: ${trim(testConflictOf(r).reason, 300)}`], fixed.records)
+          return await parkTestFix(n, rec, [`the task still reports a test that can never pass after its test fix: ${trim(again.file, 120)}: ${trim(again.reason, 300)}`], lastRepair ? lastRepair.records : [], { ruling: lastRepair ? lastRepair.ruling ?? null : null, testRepair: lastRepair ? lastRepair.testRepair : null, ...(lastRepair && lastRepair.all.length > 1 ? { testRepairs: lastRepair.all } : {}), evidence: { file: String(again.file || ''), test: String(again.test || ''), reason: String(again.reason || '') } })
         }
       }
+      const live = liveOf(r)
+      // 12.5, 12.8: the edges are recorded and logged; the task waits for them, spends no retry and never reaches the arbiter (6.4).
+      if (live.action === 'wait' && !live.refused.length) {
+        releaseSlot(n)
+        return recordLiveWait(n, rec, r, live)
+      }
+      r = liveConflicts(r)
+      const trigger = claimTrigger({ result: r, guardStop: stop, testConflict: testConflictsOf(r)[0] || null, live, worktreeKind: worktreeOutcome(r).kind, retryNo: retryNo() - budgetBase, maxRetries: MAX_RETRIES, rungsLeft: rungs.length - escIdx })
+      if (!trigger) break
+      if (trigger === 'command-cycle') log(`Task ${n}: command cycle ${(live.cycle || []).map(x => `Task ${x}`).join(' -> ')}; the live edge is not added, the claim goes to the arbiter`)
+      else if (trigger === 'test-conflict') { const first = testConflictsOf(r)[0]; log(`Task ${n}: the agent reports a test that can never pass (${trim(first.file, 120)}: ${trim(first.reason, 200)}); the claim goes to the arbiter`) }
+      if (trigger === 'test-conflict') {
+        // The conflicts the attempt reported stay in the result's testConflicts after a landed fix makes a later attempt pass (3.7).
+        const seen = new Set((rec.reportedConflicts || []).map(conflictNode))
+        rec.reportedConflicts = [...(rec.reportedConflicts || []), ...testConflictsOf(r).filter(c => !seen.has(conflictNode(c)))]
+      }
+      const go = await settleClaims(n, rec, claimsOf(trigger, live), 'retry')
+      if (go.exit) return go.exit
     }
     if (!ok(r) && busy(r)) {
       const bo = worktreeOutcome(r)
@@ -2356,33 +2882,77 @@ async function runTask(n) {
     // whose blocking findings survive the loop never merges.
     // reviewLoop returns { exit } when runTask must return that value, else null.
     const reviewLoop = async (first, opts) => {
-      let review = first
+      // Task 69 (4.8, 8.12): a review is normalized before it is read, and the findings a ruling settled are dropped. A
+      // serves-no-requirement finding is recorded as a proposed cut.
+      const settledIds = []
+      const settledNumbers = []
+      const reviewed = raw => {
+        if (!raw) return raw
+        const v = normalizeReview(raw)
+        if ((v.findings || []).length) reviewedFindings = true
+        for (const f of v.findings || []) if (f && f.noRequirement) recordCut(n, f)
+        return normalizeReview(settleFindings(v, settledIds, settledNumbers))
+      }
+      const reviewAgain = async (note = '') => reviewed(await call('review', `${reviewPrompt(n, r, WANT_EXTRA(n) ? await testReviewExtra(n) : '')}${note}`, { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts }))
+      let review = reviewed(first)
       let round = 0
-      // A revision that guard-stops climbs the ladder before the review goes on.
+      // A revision that guard-stops is a claim (6.2, D31): the arbiter rules, and a code ruling, a landed spec edit or a landed
+      // test fix runs the same revision again with the ruling's text, spending no attempt. Settled by `settleClaims` (`revise`).
       const revised = async (prompt, lbl, o, model) => {
-        working.add(n)  // a revision takes a slot but never waits for one: the task is nearly done
-        r = await call('revise', prompt, { label: lbl, phase: phaseOf(n), schema: RESULT, ...o })
-        lastModel = model
-        stop = guardStopOf(r)
-        if (stop) await climbGuard(lastModel)
-        else if (!ok(r)) await releaseClaim(n)
-        releaseSlot(n)
+        let note = ''
+        for (let again = 0; ; again++) {
+          working.add(n)  // a revision takes a slot but never waits for one: the task is nearly done
+          // A rerun after a ruling carries its own label (the same revision, spending no attempt).
+          r = await call('revise', `${prompt}${note}`, { label: again ? `${lbl} (after ruling ${again})` : lbl, phase: phaseOf(n), schema: RESULT, ...o })
+          lastModel = model
+          stop = guardStopOf(r)
+          if (!stop) { if (!ok(r)) await releaseClaim(n); releaseSlot(n); return null }
+          releaseSlot(n)
+          const tried = [...new Set([codeOpts(n).model, ...rec.escalations.map(e => e.model), model].filter(Boolean))]
+          const got = await settleClaims(n, rec, [guardClaim(n, stop, tried)], 'revise')
+          if (got.exit) return got.exit
+          note = got.note
+        }
       }
       while (review && review.verdict === 'changes' && round < REVIEW_ROUNDS && ok(r)) {
         round++
         log(`Task ${n}: reviewer asked for changes, revision ${round}/${REVIEW_ROUNDS}`)
-        await revised(revisePrompt(n, review, round, claimFlags('revision', codeOpts(n), round + 1)), `${label(n)} revise ${round}`, codeOpts(n), codeOpts(n).model)
-        if (stop) return { exit: await needInput() }
-        if (ok(r)) review = await call('review', reviewPrompt(n, r, WANT_EXTRA(n) ? await testReviewExtra(n) : ''), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts })
+        const parked1 = await revised(revisePrompt(n, review, round, claimFlags('revision', codeOpts(n), round + 1)), `${label(n)} revise ${round}`, codeOpts(n), codeOpts(n).model)
+        if (parked1) return { exit: parked1 }
+        if (ok(r)) review = await reviewAgain()
       }
-      for (const model of ladderOf(n)) {
-        if (!(review && review.verdict === 'changes' && ok(r))) break
-        round++
-        log(`Task ${n}: blocking findings remain, escalating the revision to ${model}`)
-        await revised(revisePrompt(n, review, round, claimFlags('escalation', escalated(codeOpts(n), model), round + 1)), `${label(n)} revise ${round} (${model})`, escalated(codeOpts(n), model), model)
-        if (stop) return { exit: await needInput() }
-        rec.escalations.push({ stage: 'revise', model })
-        if (ok(r)) review = await call('review', reviewPrompt(n, r, WANT_EXTRA(n) ? await testReviewExtra(n) : ''), { label: `review ${n} round ${round + 1}`, phase: phaseOf(n), schema: REVIEW_SCHEMA, ...opts })
+      // Task 69 (8.9, 8.16, D33): blocking findings that survive the rounds are a review deadlock. The arbiter rules on them
+      // (one claim, split per finding by ck), and the ruling goes to the fixer if it is a test repair; then the task is
+      // reviewed again with the ruling in the prompt. A finding a ruling settled does not block again.
+      while (review && review.verdict === 'changes' && ok(r)) {
+        const blocking = review.findings.filter(f => f && f.severity === 'blocking')
+        if (!blocking.length) break
+        const tried = [...new Set([codeOpts(n).model, ...rec.escalations.map(e => e.model)].filter(Boolean))]
+        const claim = {
+          trigger: 'review-deadlock', findings: blocking.map(f => [String(f.file || ''), String(f.issue || '')]), models_tried: tried,
+          text: `Task ${n} still has blocking review findings after ${round} revision(s): ${blocking.map(f => `${f.file || '?'}: ${f.issue}`).join(' | ')}`,
+        }
+        const go = await settleClaims(n, rec, [claim], 're-review')
+        if (go.exit) return { exit: go.exit }
+        // 8.12: only the findings the ruling names in `settles` are settled. A spec edit is the arbiter's finding that the
+        // reviewer was wrong, so it settles every blocking finding of the claim.
+        const outs = go.settled || []
+        const named = outs.filter(o => o.route !== 'spec_edit').flatMap(o => (o.ruling && Array.isArray(o.ruling.settles) ? o.ruling.settles : []).map(String))
+        const reviewerWrong = outs.some(o => o.route === 'spec_edit')
+        // A code ruling is the arbiter ruling on the claim's findings (the implementer is told to fix them), so the findings
+        // it ruled on are settled once the revision has run; a test repair or requirement settles only what it names.
+        const codeRuled = outs.some(o => o.route === 'code')
+        const settledNow = reviewerWrong || codeRuled ? blocking : blocking.filter(f => settleFindings({ findings: [f] }, named).findings.length === 0)
+        // 8.11: a code ruling always returns the task to the implementer with the ruling's text, whether or not `settles` covers
+        // every finding, and the task still needs a passing gate. Only then is the task re-reviewed with the ruling in the prompt.
+        if (codeRuled) {
+          const parked = await revised(`${revisePrompt(n, review, round, claimFlags('revision', codeOpts(n), round + 1))}${go.note}`, `${label(n)} revise after ruling`, codeOpts(n), codeOpts(n).model)
+          if (parked) return { exit: parked }
+        }
+        for (const f of settledNow) settledIds.push(`${f.file || ''}#${f.issue || ''}`)
+        if (settledNow.length) for (const o of outs) if (o.rulingNo != null) settledNumbers.push(o.rulingNo)
+        // 8.12: the re-reviewer gets the ruling too
+        if (ok(r)) review = await reviewAgain(codeRuled ? rulingNote(outs, true) : go.note)
       }
       // model/effort: who judged the task, so an audit can count escapes (approved bugs) per reviewer tier.
       const by = { model: opts.model || 'inherited', effort: opts.effort || 'inherited', riskTag: rec.riskTag }
@@ -2497,6 +3067,41 @@ async function auditRun() {
   return { schema: 'ck-audit/1', spec: SPEC, into: INTO, complete: false, clean: false, drift: [], problems: [`audit did not complete: ${trim(error, 300)}`] }
 }
 
+// Task 70 (12.5-12.7, 12.11): the launch is blocked while a verify-scope finding remains. Each problem goes to the arbiter as
+// one lint claim, one at a time; after every settled claim the plan is read again, so a finding the fix cleared is not
+// sent. Returns null when the launch may go on, else the refusal's fields. A justification finding never reaches here.
+async function clearLaunchScope() {
+  const proposals = []
+  launching = true
+  try {
+    for (;;) {
+      const next = scopeClaimsOf(view.verifyScope, scopeSent)
+      if (!next.length) break
+      const g = next[0]
+      scopeSent.add(g.key)
+      log(`Launch: Task ${g.task}'s verify scope selects tests of ${g.suite} that belong to ${g.tests.map(t => `Task ${t}`).join(', ')}; the arbiter rules on it before the launch`)
+      const out = await settleScopeClaim(g)
+      if (out.exit) {
+        if (out.exit.needsInput) scopeLaunchNeeds.push(out.exit.needsInput)
+        break
+      }
+      proposals.push({ task: g.task, suite: g.suite, outcome: out.route, changed: out.changed || '', reasoning: String((out.ruling && out.ruling.reasoning) || '') })
+      const p = await requestPlan('landing')
+      if (!p) break
+    }
+  } finally {
+    launching = false
+  }
+  const remaining = view.verifyScope || []
+  if (!remaining.length) return null
+  return {
+    reason: 'verify-scope findings remain; nothing was started',
+    verifyScope: remaining,
+    proposals,
+    needsInput: [...scopeLaunchNeeds],
+  }
+}
+
 async function mainRun() {
 const startPlan = await requestPlan('start')
 if (!startPlan) return { halted: true, refused: false, reason: PLAN_FAILED, into: INTO, degraded, planFallbacks, overhead: buildOverhead(), directCk: directCkOut(), thinAgent: thinAgentOut() }
@@ -2508,6 +3113,24 @@ if (startPlan.cycles.length || startPlan.verifyCycles.length) {
     reason: 'plan has a cycle; nothing was started',
     cycles: startPlan.cycles,
     verifyCycles: startPlan.verifyCycles,
+    into: INTO,
+    degraded,
+    planFallbacks,
+    overhead: buildOverhead(),
+    directCk: directCkOut(), thinAgent: thinAgentOut(),
+  }
+}
+// Task 70: verify-scope findings refuse the launch (no task agent runs), after the arbiter had its chance to fix them.
+const launchScope = await clearLaunchScope()
+if (launchScope) {
+  log(`Refusing to launch: ${launchScope.verifyScope.length} verify-scope finding(s) remain; see the proposals in the result`)
+  return {
+    halted: true,
+    refused: true,
+    reason: launchScope.reason,
+    verifyScope: launchScope.verifyScope,
+    proposals: launchScope.proposals,
+    needsInput: launchScope.needsInput,
     into: INTO,
     degraded,
     planFallbacks,
@@ -2588,7 +3211,7 @@ const taskReport = Object.values(records).map(r => ({
   summary: r.result && r.result.summary,
   wrongTests: r.result && r.result.wrongTests,
   testConflict: r.testConflict || r.testConflictFixed || null,
-  testConflicts: testConflictsOf(r.result),
+  testConflicts: (() => { const now = testConflictsOf(r.result); const seen = new Set(now.map(conflictNode)); return [...(r.reportedConflicts || []).filter(c => !seen.has(conflictNode(c))), ...now] })(),
   failures: (r.result && Array.isArray(r.result.failures) && r.result.failures) || [],
   outsideFiles: r.result && r.result.outsideFiles,
   deviations: r.result && r.result.deviations,
@@ -2769,6 +3392,10 @@ return {
   overhead,
   relinks,
   testFixes,
+  // Task 69 (4.8): the serves-no-requirement findings a review named. Listed when a review named any finding, so a run whose reviews are clean keeps the pinned key set.
+  ...(proposedCuts.length || reviewedFindings ? { proposedCuts } : {}),
+  // Task 65 (10.7): the rulings this run settled, listed when there are any, so a run without any keeps the pinned key set.
+  ...(runRulings.length ? { rulings: runRulings } : {}),
   // Task 93 (12.8): listed when the run added live edges; a run without any keeps the result's pinned key set.
   ...(liveEdges.length ? { liveEdges } : {}),
   // Task 94 (13.3): listed when the run held a task for an overlap; a run without any keeps the pinned key set.

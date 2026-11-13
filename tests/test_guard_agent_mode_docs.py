@@ -1,5 +1,9 @@
-"""TC-42, TC-43, TC-49 and the doc halves of TC-36, TC-80 and TC-87: the guard ladder, parking and resolve flow in the
+"""TC-42, TC-43, TC-49 and the doc halves of TC-36, TC-80 and TC-87: the guard-stop route, parking and resolve flow in the
 agent-mode instructions and the skills.
+
+Run-principles Task 50 (6.2, 6.10, 6.12): the manual path (`without-workflow-tool`) no longer climbs the guard ladder.
+Its guard-stop cases assert the needs-input route with no ladder; `spawn-worktree` is not changed by that spec, so its
+ladder cases stay as they were.
 
 Static checks on the packaged Markdown and on their `claude_kiro.plugin.vendor_files()` renderings, in memory, as
 `test_stats_agents_docs.py` does. The on-disk vendored copies are checked by the dogfood test (Task 14).
@@ -70,9 +74,25 @@ def nearby(text: str, anchor: str, pattern: str, radius: int = 600) -> bool:
 # --------------------------------------------------------------------------- TC-42
 
 SCHEDULER = cases(["without-workflow-tool", "spawn-worktree"])
+LADDER_PATHS = cases(["spawn-worktree"])
+MANUAL = cases(["without-workflow-tool"])
 
 
-@pytest.mark.parametrize("case", SCHEDULER, ids=ids)
+@pytest.mark.parametrize("case", MANUAL, ids=ids)
+def test_tc42_manual_path_guard_stop_is_a_needs_input_entry(case):
+    """6.2, 6.10, 6.12: a guardStop on the manual path goes to me as a needs-input entry, never up the ladder."""
+    text = text_of(*case)
+    need(text, r"guardStop", "a task result with guardStop is still recognised")
+    assert nearby(text, r"guardStop", r"needs[- ]input"), "a guard stop becomes a needs-input entry"
+    assert nearby(text, r"guardStop", r"arbiter"), "names the arbiter route (the manual path has no `ck arbiter` loop)"
+    assert nearby(text, r"guardStop", r"no (guard )?ladder|not (climb|run|use)[^.\n]{0,40}ladder|without[^.\n]{0,40}ladder|never[^.\n]{0,40}ladder"), (
+        "says there is no guard ladder")
+    assert not re.search(r"ck agents --guard-ladder", text), "the manual path no longer tells the agent to climb the ladder"
+    assert GUARD_TEMPLATE not in templates_of(text), "no guard attempt description template"
+    need(text, r"decision\.md|decision note", "still reads the decision note after I resolve a needs-input entry")
+
+
+@pytest.mark.parametrize("case", LADDER_PATHS, ids=ids)
 def test_tc42_ladder_instructions(case):
     text = text_of(*case)
     need(text, r"guardStop", "a task result with guardStop starts the ladder")
@@ -116,7 +136,10 @@ def test_tc42_final_report_items(case):
     assert nearby(text, r"needs[- ]input", r"merged") and nearby(text, r"needs[- ]input", r"failed") and nearby(text, r"needs[- ]input", r"blocked"), (
         "needs-input is listed apart from merged, failed and blocked")
     assert nearby(text, r"needs[- ]input", r"apart|separate|own (list|section|line)|not (as|under) (failed|blocked)"), "listed apart"
-    assert nearby(text, r"needs[- ]input", r"escalat"), "names the escalation models"
+    if case[0] == "without-workflow-tool":
+        assert nearby(text, r"needs[- ]input", r"arbiter"), "names the arbiter route a claim took"
+    else:
+        assert nearby(text, r"needs[- ]input", r"escalat"), "names the escalation models"
     assert nearby(text, r"needs[- ]input", r"notif"), "names a notification failure or missing config"
     assert nearby(text, r"notif", r"not configured|not_configured|missing|run\.notify_command|failed"), "notification failure or missing config"
     assert nearby(text, r"needs[- ]input", r"ck worktree resolve"), "says how to resolve a parked task"
@@ -141,7 +164,12 @@ def test_tc43_park_label_maps_to_the_orchestrator():
     assert got.role == "orchestrator" and got.matched
 
 
-@pytest.mark.parametrize("case", SCHEDULER, ids=ids)
+@pytest.mark.parametrize("case", MANUAL, ids=ids)
+def test_tc43_manual_path_has_no_guard_template(case):
+    assert not [t for t in templates_of(text_of(*case)) if "guard" in t], f"{ids(case)}: a guard attempt template is still shipped"
+
+
+@pytest.mark.parametrize("case", LADDER_PATHS, ids=ids)
 def test_tc43_guard_template_renders_and_parses(case):
     from claude_kiro.analytics import parse_agent_description
 

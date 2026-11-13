@@ -32,6 +32,7 @@ from claude_kiro.config import load_config
 from claude_kiro.paths import LEGACY_WORKTREES_DIR, WORKTREES_DIR
 
 if TYPE_CHECKING:
+    from claude_kiro.protect import Refusal
     from claude_kiro.progress import Liveness
 
 
@@ -118,6 +119,90 @@ def _git_merge(root: Path, target: Path, into: str, branch: str, message: str) -
                              _tree_protected(root, old, tree))
     extra = {"env": env} if env else {}
     return git(target, "merge", "--no-ff", "-m", message, branch, check=False, **extra)
+
+
+@dataclass(frozen=True)
+class RecoveryFacts:
+    into: str
+    target: str                  # realpath of the checkout of `into`
+    managed: bool                # integrate/* checkout under the worktree directory, not the main checkout
+    dirty: Tuple[str, ...]       # tracked dirty paths plus unmerged paths, sorted
+    merge_in_progress: bool      # MERGE_HEAD exists in the target
+    head: str
+    refusal: Optional["Refusal"]
+
+
+def decide_recovery(facts: RecoveryFacts) -> Tuple[str, str]:
+    """("clean" | "recover" | "refuse", reason). Pure (14.1, 14.3, 14.5)."""
+    if not facts.dirty and not facts.merge_in_progress:
+        return "clean", ""
+    base = f"{facts.target} has uncommitted changes to tracked files; refusing to land into {facts.into}"
+    if not facts.managed:
+        return "refuse", base
+    refusal = facts.refusal
+    if not (refusal is not None and refusal.ref == f"refs/heads/{facts.into}" and refusal.head == facts.head
+            and refusal.checkout == facts.target):
+        return "refuse", base + ": no refused ref update is recorded at this head; ck will not discard it"
+    return "recover", ""
+
+
+def _is_managed_checkout(root: Path, target: Path, into: str) -> bool:
+    if not into.startswith("integrate/"):
+        return False
+    real = os.path.realpath(target)
+    if real == os.path.realpath(root):
+        return False
+    for directory in (configured_dir(root), root / LEGACY_WORKTREES_DIR):
+        base = os.path.realpath(directory)
+        if real == base or real.startswith(base + os.sep):
+            return True
+    return False
+
+
+def _git_dir_of(target: Path) -> Path:
+    raw = git(target, "rev-parse", "--git-dir").stdout.strip()
+    path = Path(raw)
+    return path if path.is_absolute() else target / path
+
+
+def _recovery_state(target: Path) -> Tuple[List[str], bool, str]:
+    dirty = set(dirty_files(target, tracked_only=True))
+    paths = set()
+    for line in dirty:
+        paths.add(line[3:].split(" -> ")[-1].strip().strip('"') if len(line) > 3 else line)
+    unmerged = git(target, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split("\n")
+    paths.update(p for p in unmerged if p)
+    merging = (_git_dir_of(target) / "MERGE_HEAD").exists()
+    head = git(target, "rev-parse", "HEAD").stdout.strip()
+    return sorted(paths), merging, head
+
+
+def recover_target(root: Path, target: Path, into: str) -> Optional[Dict]:
+    """Restore a refused integration checkout before a write into it (Story 14).
+
+    None when clean; WorktreeError when it must be refused; else resets to the checkout's own head and returns
+    {"paths", "mergeInProgress", "head"}."""
+    from claude_kiro.protect import clear_refusal, refusal_for
+
+    paths, merging, head = _recovery_state(target)
+    facts = RecoveryFacts(
+        into=into, target=os.path.realpath(target), managed=_is_managed_checkout(root, target, into),
+        dirty=tuple(paths), merge_in_progress=merging, head=head,
+        refusal=refusal_for(root, f"refs/heads/{into}") if (paths or merging) else None)
+    verdict, reason = decide_recovery(facts)
+    if verdict == "clean":
+        return None
+    if verdict == "refuse":
+        raise WorktreeError(reason)
+    try:
+        _git_reset(root, target, into, head)
+    except (WorktreeError, subprocess.CalledProcessError, OSError) as exc:
+        raise WorktreeError(f"could not restore {target} to {head[:12]}: {exc}; the refusal record is kept") from exc
+    after_paths, after_merging, after_head = _recovery_state(target)
+    if after_head != head or after_merging or after_paths:
+        raise WorktreeError(f"restoring {target} to {head[:12]} did not leave it clean; the refusal record is kept")
+    clear_refusal(root, f"refs/heads/{into}", head)
+    return {"paths": paths, "mergeInProgress": merging, "head": head}
 
 
 def _git_reset(root: Path, target: Path, into: str, commit: str) -> None:
@@ -858,7 +943,8 @@ def _record_fixtures(root: Path, target: Path, spec: str, base: str, merged: Lis
     return None
 
 
-def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, keep: bool = False) -> List[Outcome]:
+def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, keep: bool = False,
+          on_recovered: Optional[Callable[[Path, Dict], None]] = None) -> List[Outcome]:
     """Merge task branches into `into` one at a time (--no-ff); stop at the first conflict.
 
     The merge runs in the checkout that has `into` checked out. A merged task's
@@ -868,9 +954,10 @@ def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, ke
     target = checkout_of(root, into)
     if target is None:
         raise WorktreeError(f"branch {into} is not checked out anywhere; check it out or create the integration worktree")
-    dirty = dirty_files(target, tracked_only=True)
-    if dirty:
-        raise WorktreeError(f"{target} has uncommitted changes to tracked files; refusing to merge into {into}")
+    with land_lock(root, into):
+        recovered = recover_target(root, target, into)
+    if recovered and on_recovered:
+        on_recovered(target, recovered)
 
     outcomes = []
     allow = land_allow_paths(target)
@@ -924,7 +1011,7 @@ def merge(root: Path, spec: str, nums: List[str], into: Optional[str] = None, ke
 @dataclass
 class Landed:
     task: str
-    state: str  # MERGED RED CONFLICT DEFERRED PROTECTED SKIP MISSING BUSY ERROR
+    state: str  # MERGED RED CONFLICT DEFERRED PROTECTED REFUSED SKIP MISSING BUSY ERROR
     detail: str = ""
     branch: str = ""
     files: List[str] = field(default_factory=list)
@@ -933,6 +1020,9 @@ class Landed:
     mergedAt: str = ""
     failures: List[Dict] = field(default_factory=list)  # the gate's failure entries (ck-gate/1), RED only
     fixtureDrift: List[Dict] = field(default_factory=list)  # [{file, task, change}] recorded fixtures changed (15.2)
+    commit: Optional[str] = None  # the target's HEAD after a spec-edit landing (MERGED only)
+    moved: List[Dict] = field(default_factory=list)  # tests a spec edit moved out of a Verify selection (8.7)
+    recovered: Optional[Dict] = None  # the checkout was restored before this landing (14.2)
 
     def line(self) -> str:
         text = f"{self.state} {self.task} ({self.branch})"
@@ -946,7 +1036,7 @@ class Landed:
 
 
 # gate(target checkout, task numbers) -> (green, failing output, failure entries)
-GateFn = Callable[[Path, List[str]], Tuple[bool, str, List[Dict]]]
+GateFn = Callable[..., Tuple[bool, str, List[Dict]]]  # gate(target, tasks, *, whole=True)
 
 
 def _now() -> str:
@@ -977,21 +1067,27 @@ def create_lock(root: Path) -> Iterator[Path]:
 
 
 @contextlib.contextmanager
-def land_lock(root: Path, into: str) -> Iterator[Path]:
+def land_lock(root: Path, into: str, wait_s: float = 0) -> Iterator[Path]:
     """One landing per target branch at a time: it may reset the target to its pre-batch commit.
 
     An flock on the lock file, which the kernel drops when the holder exits, however it
     dies. Not a recorded PID: each sandboxed command has its own PID namespace, so a PID
     from another command can't be checked. The file stays; only the flock counts.
+    `wait_s` is how long to wait for a holder to finish before refusing (0: refuse at once).
     """
     import fcntl
 
     path = _common_dir(root) / f"ck-land-{into.replace('/', '-')}.lock"
     with open(path, "a+") as f:
-        try:
-            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            raise WorktreeError(f"another process is already landing into {into}; lock {path}") from None
+        deadline = time.monotonic() + max(0.0, float(wait_s))
+        while True:
+            try:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise WorktreeError(f"another process is already landing into {into}; lock {path}") from None
+                time.sleep(0.1)
         f.truncate(0)
         f.write(f"landing since {_now()}\n")  # for a human reading it; nothing parses it
         f.flush()
@@ -1099,13 +1195,11 @@ def land(
     target = checkout_of(root, into)
     if target is None:
         raise WorktreeError(f"branch {into} is not checked out anywhere; check it out or create the integration worktree")
-    dirty = dirty_files(target, tracked_only=True)
-    if dirty:
-        raise WorktreeError(f"{target} has uncommitted changes to tracked files; refusing to land into {into}")
     priority = priority or {}
     order = sorted(dict.fromkeys(nums), key=lambda n: (-priority.get(n, 1), int(n) if n.isdigit() else 0))
 
     with land_lock(root, into):
+        recovered = recover_target(root, target, into)
         started = _now()
         hook_notes: List[Dict] = []
         _ensure_hooks(root, target, hook_notes)
@@ -1213,7 +1307,7 @@ def land(
                 merged.append(num)
             return merged
 
-        def check(group: List[str]) -> Tuple[bool, str, List[Dict]]:
+        def check(group: List[str], whole: bool = False) -> Tuple[bool, str, List[Dict]]:
             t0 = datetime.datetime.now()
             ok, tail, failures = True, "", []
             if install:
@@ -1223,8 +1317,11 @@ def land(
                     ok, tail = False, f"install step failed: `{install}`\n{out}"
                 _ensure_hooks(root, target, hook_notes)  # an install step may move core.hooksPath (husky prepare)
             if ok:
-                ok, tail, failures = gate(target, group)
-            gates.append({"tasks": list(group), "green": ok, "seconds": int((datetime.datetime.now() - t0).total_seconds())})
+                ok, tail, failures = gate(target, group) if whole else gate(target, group, whole=False)
+            gates.append({
+                "tasks": list(group), "green": ok, "seconds": int((datetime.datetime.now() - t0).total_seconds()),
+                "checkTail": "" if ok else tail, "failures": [] if ok else list(failures or []),
+            })
             return ok, tail, failures
 
         def mark_merged(group: List[str], green: Optional[bool]) -> None:
@@ -1232,35 +1329,38 @@ def land(
             for num in group:
                 results[num] = Landed(num, "MERGED", f"into {into}", task_branch(spec, num), [], green, "", at)
 
-        def land_group(group: List[str], known_red: bool = False, red_tail: str = "", red_failures: Optional[List[Dict]] = None) -> bool:
-            """Land `group` on the current target head; True if all of it landed green."""
-            red_failures = red_failures or []
-            if not known_red:
-                start = head()
-                merged = merge_all(group)
-                if not merged:
-                    return False
-                if gate is None:
-                    mark_merged(merged, None)
-                    return len(merged) == len(group)
-                ok, tail, failures = check(merged)
-                if ok:
-                    mark_merged(merged, True)
-                    return len(merged) == len(group)
-                _git_reset(root, target, into, start)
-                group, red_tail, red_failures = merged, tail, failures
-            if len(group) == 1:
-                num = group[0]
-                results[num] = Landed(num, "RED", f"the gate on {into} fails with this task; it was not landed", task_branch(spec, num), [], False, red_tail, failures=red_failures)
+        batch_gate: Dict = {}
+
+        def land_group(group: List[str], whole: bool = False) -> bool:
+            """Land `group` on the current target head, gating exactly what merged; True if all of it landed green."""
+            start = head()
+            merged = merge_all(group)
+            if not merged:
                 return False
-            half = len(group) // 2
-            left_green = land_group(group[:half])
-            # A green left half on the same base proves the right half red: skip re-gating it whole.
-            land_group(group[half:], known_red=left_green, red_tail=red_tail, red_failures=red_failures)
+            if gate is None:
+                mark_merged(merged, None)
+                return len(merged) == len(group)
+            ok, tail, failures = check(merged, whole and len(merged) > 1)
+            if whole:
+                batch_gate.update(green=ok, tasks=list(merged), tail=tail, failures=list(failures or []))
+            if ok:
+                mark_merged(merged, True)
+                return len(merged) == len(group)
+            _git_reset(root, target, into, start)
+            if len(merged) == 1:
+                num = merged[0]
+                results[num] = Landed(num, "RED", f"the gate on {into} fails with this task; it was not landed", task_branch(spec, num), [], False, tail, failures=list(failures or []))
+                return False
+            half = len(merged) // 2
+            land_group(merged[:half])
+            land_group(merged[half:])
             return False
 
         if batch:
-            land_group(batch)
+            land_group(batch, True)
+        unreproduced = None
+        if batch_gate and not batch_gate["green"] and not any(o.state == "RED" for o in results.values()):
+            unreproduced = {"tasks": batch_gate["tasks"], "tail": batch_gate["tail"], "failures": batch_gate["failures"]}
 
         _record_landed(
             root, spec, into,
@@ -1288,9 +1388,171 @@ def land(
             "tasks": [asdict(results[n]) for n in order if n in results],
             "gates": gates,
             "bisected": len(gates) > 1,
+            **({"unreproduced": unreproduced} if unreproduced else {}),
+            **({"recovered": recovered} if recovered else {}),
             **({"hooks": hook_notes[-1]} if hook_notes else {}),
             **({"fixtureError": fixture_error} if fixture_error else {}),
         }
+
+
+SPEC_EDIT_LOCK_WAIT_S = 120.0
+
+
+def _spec_dir_of(checkout: Path, spec: str) -> Optional[Path]:
+    from claude_kiro.paths import LEGACY_SPECS_DIR, SPECS_DIR
+
+    for base_dir in (SPECS_DIR, LEGACY_SPECS_DIR):
+        d = checkout / base_dir / spec
+        if (d / "tasks.md").is_file():
+            return d
+    return None
+
+
+def _finding_keys(lint: Mapping) -> set:
+    """Identities of the blocking findings of a lint result: cycles, verify cycles, verify scope, justifications."""
+    import json
+
+    keys = set()
+    for name in ("cycles", "verifyCycles", "verifyScope", "justifications"):
+        for entry in lint.get(name) or ():
+            if isinstance(entry, Mapping):
+                pick = {k: entry[k] for k in ("task", "kind", "file", "module", "suite", "testTask") if k in entry}
+                keys.add(f"{name}:{json.dumps(pick or dict(entry), sort_keys=True, default=str)}")
+            else:
+                keys.add(f"{name}:{json.dumps(entry, sort_keys=True, default=str)}")
+    return keys
+
+
+def _program_of(command: str) -> str:
+    import shlex
+
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        words = command.split()
+    at = next((i for i, w in enumerate(words) if Path(w).name == "pytest"), None)
+    return " ".join(words[: at + 1]) if at is not None else (words[0] if words else "")
+
+
+def _spec_facts(checkout: Path, spec: str) -> Dict:
+    """What a landing compares before and after the merge: tasks.md text, lint findings, test selections per
+    task, each task's verification fields, and the Done tasks."""
+    from claude_kiro.hooks._shared.spec_parser import parse_tasks_text
+    from claude_kiro.lint import _verify_runs, lint_spec
+    from claude_kiro.lint_scope import _norm, _selection, load_sim_input
+
+    spec_dir = _spec_dir_of(checkout, spec)
+    if spec_dir is None:
+        return {"text": "", "findings": set(), "selections": {}, "verification": {}, "done": set()}
+    text = (spec_dir / "tasks.md").read_text(encoding="utf-8", errors="replace")
+    config = load_config(checkout)
+    findings = _finding_keys(lint_spec(spec_dir, checkout))
+    sim = load_sim_input(spec_dir / "tasks.md", checkout, config)
+    selections: Dict[str, List[Tuple[str, Optional[str], str]]] = {}
+    for num, task in sim.tasks.items():
+        chosen = []
+        for command in task.verify:
+            for path, selector in _verify_runs([command], config).items():
+                path = _norm(path)
+                tests = sim.tests.get(path, ())
+                names = sorted(_selection({path: selector}, path, tests))
+                program = _program_of(command)
+                chosen.extend((path, name, program) for name in names) if names else chosen.append((path, None, program))
+        selections[num] = chosen
+    tasks = parse_tasks_text(text)
+    return {
+        "text": text, "findings": findings, "selections": selections,
+        "verification": {t.num: (tuple(t.verify), tuple(t.verified_by), tuple(t.verifies)) for t in tasks},
+        "done": {t.num for t in tasks if t.done},
+    }
+
+
+def land_spec_edit(
+    root: Path,
+    spec: str,
+    num: str,
+    into: Optional[str] = None,
+    gate: Optional[GateFn] = None,
+    wait_s: float = SPEC_EDIT_LOCK_WAIT_S,
+) -> Landed:
+    """Land one arbiter branch (`arbiter<k>`) on `into` under the merge-queue lock (8.1, 8.4-8.7, 1.7).
+
+    Refuses a conflict (`git merge-tree`); takes lint findings and test selections on the target, merges, takes
+    them again, and asks `decide_spec_edit` about the difference. Gates only the Done tasks whose verification
+    the edit changed. The target goes back to its earlier commit on any refusal or red gate.
+    """
+    from claude_kiro import arbiter_policy as policy
+    from claude_kiro.arbiter import _principles_at
+
+    into = into or current_branch(root)
+    branch = task_branch(spec, num)
+    path = task_path(root, spec, num)
+    target = checkout_of(root, into)
+    if target is None:
+        raise WorktreeError(f"branch {into} is not checked out anywhere; check it out or create the integration worktree")
+    with land_lock(root, into, wait_s=wait_s):
+        if not branch_exists(root, branch):
+            return Landed(num, "MISSING", "no branch", branch)
+        try:
+            recovered = recover_target(root, target, into)
+        except WorktreeError as exc:
+            return Landed(num, "ERROR", str(exc), branch)
+        start = git(target, "rev-parse", "HEAD").stdout.strip()
+        if int(git(root, "rev-list", "--count", f"{start}..{branch}").stdout.strip() or 0) == 0:
+            return Landed(num, "SKIP", f"no commits ahead of {into}", branch)
+
+        ok, _, files = merge_tree(root, start, branch)
+        if not ok:
+            return Landed(num, "CONFLICT", f"conflicts with {into}; target untouched", branch, files)
+        touched = git(root, "diff", "--name-only", "--no-renames", "-z", f"{start}...{branch}").stdout.split("\0")
+        touched = [f for f in touched if f]
+        lane = {f"specs/{spec}/{n}" for n in policy._LANE_FILES}
+        outside = [f for f in touched if f not in lane]
+        if outside:
+            return Landed(num, "REFUSED", "; ".join(f"{f} is outside the spec-edit lane" for f in outside), branch, outside)
+
+        before = _spec_facts(target, spec)
+        effective = _principles_at(root, start, spec)
+        proc = _git_merge(root, target, into, branch, f"Merge {branch} (task {num})")
+        if proc.returncode != 0:
+            conflicted = git(target, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split()
+            git(target, "merge", "--abort", check=False)
+            return Landed(num, "CONFLICT", f"merge into {into} conflicted (precheck missed it); aborted", branch, conflicted)
+
+        def undo() -> None:
+            _git_reset(root, target, into, start)
+
+        try:
+            after = _spec_facts(target, spec)
+            changes = policy.spec_text_changes(before["text"], after["text"])
+            changed = git(target, "diff", "--name-only", "--no-renames", start, "HEAD").stdout.split()
+            facts = policy.SpecEditFacts(
+                spec=spec, changed=tuple(changed), status_changes=changes.status_changes,
+                mark_changes=changes.mark_changes,
+                new_cycles=tuple(sorted(k for k in after["findings"] - before["findings"] if k.startswith("cycles:"))),
+                new_blocking=tuple(sorted(k for k in after["findings"] - before["findings"] if not k.startswith("cycles:"))),
+                reserved=tuple(effective.reserved),
+            )
+            decision = policy.decide_spec_edit(facts)
+            if not decision.land:
+                undo()
+                return Landed(num, "REFUSED", "; ".join(decision.reasons), branch, list(changed))
+            moved = [asdict(m) for m in policy.moved_out_of_verify(before["selections"], after["selections"])]
+            scope = policy.gate_scope_of_edit(before["verification"], after["verification"], before["done"] & after["done"])
+            if gate is not None and scope:
+                green, tail, failures = gate(target, [str(n) for n in scope])
+                if not green:
+                    undo()
+                    return Landed(num, "RED", f"the gate on {into} fails with this edit; it was not landed", branch,
+                                  list(changed), False, tail, failures=failures)
+        except BaseException:
+            with contextlib.suppress(Exception):
+                undo()
+            raise
+        commit = git(target, "rev-parse", "HEAD").stdout.strip()
+        note = _cleanup_merged(root, target, path, branch)
+        return Landed(num, "MERGED", f"into {into}{note}", branch, list(changed), True if gate is not None and scope else None,
+                      "", _now(), commit=commit, moved=moved, recovered=recovered)
 
 
 def status(root: Path, spec: str) -> List[Outcome]:

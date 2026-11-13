@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { runWorkflow } from './load_workflow.mjs'
 import { project } from './fake_project.mjs'
+import { arbiterProject, repairRuling } from './arbiter_project.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const SCRIPT = path.join(here, '../../plugin/workflows/spec-implement.js')
@@ -32,11 +33,20 @@ const conflict = (file, test, extra = {}) => ({ file, test, criterion: '4.1', re
 const node = c => `${c.file}::${c.test}`
 const C1 = conflict(FILE_A, 'test_tc4_decay')
 
-// Task 4's first two attempts (the report and the confirmation) return `conflicts`; a later attempt passes.
+// Task 4's first attempt reports `conflicts` once; the arbiter then rules each one `test_repair` (a fake `rulings` answer
+// for `arbiter task 4`, its `testRepair.change` and `why` the conflict's `fix` and `reason`), the real `ck arbiter open`,
+// `settle` and `record` run against a temporary git project, and the fixer follows the ruling. A later attempt passes.
 async function run(conflicts, { testFix = { [FILE_A]: {} }, deps = { 4: [], 5: ['4'] }, args = {}, ...rest } = {}) {
-  const p = project({ deps, testConflictsList: { 4: { conflicts, attempts: 2 } }, testFix, ...rest })
-  const out = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, agents: AGENTS, ...args } })
-  return { p, ...out }
+  const proj = arbiterProject()
+  const p = project({ deps, testConflictsList: { 4: { conflicts, attempts: 1 } }, rulings: { 4: conflicts.map(c => repairRuling('4', c)) }, execCk: proj.execCk, testFix, ...rest })
+  const out = await runWorkflow(SCRIPT, { agent: p.agent, args: { ...baseArgs, ...proj.args, agents: AGENTS, arbiterAgent: 'spec:arbiter', ...args } })
+  return { p, proj, ...out }
+}
+// An entry holds the conflict's five fields and the settled ruling object, whose test-repair change and why are the entry's fix and reason.
+const sameEntry = (e, c) => {
+  const { ruling, ...rest } = e
+  return JSON.stringify(rest) === JSON.stringify({ file: c.file, test: c.test, criterion: c.criterion, reason: c.reason, fix: c.fix })
+    && ruling && typeof ruling === 'object' && ruling.outcome === 'test_repair' && JSON.stringify(ruling).includes(c.fix) && JSON.stringify(ruling).includes(c.reason)
 }
 const requests = trace => trace.filter(e => e.ev === 'request').map(e => e.label)
 const fixers = trace => requests(trace).filter(l => /^testfix \d+ \(Task /.test(l))
@@ -64,14 +74,18 @@ function jsonArrays(text) {
 const toMe = (result, task = '4') => (result.needsInput || []).filter(e => String(e.task) === task && e.kind === 'test-fix')
 const noLand = trace => assert.deepEqual(fixLands(trace), [], 'no worktree land request for the test-fix branch')
 
-await test('tc38_ a confirmed conflict starts one test-fixer in the test-writer role on a branch created from INTO', async () => {
+await test('tc38_ a conflict ruled test_repair starts one test-fixer in the test-writer role on a branch created from INTO', async () => {
   const { p, trace } = await run([C1])
   assert.deepEqual(fixers(trace), ['testfix 1 (Task 4)'])
+  const reqs = requests(trace)
+  assert.equal(reqs.filter(l => /^arbiter task 4/.test(l)).length, 1, 'one arbiter ruling')
+  assert.ok(!reqs.some(l => /^task 4 retry/.test(l)) || firstReq(trace, /^arbiter task 4/) < firstReq(trace, /^task 4 retry/), 'no confirmation attempt before the ruling')
+  assert.ok(firstReq(trace, /^arbiter task 4/) < firstReq(trace, /^testfix 1 /), 'the arbiter rules before the fixer runs')
   const o = p.state.opts['testfix 1 (Task 4)']
   assert.deepEqual([o.model, o.effort], ['opus', 'high'], 'the test-writer model and effort')
   const prompt = p.state.prompts['testfix 1 (Task 4)']
   assert.match(prompt, /worktree create demo testfix1[^\n]*--base integrate\/demo/, 'the branch is created from the integration branch')
-  assert.ok(jsonArrays(prompt).some(a => JSON.stringify(a) === JSON.stringify([C1])), 'the prompt carries the structured conflict entries')
+  assert.ok(jsonArrays(prompt).some(a => a.length === 1 && sameEntry(a[0], C1)), 'the prompt carries the structured conflict entries (testRepairEntries: the conflict with the ruling)')
 })
 
 await test('tc36_ the test-fixer prompt carries the conflicts as schema-valid entries; the thin testfix calls carry the lean agentType', async () => {
@@ -81,7 +95,8 @@ await test('tc36_ the test-fixer prompt carries the conflicts as schema-valid en
   assert.ok(entries, 'one array of two entries')
   for (const e of entries) {
     for (const k of ['file', 'test', 'criterion', 'reason', 'fix']) assert.equal(typeof e[k], 'string', `entry.${k} is a string`)
-    assert.deepEqual(Object.keys(e).sort(), ['criterion', 'file', 'fix', 'reason', 'test'], 'no extra keys')
+    assert.equal(typeof e.ruling, 'object', 'entry.ruling is the settled ruling')
+    assert.deepEqual(Object.keys(e).sort(), ['criterion', 'file', 'fix', 'reason', 'ruling', 'test'], 'no extra keys')
   }
   for (const l of ['testfix ledger 1', 'testfix prove 1']) {
     assert.ok(requests(trace).includes(l), `${l} was requested`)
@@ -153,17 +168,22 @@ await test('tc45_ a rejected review: nothing lands, needs-input carries the find
   assert.ok(!result.merged.includes('4'))
 })
 
-await test('tc46_ verdict test-correct: no review, no land, Task 4 is retried with the finding as a failure', async () => {
+await test('tc46_ verdict test-correct on a ruled test: no review, no land, no retry; one test-fix entry carries the ruling and the finding', async () => {
   const finding = { file: 'src/calc.py', test: 'test_tc4_decay', issue: 'FINDING-XYZ: decay() rounds before it compares' }
-  const { p, trace } = await run([C1], { testFix: { [FILE_A]: { verdict: 'test-correct', finding } } })
+  const { trace, result } = await run([C1], { testFix: { [FILE_A]: { verdict: 'test-correct', finding } } })
   assert.deepEqual(reviews(trace), [])
   assert.deepEqual(proves(trace), [])
   noLand(trace)
   const fixAt = firstReq(trace, /^testfix 1 /)
-  const retry = trace.find((e, i) => e.ev === 'request' && /^task 4/.test(e.label) && i > fixAt)
-  assert.ok(retry, 'Task 4 was retried after the fixer')
-  const prompts = Object.entries(p.state.prompts).filter(([l]) => /^task 4/.test(l)).map(([, t]) => t)
-  assert.ok(prompts.some(t => /FINDING-XYZ/.test(t) && t.includes('src/calc.py')), 'the retry prompt carries the finding')
+  assert.ok(fixAt >= 0, 'the fixer ran')
+  assert.ok(!trace.some((e, i) => e.ev === 'request' && /^task 4/.test(e.label) && i > fixAt), 'Task 4 is not retried after the fixer disagrees with the ruling')
+  assert.equal(requests(trace).filter(l => /^arbiter task 4/.test(l)).length, 1, 'no second ruling')
+  const e = toMe(result)
+  assert.equal(e.length, 1, JSON.stringify(result.needsInput))
+  assert.match(JSON.stringify(e[0]), /FINDING-XYZ/, 'the finding is in the entry')
+  assert.ok(e[0].ruling != null, 'the entry carries the ruling')
+  assert.match(JSON.stringify(e[0].testRepair), /rel_tol 1e-5/, 'and its test repair')
+  assert.ok(!result.merged.includes('4'))
 })
 
 await test('tc47_ a node in priorFixes starts no fixer and goes to needs-input', async () => {
@@ -177,8 +197,9 @@ await test('tc47_ a node in priorFixes starts no fixer and goes to needs-input',
   assert.ok(!result.merged.includes('4'))
 })
 
-await test('tc48_ three conflicts in one file and one in another: exactly two fixers, the first with all three', async () => {
-  const a = ['test_tc4_one', 'test_tc4_two', 'test_tc4_three'].map(t => conflict(FILE_A, t))
+// Two conflicts in one file and one in another: at most 3 rulings on a task (7.6), so a 4th conflict would be my entry.
+await test('tc48_ two conflicts in one file and one in another: exactly two fixers, the first with both', async () => {
+  const a = ['test_tc4_one', 'test_tc4_two'].map(t => conflict(FILE_A, t))
   const b = conflict(FILE_B, 'test_tc4_four')
   const { p, trace } = await run([...a, b], { testFix: { [FILE_A]: {}, [FILE_B]: {} } })
   const fx = fixers(trace)

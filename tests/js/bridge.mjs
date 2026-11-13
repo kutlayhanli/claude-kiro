@@ -1,6 +1,5 @@
 // Long-lived JSON-lines bridge: one request object per stdin line, one response object per stdout line.
 //   {op:'ready', order, deps, done, exclude, blocked} -> {ok:true, ready}
-//   {op:'ladder', model}                              -> {ok:true, ladder}
 //   {op:'run', project, args, slots, clock, execCk}   -> {ok:true, result, logs, trace, prompts, opts, optsList, events, execLog, execResults}
 //       clock: 'virtual' (a VirtualClock: sleeps and trace t are exact virtual ms) | 'real' (real timers) | unset (as before)
 //       execCk: {cmd, env, cwd, dry}: fake agents record progress events through the real CLI (see fake_project.mjs)
@@ -8,18 +7,20 @@
 //       a step-end answer gets the eta printed by the `ck progress event ... step-end --json` its prompt wrote
 //   {op:'call', name, args}                           -> {ok:true, value}   one decisions-block function (any name), called with args;
 //       a Set anywhere in a response is written as a sorted array
+//   throwingDate: true on `run` and `create`: the script gets a Date (no-argument construction and Date.now) and a
+//       Math.random that throw, as Claude Code's Workflow runtime has no clock (scripts replay for resume)
 //   {op:'run', ..., realCk:{cmd, cwd, env}}           direct ck() calls of the workflow run the real CLI subprocess; the
 //       argv lists are returned as `ckCalls` [{argv, code}]
 // Any throw -> {ok:false, error}. Durations in the project options are milliseconds (1-40).
 import readline from 'node:readline'
 import { execFile } from 'node:child_process'
-import { runWorkflow, useVirtualTime } from './load_workflow.mjs'
-import { project, writtenCommands, execCkRun } from './fake_project.mjs'
+import { runWorkflow, useVirtualTime, throwingGlobals } from './load_workflow.mjs'
+import { project, writtenCommands, execCkRun, isCkCall, arbiterArgv, arbiterStdin } from './fake_project.mjs'
 import { stub } from './fake_create.mjs'
 import { VirtualClock } from './virtual_clock.mjs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { loadDecisions, SCRIPT, GUARD_NAMES } from './load_decisions.mjs'
+import { loadDecisions, SCRIPT } from './load_decisions.mjs'
 
 
 // Fake agent durations run on a virtual clock, so a scenario replays identically however loaded the machine is.
@@ -49,10 +50,6 @@ async function handle(req) {
     const { readyTasks } = req.script ? loadDecisions(req.script) : loadDecisions()  // req.script: test hook for a script without markers
     return { ready: readyTasks({ order: req.order ?? Object.keys(req.deps), deps: req.deps, done: req.done ?? [], exclude: req.exclude ?? [], blocked: req.blocked ?? [] }) }
   }
-  if (req.op === 'ladder') {
-    const { guardLadder } = loadDecisions({ extra: GUARD_NAMES })
-    return { ladder: guardLadder(req.model) }
-  }
   if (req.op === 'call') {
     const decisions = loadDecisions({ extra: [req.name] })
     return { value: decisions[req.name](...(req.args ?? [])) ?? null }
@@ -68,7 +65,7 @@ async function handle(req) {
     const args = { ...baseArgs, ...req.args, ...(slots ? { agentSlots: slots } : {}) }
     const ckCalls = []
     const ck = req.realCk ? realCkFn(req.realCk, ckCalls, clock ? q => clock.external(q) : q => q) : undefined
-    const { result, logs, trace } = await runWorkflow(SCRIPT, { agent: p.agent, args, slots, clock, ck })
+    const { result, logs, trace } = await runWorkflow(SCRIPT, { agent: p.agent, args, slots, clock, ck, ...(req.throwingDate ? throwingGlobals() : {}) })
     return { ckCalls, result, logs, trace, prompts: p.state.prompts, opts: p.state.opts, optsList: p.state.optsList, events: p.state.events, execLog: p.state.execLog, execResults: p.state.execResults, reviewTasks: p.state.reviewTasks }
   }
   if (req.op === 'create') {
@@ -86,12 +83,28 @@ async function handle(req) {
           if (argv[3] === 'step-end' && argv.includes('--json') && out && typeof out === 'object' && 'eta' in out) eta = out.eta
         }
       }
+      // With execCk, the thin `ck arbiter context|lane|review` steps run the real CLI (as run_create promises), with the
+      // step's stdin; an explicit `ck ...` override still answers its step in place of the CLI.
+      if (req.execCk && isCkCall(opts)) {
+        const argv = arbiterArgv(String(prompt))
+        const rest = argv && argv[0] === '-C' ? argv.slice(2) : argv
+        if (rest && rest[0] === 'arbiter') {
+          const si = rest.indexOf('--step')
+          const key = rest[1] === 'review' ? `ck arbiter review ${si >= 0 ? rest[si + 1] : undefined}` : `ck arbiter ${rest[1]}`
+          if (!(req.overrides && key in req.overrides)) {
+            const before = execResults.length
+            const out = await execCkRun(req.execCk, argv, { log: execLog, results: execResults, external: p => clock.external(p), input: arbiterStdin(String(prompt)) })
+            const res = execResults[before] ?? { code: 0, stdout: '', stderr: '' }
+            return { exitCode: res.code, json: out && typeof out === 'object' ? out : {}, ...(res.code !== 0 && !(out && typeof out === 'object') ? { error: res.stderr } : {}) }
+          }
+        }
+      }
       const answer = await s.agent(prompt, opts)
       // A step-end answer carries the eta the CLI printed for it, as a real agent's would.
       return eta !== undefined && answer && typeof answer === 'object' && !Array.isArray(answer) ? { ...answer, eta } : answer
     }
     const createArgs = { mode: 'create', feature: 'f', projectRoot: '/p', specDir: '/p/specs/f', date: '2026-10-04', ...req.args }
-    const { result, logs, trace } = await runWorkflow(CREATE_SCRIPT, { agent, args: createArgs, clock })
+    const { result, logs, trace } = await runWorkflow(CREATE_SCRIPT, { agent, args: createArgs, clock, ...(req.throwingDate ? throwingGlobals() : {}) })
     return { result, logs, trace, prompts: s.prompts, execLog, execResults }
   }
   throw new Error(`unknown op: ${req.op}`)

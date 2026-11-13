@@ -163,7 +163,14 @@ def test_red_batch_bisects_to_the_culprit(repo):
     assert "bad.txt" in by["2"]["checkTail"]
     assert data["bisected"] is True
     assert sorted(data["gates"][0]["tasks"]) == ["1", "2", "3"] and data["gates"][0]["green"] is False
-    assert len(data["gates"]) < 5  # a green left half proves the right half red without re-gating it
+    # Every half is gated, none inferred red: at most 2n-1 gates for n tasks, the right half's own gate included.
+    assert len(data["gates"]) <= 2 * 3 - 1
+    # Halves follow landing order (task 3 has the dependent task 4, so it lands first): the left half is the
+    # first of them, the right half the rest, and the right half is the one holding the culprit.
+    order = [t["task"] for t in data["tasks"]]
+    right_half = sorted(order[len(order) // 2:])
+    right = [g for g in data["gates"] if sorted(g["tasks"]) == right_half]
+    assert len(right) == 1 and right[0]["green"] is False
     # The target holds the green tasks only; the culprit's branch and worktree stay for the fixer.
     assert (repo / "one.txt").exists() and (repo / "three.txt").exists()
     assert not (repo / "bad.txt").exists()
@@ -385,7 +392,7 @@ def test_land_raises_when_the_reset_after_a_red_gate_is_refused(repo: Path):
     commit_in(wt(repo, "1"), "one.txt", "1\n", "one")
     start = git(repo, "rev-parse", "main")
 
-    def red_and_locked(target: Path, group):
+    def red_and_locked(target: Path, group, whole: bool = True):
         lock = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-path", "index.lock"], cwd=target,
                               capture_output=True, text=True, check=True).stdout.strip()
         Path(lock).write_text("")

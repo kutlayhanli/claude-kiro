@@ -2,8 +2,10 @@
 
 import json
 import os
+import re
 import socket
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 import click
@@ -105,6 +107,9 @@ def _plan(project_dir: Path, spec: str, exclude: set) -> dict:
     return {
         **plan,
         **lint,
+        # plan_waves' warnings (strings) keep their key; lint's principles warnings travel as lintWarnings.
+        "warnings": plan["warnings"],
+        "lintWarnings": lint["warnings"],
         # Routing inputs for /spec:implement: "safety" tasks start on a stronger model
         # and get the risky reviewer; complexity feeds implementer.complexity_routing.
         "risk": task_risk({t.num: t for t in tasks}, load_config(project_dir))["risk"],
@@ -119,6 +124,8 @@ def _plan(project_dir: Path, spec: str, exclude: set) -> dict:
         "overlaps": write_set_overlaps({t.num: t.files for t in tasks}),
         "testVerifies": {path[len("file:"):]: [n[len("task:"):] for n in nums] for path, nums in graph.test_verifies.items()},
         "provides": _provides_by_command(graph),
+        # impl task -> the test tasks that verify it (the arbiter and the workflows read this map).
+        "verifiedBy": {t.num: list(t.verified_by) for t in tasks if t.verified_by},
     }
 
 
@@ -132,7 +139,7 @@ def _provides_by_command(graph) -> dict:
 
 
 # The keys `ck plan --compact` prints: what the scheduler reads.
-COMPACT_KEYS = ("done", "remaining", "deps", "ready", "cycles", "verifyCycles", "overlaps", "testVerifies", "provides")
+COMPACT_KEYS = ("done", "remaining", "deps", "ready", "cycles", "verifyCycles", "verifyScope", "verifiedBy", "overlaps", "testVerifies", "provides")
 
 
 def _worktree_dir(project_dir: Path, spec: str):
@@ -202,10 +209,11 @@ def _record_failed(spec: str, key: str, ids) -> None:
 @click.option("--task", "tasks", multiple=True, help="With --contracts or --fidelity: only these test tasks (repeatable)")
 @click.option("--base", help="With --contracts: check the test files changed since this git ref instead")
 @click.option("--strict", is_flag=True, help="With --contracts: exit 1 when anything is flagged (default: warn)")
-def lint(spec: str, as_json: bool, contracts: bool, fidelity: bool, tasks, base, strict: bool):
-    """Check SPEC's task plan: dependency cycles, verify-order cycles, reasonless dependencies, untagged risk-path tasks, critical path.
+@click.option("--simulate", is_flag=True, help="Instead: print the suites due at --task N's gate and the tests they select (JSON)")
+def lint(spec: str, as_json: bool, contracts: bool, fidelity: bool, tasks, base, strict: bool, simulate: bool):
+    """Check SPEC's task plan: dependency cycles, verify-order cycles, verify scope, reasonless dependencies, untagged risk-path tasks, critical path.
 
-    Exits 1 if there is a cycle (the plan can't be executed as written).
+    Exits 1 if there is a cycle (the plan can't be executed as written) or a verify-scope finding.
     With --contracts, checks test files against design.md's data models instead (a heuristic: it warns unless --strict).
     """
     if contracts:
@@ -214,10 +222,22 @@ def lint(spec: str, as_json: bool, contracts: bool, fidelity: bool, tasks, base,
     if fidelity:
         _lint_fidelity(spec, as_json, tasks)
         return
+    if simulate:
+        if len(tasks) != 1:
+            raise click.UsageError("--simulate needs exactly one --task N")
+        from ..lint import simulate_gate
+
+        click.echo(json.dumps(simulate_gate(_spec_dir(Path.cwd(), spec), Path.cwd(), tasks[0]), indent=2))
+        return
+    from ..lint_scope import lint_verdict
+
     result = _plan(Path.cwd(), spec, set())
     if as_json:
-        click.echo(json.dumps({k: result[k] for k in ("cycles", "verifyCycles", "reasonless", "criticalPath", "waves", "riskUntagged",
-                                                      "commandEdges", "unknownCommands", "untaggedTests", "noWriteSet", "graphProblems")}, indent=2))
+        payload = {k: result[k] for k in ("cycles", "verifyCycles", "verifyScope", "notChecked", "reasonless", "criticalPath",
+                                          "waves", "riskUntagged", "commandEdges", "unknownCommands", "untaggedTests",
+                                          "noWriteSet", "graphProblems", "justifications")}
+        payload["warnings"] = result["lintWarnings"]
+        click.echo(json.dumps(payload, indent=2))
     else:
         click.echo(f"Plan lint for {result['spec']}:")
         if result["cycles"]:
@@ -240,6 +260,10 @@ def lint(spec: str, as_json: bool, contracts: bool, fidelity: bool, tasks, base,
                 click.echo(f"  ✗ verify-order cycle: {item['message']}")
         if not result["verifyCycles"] and not result["cycles"]:
             click.echo("  ✓ no verify-order cycles found (checked Python imports of existing test files and Verify test files owned by test tasks)")
+        for item in result["verifyScope"]:
+            click.echo(f"  ✗ verify scope: {item['message']}")
+        for item in result["notChecked"]:
+            click.echo(f"  ⚠ {item['message']}")
         if result["reasonless"]:
             click.echo(f"  ⚠ {len(result['reasonless'])} dependenc{'y' if len(result['reasonless']) == 1 else 'ies'} without a stated reason (each one serializes work):")
             for item in result["reasonless"][:25]:
@@ -266,11 +290,16 @@ def lint(spec: str, as_json: bool, contracts: bool, fidelity: bool, tasks, base,
             click.echo(f"  ⚠ {item['message']}")
         for item in result["graphProblems"]:
             click.echo(f"  ⚠ {item['source']}: {item['problem']}")
+        # The requirements' justifications fail lint (3.1); the plan's principles warn only (3.7).
+        for item in result["justifications"]:
+            click.echo(f"  ✗ {item['message']}")
+        for item in result["lintWarnings"]:
+            click.echo(f"  ⚠ {item['message']}")
         path = result["criticalPath"]
         if path:
             click.echo(f"  ℹ critical path ({len(path)} of {len(result['remaining'])} open tasks): {' -> '.join(path)}")
             click.echo(f"  ℹ ready now: {', '.join(result['ready']) or 'none'}")
-    if result["cycles"] or result["verifyCycles"]:
+    if lint_verdict(result).exit_nonzero:
         sys.exit(1)
 
 
@@ -571,7 +600,13 @@ def merge_cmd(spec, tasks, into, keep, as_json):
     """
     root = _root()
     try:
-        outcomes = wt.merge(root, _spec_name(spec), list(tasks), into=into, keep=keep)
+        def say(checkout, rec):
+            if as_json:
+                return
+            tail = "; a merge was in progress" if rec["mergeInProgress"] else ""
+            click.echo(f"restored {checkout} to {rec['head']}: discarded {', '.join(rec['paths'])}{tail}")
+
+        outcomes = wt.merge(root, _spec_name(spec), list(tasks), into=into, keep=keep, on_recovered=say)
     except wt.WorktreeError as e:
         click.echo(f"❌ {e}")
         sys.exit(3)
@@ -599,7 +634,7 @@ def _gate_fn(spec: str, scopes: dict = None):
     """
     from ..gate import run_gate
 
-    def gate(target: Path, nums):
+    def gate(target: Path, nums, whole: bool = True):
         spec_dir = next((r / spec for r in spec_roots(target) if (r / spec / "tasks.md").exists()), None)
         if spec_dir is None:
             return False, f"no tasks.md for {spec} in {target}", []
@@ -614,7 +649,7 @@ def _gate_fn(spec: str, scopes: dict = None):
             if not scope:
                 return False, f"✗ test fix {num} changes no file a test task owns", []
             tasks.extend(scope)
-        result = run_gate(target, spec_dir, list(dict.fromkeys(tasks)))
+        result = run_gate(target, spec_dir, list(dict.fromkeys(tasks)), escalate_complete=whole)
         if result.ok:
             return True, "", []
         lines = []
@@ -662,6 +697,64 @@ def _priority(target: Path, spec: str) -> dict:
     return {}
 
 
+def _verify_gate_fn(spec: str):
+    """The gate of a spec-edit landing: each named Done task's own Verify commands, run in the target.
+
+    A spec edit changes how a finished task is verified, not what it delivered, so its acceptance boxes and
+    test files are not re-checked here (the task gate did that when it finished); the commands are (8.4).
+    """
+    import subprocess
+
+    def gate(target: Path, nums, whole: bool = True):
+        spec_dir = next((r / spec for r in spec_roots(target) if (r / spec / "tasks.md").exists()), None)
+        if spec_dir is None:
+            return False, f"no tasks.md for {spec} in {target}", []
+        from ..hooks._shared.spec_parser import parse_tasks
+
+        timeout = int(load_config(target).get("verify_timeout", 540))
+        tasks = {t.num: t for t in parse_tasks(spec_dir / "tasks.md")}
+        lines = []
+        for num in nums:
+            for command in tasks[num].verify if num in tasks else []:
+                try:
+                    proc = subprocess.run(command, shell=True, cwd=target, capture_output=True, text=True, timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    lines.append(f"✗ Task {num}: `{command}` timed out after {timeout}s")
+                    continue
+                if proc.returncode != 0:
+                    out = (proc.stdout + proc.stderr).strip().splitlines()[-20:]
+                    lines.append(f"✗ Task {num}: `{command}` exit {proc.returncode}")
+                    lines.extend(f"    {line}" for line in out)
+        return (not lines), "\n".join(lines), []
+
+    return gate
+
+
+def _land_spec_edit(root, name, num, into, do_gate, as_json):
+    """`ck worktree land SPEC arbiter<k>`: one entry, state MERGED|CONFLICT|RED|REFUSED|ERROR, with commit and moved."""
+    try:
+        integ = wt.integration_branch(name)
+        use_integ = wt.branch_exists(root, integ) and wt.checkout_of(root, integ) is not None
+        target_branch = into or (integ if use_integ else wt.current_branch(root))
+        entry = wt.land_spec_edit(root, name, num, into=target_branch, gate=_verify_gate_fn(name) if do_gate else None)
+    except wt.WorktreeError as e:
+        if as_json:
+            click.echo(json.dumps({"error": str(e), "tasks": []}, indent=2))
+        else:
+            click.echo(f"❌ {e}")
+        sys.exit(3)
+    if as_json:
+        click.echo(json.dumps(asdict(entry), indent=2))
+    else:
+        click.echo(entry.line())
+    if entry.state in ("BUSY", "ERROR", "MISSING", "PROTECTED", "REFUSED"):
+        sys.exit(3)
+    if entry.state == "CONFLICT":
+        sys.exit(2)
+    if entry.state == "RED":
+        sys.exit(1)
+
+
 @worktree.command("land")
 @click.argument("spec")
 @click.argument("tasks", nargs=-1, required=True)
@@ -692,6 +785,9 @@ def land_cmd(spec, tasks, into, do_gate, do_install, release_claims, keep, progr
     root = _root()
     name = _spec_name(spec)
     scopes: dict = {}
+    if len(tasks) == 1 and re.fullmatch(r"arbiter\d+", str(tasks[0])):
+        _land_spec_edit(root, name, str(tasks[0]), into, do_gate, as_json)
+        return
     try:
         integ = wt.integration_branch(name)
         use_integ = wt.branch_exists(root, integ) and wt.checkout_of(root, integ) is not None

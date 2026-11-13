@@ -31,6 +31,7 @@ from .graph import graph
 from .fixtures import fixtures
 from .testfix import testfix
 from .githooks import git_hook
+from .arbiter import arbiter, principles
 from .runner import HOOK_SETTINGS, configured_hooks, execute_hook, install_hook_settings
 
 
@@ -1219,6 +1220,8 @@ stats.add_command(eta_backtest)
 cli.add_command(eta)
 cli.add_command(progress_group)
 cli.add_command(status_line)
+cli.add_command(principles)
+cli.add_command(arbiter)
 
 
 if __name__ == "__main__":

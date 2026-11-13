@@ -36,6 +36,8 @@ AGENT_ROLES = {
     "fixer": "fixer",
     "resolver": "resolver",
     "reviewer": "reviewer",
+    "arbiter": "arbiter",
+    "auditor": "reviewer",
     "runner": None,  # the lean thin ck agent: fixed frontmatter, no role settings
 }
 

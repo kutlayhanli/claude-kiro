@@ -1,7 +1,7 @@
 ---
 description: Adversarially review an existing spec and apply the findings that survive
 argument-hint: [spec-name]
-allowed-tools: Read, Edit, Write, Grep, Glob, AskUserQuestion, Workflow, Agent, TaskCreate, TaskUpdate
+allowed-tools: Read, Edit, Write, Grep, Glob, AskUserQuestion, Workflow, Agent, TaskCreate, TaskUpdate, Bash(ck agents --json:*), Bash(ck principles init:*)
 ---
 
 Review the specification: $ARGUMENTS
@@ -25,7 +25,8 @@ Use this after the spec or the code has drifted, after hand edits, or for specs 
 
 1. Resolve the spec directory: `specs/$ARGUMENTS/`. If it only exists under `.claude/specs/`, tell me to run `ck migrate` first and stop. If `$ARGUMENTS` is empty, list the specs in `specs/` and ask which one.
 2. Confirm `requirements.md`, `design.md`, and `tasks.md` all exist. If one is missing, say so and suggest `/spec:create` instead.
-3. Call the **Workflow** tool with `args` as below, picking the script by the project's mode first: if `.claude/ck-manifest.json` records `"mode": "vendor"` (copies made by `ck vendor`; the plugin is off there), use `scriptPath` set to the absolute path of `.claude/workflows/spec-create.js` and don't try the plugin's name. Otherwise use `name: "spec:spec-create"` (the workflow this plugin ships); only if no workflow by that name is found, fall back to that `scriptPath`. If the file is missing too, tell me to run `ck setup` (installs the plugin) and stop.
+3. Run `ck principles init` (from the project root). If it created the principles file, tell me so in one line; otherwise say nothing. Then run `ck agents --json` and keep its `agents.arbiter` role. `arbiterAgent` is `spec:arbiter` in plugin mode and `ck-arbiter` in vendor mode; `runnerAgent` is `spec:runner` in plugin mode and `ck-runner` in vendor mode (pass `null` for one whose file is missing from `.claude/agents/` in vendor mode).
+4. Call the **Workflow** tool with `args` as below, picking the script by the project's mode first: if `.claude/ck-manifest.json` records `"mode": "vendor"` (copies made by `ck vendor`; the plugin is off there), use `scriptPath` set to the absolute path of `.claude/workflows/spec-create.js` and don't try the plugin's name. Otherwise use `name: "spec:spec-create"` (the workflow this plugin ships); only if no workflow by that name is found, fall back to that `scriptPath`. If the file is missing too, tell me to run `ck setup` (installs the plugin) and stop.
    ```json
    {
      "mode": "review",
@@ -35,10 +36,13 @@ Use this after the spec or the code has drifted, after hand edits, or for specs 
      "description": "Review of an existing spec",
      "planPath": "[absolute path to PLAN.md if it exists, else null]",
      "evolvesFrom": null,
+     "arbiterAgent": "[spec:arbiter, or ck-arbiter in vendor mode]",
+     "runnerAgent": "[spec:runner, or ck-runner in vendor mode]",
+     "agents": { "arbiter": "[agents.arbiter from ck agents --json]" },
      "context": "[anything I said about why we're reviewing, plus recent changes you know of]",
      "date": "[today, YYYY-MM-DD]"
    }
    ```
-4. When it returns, report: result, how many findings were fixed, refuted, or need my decision, what the consistency check fixed or raised (`consistency`), and any partial coverage. Then run `ck stats collect --run <wf_id> --auto` outside the sandbox and quote the line it prints (where the record went, or why it was skipped; if it failed, quote the retry command it gives). Never let its result change what you report about the run. In agent mode (no `wf_id`, the run was started with `ck stats begin`), run `ck stats collect --agents <run_id> --auto` instead, outside the sandbox, and quote its line the same way. Ask me the open questions (`review.openQuestions`, every `source`: review, revise, consistency; show `conflictsWith` and offer the `options` for the last two) with AskUserQuestion, apply my answers consistently across the spec files, and record them in `review.md` (and PLAN.md if it exists).
+5. When it returns, report: result, how many findings were fixed, refuted, or need my decision, what the consistency check fixed or raised (`consistency`), and any partial coverage. Report each entry of `review.proposedCuts` with its story, its weakness and what it saves; a review never applies a cut, so say they wait for my approval, and that approving one is done through `/spec:create`. Then run `ck stats collect --run <wf_id> --auto` outside the sandbox and quote the line it prints (where the record went, or why it was skipped; if it failed, quote the retry command it gives). Never let its result change what you report about the run. In agent mode (no `wf_id`, the run was started with `ck stats begin`), run `ck stats collect --agents <run_id> --auto` instead, outside the sandbox, and quote its line the same way. Ask me the open questions (`review.openQuestions`, every `source`: review, revise, consistency; show `conflictsWith` and offer the `options` for the last two) with AskUserQuestion, apply my answers consistently across the spec files, and record them in `review.md` (and PLAN.md if it exists).
 
 The full record is in `specs/[spec-name]/review.md`.
