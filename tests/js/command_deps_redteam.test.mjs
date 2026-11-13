@@ -191,25 +191,35 @@ await test('tc114_redteam a task that waits twice in a row (a second missing com
 // ================= 12.7 =================
 
 const cycleRe = (...ids) => new RegExp(ids.map(i => `(?:Task )?${i}`).join(' -> '))
+// 6.13: a command cycle is a wiring claim, not a blocked task; 6.10: with no arbiter it goes to me as a needs-input entry
+// whose claim names the cycle. The task is not ended `blocked`.
+const cycleEntry = (result, task) => (result.needsInput ?? []).find(e => String(e.task) === String(task) && e.claim && e.claim.trigger === 'command-cycle')
+const assertCycle = (result, task, ...ids) => {
+  const e = cycleEntry(result, task)
+  assert.ok(e, `Task ${task} has a command-cycle needs-input entry: ${JSON.stringify(result.needsInput)}`)
+  assert.ok(cycleRe(...ids).test(e.claim.text), `the claim names ${ids.join(' -> ')}: ${e.claim.text}`)
+  assert.deepEqual(e.claim.cycle.map(String), ids.map(String))
+  assert.ok(!result.failed.some(x => x.task === String(task)), `Task ${task} is not ended blocked: ${JSON.stringify(result.failed)}`)
+}
 
-await test('tc117_redteam direct cycle: no edge, blocked naming 2 -> 5 -> 2, no conflict, no retry', async () => {
+await test('tc117_redteam direct cycle: no edge, a claim naming 2 -> 5 -> 2, no conflict, no retry', async () => {
   const deps = { 2: [], 5: ['2'] }
   const p = project({ deps, failUntil: { 2: 1 }, taskFailures: { 2: [failure(MESSAGES.plain, ['5'])] } })
   const { result } = await run(p, { ...baseArgs, ...graphArgs(deps), maxRetries: 1 })
   assert.deepEqual(result.liveEdges ?? [], [], 'the edge that would close the cycle is not added')
-  const f = result.failed.find(x => x.task === '2')
-  assert.ok(f && /^blocked/.test(f.reason) && cycleRe(2, 5, 2).test(f.reason), JSON.stringify(result.failed))
+  assertCycle(result, '2', 2, 5, 2)
+  assert.deepEqual(retryLabels(p.state.events), [], `no retry label: ${p.state.events.join(', ')}`)
   assert.deepEqual(result.testFixes ?? [], [])
   assert.ok(!result.merged.includes('2') && !result.merged.includes('5'))
 })
 
-await test('tc117_redteam text is ignored when the mark is set (curly, ANSI, wrapped, argparse messages): the cycle is still blocked', async () => {
+await test('tc117_redteam text is ignored when the mark is set (curly, ANSI, wrapped, argparse messages): the cycle is still a claim', async () => {
   for (const m of [MESSAGES.curly, MESSAGES.ansi, MESSAGES.wrapped, MESSAGES.argparse]) {
     const deps = { 2: [], 5: ['2'] }
     const p = project({ deps, failUntil: { 2: 1 }, taskFailures: { 2: [failure(m, ['5'])] } })
     const { result } = await run(p, { ...baseArgs, ...graphArgs(deps), maxRetries: 1 })
     assert.deepEqual(result.liveEdges ?? [], [], JSON.stringify(m))
-    assert.ok(result.failed.some(x => x.task === '2' && cycleRe(2, 5, 2).test(x.reason)), JSON.stringify(m))
+    assert.ok(cycleEntry(result, '2') && cycleRe(2, 5, 2).test(cycleEntry(result, '2').claim.text), JSON.stringify(m) + JSON.stringify(result.needsInput))
   }
 })
 
@@ -218,8 +228,7 @@ await test('tc117_redteam a longer cycle through three tasks is found: 2 -> 5 ->
   const p = project({ deps, failUntil: { 2: 1 }, taskFailures: { 2: [failure(MESSAGES.plain, ['5'])] } })
   const { result } = await run(p, { ...baseArgs, ...graphArgs(deps), maxRetries: 1 })
   assert.deepEqual(result.liveEdges ?? [], [])
-  const f = result.failed.find(x => x.task === '2')
-  assert.ok(f && cycleRe(2, 5, 4, 2).test(f.reason), JSON.stringify(result.failed))
+  assertCycle(result, '2', 2, 5, 4, 2)
   assert.deepEqual(result.testFixes ?? [], [])
 })
 
@@ -228,7 +237,7 @@ await test('tc117_redteam a four-task chain cycle is found', async () => {
   const p = project({ deps, failUntil: { 2: 1 }, taskFailures: { 2: [failure(MESSAGES.plain, ['5'])] } })
   const { result } = await run(p, { ...baseArgs, ...graphArgs(deps), maxRetries: 1 })
   assert.deepEqual(result.liveEdges ?? [], [])
-  assert.ok(result.failed.some(x => x.task === '2' && cycleRe(2, 5, 4, 3, 2).test(x.reason)), JSON.stringify(result.failed))
+  assertCycle(result, '2', 2, 5, 4, 3, 2)
 })
 
 await test('tc117_redteam a cycle formed only with a previously added live edge is refused, the earlier edge stays', async () => {
@@ -238,29 +247,28 @@ await test('tc117_redteam a cycle formed only with a previously added live edge 
     taskFailures: { 2: [failure(MESSAGES.plain, ['5'])], 5: [failure("Error: No such command 'thesis list'.", ['2'], 'mtr thesis list')] } })
   const { result } = await run(p, { ...baseArgs, ...graphArgs(deps), maxRetries: 1, maxConcurrent: 2, mergeBatch: 1 })
   assert.deepEqual(result.liveEdges.map(e => [e.task, e.dependsOn]), [['2', '5']], JSON.stringify(result.liveEdges))
-  const f = result.failed.find(x => x.task === '5')
-  assert.ok(f && /^blocked/.test(f.reason) && cycleRe(5, 2, 5).test(f.reason), JSON.stringify(result.failed))
+  assertCycle(result, '5', 5, 2, 5)
   assert.deepEqual(result.testFixes ?? [], [])
   assert.ok(!result.merged.includes('5'))
 })
 
 // 12.7 applies to the 2 -> 5 edge whatever happens to 2 -> 6: that edge is not added and Task 2 is reported blocked,
 // naming the cycle. Whether the safe 2 -> 6 edge is also recorded is left open by the design, so it is not asserted.
-await test('tc117_redteam one provider cycles and another does not: the cyclic edge is not added, the task is blocked naming 2 -> 5 -> 2', async () => {
+await test('tc117_redteam one provider cycles and another does not: the cyclic edge is not added, a claim names 2 -> 5 -> 2', async () => {
   const deps = { 2: [], 5: ['2'], 6: [] }
   const p = project({ deps, failUntil: { 2: 1 }, durations: { 2: 5, 6: 40 }, mergeDurations: { 6: 5 }, taskFailures: { 2: [failure(MESSAGES.plain, ['5', '6'])] } })
   const { result } = await run(p, { ...baseArgs, ...graphArgs(deps), maxRetries: 0, maxConcurrent: 3, mergeBatch: 1 })
   assert.ok(!(result.liveEdges ?? []).some(e => e.task === '2' && e.dependsOn === '5'), JSON.stringify(result.liveEdges))
-  const f = result.failed.find(x => x.task === '2')
-  assert.ok(f && /^blocked/.test(f.reason) && cycleRe(2, 5, 2).test(f.reason), JSON.stringify(result.failed))
-  assert.ok(!result.merged.includes('2'), 'a blocked task does not merge')
+  assertCycle(result, '2', 2, 5, 2)
+  assert.ok(!result.merged.includes('2'), 'a task waiting on a cycle claim does not merge')
   assertNoTestConflict(result, '2')
 })
 
-await test('tc117_redteam the blocked reason of a cycle is not a test conflict reason', async () => {
+await test('tc117_redteam a cycle is a command-cycle claim, not a test conflict', async () => {
   const deps = { 2: [], 5: ['2'] }
   const p = project({ deps, failUntil: { 2: 1 }, taskFailures: { 2: [failure(MESSAGES.plain, ['5'])] } })
   const { result } = await run(p, { ...baseArgs, ...graphArgs(deps), maxRetries: 1 })
-  assert.ok(result.failed.some(x => x.task === '2' && /^blocked: command cycle/.test(String(x.reason))), JSON.stringify(result.failed))
+  const e = cycleEntry(result, '2')
+  assert.ok(e && e.trigger === 'command-cycle' && e.kind !== 'test-fix', JSON.stringify(result.needsInput))
   assertNoTestConflict(result, '2')
 })
