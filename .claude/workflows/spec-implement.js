@@ -1596,6 +1596,9 @@ let lastGood = null       // { ready, deps, order } of the last consistent plan:
 let planRun = null          // the plan agent in flight, if any
 let queuedTrigger = null    // a trigger that arrived while one was in flight: one follow-up
 let idleArmed = true
+let idlePlans = 0           // idle plans asked for so far
+let landingsAwaitingPlan = 0  // landings whose merge is known and whose landing plan is not yet asked for
+const slotFreedAt = new Map()  // task -> idlePlans when it last gave its slot up
 let recordSeq = 0           // failed task records seen so far: a landing plan disarms the idle plan only if none arrived while it ran (an ok record waits for its landing, so it changes nothing)
 let deferring = false
 const excluded = () => new Set([...running.keys(), ...failed.keys(), ...parked.keys(), ...mergedInRun, ...crossHeld, ...crossPendingHeld(), ...stillWaitingLive()])
@@ -1759,6 +1762,7 @@ function requestPlan(trigger) {
   if (d === 'coalesce') { queuedTrigger = queuedTrigger || trigger; return planRun }
   if (trigger === 'idle') {
     idleArmed = false
+    idlePlans++
     log(`plan ${refills + 1} (idle): nothing ready, ${ctx.open} task(s) open; re-reading the plan`)
   }
   // Task 70 (12.11): starts wait for the plan a landing asked for, so a verify-scope finding it reads holds its task first.
@@ -1780,6 +1784,7 @@ function requestPlan(trigger) {
 // first, before the scheduler can start a new task in it.
 function releaseSlot(n) {
   if (!working.delete(n)) return
+  slotFreedAt.set(n, idlePlans)
   const w = slotWaiters.shift()
   if (w) { working.add(w.n); w.resolve() }
   requestPlan('freed')
@@ -1825,7 +1830,9 @@ function finishTask(n, rec) {
   running.delete(n)
   records[n] = rec
   maybeCrossTest(n)
-  if (!rec.ok) { idleArmed = true; recordSeq++ }  // only a failure can change what is ready before its landing; a merged task was already followed by its landing plan; a failed one may change what is ready
+  // A task that gave its slot up before it settled (an arbiter ruling, a park) and saw an idle plan since, leaves the
+  // idle plan disarmed: that plan already re-read tasks.md after its last attempt (3.3, P-8).
+  if (!rec.ok) { if (slotFreedAt.get(n) === idlePlans) idleArmed = true; recordSeq++ }  // only a failure can change what is ready before its landing; a merged task was already followed by its landing plan; a failed one may change what is ready
   if (!rec.ok && rec.needsInput) {
     parked.set(n, rec.needsInput)  // listed apart from failed; never triggers onFailure: halt
     log(`Task ${n}: needs input (${rec.needsInput.action}); independent tasks continue, its dependents wait`)
@@ -1885,7 +1892,9 @@ function schedule() {
       log(d.waiting > 0 ? `finish-first: holding new task starts while ${d.waiting} review/revise/land agent(s) wait for a slot` : `finish-first: holding new task starts while all ${AGENT_SLOTS} runtime slots are busy`)
     }
   } else deferring = false
-  if (SCRIPT_READINESS && !stopLaunching && !planRun) requestPlan('idle')
+  // A landing between its merge and its landing plan (its full gate runs meanwhile) re-reads the plan itself: no idle plan
+  // runs ahead of it, so the landing plan is never coalesced behind one (3.1, P-8).
+  if (SCRIPT_READINESS && !stopLaunching && !planRun && !landingsAwaitingPlan) requestPlan('idle')
 }
 
 // Task 70 (12.6, 8.9, D33): one verify-scope problem (a lint claim listing every test task it covers) settled by the
@@ -2083,6 +2092,7 @@ async function landBatch(batch) {
     else entry.other.push(b.n)
     outcomes.push([b, t])
   }
+  if (outcomes.length) landingsAwaitingPlan++  // until its landing plan is asked for, no idle plan runs (3.1)
   landQueue.unshift(...deferred)  // they land in the next batch
   // Zuul-style window: halve after a red batch, grow by one after a green one.
   batchWindow = entry.red.length || entry.bisected ? Math.max(1, Math.floor(batchWindow / 2)) : Math.min(MERGE_BATCH, batchWindow + 1)
@@ -2091,17 +2101,23 @@ async function landBatch(batch) {
 
   // A landing the gate could not reproduce red (the `unreproduced` key) gets the full gate at once, in place of a
   // periodic gate due on the same step.
-  if (res && res.unreproduced) {
-    entry.unreproduced = true
-    log(`Landing ${tasks.join(' ')}: unreproduced, the batch was red once and green on its halves; running the full gate`)
-    await fullGateAndFix('unreproduced', `full gate @${mergedCount} (unreproduced landing)`, phaseOf(tasks[0]))
-  } else if (entry.merged.length && FULL_EVERY > 0 && Math.floor(mergedCount / FULL_EVERY) > Math.floor(before / FULL_EVERY)) {
-    await fullGateAndFix('periodic', `full gate @${mergedCount}`, phaseOf(tasks[0]))
+  try {
+    if (res && res.unreproduced) {
+      entry.unreproduced = true
+      log(`Landing ${tasks.join(' ')}: unreproduced, the batch was red once and green on its halves; running the full gate`)
+      await fullGateAndFix('unreproduced', `full gate @${mergedCount} (unreproduced landing)`, phaseOf(tasks[0]))
+    } else if (entry.merged.length && FULL_EVERY > 0 && Math.floor(mergedCount / FULL_EVERY) > Math.floor(before / FULL_EVERY)) {
+      await fullGateAndFix('periodic', `full gate @${mergedCount}`, phaseOf(tasks[0]))
+    }
+  } catch (e) {
+    if (outcomes.length) landingsAwaitingPlan--
+    throw e
   }
   for (const [b, t] of outcomes) {
     if (t.state === 'MERGED') { mergedInRun.add(b.n); view.done.add(b.n) }  // Done for the scheduler at once; the plan below confirms it
   }
   if (outcomes.length) {
+    landingsAwaitingPlan--
     idleArmed = true
     requestPlan('landing')
     poke()
@@ -2777,13 +2793,20 @@ The verifying test tasks: ${(verifiedBy || []).map(t => `Task ${t}`).join(', ') 
 The selected tests (the tests this task's gate selects${selected ? '' : '; the list could not be read, so read the test files of the verifying test tasks'}): ${JSON.stringify(selected || [])}
 Read specs/${SPEC}/requirements.md, specs/${SPEC}/design.md, specs/${SPEC}/test-plan.md and specs/${SPEC}/tasks.md, then each selected test file. Report a problem for each selected test that asserts something the spec does not require, needs behaviour a later task adds, or can never pass with code that meets the spec: "file", "test", "criterion" (the requirement number), "reason" and "needs". Report no problem for a test that fits the spec. Return "problems" (an empty list when none) and a short "summary".`
 
-async function auditFirst(n, rec) {
+// The test tasks whose audit Task n's first attempt waits for, or null when no audit is due (13.1, 13.7). Synchronous,
+// so a task with no audit due sends its first attempt in the same turn it starts (3.9: nothing slips in between).
+function auditDueFor(n) {
   const verifiedSrc = current ? current.verifiedBy : A.verifiedBy   // the args' map until the first plan, the current plan's after
   const listed = verifiedSrc && typeof verifiedSrc === 'object' ? (verifiedSrc[n] ?? verifiedSrc[String(n)] ?? null) : null
   // Only a test-track task of this spec verifies the task: a Verified by that names no task of the spec is no audit (13.7).
   const verifiedBy = Array.isArray(listed) ? listed.map(String).filter(t => TRACKS[t] === 'test') : []
   const crossPassed = crossPassedOf({ checks: crossTests, testVerifies: current && current.testVerifies })
-  if (!auditDue({ task: n, track: TRACKS[n] === 'test' ? 'test' : 'impl', verifiedBy, audited: auditedTasks, crossPassed })) return { exit: null, note: '' }
+  return auditDue({ task: n, track: TRACKS[n] === 'test' ? 'test' : 'impl', verifiedBy, audited: auditedTasks, crossPassed }) ? verifiedBy : null
+}
+
+async function auditFirst(n, rec) {
+  const verifiedBy = auditDueFor(n)
+  if (!verifiedBy) return { exit: null, note: '' }
   auditedTasks.add(String(n))
   const phase = phaseOf(n)
   const missed = why => {
@@ -2884,10 +2907,12 @@ async function runTask(n) {
   }
   try {
     // Task 74 (13.1): the reading audit runs before the first attempt; the rulings on its problems ride in that attempt's prompt.
-    const firstAudit = await auditFirst(n, rec)
+    // With no audit due, nothing is awaited before the first attempt: its request goes out in the turn the task starts,
+    // so no plan or other agent takes the slot in between (3.9, P6, P23).
+    const firstAudit = auditDueFor(n) ? await auditFirst(n, rec) : { exit: null, note: '' }
     if (firstAudit.exit) return firstAudit.exit
     // The audit's arbiter and hand-off calls gave the slot up (releaseSlot): the first attempt takes it back before it runs (a no-op when still held).
-    await acquireSlot(n)
+    if (!working.has(n)) await acquireSlot(n)
     let r = await call('task', `${taskPrompt(n, claimFlags('task-start', codeOpts(n), 1))}${firstAudit.note}`, { label: label(n), phase: phaseOf(n), schema: RESULT, ...codeOpts(n) })
     let lastModel = codeOpts(n).model
     let stop = guardStopOf(r)   // set after every call; a guard stop leaves the retry and escalate loops at once and goes to the arbiter (6.2)

@@ -9,7 +9,7 @@
     ".claude/commands/spec/spawn-worktree.md": "d8f39038c12c680b",
     ".claude/output-styles/spec-driven.md": "33e67716471353f0",
     ".claude/workflows/spec-create.js": "a01a7fc7243450ee",
-    ".claude/workflows/spec-implement.js": "5afe4579dd231523",
+    ".claude/workflows/spec-implement.js": "ca345833c86b9e17",
     ".claude/workflows/spec-implement-brief.md": "4ff95111b3b3e5cf",
     ".claude/workflows/without-workflow-tool.md": "c952cbd1c7a2d750",
     ".claude/agents/ck-runner.md": "4fcda351ff967756"
