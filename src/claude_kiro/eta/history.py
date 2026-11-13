@@ -32,6 +32,7 @@ CREATE_PHASES = (
     "Task Tracks",
     "Link",
     "Adversarial Review",
+    "Arbiter",
     "Revise",
     "Consistency Check",
 )
