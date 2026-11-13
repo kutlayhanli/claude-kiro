@@ -1804,7 +1804,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 76: Pass the new arguments and report rulings in /spec:implement
-**Status:** Not Started
+**Status:** Done
 **Track:** impl
 **Requirements:** 10.7, 12.5, 12.6, 1.1, 6.12, 12.12, 13.1
 **Description:** In `plugin/skills/implement/SKILL.md` and `plugin/resources/without-workflow-tool.md`, a single-task run and the no-Workflow path run the read-only audit (the `spec:auditor` agent, or `ck-auditor` when vendored) before the first attempt, and an audit problem is a needs-input entry (13.1, 6.12). In `plugin/skills/implement/SKILL.md`, after the merge target is chosen, run `ck -C <targetDir> principles init --commit --json` and tell me when it created the file; pass `arbiterAgent`, `auditorAgent`, `verifiedBy` and `agents.arbiter`; a `verify-scope` finding launches the workflow on a whole-spec run, and refuses a single-task run whose task it names, quoting the finding as a `verify-file` entry does; report rulings and proposed cuts. In `plugin/resources/spec-implement-brief.md` and `plugin/resources/without-workflow-tool.md`, say a guard stop or test conflict now goes to the arbiter, and that a single-task run and the manual path give claims to me as needs-input entries with no guard ladder and no confirmation agent, since they have no `ck arbiter` loop; a manual launch with a `verify-scope` finding stops and shows me the findings. Use we/you/me framing.
@@ -1816,10 +1816,10 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verified by:** Task 75 (the implement skill text)
 
 **Acceptance:**
-- [ ] The skill passes all four new args
-- [ ] A whole-spec run launches through a `verify-scope` finding and a single-task run refuses when the finding names its task
-- [ ] The report lists this run's rulings and proposed cuts
-- [ ] A single-task run and the no-Workflow path run the read-only audit before the first attempt, and an audit problem there is a needs-input entry
+- [x] The skill passes all four new args
+- [x] A whole-spec run launches through a `verify-scope` finding and a single-task run refuses when the finding names its task
+- [x] The report lists this run's rulings and proposed cuts
+- [x] A single-task run and the no-Workflow path run the read-only audit before the first attempt, and an audit problem there is a needs-input entry
 
 **Dependencies:** Task 5 (reads the arbiter role settings), Task 70 (passes the args and reports the results that workflow uses), Task 75 (its tests are the oracle)
 **Complexity:** Low
@@ -2080,7 +2080,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 88: Extend the plugin tests to the arbiter and auditor agents
-**Status:** Not Started
+**Status:** Done
 **Track:** test
 **Requirements:** 6.8, 13.4
 **Description:** In `tests/test_plugin.py`, add `arbiter` and `auditor` to `AGENTS` (`"arbiter": "arbiter"`, `"auditor": "reviewer"`), so the existing checks cover the two new agent files, their generated `ck-` copies, and the guide. Adding them also makes the guide assertion require `spec:arbiter` and `spec:auditor` in `plugin/resources/without-workflow-tool.md`, which Task 76 writes, so this suite verifies Task 76 as well as Task 6. Its Verify leaves out only the dogfood and vendored-copy tests, which need Task 92's protected `.claude/` copies.
@@ -2090,11 +2090,11 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 **Verifies:** none: it runs after Tasks 6 and 76 (its `AGENTS` entries fail until their files exist, and `tests/test_plugin.py` is an existing suite that must stay green), and checks their files once they have landed
 
 **Acceptance:**
-- [ ] `AGENTS` holds both new agents with their roles
-- [ ] No assertion is loosened: the dogfood and vendored-copy tests still run on the full suite
-- [ ] Tests exercise the real boundary named in the test plan (the shipped plugin files)
-- [ ] Tests fail before the implementation exists for the right reason (the agent files do not exist)
-- [ ] No mocks of the project's own code in integration tests
+- [x] `AGENTS` holds both new agents with their roles
+- [x] No assertion is loosened: the dogfood and vendored-copy tests still run on the full suite
+- [x] Tests exercise the real boundary named in the test plan (the shipped plugin files)
+- [x] Tests fail before the implementation exists for the right reason (the agent files do not exist)
+- [x] No mocks of the project's own code in integration tests
 
 **Dependencies:** Task 6 (creates the agent files the new `AGENTS` entries read), Task 76 (adds `spec:arbiter` and `spec:auditor` to the guide)
 **Complexity:** Low
