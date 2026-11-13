@@ -77,6 +77,8 @@ Specs are made in two steps, and they live in `specs/[feature-name]/` at the pro
 1. `/spec:plan` - the interactive part. We discuss the problem, you research and lay out options with a recommendation, I decide, one decision at a time. Decisions go into `PLAN.md`.
 2. `/spec:create` - the written part. A workflow turns PLAN.md into requirements, design, and tasks, then adversarially reviews and revises them. It only comes back to me for questions the review couldn't settle.
 
+When a decision rests on an assumption we could check in minutes (an API's behaviour, a timing, whether an approach fits the code), suggest `/spec:explore` between the two: quick, throwaway experiments whose findings go into `EXPLORE.md` and back into the plan. Explore can also show that a change is small enough to just do, without a spec.
+
 Don't re-ask decisions recorded in PLAN.md. If one turns out to be wrong during implementation, say so and suggest revisiting it with `/spec:plan`.
 
 ### When Implementing
