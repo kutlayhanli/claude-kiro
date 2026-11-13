@@ -1661,7 +1661,7 @@ Create `tests/fixtures/hook_inputs/arbiter-agent-pretooluse.json`. `tests/fixtur
 ---
 
 ### Task 70: Block a launch on Verify-scope findings and let the arbiter fix them
-**Status:** Not Started
+**Status:** In Progress
 **Track:** impl
 **Requirements:** 3.7, 8.9, 12.5, 12.6, 12.7, 12.11
 **Description:** In `plugin/workflows/spec-implement.js`, `applyPlanView` gains `verifyScope` and `verifiedBy` keys, read from `ck plan`'s `out.json` (there is no `PLAN` schema: plans come through `thinCk`'s `CK_CALL` envelope), with a missing key read as `[]` or `{}` and a wrong-typed one treated as a failed plan call. Add `scopeClaims` to the decisions block. At workflow start, if the plan has `verifyScope` findings, group them with `scopeClaims` and send each group through `settleClaims` (`next` `replan`) as one `lint` claim listing every test task it covers, one at a time. A `test_repair` ruling goes to the test-fixer like any other (D33). After each landed fix, spec edit or test fix, re-plan and drop findings that have gone before the next ruling. Any remaining finding refuses the launch, with `verifyScope` and `proposals` in the result. Cycles refuse as today. A justification finding alone never refuses. Extend `applyLint` so that, on a non-start plan, a `verifyScope` finding for a task not yet started goes to `settleClaims` (`next` `replan`) as a `lint` claim, grouped the same way, and holds that task until the claim settles; `claim_key` and the ledger rule it once, and `lintClaimed` keeps a later plan from reopening a key this run already sent.
