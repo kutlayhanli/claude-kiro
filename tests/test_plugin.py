@@ -17,7 +17,7 @@ from claude_kiro.cli.runner import HOOK_SETTINGS
 
 REPO = Path(__file__).resolve().parents[1]
 PLUGIN = REPO / "plugin"
-SKILLS = ["plan", "create", "implement", "review", "spawn-worktree"]
+SKILLS = ["plan", "explore", "create", "implement", "review", "spawn-worktree"]
 AGENTS = {"implementer": "implementer", "test-writer": "test_writer", "fixer": "fixer", "resolver": "resolver", "reviewer": "reviewer"}
 WORKFLOWS = ["spec-create", "spec-implement"]
 
