@@ -1831,7 +1831,7 @@ async function settleScopeClaim(g) {
   if (out.exit) return { exit: out.exit }
   if (out.route === 'spec_edit') return { route: 'spec_edit', ruling: out.ruling, changed: out.ruling && typeof out.ruling === 'object' ? String(out.ruling.changed || '') : '' }
   if (out.route === 'test_repair') {
-    const h = await handOffTestRepair(g.task, rec, [out])
+    const h = await handOffTestRepair(g.task, rec, [out], { onIntegration: true })
     const reasons = [...h.fixed.toMe, ...h.fixed.findings.map(f => `the test-fixer found the test correct, so it is not changed: ${trim(String(f.message || f.issue || ''), 300)}`)]
     if (!reasons.length) return { route: 'test_repair', ruling: out.ruling, changed: '' }
     const t = (out.ruling && out.ruling.testRepair) || {}
@@ -2206,7 +2206,7 @@ const proofRefusal = pf => {
 const reviewApproved = rv => !!rv && rv.verdict === 'approve' && !(rv.findings || []).some(f => f && f.severity === 'blocking')
 
 // One test-fixer for one file group. `blocked` is the task the tests block (null for a cross-test fix, which holds `held`).
-async function runTestFix({ k, blocked, held = [], source = 'conflict', conflicts }) {
+async function runTestFix({ k, blocked, held = [], source = 'conflict', conflicts, onIntegration = false }) {
   const fix = `testfix${k}`
   const entries = conflicts.map(conflictEntry)
   const nodes = conflicts.map(conflictNode)
@@ -2238,7 +2238,8 @@ async function runTestFix({ k, blocked, held = [], source = 'conflict', conflict
   if (Array.isArray(fx.changedTests)) rec.changedTests = fx.changedTests.map(String)
   if (fx.verdict !== 'fixed') return toMe(`the test-fixer cannot fix it: ${trim(fx.summary, 400)}`)
   if (fx.finding && typeof fx.finding === 'object') return toMe(`the test-fixer's report contradicts itself (verdict fixed with a finding about the code): ${trim(fx.finding, 300)}`)
-  const proveArgv = ['-C', ROOT, 'testfix', 'prove', SPEC, fix, ...(blocked != null ? ['--blocked', String(blocked)] : held.flatMap(h => ['--held', String(h)])), ...nodes.flatMap(x => ['--test', x]), '--into', INTO, '--json']
+  // Task 70: a task that has not started has no branch, so its fix is proved on the integration branch (--held).
+  const proveArgv = ['-C', ROOT, 'testfix', 'prove', SPEC, fix, ...(blocked != null && !onIntegration ? ['--blocked', String(blocked)] : (blocked != null ? [String(blocked)] : held).flatMap(h => ['--held', String(h)])), ...nodes.flatMap(x => ['--test', x]), '--into', INTO, '--json']
   const pv = await thinCk('testfix prove', proveArgv, { label: `testfix prove ${k}`, phase, cwd: ROOT, what: `Proof step for test fix ${fix} of spec ${SPEC}: it checks the fix's scope, then that the tests pass with it` })
   if (!pv.json) { await record('to-me'); return toMe(`ck testfix prove gave no result: ${ckError(pv)}`) }
   rec.scope = pv.json.scope ?? null
@@ -2282,7 +2283,7 @@ async function runTestFix({ k, blocked, held = [], source = 'conflict', conflict
 
 // A blocked task's confirmed conflicts: plan, run one test-fixer per file, record each outcome.
 // Returns {records, fixed: [node], findings: [Failure], toMe: [reason]}.
-async function testFixFor(n, conflicts, { held = [] } = {}) {
+async function testFixFor(n, conflicts, { held = [], onIntegration = false } = {}) {
   const src = n == null ? 'cross-test' : 'conflict'
   const nodes = [...new Set(conflicts.map(conflictNode))]
   const led = await thinCk('testfix ledger', ['-C', ROOT, 'testfix', 'check', SPEC, ...nodes.flatMap(x => ['--test', x]), '--json'], { label: `testfix ledger ${++ledgerSeq}`, phase: n != null ? phaseOf(n) : 'Test fix', cwd: ROOT, what: `Ledger check for the test fixes of spec ${SPEC}` })
@@ -2305,7 +2306,7 @@ async function testFixFor(n, conflicts, { held = [] } = {}) {
   for (const g of plan.groups) {
     const k = ++testFixSeq
     log(`${n != null ? `Task ${n}` : 'Cross-test'}: test-fixer ${k} for ${g.file} (${g.conflicts.length} test(s))`)
-    const rec = await runTestFix({ k, blocked: n, held, source: src, conflicts: g.conflicts })
+    const rec = await runTestFix({ k, blocked: n, held, source: src, conflicts: g.conflicts, onIntegration })
     out.records.push(rec)
     if (rec.outcome === 'landed') out.fixed.push(...rec.tests)
     else if (rec.outcome === 'test-correct') out.findings.push({ ...rec.finding, kind: 'assertion', message: rec.reason, tasks: n != null ? [String(n)] : held.map(String), command: null, node: rec.tests[0], file: rec.finding.file || g.file })
@@ -2658,7 +2659,7 @@ async function arbitrate(n, rec, r, claim) {
 // Task 66 (8.9, 8.10, D18): the single point a test-repair ruling goes through, called once, from `settleClaims`. The
 // rulings are gathered `{claim, ruling}` outcomes; each becomes a conflict entry carrying the ruling unchanged, and the
 // ruling is the confirmation the test-fixer starts on, so no second agent confirms. Returns { entries, fixed }.
-async function handOffTestRepair(n, rec, rulings) {
+async function handOffTestRepair(n, rec, rulings, opts = {}) {
   releaseSlot(n)
   const entries = testRepairEntries(rulings)
   if (!entries.length) {
@@ -2667,7 +2668,7 @@ async function handOffTestRepair(n, rec, rulings) {
   }
   rec.testConflict = { ...entries[0] }
   rec.reason = `blocked: test (${entries[0].file}${entries[0].test ? ` ${entries[0].test}` : ''}): ${entries[0].reason || 'a ruled test repair'}`
-  return { entries, fixed: await testFixFor(n, entries) }
+  return { entries, fixed: await testFixFor(n, entries, opts) }
 }
 
 async function runTask(n) {
