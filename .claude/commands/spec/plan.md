@@ -1,7 +1,7 @@
 ---
 description: Discuss and decide what to build, interactively, and record the decisions in PLAN.md
 argument-hint: [feature-description]
-allowed-tools: Read, Write, Edit, Grep, Glob, WebSearch, WebFetch, AskUserQuestion, Agent, Bash(ck agents check:*)
+allowed-tools: Read, Write, Edit, Grep, Glob, WebSearch, WebFetch, AskUserQuestion, Agent, Bash(ck agents check:*), Bash(ck principles init:*), Bash(ck principles check:*)
 ---
 
 Plan feature: $ARGUMENTS
@@ -40,6 +40,10 @@ This is where we decide what to build. You and I talk it through: you bring rese
    - Grep/Glob for code this feature would touch. Note the 3-6 most relevant files.
 3. Play the problem back to me in 3-5 lines: what you think I want, who it is for, what it touches in the codebase.
 4. Ask me the questions whose answers change the shape of the work (use AskUserQuestion, up to 4 per call): goal and success signal, scope boundaries, hard constraints (deadline, compatibility, dependencies we can't add), and whether this evolves an existing spec.
+5. Run `ck principles init` before any decision is recorded, and tell me whether it created `specs/PRINCIPLES.md` or found the file already there.
+6. Ask me directly for tie-breakers: which value wins when two of our goals conflict (for example speed over safety), so you can apply them without asking again.
+7. Ask me directly whether any project default should be overridden for this plan. Ask for the reason before recording an override, and record it as `**Reason:** <text>`, the only form the principles check reads.
+8. Ask me directly what may change without asking me first, so you know which calls are yours to make.
 
 Do not research yet. A wrong frame wastes the research.
 
@@ -72,8 +76,10 @@ Keep going until there are no open decisions that would change the requirements.
 
 1. Summarize the plan back to me in under 15 lines: what we're building, the key decisions, what's out of scope, the main risks.
 2. Ask whether anything is missing or wrong. Apply changes.
-3. Set Status to `Decided` and update the date.
-4. Tell me: "Plan decided. Run `/spec:create [feature-name]` to write the spec. It runs as a workflow and ends with an adversarial review."
+3. For each **In** item, ask me what breaks without it, and record the answer as a `*Without it:*` note under that item in PLAN.md. If nothing concrete breaks without an item, offer to cut it. Remove it only if I accept the cut; if I decline, keep it.
+4. Run `ck principles check [feature-name] --json`. Status can become Decided only once it passes, which needs a non-empty `## Principles`. If the plan has nothing to add, say so in that section: `**Nothing to add:** the project defaults apply.`
+5. Set Status to `Decided` and update the date only after `ck principles check` passes on `## Principles`.
+6. Tell me: "Plan decided. Run `/spec:create [feature-name]` to write the spec. It runs as a workflow and ends with an adversarial review."
 
 ---
 
@@ -92,12 +98,18 @@ What we're solving, for whom, and how we'll know it worked.
 ## Scope
 **In:**
 - ...
+  *Without it:* what breaks if this item is cut
 
 **Out:**
 - ...
 
 ## Constraints
 Hard limits: compatibility, dependencies, performance budgets, deadlines.
+
+## Principles
+Project defaults (`specs/PRINCIPLES.md`) apply unless overridden here.
+- **Nothing to add:** the project defaults apply.
+- **Overrides <slug>:** <what changes>. **Reason:** <text>
 
 ## Decisions
 
