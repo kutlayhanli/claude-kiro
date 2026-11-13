@@ -50,7 +50,10 @@ def audit_calls(out: dict, n: str | None = None) -> list:
     for entry in out["optsList"]:
         label = entry["label"]
         opts = entry["opts"] or {}
-        if label.startswith(want) or opts.get("agentType") in AUDITOR_TYPES:
+        typed = opts.get("agentType") in AUDITOR_TYPES
+        if n is not None:
+            typed = typed and re.search(rf"\b{n}\b", label) is not None
+        if label.startswith(want) or typed:
             found.append(entry)
     return found
 
