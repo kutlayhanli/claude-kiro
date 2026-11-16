@@ -362,10 +362,13 @@ def _get_salt() -> bytes:
 
 
 def _new_cell() -> dict:
-    return {"usd": None, "input": None, "output": None, "cacheRead": None, "cacheCreation": None, "agents": 0, "ms": None}
+    return {"usd": None, "input": None, "output": None, "cacheRead": None, "cacheCreation": None, "agents": 0, "ms": None,
+            "requests": None, "longRequests": None, "peakPrompt": None, "longUsd": None}
 
 
-def _add(cell: dict, usd: Optional[float], usage: Optional[Mapping[str, int]], ms: Optional[int], count: int = 1) -> None:
+def _add(cell: dict, usd: Optional[float], usage: Optional[Mapping[str, int]], ms: Optional[int], count: int = 1,
+         prompts: Optional[Mapping[str, int]] = None, long_usd: Optional[float] = None) -> None:
+    """PROMPTS is a bench.PROMPT_KEYS dict; LONG_USD the cost of the requests over bench.LONG_PROMPT_TOKENS."""
     cell["agents"] += count
     if usd is not None:
         cell["usd"] = (cell["usd"] or 0.0) + usd
@@ -374,6 +377,26 @@ def _add(cell: dict, usd: Optional[float], usage: Optional[Mapping[str, int]], m
             cell[k] = (cell[k] or 0) + usage.get(k, 0)
     if ms is not None:
         cell["ms"] = (cell["ms"] or 0) + ms
+    if prompts is not None:
+        acc = {k: cell.get(k) or 0 for k in bench.PROMPT_KEYS}
+        bench.merge_prompts(acc, dict(prompts))
+        cell.update(acc)
+    if long_usd is not None:
+        cell["longUsd"] = (cell.get("longUsd") or 0.0) + long_usd
+
+
+def _long_usd(usage_by_model: Mapping[str, Mapping[str, int]], pricing: dict) -> Optional[float]:
+    """Cost of the requests over bench.LONG_PROMPT_TOKENS; 0.0 when there were none, None when unpriceable."""
+    total = 0.0
+    for m, u in usage_by_model.items():
+        part = bench.long_part(dict(u))
+        if part is None:
+            continue
+        usd = bench.price_usage(m, part, pricing)
+        if usd is None:
+            return None
+        total += usd
+    return total
 
 
 # ---------------------------------------------------------------- agents
@@ -514,7 +537,7 @@ def _build_agent(a: _Agent, workflow_name: str, pricing: dict, missing: List[dic
     usage_by_model: Dict[str, Dict[str, int]] = scan["usage_by_model"] if scan else {}
     dominant = None
     if usage_by_model:
-        dominant = max(usage_by_model, key=lambda m: (sum(usage_by_model[m].values()), m))
+        dominant = max(usage_by_model, key=lambda m: (bench.usage_tokens(usage_by_model[m]), m))
     hint = meta.get("model") if isinstance(meta.get("model"), str) else None
     raw_model = a.model_hint if isinstance(a.model_hint, str) and a.model_hint else hint
     model = bench.normalize_model(raw_model) if raw_model else dominant
@@ -527,12 +550,18 @@ def _build_agent(a: _Agent, workflow_name: str, pricing: dict, missing: List[dic
     usage: Optional[Dict[str, int]] = None
     usd: Optional[float] = None
     estimate: Optional[float] = None
+    prompts: Optional[Dict[str, int]] = None
+    long_usd: Optional[float] = None
     if scan:
         usage = dict.fromkeys(_USAGE_KEYS, 0)
         for u in usage_by_model.values():
             for k in _USAGE_KEYS:
                 usage[k] += u[k]
         usd = bench._price_by_model(usage_by_model, pricing)
+        prompts = dict.fromkeys(bench.PROMPT_KEYS, 0)
+        for p in (scan.get("prompts_by_model") or {}).values():
+            bench.merge_prompts(prompts, p)
+        long_usd = _long_usd(usage_by_model, pricing)
     elif a.tokens is not None and a.tokens >= 0 and model:
         estimate = bench.price_usage(model, {"input": a.tokens}, pricing)
 
@@ -546,14 +575,18 @@ def _build_agent(a: _Agent, workflow_name: str, pricing: dict, missing: List[dic
         "requestedEffort": None, "resolvedEffort": None, "variant": None,
         "transcript": status,
         "queuedAtMs": a.queued_ms, "queueMs": queue_ms(a.queued_ms, a.started_ms),
+        "requests": prompts["requests"] if prompts else None,
+        "longRequests": prompts["longRequests"] if prompts else None,
+        "peakPrompt": prompts["peakPrompt"] if prompts else None,
+        "longUsd": long_usd,
     }
     if status == "truncated":
         # a cut file cannot show that a figure is really 0: report it as unknown
-        for k in ("usd", "input", "output", "cacheRead", "cacheCreation"):
+        for k in ("usd", "input", "output", "cacheRead", "cacheCreation", "longRequests", "longUsd"):
             if row[k] == 0:
                 row[k] = None
     info = {"scan": scan, "usage_by_model": usage_by_model, "usage": usage, "match": match,
-            "first_ts": first_ts, "last_ts": last_ts, "terms": terms}
+            "first_ts": first_ts, "last_ts": last_ts, "terms": terms, "prompts": prompts}
     return row, info
 
 
@@ -565,16 +598,19 @@ def _aggregate(rows: List[dict], infos: List[dict], pricing: dict) -> Dict[str, 
     for row, info in zip(rows, infos):
         contribution = row["usd"] if row["usd"] is not None else row["usdEstimate"]
         ubm = info["usage_by_model"]
+        scan_prompts = (info.get("scan") or {}).get("prompts_by_model") or {}
         if ubm:
             target = row["model"] if row["model"] in ubm else next(iter(ubm))
             for m, u in ubm.items():
-                _add(by_model.setdefault(m, _new_cell()), bench.price_usage(m, u, pricing), u, row["ms"] if m == target else None)
+                _add(by_model.setdefault(m, _new_cell()), bench.price_usage(m, u, pricing), u, row["ms"] if m == target else None,
+                     prompts=scan_prompts.get(m), long_usd=_long_usd({m: u}, pricing))
         else:
             _add(by_model.setdefault(row["model"] or "unknown", _new_cell()), contribution, None, row["ms"])
         for table, key in ((by_role, row["role"]), (by_phase, row["phase"]), (by_task, row["task"])):
             if key is None:
                 continue
-            _add(table.setdefault(key, _new_cell()), contribution, info["usage"], row["ms"])
+            _add(table.setdefault(key, _new_cell()), contribution, info["usage"], row["ms"],
+                 prompts=info.get("prompts"), long_usd=row.get("longUsd"))
     return {"byModel": by_model, "byRole": by_role, "byPhase": by_phase, "byTask": by_task}
 
 

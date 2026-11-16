@@ -68,8 +68,9 @@ def home(tmp_path, monkeypatch):
 def test_session_spend_takes_claude_codes_own_total_and_prices_every_transcript(home):
     s = b.session_spend(home, SID)
     assert s["claude_usd"] == 12.25 and s["budget_usd"] == 40  # the highest running total seen
-    # sonnet 1M output = $10, haiku 10M cache reads = $0.10, opus 100k output = $2
-    assert s["priced_usd"] == pytest.approx(12.10)
+    # sonnet 1M output = $10, opus 100k output = $2, haiku 10M cache reads = $0.50: one 10M-token
+    # prompt is over Haiku's 100K tier, so its cache reads cost $0.05/M, not $0.01/M
+    assert s["priced_usd"] == pytest.approx(12.50)
     assert s["transcripts"] == 3
     assert s["by_model"]["claude-haiku-5-5"]["cacheRead"] == 10_000_000
     assert s["workflow_tokens"] == 100_000 and s["workflow_transcript_tokens"] == 10_100_000
@@ -78,7 +79,7 @@ def test_session_spend_takes_claude_codes_own_total_and_prices_every_transcript(
 
 def test_run_spend_counts_only_that_runs_agents(home):
     s = b.session_spend(home, SID, run_id=RUN)
-    assert s["transcripts"] == 2 and s["priced_usd"] == pytest.approx(2.10)
+    assert s["transcripts"] == 2 and s["priced_usd"] == pytest.approx(2.50)  # opus $2 + long-tier haiku $0.50
 
 
 def test_a_run_id_alone_finds_its_session(home):
@@ -96,9 +97,9 @@ def test_ck_cost_reports_real_spend_and_the_undercount(home, tmp_path):
     out = ck(tmp_path, "cost", "--session", SID)
     assert out.exit_code == 0, out.output
     # the workflow's agents used 10.1M tokens by their transcripts; its progress counted 100k
-    assert "$12.25" in out.output and "$12.10" in out.output and "101x" in out.output
+    assert "$12.25" in out.output and "$12.50" in out.output and "101x" in out.output
     data = json.loads(ck(tmp_path, "cost", "--run", RUN, "--json").output)
-    assert data["session_id"] == SID and data["run_id"] == RUN and data["priced_usd"] == pytest.approx(2.10)
+    assert data["session_id"] == SID and data["run_id"] == RUN and data["priced_usd"] == pytest.approx(2.50)
 
 
 def test_ck_cost_without_transcripts_says_so(home, tmp_path):

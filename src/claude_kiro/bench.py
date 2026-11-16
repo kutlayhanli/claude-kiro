@@ -41,6 +41,10 @@ SCHEMA = "ck-bench-result/1"
 # List prices in USD per 1M tokens, dated 2026-10. Override per family with
 # "pricing" in the bench config, e.g. {"opus": {"input": 5, "output": 25}}.
 # Cache writes (5-minute TTL) cost 1.25x input unless "cacheCreation" is set.
+# A family with a "long" entry charges those rates for every request whose prompt
+# (input + cache reads + cache writes) exceeds LONG_PROMPT_TOKENS: the whole request,
+# output included, moves to the long rates. Claude Haiku 5.5 is $0.10/$0.50 up to 100K
+# prompt tokens and $0.50/$2.50 beyond.
 PRICING_DATE = "2026-10"  # Claude families; OpenCode rates carry the snapshot date (model_catalog)
 # OpenCode refs are exact `provider/model` keys (not families): "opencode" is also a provider
 # prefix of paid refs, so substring matching would price every paid model as free.
@@ -67,13 +71,22 @@ OPENCODE_PRICING: Dict[str, Dict[str, Any]] = {
 # all four usage rates per model, None where the catalog lists none (unknown, never $0).
 OPENCODE_PRICING.update(catalog_pricing())
 PRICING: Dict[str, Dict[str, Any]] = {
-    "haiku": {"input": 0.10, "output": 0.50, "cacheRead": 0.01},
+    "haiku": {"input": 0.10, "output": 0.50, "cacheRead": 0.01,
+              "long": {"input": 0.50, "output": 2.50, "cacheRead": 0.05}},
     "sonnet": {"input": 2.0, "output": 10.0, "cacheRead": 0.20},
     "opus": {"input": 4.0, "output": 20.0, "cacheRead": 0.20},
     **OPENCODE_PRICING,
 }
 CACHE_WRITE_FACTOR = 1.25
 USAGE_KEYS = ("input", "output", "cacheRead", "cacheCreation")
+# Requests whose prompt is over this many tokens are "long": priced at a family's "long"
+# rates when it has them, and counted per model either way (prompts_by_model).
+LONG_PROMPT_TOKENS = 100_000
+# The share of each USAGE_KEYS total that came from long requests. A usage dict carries
+# these only when at least one of its requests was long; they are subsets, never extra tokens.
+LONG_KEYS = {"input": "longInput", "output": "longOutput", "cacheRead": "longCacheRead",
+             "cacheCreation": "longCacheCreation"}
+PROMPT_KEYS = ("requests", "longRequests", "peakPrompt")
 
 # Tool-result text that means the permission layer refused a call.
 DENIAL_PHRASES = ("Permission for this action was denied", "auto mode classifier")
@@ -118,7 +131,29 @@ def rates(model: Optional[str], pricing: Optional[dict] = None) -> Optional[Dict
     # (cost unknown) when the model actually used cache reads.
     r.setdefault("cacheRead", None)
     r.setdefault("cacheCreation", r["input"] * CACHE_WRITE_FACTOR)
+    if isinstance(r.get("long"), dict):
+        long = dict(r["long"])
+        if "input" not in long:
+            long = {}  # a tier without an input rate cannot price anything: long requests are unknown
+        else:
+            long.setdefault("output", None)
+            long.setdefault("cacheRead", None)
+            long.setdefault("cacheCreation", long["input"] * CACHE_WRITE_FACTOR)
+        r["long"] = long
     return r
+
+
+def usage_tokens(usage: Dict[str, int]) -> int:
+    """Total tokens of a usage dict: the USAGE_KEYS only (the LONG_KEYS are subsets of them)."""
+    return sum(usage.get(k) or 0 for k in USAGE_KEYS)
+
+
+def long_part(usage: Dict[str, int]) -> Optional[Dict[str, int]]:
+    """The long-request share of a usage dict, as a usage dict of its own; None when it had none."""
+    if not any(usage.get(lk) for lk in LONG_KEYS.values()):
+        return None
+    part = {k: usage.get(LONG_KEYS[k]) or 0 for k in USAGE_KEYS}
+    return {**part, **{LONG_KEYS[k]: v for k, v in part.items()}}
 
 
 def price_usage(model: Optional[str], usage: Dict[str, int], pricing: Optional[dict] = None) -> Optional[float]:
@@ -129,13 +164,15 @@ def price_usage(model: Optional[str], usage: Dict[str, int], pricing: Optional[d
         return None
     if r.get("free") is True:
         return 0.0
+    long_rates = r.get("long")
     total = 0.0
     for k in USAGE_KEYS:
         used = usage.get(k) or 0
-        rate = r.get(k)
-        if used and rate is None:
-            return None
-        total += used * (rate or 0.0)
+        long_used = min(usage.get(LONG_KEYS[k]) or 0, used) if long_rates is not None else 0
+        for n, rate in ((used - long_used, r.get(k)), (long_used, (long_rates or {}).get(k))):
+            if n and rate is None:
+                return None
+            total += n * (rate or 0.0)
     return total / 1e6
 
 
@@ -297,7 +334,10 @@ def _blocks(content: Any) -> List[dict]:
 
 
 def scan_transcript(path: Path) -> Dict[str, Any]:
-    """Per-model token usage (one count per API request), AskUserQuestion calls and permission refusals."""
+    """Per-model token usage (one count per API request), AskUserQuestion calls and permission refusals.
+
+    usage_by_model also carries LONG_KEYS for a model with requests over LONG_PROMPT_TOKENS, and
+    prompts_by_model counts each model's requests, its long ones and its largest prompt."""
     requests: Dict[str, Tuple[str, Dict[str, int]]] = {}
     asked, denials = 0, []
     budget_used: Optional[float] = None
@@ -344,12 +384,39 @@ def scan_transcript(path: Path) -> Dict[str, Any]:
                     if any(p in text for p in DENIAL_PHRASES):
                         denials.append("tool call refused by the permission layer")
     by_model: Dict[str, Dict[str, int]] = {}
+    prompts: Dict[str, Dict[str, int]] = {}
     for model, u in requests.values():
         acc = by_model.setdefault(model, dict.fromkeys(USAGE_KEYS, 0))
+        prompt = u["input"] + u["cacheRead"] + u["cacheCreation"]
+        long = prompt > LONG_PROMPT_TOKENS
         for k in USAGE_KEYS:
             acc[k] += u[k]
-    return {"usage_by_model": by_model, "requests": len(requests), "asked": asked, "denials": denials,
-            "budget_used": budget_used, "budget_total": budget_total}
+            if long:
+                acc[LONG_KEYS[k]] = acc.get(LONG_KEYS[k], 0) + u[k]
+        p = prompts.setdefault(model, dict.fromkeys(PROMPT_KEYS, 0))
+        p["requests"] += 1
+        p["longRequests"] += int(long)
+        p["peakPrompt"] = max(p["peakPrompt"], prompt)
+    return {"usage_by_model": by_model, "prompts_by_model": prompts, "requests": len(requests), "asked": asked,
+            "denials": denials, "budget_used": budget_used, "budget_total": budget_total}
+
+
+def merge_prompts(acc: Dict[str, int], p: Optional[Dict[str, Any]]) -> None:
+    """Add one prompts_by_model entry into ACC: counts sum, peakPrompt is the max."""
+    if not isinstance(p, dict):
+        return
+    for k in ("requests", "longRequests"):
+        acc[k] = (acc.get(k) or 0) + (p.get(k) or 0)
+    acc["peakPrompt"] = max(acc.get("peakPrompt") or 0, p.get("peakPrompt") or 0)
+
+
+def aggregate_prompts(scans: Iterable[Dict[str, Any]]) -> Dict[str, Dict[str, int]]:
+    """Per-model prompts_by_model over transcript scans."""
+    out: Dict[str, Dict[str, int]] = {}
+    for s in scans:
+        for model, p in (s.get("prompts_by_model") or {}).items():
+            merge_prompts(out.setdefault(model, dict.fromkeys(PROMPT_KEYS, 0)), p)
+    return out
 
 
 def _price_by_model(by_model: Dict[str, Dict[str, int]], pricing: dict) -> Optional[float]:
@@ -414,6 +481,8 @@ def aggregate_usage(scans: Iterable[Dict[str, Any]]) -> Dict[str, Dict[str, int]
             acc = by_model.setdefault(model, dict.fromkeys(USAGE_KEYS, 0))
             for k in USAGE_KEYS:
                 acc[k] += u[k]
+                if u.get(LONG_KEYS[k]) is not None:
+                    acc[LONG_KEYS[k]] = acc.get(LONG_KEYS[k], 0) + u[LONG_KEYS[k]]
     return by_model
 
 
@@ -446,7 +515,7 @@ def session_spend(home: Path, session_id: str, run_id: Optional[str] = None, pri
             continue
         scans.append(s)
         if "/subagents/workflows/" in f.as_posix():
-            wf_tx_tokens += sum(sum(u.values()) for u in s["usage_by_model"].values())
+            wf_tx_tokens += sum(usage_tokens(u) for u in s["usage_by_model"].values())
     by_model = aggregate_usage(scans)
     workflow_tokens = 0
     for wf in wf_files:
@@ -455,9 +524,13 @@ def session_spend(home: Path, session_id: str, run_id: Optional[str] = None, pri
         except (OSError, json.JSONDecodeError, AttributeError):
             continue
         workflow_tokens += sum(a.get("tokens") or 0 for a in progress if isinstance(a, dict) and a.get("type") == "workflow_agent")
+    prompts = aggregate_prompts(scans)
     models = {}
     for model, u in by_model.items():
-        models[model] = {**u, "usd": price_usage(model, u, pricing)}
+        lp = long_part(u)
+        models[model] = {**u, "usd": price_usage(model, u, pricing),
+                         "longUsd": price_usage(model, lp, pricing) if lp else 0.0,
+                         **prompts.get(model, {})}
     return {
         "session_id": session_id,
         "run_id": run_id,
@@ -466,7 +539,7 @@ def session_spend(home: Path, session_id: str, run_id: Optional[str] = None, pri
         "budget_usd": budget,
         "priced_usd": _price_by_model(by_model, pricing) if by_model else None,
         "by_model": models,
-        "transcript_tokens": sum(sum(u.values()) for u in by_model.values()),
+        "transcript_tokens": sum(usage_tokens(u) for u in by_model.values()),
         "workflow_tokens": workflow_tokens,
         "workflow_transcript_tokens": wf_tx_tokens,
         "pricing_date": PRICING_DATE,
@@ -522,11 +595,36 @@ def spend_lines(s: Dict[str, Any]) -> List[str]:
     if s.get("priced_usd") is not None:
         per = ", ".join(f"{m} ${u['usd']:.2f}" for m, u in sorted(s["by_model"].items()) if u.get("usd") is not None)
         lines.append(f"  ${s['priced_usd']:.2f} priced from {s['transcripts']} transcript(s) at {s['pricing_date']} list prices ({per})")
+    lines += long_prompt_lines(s.get("by_model") or {}, indent="  ")
     if s.get("workflow_tokens") and s.get("workflow_transcript_tokens"):
         ratio = s["workflow_transcript_tokens"] / s["workflow_tokens"]
         lines.append(f"  workflow agents used {s['workflow_transcript_tokens'] / 1e6:.1f}M tokens; the workflow's progress "
                      f"counted {s['workflow_tokens'] / 1e6:.1f}M ({ratio:.0f}x low: it reports final context size, not usage)")
     return lines
+
+
+def long_prompt_line(name: str, cell: Dict[str, Any]) -> Optional[str]:
+    """"<name>: 41% of 812 requests had prompts over 100K tokens (peak 183K), 76% of its cost";
+    None when the cell has no request counts (records from before they were kept)."""
+    n, n_long = cell.get("requests"), cell.get("longRequests")
+    if not isinstance(n, int) or isinstance(n, bool) or not isinstance(n_long, int) or n <= 0:
+        return None
+    line = (f"{name}: {n_long * 100 / n:.0f}% of {n} requests had prompts over {LONG_PROMPT_TOKENS // 1000}K tokens"
+            f" (peak {(cell.get('peakPrompt') or 0) / 1000:.0f}K)")
+    usd, long_usd = cell.get("usd"), cell.get("longUsd")
+    if isinstance(usd, (int, float)) and isinstance(long_usd, (int, float)) and usd > 0:
+        line += f", {long_usd * 100 / usd:.0f}% of its cost"
+    return line
+
+
+def long_prompt_lines(by_model: Dict[str, Dict[str, Any]], indent: str = "") -> List[str]:
+    """A header plus one long_prompt_line per model; [] when no model has request counts."""
+    lines = [long_prompt_line(m, c) for m, c in sorted(by_model.items()) if isinstance(c, dict)]
+    lines = [x for x in lines if x]
+    if not lines:
+        return []
+    head = f"{indent}prompt sizes (over {LONG_PROMPT_TOKENS // 1000}K tokens is the long-context price tier where a model has one):"
+    return [head] + [f"{indent}  {x}" for x in lines]
 
 
 def summarize_report(report: Optional[Dict[str, Any]]) -> Dict[str, Any]:
