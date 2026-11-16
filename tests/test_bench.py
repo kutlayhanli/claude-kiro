@@ -65,7 +65,8 @@ def test_run_clones_applies_agents_launches_and_records_results(tmp_path):
     assert r["fail_closed"] is False and r["exit_code"] == 0 and r["wall_minutes"] >= 0
     h = res["calc--haiku--r1"]
     assert h["report"]["escalations"] == 1 and h["report"]["review_rounds"] == 1
-    assert abs(h["cost"]["priced_usd"] - 0.61) < 1e-9
+    # one haiku request with a 2M-token prompt: over the 100K tier, so 1M in x0.50 + 1M out x2.50 + 1M cache read x0.05
+    assert abs(h["cost"]["priced_usd"] - 3.05) < 1e-9
 
 
 def test_rerun_skips_finished_arms_unless_forced(tmp_path):
@@ -223,8 +224,8 @@ def test_import_prices_transcripts_when_given(tmp_path):
     assert out.exit_code == 0, out.output
     r = json.loads((tmp_path / "res" / "demo--haiku--r2.json").read_text())
     by = {a["agent_id"]: a for a in r["agents"]}
-    # cache read 0.01 + cache write 1.25 x input 0.10 per 1M
-    assert abs(by["t3"]["cost_usd"] - (0.01 + 0.125)) < 1e-9 and by["t3"]["cost_basis"] == "transcript"
+    # a 2M-token prompt is over haiku's 100K tier: cache read 0.05 + cache write 1.25 x long input 0.50 per 1M
+    assert abs(by["t3"]["cost_usd"] - (0.05 + 0.625)) < 1e-9 and by["t3"]["cost_basis"] == "transcript"
     assert by["p1"]["cost_basis"] == "context-tokens-as-input"
 
 

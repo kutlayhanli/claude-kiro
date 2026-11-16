@@ -661,6 +661,17 @@ def _bucket_lines(title: str, buckets: Mapping[str, Mapping[str, Any]]) -> List[
     return lines
 
 
+def _prompt_size_lines(view: Mapping[str, Any]) -> List[str]:
+    """Per model and per role: the share of requests and of cost over bench.LONG_PROMPT_TOKENS.
+    Nothing for records from before request counts were kept."""
+    by_model = bench.long_prompt_lines(dict(view.get("by_model") or {}))
+    if not by_model:
+        return []
+    roles = [bench.long_prompt_line(f"role {r}", dict(c)) for r, c in sorted((view.get("by_role") or {}).items())
+             if isinstance(c, Mapping)]
+    return [""] + by_model + [f"  {x}" for x in roles if x]
+
+
 def _cost_basis(buckets: Mapping[str, Mapping[str, Any]]) -> str:
     """Show the exact model id and the in/out token arithmetic behind each model's cost."""
     parts = []
@@ -681,12 +692,21 @@ def _cost_basis(buckets: Mapping[str, Mapping[str, Any]]) -> str:
             if cache_read_rate is not None
             else f"{cache_read / 1e6:.1f}M×unknown rate"
         )
-        parts.append(
+        part = (
             f"{model}: in {input_tokens / 1e6:.2f}M×${rate.get('input', 0.0):.2f}/M"
             f" + out {output_tokens / 1e6:.2f}M×${rate.get('output', 0.0):.2f}/M"
             f" = ${input_usd + output_usd:.2f}; cache {cache_part}"
             f" = ${cache_usd:.2f}"
         )
+        long_rates = rate.get("long") or {}
+        n_long, usd = b.get("longRequests"), b.get("usd")
+        if long_rates.get("input") is not None and isinstance(n_long, int) and n_long > 0 and isinstance(usd, (int, float)):
+            extra = usd - (input_usd + output_usd + cache_usd)
+            out_rate = long_rates.get("output")
+            out_text = f"${out_rate:.2f}" if out_rate is not None else "unknown"
+            part += (f"; {n_long} requests over {bench.LONG_PROMPT_TOKENS // 1000}K prompt tokens at the long-context"
+                     f" rates (in ${long_rates['input']:.2f}/M, out {out_text}/M) add ${extra:.2f}, total ${usd:.2f}")
+        parts.append(part)
     return "; ".join(parts)
 
 
@@ -768,6 +788,7 @@ def render_run(view: Mapping[str, Any]) -> List[str]:
     for title, key in (("by role", "by_role"), ("by phase", "by_phase"), ("by model", "by_model")):
         lines += _bucket_lines(title, view.get(key) or {})
     lines.append(f"  minutes: {COVERAGE['role_phase_minutes']}")
+    lines += _prompt_size_lines(view)
     lines.append("")
     sl = view.get("slowest_tasks") or []
     lines.append("slowest tasks:" if sl else f"slowest tasks: {UNKNOWN}")
